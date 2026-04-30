@@ -59,6 +59,7 @@ export default function AgentPanel({
   const [agentError, setAgentError] = useState<string | null>(null);
   const [lastInput, setLastInput] = useState<string>("");
   const [brainMode, setBrainMode] = useState(false);
+  const [epiphanies, setEpiphanies] = useState<{ id: number; skill: string; category: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -67,6 +68,7 @@ export default function AgentPanel({
     let unlistenEnd: UnlistenFn;
     let unlistenSearch: UnlistenFn;
     let unlistenError: UnlistenFn;
+    let unlistenEpiphany: UnlistenFn;
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
@@ -92,6 +94,16 @@ export default function AgentPanel({
           if (isInlineRequest) return;
           rawBufferRef.current = "";
           setSearchStatus(event.payload);
+        },
+      );
+
+      unlistenEpiphany = await listen<{ id: number; skill: string; category: string }>(
+        "agent-epiphany",
+        (event) => {
+          setEpiphanies((prev) => [
+            { id: event.payload.id, skill: event.payload.skill, category: event.payload.category },
+            ...prev.slice(0, 9),
+          ]);
         },
       );
 
@@ -129,6 +141,7 @@ export default function AgentPanel({
       if (unlistenEnd) unlistenEnd();
       if (unlistenSearch) unlistenSearch();
       if (unlistenError) unlistenError();
+      if (unlistenEpiphany) unlistenEpiphany();
     };
   }, [onActionInsert, onActionReplace, isInlineRequest, setIsAgentThinking, incrementActionEpoch]);
 
@@ -223,6 +236,25 @@ export default function AgentPanel({
             {msg.content}
           </div>
         ))}
+        {epiphanies.length > 0 && (
+          <div className="space-y-1.5">
+            {epiphanies.map((ep) => (
+              <div
+                key={ep.id}
+                className="text-xs max-w-[90%] rounded-sm px-3 py-2 bg-purple-500/10 border border-purple-500/30 text-purple-200 flex items-center gap-2 animate-pulse"
+              >
+                <span className="text-sm">💡</span>
+                <span className="flex-1">
+                  <span className="text-purple-300 font-medium">Learned: </span>
+                  {ep.skill}
+                </span>
+                <span className="text-[10px] text-purple-400 px-1.5 py-0.5 rounded-sm bg-purple-500/15">
+                  {ep.category}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {agentError && (
           <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-danger/20 border border-danger text-danger whitespace-pre-wrap flex items-center gap-3">
             <span>{agentError}</span>

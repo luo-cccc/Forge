@@ -1,8 +1,10 @@
+mod hermes_memory;
 mod vector_db;
 
 use std::sync::Mutex;
 
 use futures_util::StreamExt;
+use hermes_memory::HermesDB;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use vector_db::{chunk_text, Chunk, VectorDB};
@@ -16,6 +18,7 @@ enum HarnessState {
 
 struct AppState {
     harness_state: Mutex<HarnessState>,
+    hermes_db: Mutex<HermesDB>,
 }
 
 #[derive(Serialize, Clone)]
@@ -549,6 +552,143 @@ async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content
     let _ = db.save(&path);
 }
 
+#[derive(Serialize, Clone)]
+struct Epiphany {
+    skill: String,
+    category: String,
+    id: i64,
+}
+
+async fn extract_skills_from_recent(app: &tauri::AppHandle) {
+    let api_key = match std::env::var("OPENAI_API_KEY") {
+        Ok(k) => k,
+        Err(_) => return,
+    };
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+
+    let state = app.state::<AppState>();
+    let recent = {
+        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        db.recent_interactions(20).unwrap_or_default()
+    };
+    // Guard dropped before any .await
+
+    if recent.len() < 4 {
+        return;
+    }
+
+    let transcript: String = recent
+        .iter()
+        .map(|r| format!("[{}]: {}", r.role, r.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let resp = client
+        .post(format!("{}/chat/completions", api_base))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a reflection engine. Analyze the recent interaction transcript and extract 1-2 reusable writing rules or user preferences. Output JSON: {\"skills\": [{\"skill\": \"...\", \"category\": \"style|character|pacing|preference\"}]}. If nothing new, output {\"skills\": []}."},
+                {"role": "user", "content": format!("Transcript:\n{}", transcript)}
+            ],
+            "stream": false,
+            "response_format": {"type": "json_object"}
+        }))
+        .send()
+        .await;
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let body: serde_json::Value = match resp.json().await {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let text = body["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    let parsed: serde_json::Value = match serde_json::from_str(text) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let skills = parsed["skills"].as_array();
+    if let Some(skills) = skills {
+        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        for s in skills {
+            let skill_text = s["skill"].as_str().unwrap_or("").to_string();
+            let category = s["category"].as_str().unwrap_or("general").to_string();
+            if skill_text.is_empty() || skill_text.len() < 10 {
+                continue;
+            }
+            if let Ok(id) = db.insert_skill(&skill_text, &category) {
+                let _ = app.emit(
+                    "agent-epiphany",
+                    Epiphany {
+                        skill: skill_text,
+                        category,
+                        id,
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
+    let state = app.state::<AppState>();
+    let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+
+    let mut parts = Vec::new();
+
+    // 1. User drift profile
+    if let Ok(profiles) = db.get_drift_profiles() {
+        if !profiles.is_empty() {
+            let profile_text: Vec<String> = profiles
+                .iter()
+                .map(|p| format!("- {}: {} (confidence {:.0}%)", p.key, p.value, p.confidence * 100.0))
+                .collect();
+            parts.push(format!(
+                "## User Preferences (learned over time)\n{}\n",
+                profile_text.join("\n")
+            ));
+        }
+    }
+
+    // 2. Relevant skills (keyword match against query)
+    if !query.is_empty() {
+        if let Ok(skills) = db.search_skills(query) {
+            if !skills.is_empty() {
+                let skill_text: Vec<String> = skills
+                    .iter()
+                    .map(|s| format!("- [{}] {}", s.category, s.skill))
+                    .collect();
+                parts.push(format!(
+                    "## Relevant Learned Skills\n{}\n",
+                    skill_text.join("\n")
+                ));
+            }
+        }
+    }
+
+    drop(db);
+    parts.join("\n")
+}
+
 fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
@@ -755,9 +895,19 @@ async fn ask_agent(
 
     let truncated_context = truncate_context(&context, 2000);
 
+    // Log user message to Hermes memory
+    {
+        let state = app.state::<AppState>();
+        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        let _ = db.log_interaction("user", &message);
+    }
+
+    // Build context injection from learned memory
+    let memory_context = build_context_injection(&app, &message);
+
     let system_prompt = format!(
         "You are a creative writing assistant helping the user write a novel.\n\
-\n\
+{}\n\
 Current draft (last ~2000 chars):\n\
 \"\"\"\n\
 {}\n\
@@ -786,7 +936,7 @@ Selected text (user wants to rewrite this):\n\
 7. If you need to know details about a character, location, or world setting that may exist in the lorebook, use:\n\
    <ACTION_SEARCH>keyword</ACTION_SEARCH>\n\
    The system will search the lorebook and return matching entries. Always search before inventing new details about named characters or settings.",
-        truncated_context, paragraph, selected_text
+        memory_context, truncated_context, paragraph, selected_text
     );
 
     let mut messages: Vec<serde_json::Value> = vec![
@@ -947,6 +1097,17 @@ Selected text (user wants to rewrite this):\n\
                 let mut s = state.harness_state.lock().map_err(|e| e.to_string())?;
                 *s = HarnessState::Idle;
             }
+            {
+                // Log assistant response to Hermes memory
+                let state = app.state::<AppState>();
+                let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+                let _ = db.log_interaction("assistant", &raw_buffer);
+            }
+
+            // Trigger background skill extraction (Hermes pattern)
+            let app_clone = app.clone();
+            tokio::spawn(async move { extract_skills_from_recent(&app_clone).await });
+
             let _ = app.emit(
                 "agent-stream-end",
                 StreamEnd {
@@ -975,9 +1136,15 @@ Selected text (user wants to rewrite this):\n\
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
+    let db_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("hermes_memory.db");
+    let hermes_db = HermesDB::open(&db_path).expect("Failed to open Hermes memory DB");
+
     tauri::Builder::default()
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
+            hermes_db: Mutex::new(hermes_db),
         })
         .invoke_handler(tauri::generate_handler![
             harness_echo,
