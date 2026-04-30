@@ -58,6 +58,7 @@ export default function AgentPanel({
   const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [lastInput, setLastInput] = useState<string>("");
+  const [brainMode, setBrainMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -151,7 +152,11 @@ export default function AgentPanel({
 
     try {
       const { full, paragraph, selected } = getContext();
-      await invoke("ask_agent", { message: text, context: full, paragraph, selectedText: selected });
+      if (brainMode) {
+        await invoke("ask_project_brain", { query: text });
+      } else {
+        await invoke("ask_agent", { message: text, context: full, paragraph, selectedText: selected });
+      }
     } catch (e) {
       setStreaming("");
       setIsStreaming(false);
@@ -161,7 +166,7 @@ export default function AgentPanel({
         { role: "agent", content: `Error: ${e}` },
       ]);
     }
-  }, [input, isStreaming, getContext, setIsAgentThinking]);
+  }, [input, isStreaming, getContext, setIsAgentThinking, brainMode]);
 
   const handleRetry = useCallback(async () => {
     if (!lastInput) return;
@@ -170,20 +175,34 @@ export default function AgentPanel({
     setIsAgentThinking(true);
     rawBufferRef.current = "";
     try {
-      const { full, paragraph, selected } = getContext();
-      await invoke("ask_agent", { message: lastInput, context: full, paragraph, selectedText: selected });
+      if (brainMode) {
+        await invoke("ask_project_brain", { query: lastInput });
+      } else {
+        const { full, paragraph, selected } = getContext();
+        await invoke("ask_agent", { message: lastInput, context: full, paragraph, selectedText: selected });
+      }
     } catch (e) {
       setStreaming("");
       setIsStreaming(false);
       setIsAgentThinking(false);
       setMessages((prev) => [...prev, { role: "agent", content: `Error: ${e}` }]);
     }
-  }, [lastInput, getContext, setIsAgentThinking]);
+  }, [lastInput, getContext, setIsAgentThinking, brainMode]);
 
   return (
     <div className="flex flex-col h-full border-l border-border-subtle">
-      <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider">
-        Agent
+      <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider flex items-center justify-between">
+        <span>{brainMode ? "Project Brain" : "Agent"}</span>
+        <button
+          onClick={() => setBrainMode(!brainMode)}
+          className={`text-[10px] px-2 py-0.5 rounded-sm transition-colors ${
+            brainMode
+              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+              : "bg-bg-raised text-text-muted border border-border-subtle"
+          }`}
+        >
+          {brainMode ? "Brain" : "Copilot"}
+        </button>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -195,7 +214,9 @@ export default function AgentPanel({
             key={i}
             className={`text-sm max-w-[90%] rounded-sm px-3 py-2 whitespace-pre-wrap ${
               msg.role === "user"
-                ? "bg-accent text-bg-deep ml-auto"
+                ? brainMode
+                  ? "bg-purple-500/80 text-white ml-auto"
+                  : "bg-accent text-bg-deep ml-auto"
                 : "bg-bg-raised text-text-primary"
             }`}
           >
@@ -214,14 +235,18 @@ export default function AgentPanel({
           </div>
         )}
         {searchStatus && (
-          <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-accent-subtle border border-accent text-accent whitespace-pre-wrap">
+          <div className={`text-sm max-w-[90%] rounded-sm px-3 py-2 border whitespace-pre-wrap ${
+            brainMode
+              ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+              : "bg-accent-subtle border border-accent text-accent"
+          }`}>
             Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...
           </div>
         )}
         {streaming && (
           <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-bg-raised text-text-primary whitespace-pre-wrap">
             {streaming}
-            <span className="inline-block w-1.5 h-4 bg-accent ml-0.5 animate-pulse align-middle" />
+            <span className={`inline-block w-1.5 h-4 ml-0.5 animate-pulse align-middle ${brainMode ? "bg-purple-400" : "bg-accent"}`} />
           </div>
         )}
       </div>

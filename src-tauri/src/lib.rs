@@ -1,8 +1,11 @@
+mod vector_db;
+
 use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use vector_db::{chunk_text, Chunk, VectorDB};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 enum HarnessState {
@@ -185,7 +188,17 @@ fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result
     let dir = project_dir(&app)?;
     let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
     let path = dir.join(&filename);
-    atomic_write(&path, &content)
+    atomic_write(&path, &content)?;
+
+    // Background auto-embed
+    let app_clone = app.clone();
+    let title_clone = title.clone();
+    let content_clone = content.clone();
+    tokio::spawn(async move {
+        auto_embed_chapter(&app_clone, &title_clone, &content_clone).await;
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -222,6 +235,15 @@ fn load_outline(app: &tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
+}
+
+fn brain_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
+    Ok(dir.join("project_brain.json"))
 }
 
 fn save_outline(app: &tauri::AppHandle, nodes: &[OutlineNode]) -> Result<(), String> {
@@ -456,6 +478,77 @@ async fn batch_generate_chapter(
     Ok(())
 }
 
+async fn embed_text(text: &str) -> Result<Vec<f32>, String> {
+    let api_key =
+        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
+    let resp = client
+        .post(format!("{}/embeddings", api_base))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": "text-embedding-3-small",
+            "input": text
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Embed request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Embed API error: {}", resp.status()));
+    }
+
+    let body: serde_json::Value =
+        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
+    let embedding: Vec<f32> = body["data"][0]["embedding"]
+        .as_array()
+        .ok_or("Missing embedding in response")?
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+        .collect();
+
+    Ok(embedding)
+}
+
+async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
+    let chunks = chunk_text(content, 500);
+    if chunks.is_empty() {
+        return;
+    }
+
+    let path = match brain_path(app) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let mut db = VectorDB::load(&path).unwrap_or_else(|_| VectorDB::new());
+    db.remove_chapter(chapter_title);
+
+    for (i, chunk_text) in chunks.iter().enumerate() {
+        if chunk_text.trim().len() < 20 {
+            continue;
+        }
+        let embedding = match embed_text(chunk_text).await {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        db.upsert(Chunk {
+            id: format!("{}-{}", chapter_title, i),
+            chapter: chapter_title.to_string(),
+            text: chunk_text.to_string(),
+            embedding,
+        });
+    }
+
+    let _ = db.save(&path);
+}
+
 fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
@@ -542,6 +635,105 @@ Output ONLY the JSON object, no explanation outside. Example:
         serde_json::from_str(text).map_err(|e| format!("Failed to parse review JSON: {}", e))?;
 
     Ok(report.reviews)
+}
+
+#[tauri::command]
+async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
+    let api_key =
+        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+
+    // 1. Embed the query
+    let query_embedding = embed_text(&query).await.map_err(|e| format!("Embed error: {}", e))?;
+
+    // 2. Search vector DB for top 5 chunks
+    let brain_path = brain_path(&app)?;
+    let db = VectorDB::load(&brain_path).unwrap_or_else(|_| VectorDB::new());
+    let results = db.search(&query_embedding, 5);
+
+    // 3. Build context from top chunks
+    let context = if results.is_empty() {
+        "No relevant chunks found in the book.".to_string()
+    } else {
+        results
+            .iter()
+            .enumerate()
+            .map(|(i, (score, chunk))| {
+                format!(
+                    "[Chunk {} · {} · score {:.3}]\n{}",
+                    i + 1,
+                    chunk.chapter,
+                    score,
+                    chunk.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    // 4. Stream LLM response
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": format!(
+            "You are an expert on this novel. Answer the user's question using ONLY the provided book excerpts. \
+             If the excerpts don't contain relevant information, say so honestly.\n\nBook excerpts:\n{}",
+            context
+        )}),
+        serde_json::json!({"role": "user", "content": query}),
+    ];
+
+    let resp = client
+        .post(format!("{}/chat/completions", api_base))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": true
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status.as_u16(), text));
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut sse_buffer = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        let text = String::from_utf8_lossy(&chunk);
+        sse_buffer.push_str(&text);
+
+        while let Some(line_end) = sse_buffer.find('\n') {
+            let line = sse_buffer[..line_end].trim().to_string();
+            sse_buffer = sse_buffer[line_end + 1..].to_string();
+            if line.is_empty() { continue; }
+            let data = if let Some(d) = line.strip_prefix("data: ") { d } else { continue };
+            if data == "[DONE]" { continue; }
+            let parsed: serde_json::Value =
+                serde_json::from_str(data).unwrap_or_default();
+            let content = parsed["choices"][0]["delta"]["content"]
+                .as_str().unwrap_or("").to_string();
+            if !content.is_empty() {
+                let _ = app.emit("agent-stream-chunk", StreamChunk { content });
+            }
+        }
+    }
+
+    let _ = app.emit("agent-stream-end", StreamEnd { reason: "complete".to_string() });
+    Ok(())
 }
 
 #[tauri::command]
@@ -802,7 +994,8 @@ pub fn run() {
             delete_outline_node,
             update_outline_status,
             batch_generate_chapter,
-            analyze_chapter
+            analyze_chapter,
+            ask_project_brain
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
