@@ -1,10 +1,15 @@
-import HarnessEcho from "./HarnessEcho";
+import EditorPanel from "./components/EditorPanel";
+import AgentPanel from "./components/AgentPanel";
 
 function App() {
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center gap-8">
-      <h1 className="text-3xl font-bold tracking-tight">Agent Writer</h1>
-      <HarnessEcho />
+    <div className="h-screen bg-slate-900 text-white flex">
+      <div className="w-2/3 h-full">
+        <EditorPanel />
+      </div>
+      <div className="w-1/3 h-full">
+        <AgentPanel />
+      </div>
     </div>
   );
 }
