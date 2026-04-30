@@ -140,7 +140,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen bg-slate-900 text-white flex">
+    <div className="h-screen bg-bg-deep text-text-primary flex">
       <div className="w-48 h-full flex-shrink-0">
         <ProjectTree
           currentChapter={currentChapter}

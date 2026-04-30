@@ -61,17 +61,17 @@ export default function InlineCommandBubble({
       className="absolute z-50"
       style={{ left: pos.x, top: pos.y }}
     >
-      <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-2xl px-1 py-1 flex items-center gap-1">
+      <div className="bg-bg-raised border border-border-active rounded-sm px-1 py-1 flex items-center gap-1 shadow-xl">
         {isThinking ? (
           <>
-            <span className="px-2 py-1 text-sm text-slate-300 flex items-center gap-2">
-              <span className="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+            <span className="px-2 py-1 text-sm text-text-primary flex items-center gap-2">
+              <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
               Thinking...
             </span>
             {onStop && (
               <button
                 onClick={onStop}
-                className="px-2 py-0.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+                className="px-2 py-0.5 text-xs text-danger hover:text-danger/80 transition-colors"
               >
                 Stop
               </button>
@@ -86,9 +86,9 @@ export default function InlineCommandBubble({
               onKeyDown={handleKeyDown}
               onBlur={onDismiss}
               placeholder="Tell AI what to do..."
-              className="w-64 px-2 py-1 bg-transparent text-white text-sm placeholder-slate-500 focus:outline-none"
+              className="w-64 px-2 py-1 bg-transparent text-text-primary text-sm placeholder-text-muted focus:outline-none"
             />
-            <span className="text-xs text-slate-500 pr-1.5 whitespace-nowrap">
+            <span className="text-xs text-text-muted pr-1.5 whitespace-nowrap font-mono">
               Enter ↵
             </span>
           </>

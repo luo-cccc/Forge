@@ -93,7 +93,6 @@ export default function AgentPanel({
 
       unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
         if (isInlineRequestRef.current) return;
-        // Flush remaining buffer
         const finalText = rawBufferRef.current.replace(ACTION_RE, "");
         rawBufferRef.current = "";
 
@@ -145,47 +144,47 @@ export default function AgentPanel({
   }, [input, isStreaming, getContext]);
 
   return (
-    <div className="flex flex-col h-full border-l border-slate-700">
-      <div className="px-4 py-3 border-b border-slate-700 text-sm text-slate-400 font-medium">
+    <div className="flex flex-col h-full border-l border-border-subtle">
+      <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider">
         Agent
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && !streaming && (
-          <p className="text-slate-500 text-sm">Agent responses will appear here.</p>
+        {messages.length === 0 && !streaming && !searchStatus && (
+          <p className="text-text-muted text-xs">Agent responses will appear here.</p>
         )}
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`text-sm max-w-[90%] rounded-lg px-3 py-2 whitespace-pre-wrap ${
+            className={`text-sm max-w-[90%] rounded-sm px-3 py-2 whitespace-pre-wrap ${
               msg.role === "user"
-                ? "bg-blue-600 text-white ml-auto"
-                : "bg-slate-800 text-slate-200"
+                ? "bg-accent text-bg-deep ml-auto"
+                : "bg-bg-raised text-text-primary"
             }`}
           >
             {msg.content}
           </div>
         ))}
         {searchStatus && (
-          <div className="text-sm max-w-[90%] rounded-lg px-3 py-2 bg-amber-900/50 border border-amber-700 text-amber-200 whitespace-pre-wrap">
-            🔍 Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...
+          <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-accent-subtle border border-accent text-accent whitespace-pre-wrap">
+            Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...
           </div>
         )}
         {streaming && (
-          <div className="text-sm max-w-[90%] rounded-lg px-3 py-2 bg-slate-800 text-slate-200 whitespace-pre-wrap">
+          <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-bg-raised text-text-primary whitespace-pre-wrap">
             {streaming}
-            <span className="inline-block w-1.5 h-4 bg-slate-400 ml-0.5 animate-pulse align-middle" />
+            <span className="inline-block w-1.5 h-4 bg-accent ml-0.5 animate-pulse align-middle" />
           </div>
         )}
       </div>
 
-      <div className="p-4 border-t border-slate-700">
+      <div className="p-4 border-t border-border-subtle">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
           disabled={isStreaming}
-          className="w-full px-3 py-2 rounded-md bg-slate-800 border border-slate-600 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-50"
+          className="w-full px-3 py-2 rounded-sm bg-bg-deep border border-border-subtle text-text-primary placeholder-text-muted focus:outline-none focus:border-accent text-sm disabled:opacity-50"
           placeholder="Ask the agent..."
         />
       </div>

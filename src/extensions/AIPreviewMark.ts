@@ -12,7 +12,7 @@ const AIPreviewMark = Mark.create({
       "mark",
       {
         class:
-          "ai-preview bg-emerald-900/40 text-emerald-200 rounded-sm px-0.5 border-b border-emerald-700/50",
+          "ai-preview bg-accent-subtle text-accent rounded-sm px-0.5 border-b border-accent/60",
       },
       0,
     ];

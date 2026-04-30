@@ -108,19 +108,16 @@ export default function OutlinePanel() {
     }
   };
 
-  const statusBadge = (status: string) => {
-    const colors: Record<string, string> = {
-      empty: "bg-slate-700 text-slate-400",
-      generated: "bg-emerald-900/60 text-emerald-300",
-      polished: "bg-blue-900/60 text-blue-300",
-    };
-    return colors[status] || colors.empty;
+  const statusColors: Record<string, string> = {
+    empty: "bg-bg-raised text-text-muted",
+    generated: "bg-success/20 text-success border border-success/30",
+    polished: "bg-accent-subtle text-accent border border-accent/30",
   };
 
   return (
     <div className="flex flex-col h-full relative">
       {toast && (
-        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-md bg-emerald-900/95 border border-emerald-700 text-emerald-200 text-xs whitespace-nowrap shadow-lg">
+        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-sm bg-success/20 border border-success text-success text-xs whitespace-nowrap">
           {toast}
         </div>
       )}
@@ -130,21 +127,21 @@ export default function OutlinePanel() {
           return (
             <div
               key={node.chapter_title}
-              className="px-3 py-2 border-b border-slate-800"
+              className="px-3 py-2.5 border-b border-border-subtle"
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-300 font-medium">
+                <span className="text-xs text-text-primary font-display tracking-wider">
                   {node.chapter_title}
                 </span>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => handleGenerate(node)}
                     disabled={isGen}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-purple-200 transition-colors flex items-center gap-1"
+                    className="text-[10px] px-1.5 py-0.5 rounded-sm bg-accent hover:bg-accent/80 disabled:opacity-50 text-bg-deep transition-colors flex items-center gap-1"
                   >
                     {isGen ? (
                       <>
-                        <span className="inline-block w-2 h-2 border border-purple-300 border-t-transparent rounded-full animate-spin" />
+                        <span className="inline-block w-2 h-2 border border-bg-deep border-t-transparent rounded-full animate-spin" />
                         ...
                       </>
                     ) : (
@@ -153,17 +150,17 @@ export default function OutlinePanel() {
                   </button>
                   <button
                     onClick={() => handleDelete(node.chapter_title)}
-                    className="text-slate-600 hover:text-red-400 text-xs"
+                    className="text-text-muted hover:text-danger text-xs transition-colors"
                   >
                     ×
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
+              <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">
                 {node.summary}
               </p>
               <span
-                className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded ${statusBadge(node.status)}`}
+                className={`inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded-sm ${statusColors[node.status] || statusColors.empty}`}
               >
                 {node.status}
               </span>
@@ -171,23 +168,23 @@ export default function OutlinePanel() {
           );
         })}
       </div>
-      <div className="p-2 border-t border-slate-700 space-y-1">
+      <div className="p-3 border-t border-border-subtle space-y-1.5">
         <input
           value={chapterTitle}
           onChange={(e) => setChapterTitle(e.target.value)}
           placeholder="Chapter title..."
-          className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent"
         />
         <textarea
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder="Summary / beat..."
           rows={2}
-          className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500 resize-none"
+          className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent resize-none"
         />
         <button
           onClick={handleSave}
-          className="w-full px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs transition-colors"
+          className="w-full px-2.5 py-1.5 rounded-sm bg-accent hover:bg-accent/80 text-bg-deep text-xs transition-colors"
         >
           Save Beat
         </button>

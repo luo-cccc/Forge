@@ -1,18 +1,12 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import type { Editor } from "@tiptap/core";
-import { useEffect, useState } from "react";
-import LorebookDrawer from "./LorebookDrawer";
-import InlineCommandBubble from "./InlineCommandBubble";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Editor } from "@tiptap/core";
+import { useEffect, useState } from "react";
 import AIPreviewMark from "../extensions/AIPreviewMark";
-
-interface StreamChunk {
-  content: string;
-}
-
-const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
+import LorebookDrawer from "./LorebookDrawer";
+import InlineCommandBubble from "./InlineCommandBubble";
 
 interface SelectionState {
   from: number;
@@ -27,6 +21,12 @@ interface EditorPanelProps {
   isInlineRequestRef: React.RefObject<boolean>;
 }
 
+interface StreamChunk {
+  content: string;
+}
+
+const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
+
 export default function EditorPanel({
   onEditorReady,
   onSelectionUpdate,
@@ -39,7 +39,7 @@ export default function EditorPanel({
     editorProps: {
       attributes: {
         class:
-          "prose prose-invert prose-slate max-w-none h-full focus:outline-none px-6 py-4 text-slate-200 leading-relaxed",
+          "prose prose-invert max-w-none h-full focus:outline-none px-8 py-6 text-text-primary leading-relaxed font-editor",
       },
     },
   });
@@ -52,13 +52,11 @@ export default function EditorPanel({
 
   useEffect(() => {
     if (!editor || !onSelectionUpdate) return;
-
     const handler = () => {
       const { from, to } = editor.state.selection;
       const text = editor.state.doc.textBetween(from, to, " ");
       onSelectionUpdate({ from, to, text });
     };
-
     editor.on("selectionUpdate", handler);
     return () => {
       editor.off("selectionUpdate", handler);
@@ -66,6 +64,15 @@ export default function EditorPanel({
   }, [editor, onSelectionUpdate]);
 
   const [showToast, setShowToast] = useState(false);
+
+  useEffect(() => {
+    if (actionEpoch && actionEpoch > 0) {
+      setShowToast(true);
+      const timer = setTimeout(() => setShowToast(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionEpoch]);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [bubbleThinking, setBubbleThinking] = useState(false);
@@ -73,7 +80,6 @@ export default function EditorPanel({
 
   useEffect(() => {
     if (!editor) return;
-
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "k") {
         event.preventDefault();
@@ -83,7 +89,6 @@ export default function EditorPanel({
         setBubbleVisible(false);
       }
     };
-
     const view = editor.view;
     view.dom.addEventListener("keydown", handler);
     return () => view.dom.removeEventListener("keydown", handler);
@@ -213,7 +218,6 @@ export default function EditorPanel({
 
   useEffect(() => {
     if (!editor || !inlineDone) return;
-
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -223,22 +227,16 @@ export default function EditorPanel({
         handleReject();
       }
     };
-
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [editor, inlineDone]);
 
-  useEffect(() => {
-    if (actionEpoch && actionEpoch > 0) {
-      setShowToast(true);
-      const timer = setTimeout(() => setShowToast(false), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [actionEpoch]);
+  const btnActive = (active: boolean) =>
+    active ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary";
 
   if (!editor) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500">
+      <div className="flex items-center justify-center h-full text-text-muted">
         Loading editor...
       </div>
     );
@@ -246,119 +244,95 @@ export default function EditorPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-slate-700 text-sm text-slate-400 font-medium flex items-center justify-between relative">
-        <span>Editor</span>
+      <div className="px-4 py-2.5 border-b border-border-subtle text-sm text-text-secondary flex items-center justify-between relative">
+        <span className="font-display tracking-wider text-xs">Editor</span>
         {showToast && (
-          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-1.5 rounded-md bg-emerald-900/90 border border-emerald-700 text-emerald-200 text-xs whitespace-nowrap transition-opacity">
+          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-1.5 rounded-sm bg-success/20 border border-success text-success text-xs whitespace-nowrap">
             AI writing complete. Press Ctrl+Z / Cmd+Z to undo
           </div>
         )}
         <div className="flex gap-1">
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
-            className={`px-2 py-0.5 rounded text-xs transition-colors ${
-              editor.isActive("bold")
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("bold"))}`}
             title="Bold"
           >
             B
           </button>
           <button
             onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={`px-2 py-0.5 rounded text-xs italic transition-colors ${
-              editor.isActive("italic")
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+            className={`px-2.5 py-1 rounded-sm text-xs font-editor italic transition-colors ${btnActive(editor.isActive("italic"))}`}
             title="Italic"
           >
             I
           </button>
           <button
             onClick={() => editor.chain().focus().toggleStrike().run()}
-            className={`px-2 py-0.5 rounded text-xs line-through transition-colors ${
-              editor.isActive("strike")
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+            className={`px-2.5 py-1 rounded-sm text-xs font-editor line-through transition-colors ${btnActive(editor.isActive("strike"))}`}
             title="Strikethrough"
           >
             S
           </button>
+          <span className="w-px h-4 bg-border-subtle mx-1 self-center" />
           <button
             onClick={() => setDrawerOpen(!drawerOpen)}
-            className={`px-2 py-0.5 rounded text-xs transition-colors ${
-              drawerOpen
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
+            className={`px-2.5 py-1 rounded-sm text-xs transition-colors ${
+              drawerOpen ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary"
             }`}
             title="Lorebook"
           >
-            📖
+            Lorebook
           </button>
-          <span className="w-px bg-slate-600 mx-1" />
+          <span className="w-px h-4 bg-border-subtle mx-1 self-center" />
           <button
-            onClick={() =>
-              editor.commands.toggleHeading({ level: 2 })
-            }
-            className={`px-2 py-0.5 rounded text-xs transition-colors ${
-              editor.isActive("heading", { level: 2 })
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+            onClick={() => editor.commands.toggleHeading({ level: 2 })}
+            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("heading", { level: 2 }))}`}
             title="Heading"
           >
             H
           </button>
           <button
             onClick={() => editor.chain().focus().toggleBlockquote().run()}
-            className={`px-2 py-0.5 rounded text-xs transition-colors ${
-              editor.isActive("blockquote")
-                ? "bg-slate-700 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("blockquote"))}`}
             title="Blockquote"
           >
             &ldquo;
           </button>
         </div>
       </div>
+
       <LorebookDrawer
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
       <div className="flex-1 overflow-y-auto relative">
         <EditorContent editor={editor} />
-        {inlineDone && (
-          <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-slate-800 border border-emerald-700 rounded-lg px-3 py-2 shadow-lg z-40">
-            <span className="text-xs text-emerald-300">AI Preview</span>
-            <span className="w-px h-4 bg-slate-600" />
-            <button
-              onClick={handleAccept}
-              className="text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-2 py-0.5 rounded transition-colors"
-            >
-              Accept (Tab)
-            </button>
-            <button
-              onClick={handleReject}
-              className="text-xs text-red-400 hover:text-red-300 px-2 py-0.5 transition-colors"
-            >
-              Reject (Esc)
-            </button>
-          </div>
-        )}
         {bubbleVisible && (
           <InlineCommandBubble
             editor={editor}
             onSubmit={handleBubbleSubmit}
             onDismiss={handleBubbleDismiss}
             isThinking={bubbleThinking}
-            onStop={() => {
-              // Stop is handled naturally by stream-end cleanup
-            }}
+            onStop={() => {}}
           />
+        )}
+        {inlineDone && (
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-bg-raised border border-accent rounded-sm px-3 py-2 shadow-lg z-40">
+            <span className="text-xs text-accent">AI Preview</span>
+            <span className="w-px h-4 bg-border-subtle" />
+            <button
+              onClick={handleAccept}
+              className="text-xs text-bg-deep bg-success hover:bg-success/80 px-2.5 py-0.5 rounded-sm transition-colors"
+            >
+              Accept (Tab)
+            </button>
+            <button
+              onClick={handleReject}
+              className="text-xs text-danger hover:text-danger/80 px-2.5 py-0.5 transition-colors"
+            >
+              Reject (Esc)
+            </button>
+          </div>
         )}
       </div>
     </div>

@@ -46,24 +46,24 @@ export default function ProjectTree({
   };
 
   return (
-    <div className="flex flex-col h-full border-r border-slate-700 bg-slate-900">
-      <div className="flex border-b border-slate-700">
+    <div className="flex flex-col h-full border-r border-border-subtle bg-bg-surface">
+      <div className="flex border-b border-border-subtle">
         <button
           onClick={() => setTab("chapters")}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
             tab === "chapters"
-              ? "bg-slate-800 text-blue-300 border-b border-blue-500"
-              : "text-slate-500 hover:text-slate-300"
+              ? "bg-bg-deep text-accent border-b border-accent"
+              : "text-text-muted hover:text-text-secondary"
           }`}
         >
           Chapters
         </button>
         <button
           onClick={() => setTab("outline")}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
             tab === "outline"
-              ? "bg-slate-800 text-blue-300 border-b border-blue-500"
-              : "text-slate-500 hover:text-slate-300"
+              ? "bg-bg-deep text-accent border-b border-accent"
+              : "text-text-muted hover:text-text-secondary"
           }`}
         >
           Outline
@@ -77,27 +77,27 @@ export default function ProjectTree({
               <button
                 key={ch.filename}
                 onClick={() => onSelectChapter(ch.title)}
-                className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                className={`w-full text-left px-4 py-2.5 text-xs transition-colors ${
                   currentChapter === ch.title
-                    ? "bg-blue-900/40 text-blue-300 border-l-2 border-blue-500"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200 border-l-2 border-transparent"
+                    ? "bg-accent-subtle text-accent border-l-2 border-accent"
+                    : "text-text-secondary hover:bg-bg-raised hover:text-text-primary border-l-2 border-transparent"
                 }`}
               >
                 {ch.title}
               </button>
             ))}
           </div>
-          <div className="p-2 border-t border-slate-700 space-y-1">
+          <div className="p-3 border-t border-border-subtle space-y-1.5">
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               placeholder="New chapter..."
-              className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent"
             />
             <button
               onClick={handleCreate}
-              className="w-full px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs transition-colors"
+              className="w-full px-2.5 py-1.5 rounded-sm bg-accent hover:bg-accent/90 text-bg-deep text-xs transition-colors"
             >
               + New Chapter
             </button>
