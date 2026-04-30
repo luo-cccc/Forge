@@ -905,6 +905,211 @@ async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), S
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct GraphEntity {
+    id: String,
+    name: String,
+    category: String,
+    description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GraphRelationship {
+    source: String,
+    target: String,
+    label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GraphChapter {
+    title: String,
+    summary: String,
+    status: String,
+    word_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectGraphData {
+    entities: Vec<GraphEntity>,
+    relationships: Vec<GraphRelationship>,
+    chapters: Vec<GraphChapter>,
+}
+
+#[tauri::command]
+fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
+    let mut entities = Vec::new();
+    let mut relationships = Vec::new();
+    let mut chapters = Vec::new();
+
+    // 1. Entities from Lorebook
+    let lore_entries = load_lorebook(&app)?;
+    for entry in lore_entries {
+        entities.push(GraphEntity {
+            id: format!("lore-{}", entry.id),
+            name: entry.keyword.clone(),
+            category: "character".to_string(),
+            description: entry.content.clone(),
+        });
+    }
+
+    // 2. Entities from agent_skills (extracted character rules)
+    let state = app.state::<AppState>();
+    let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+    if let Ok(skills) = db.get_active_skills() {
+        for skill in skills {
+            if skill.category == "character" {
+                // Extract entity name from skill description
+                let name = skill.skill.chars().take(30).collect::<String>();
+                entities.push(GraphEntity {
+                    id: format!("skill-{}", skill.id),
+                    name,
+                    category: "character_trait".to_string(),
+                    description: skill.skill.clone(),
+                });
+            }
+        }
+    }
+    drop(db);
+
+    // 3. Chapters from file tree + outline
+    let dir = project_dir(&app)?;
+    if let Ok(outline_nodes) = load_outline(&app) {
+        for node in outline_nodes {
+            // Count words in chapter file
+            let filename = format!("{}.md", node.chapter_title.replace(' ', "-").to_lowercase());
+            let path = dir.join(&filename);
+            let word_count = if path.exists() {
+                std::fs::read_to_string(&path)
+                    .map(|s| s.split_whitespace().count())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            chapters.push(GraphChapter {
+                title: node.chapter_title.clone(),
+                summary: node.summary.clone(),
+                status: node.status.clone(),
+                word_count,
+            });
+        }
+    }
+
+    // If outline is empty, derive chapters from file tree
+    if chapters.is_empty() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "md").unwrap_or(false) {
+                    let title = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                    let word_count = content.split_whitespace().count();
+                    chapters.push(GraphChapter {
+                        title,
+                        summary: String::new(),
+                        status: "empty".to_string(),
+                        word_count,
+                    });
+                }
+            }
+        }
+    }
+
+    // 4. Relationships: co-occurrence of entities in same chapter
+    let entity_names: Vec<String> = entities.iter().map(|e| e.name.clone()).collect();
+    for chapter in &chapters {
+        let filename = format!("{}.md", chapter.title.replace(' ', "-").to_lowercase());
+        let path = dir.join(&filename);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let content_lower = content.to_lowercase();
+            let mut found: Vec<&String> = entity_names
+                .iter()
+                .filter(|name| content_lower.contains(&name.to_lowercase()))
+                .collect();
+            if found.len() >= 2 {
+                for i in 0..found.len() {
+                    for j in i + 1..found.len() {
+                        let exists = relationships.iter().any(|r: &GraphRelationship| {
+                            (r.source == *found[i] && r.target == *found[j])
+                                || (r.source == *found[j] && r.target == *found[i])
+                        });
+                        if !exists {
+                            relationships.push(GraphRelationship {
+                                source: found[i].clone(),
+                                target: found[j].clone(),
+                                label: format!("Co-occur in {}", chapter.title),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(ProjectGraphData {
+        entities,
+        relationships,
+        chapters,
+    })
+}
+
+#[tauri::command]
+async fn analyze_pacing(summaries: String) -> Result<String, String> {
+    let api_key =
+        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
+    let resp = client
+        .post(format!("{}/chat/completions", api_base))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a structural editor. Analyze the chapter sequence for pacing issues, slow sections, abrupt transitions, and unresolved arcs. Be specific and concise."},
+                {"role": "user", "content": format!("Chapter summaries:\n{}", summaries)}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("API error: {}", resp.status()));
+    }
+
+    let body: serde_json::Value =
+        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
+    Ok(body["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("No analysis generated")
+        .to_string())
+}
+
+#[tauri::command]
+fn rename_chapter_file(
+    _app: tauri::AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let dir = project_dir(&_app)?;
+    let old_path = dir.join(&old_name);
+    let new_path = dir.join(&new_name);
+    if old_path.exists() && !new_path.exists() {
+        std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn ask_agent(
     app: tauri::AppHandle,
@@ -1191,7 +1396,10 @@ pub fn run() {
             update_outline_status,
             batch_generate_chapter,
             analyze_chapter,
-            ask_project_brain
+            ask_project_brain,
+            get_project_graph_data,
+            analyze_pacing,
+            rename_chapter_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
