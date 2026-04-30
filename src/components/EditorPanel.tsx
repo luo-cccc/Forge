@@ -3,6 +3,16 @@ import StarterKit from "@tiptap/starter-kit";
 import type { Editor } from "@tiptap/core";
 import { useEffect, useState } from "react";
 import LorebookDrawer from "./LorebookDrawer";
+import InlineCommandBubble from "./InlineCommandBubble";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import AIPreviewMark from "../extensions/AIPreviewMark";
+
+interface StreamChunk {
+  content: string;
+}
+
+const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
 
 interface SelectionState {
   from: number;
@@ -14,15 +24,17 @@ interface EditorPanelProps {
   onEditorReady?: (editor: Editor) => void;
   onSelectionUpdate?: (sel: SelectionState) => void;
   actionEpoch?: number;
+  isInlineRequestRef: React.RefObject<boolean>;
 }
 
 export default function EditorPanel({
   onEditorReady,
   onSelectionUpdate,
   actionEpoch,
+  isInlineRequestRef,
 }: EditorPanelProps) {
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [StarterKit, AIPreviewMark],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -55,6 +67,166 @@ export default function EditorPanel({
 
   const [showToast, setShowToast] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [bubbleVisible, setBubbleVisible] = useState(false);
+  const [bubbleThinking, setBubbleThinking] = useState(false);
+  const [inlineDone, setInlineDone] = useState(false);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "k") {
+        event.preventDefault();
+        setBubbleVisible(true);
+      }
+      if (event.key === "Escape" && bubbleVisible) {
+        setBubbleVisible(false);
+      }
+    };
+
+    const view = editor.view;
+    view.dom.addEventListener("keydown", handler);
+    return () => view.dom.removeEventListener("keydown", handler);
+  }, [editor, bubbleVisible]);
+
+  const handleBubbleSubmit = async (command: string) => {
+    if (!editor) return;
+    const editorRef = { current: editor };
+
+    isInlineRequestRef.current = true;
+    setBubbleThinking(true);
+
+    const fullText = editor.getText();
+
+    let unlistenChunk: UnlistenFn;
+    let unlistenEnd: UnlistenFn;
+    let rawBuffer = "";
+
+    unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
+      rawBuffer += event.payload.content;
+      const ed = editorRef.current;
+      if (!ed) return;
+
+      let m: RegExpExecArray | null;
+      const re = new RegExp(ACTION_RE.source, "gs");
+      while ((m = re.exec(rawBuffer)) !== null) {
+        const [, kind, content] = m;
+
+        if (kind === "replace") {
+          const sel = ed.state.selection;
+          const rFrom = sel.from;
+          const rTo = sel.to;
+          if (rFrom < rTo) {
+            ed.chain()
+              .focus()
+              .insertContentAt({ from: rFrom, to: rTo }, content)
+              .setTextSelection({ from: rFrom, to: rFrom + content.length })
+              .setMark("aiPreview")
+              .setTextSelection(rFrom + content.length)
+              .run();
+          } else {
+            const p = ed.state.selection.from;
+            ed.chain()
+              .focus()
+              .insertContent(content)
+              .setTextSelection({ from: p, to: p + content.length })
+              .setMark("aiPreview")
+              .setTextSelection(p + content.length)
+              .run();
+          }
+        } else {
+          const p = ed.state.selection.from;
+          ed.chain()
+            .focus()
+            .insertContent(content)
+            .setTextSelection({ from: p, to: p + content.length })
+            .setMark("aiPreview")
+            .setTextSelection(p + content.length)
+            .run();
+        }
+      }
+      rawBuffer = rawBuffer.replace(ACTION_RE, "");
+    });
+
+    unlistenEnd = await listen("agent-stream-end", () => {
+      unlistenChunk();
+      unlistenEnd();
+      isInlineRequestRef.current = false;
+      setBubbleThinking(false);
+      setBubbleVisible(false);
+      setInlineDone(true);
+    });
+
+    try {
+      await invoke("ask_agent", {
+        message: command,
+        context: fullText,
+        paragraph: "",
+        selectedText: "",
+      });
+    } catch {
+      unlistenChunk();
+      unlistenEnd();
+      isInlineRequestRef.current = false;
+      setBubbleThinking(false);
+      setBubbleVisible(false);
+    }
+  };
+
+  const handleBubbleDismiss = () => {
+    setBubbleVisible(false);
+  };
+
+  const handleAccept = () => {
+    if (!editor) return;
+    const rangesToClear: { from: number; to: number }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.marks?.some((m) => m.type.name === "aiPreview")) {
+        rangesToClear.push({ from: pos, to: pos + node.nodeSize });
+      }
+    });
+    editor.chain().focus();
+    for (const r of rangesToClear) {
+      editor
+        .chain()
+        .setTextSelection({ from: r.from, to: r.to })
+        .unsetMark("aiPreview")
+        .run();
+    }
+    setInlineDone(false);
+  };
+
+  const handleReject = () => {
+    if (!editor) return;
+    const rangesToDelete: { from: number; to: number }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.marks?.some((m) => m.type.name === "aiPreview")) {
+        rangesToDelete.push({ from: pos, to: pos + node.nodeSize });
+      }
+    });
+    for (let i = rangesToDelete.length - 1; i >= 0; i--) {
+      const r = rangesToDelete[i];
+      editor.chain().focus().deleteRange({ from: r.from, to: r.to }).run();
+    }
+    setInlineDone(false);
+  };
+
+  useEffect(() => {
+    if (!editor || !inlineDone) return;
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        handleAccept();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        handleReject();
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [editor, inlineDone]);
 
   useEffect(() => {
     if (actionEpoch && actionEpoch > 0) {
@@ -157,8 +329,37 @@ export default function EditorPanel({
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto relative">
         <EditorContent editor={editor} />
+        {inlineDone && (
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-slate-800 border border-emerald-700 rounded-lg px-3 py-2 shadow-lg z-40">
+            <span className="text-xs text-emerald-300">AI Preview</span>
+            <span className="w-px h-4 bg-slate-600" />
+            <button
+              onClick={handleAccept}
+              className="text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-2 py-0.5 rounded transition-colors"
+            >
+              Accept (Tab)
+            </button>
+            <button
+              onClick={handleReject}
+              className="text-xs text-red-400 hover:text-red-300 px-2 py-0.5 transition-colors"
+            >
+              Reject (Esc)
+            </button>
+          </div>
+        )}
+        {bubbleVisible && (
+          <InlineCommandBubble
+            editor={editor}
+            onSubmit={handleBubbleSubmit}
+            onDismiss={handleBubbleDismiss}
+            isThinking={bubbleThinking}
+            onStop={() => {
+              // Stop is handled naturally by stream-end cleanup
+            }}
+          />
+        )}
       </div>
     </div>
   );

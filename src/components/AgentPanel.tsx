@@ -25,6 +25,7 @@ interface AgentPanelProps {
   onActionInsert: (text: string) => void;
   onActionReplace: (text: string) => void;
   onActionsCompleted: () => void;
+  isInlineRequestRef: React.RefObject<boolean>;
 }
 
 const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
@@ -48,6 +49,7 @@ export default function AgentPanel({
   onActionInsert,
   onActionReplace,
   onActionsCompleted,
+  isInlineRequestRef,
 }: AgentPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
@@ -64,6 +66,7 @@ export default function AgentPanel({
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
+        if (isInlineRequestRef.current) return;
         if (searchStatus) setSearchStatus(null);
         rawBufferRef.current += event.payload.content;
 
@@ -82,12 +85,14 @@ export default function AgentPanel({
       unlistenSearch = await listen<SearchStatus>(
         "agent-search-status",
         (event) => {
+          if (isInlineRequestRef.current) return;
           rawBufferRef.current = "";
           setSearchStatus(event.payload);
         },
       );
 
       unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
+        if (isInlineRequestRef.current) return;
         // Flush remaining buffer
         const finalText = rawBufferRef.current.replace(ACTION_RE, "");
         rawBufferRef.current = "";

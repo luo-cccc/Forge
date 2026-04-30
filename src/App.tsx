@@ -44,6 +44,7 @@ function App() {
   );
 
   const [actionEpoch, setActionEpoch] = useState(0);
+  const isInlineRequestRef = useRef(false);
 
   const handleActionsCompleted = useCallback(() => {
     setActionEpoch((e) => e + 1);
@@ -73,6 +74,7 @@ function App() {
           onEditorReady={handleEditorReady}
           onSelectionUpdate={handleSelectionUpdate}
           actionEpoch={actionEpoch}
+          isInlineRequestRef={isInlineRequestRef}
         />
       </div>
       <div className="w-1/3 h-full">
@@ -81,6 +83,7 @@ function App() {
           onActionInsert={handleActionInsert}
           onActionReplace={handleActionReplace}
           onActionsCompleted={handleActionsCompleted}
+          isInlineRequestRef={isInlineRequestRef}
         />
       </div>
     </div>
