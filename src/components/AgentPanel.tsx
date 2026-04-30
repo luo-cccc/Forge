@@ -15,12 +15,29 @@ interface Message {
   content: string;
 }
 
-export default function AgentPanel() {
+interface AgentPanelProps {
+  getContext: () => { full: string; paragraph: string };
+  onActionInsert: (text: string) => void;
+}
+
+const ACTION_RE = /<ACTION_INSERT>(.*?)<\/ACTION_INSERT>/gs;
+
+function extractActions(buffer: string): { actions: string[]; cleanText: string } {
+  const actions: string[] = [];
+  const cleanText = buffer.replace(ACTION_RE, (_, content) => {
+    actions.push(content);
+    return "";
+  });
+  return { actions, cleanText };
+}
+
+export default function AgentPanel({ getContext, onActionInsert }: AgentPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rawBufferRef = useRef("");
 
   useEffect(() => {
     let unlistenChunk: UnlistenFn;
@@ -28,16 +45,25 @@ export default function AgentPanel() {
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
-        setStreaming((prev) => prev + event.payload.content);
+        rawBufferRef.current += event.payload.content;
+
+        const { actions, cleanText } = extractActions(rawBufferRef.current);
+        for (const action of actions) {
+          onActionInsert(action);
+        }
+        rawBufferRef.current = cleanText;
+        setStreaming(rawBufferRef.current);
       });
 
       unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
-        setStreaming((prev) => {
-          if (prev) {
-            setMessages((msgs) => [...msgs, { role: "agent", content: prev }]);
-          }
-          return "";
-        });
+        // Flush remaining buffer
+        const finalText = rawBufferRef.current.replace(ACTION_RE, "");
+        rawBufferRef.current = "";
+
+        if (finalText) {
+          setMessages((prev) => [...prev, { role: "agent", content: finalText }]);
+        }
+        setStreaming("");
         setIsStreaming(false);
       });
     };
@@ -48,7 +74,7 @@ export default function AgentPanel() {
       if (unlistenChunk) unlistenChunk();
       if (unlistenEnd) unlistenEnd();
     };
-  }, []);
+  }, [onActionInsert]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -63,9 +89,11 @@ export default function AgentPanel() {
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setIsStreaming(true);
+    rawBufferRef.current = "";
 
     try {
-      await invoke("ask_agent", { message: text });
+      const { full, paragraph } = getContext();
+      await invoke("ask_agent", { message: text, context: full, paragraph });
     } catch (e) {
       setStreaming("");
       setIsStreaming(false);
@@ -74,7 +102,7 @@ export default function AgentPanel() {
         { role: "agent", content: `Error: ${e}` },
       ]);
     }
-  }, [input, isStreaming]);
+  }, [input, isStreaming, getContext]);
 
   return (
     <div className="flex flex-col h-full border-l border-slate-700">
