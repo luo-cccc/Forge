@@ -36,6 +36,7 @@ async fn ask_agent(
     message: String,
     context: String,
     paragraph: String,
+    selected_text: String,
 ) -> Result<(), String> {
     let api_key = std::env::var("OPENAI_API_KEY")
         .map_err(|_| "OPENAI_API_KEY not set in .env".to_string())?;
@@ -67,14 +68,22 @@ Current paragraph the user is focused on:\n\
 {}\n\
 \"\"\"\n\
 \n\
+Selected text (user wants to rewrite this):\n\
+\"\"\"\n\
+{}\n\
+\"\"\"\n\
+\n\
 ## Rules\n\
 1. Respond conversationally to the user's requests about their writing.\n\
-2. When you want to directly write or edit content into the editor, wrap the text in XML tags:\n\
+2. When you want to write NEW content into the editor, use:\n\
    <ACTION_INSERT>your text here</ACTION_INSERT>\n\
-3. You may use multiple ACTION_INSERT blocks in a single response.\n\
-4. Do NOT wrap normal conversation in ACTION_INSERT tags — only content meant for the editor.\n\
-5. Action tags will be intercepted and inserted into the editor automatically; the user will NOT see them in chat.",
-                context, paragraph
+3. When the user provides selected text and asks you to rewrite, polish, or modify it, output ONLY the rewritten version wrapped in:\n\
+   <ACTION_REPLACE>rewritten text</ACTION_REPLACE>\n\
+   Do NOT include the original text in your response. Do NOT add explanations inside the tags.\n\
+4. You may use multiple ACTION_INSERT or ACTION_REPLACE blocks in a single response.\n\
+5. Do NOT wrap normal conversation in action tags — only content meant for the editor.\n\
+6. Action tags will be intercepted automatically; the user will NOT see them in chat.",
+                context, paragraph, selected_text
             )},
             {"role": "user", "content": message}
         ],

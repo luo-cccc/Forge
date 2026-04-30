@@ -16,22 +16,34 @@ interface Message {
 }
 
 interface AgentPanelProps {
-  getContext: () => { full: string; paragraph: string };
+  getContext: () => { full: string; paragraph: string; selected: string };
   onActionInsert: (text: string) => void;
+  onActionReplace: (text: string) => void;
+  onActionsCompleted: () => void;
 }
 
-const ACTION_RE = /<ACTION_INSERT>(.*?)<\/ACTION_INSERT>/gs;
+const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
 
-function extractActions(buffer: string): { actions: string[]; cleanText: string } {
-  const actions: string[] = [];
-  const cleanText = buffer.replace(ACTION_RE, (_, content) => {
-    actions.push(content);
+interface ParsedAction {
+  kind: "insert" | "replace";
+  content: string;
+}
+
+function extractActions(buffer: string): { actions: ParsedAction[]; cleanText: string } {
+  const actions: ParsedAction[] = [];
+  const cleanText = buffer.replace(ACTION_RE, (_, kind: string, content: string) => {
+    actions.push({ kind: kind.toLowerCase() as "insert" | "replace", content });
     return "";
   });
   return { actions, cleanText };
 }
 
-export default function AgentPanel({ getContext, onActionInsert }: AgentPanelProps) {
+export default function AgentPanel({
+  getContext,
+  onActionInsert,
+  onActionReplace,
+  onActionsCompleted,
+}: AgentPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
@@ -49,7 +61,11 @@ export default function AgentPanel({ getContext, onActionInsert }: AgentPanelPro
 
         const { actions, cleanText } = extractActions(rawBufferRef.current);
         for (const action of actions) {
-          onActionInsert(action);
+          if (action.kind === "replace") {
+            onActionReplace(action.content);
+          } else {
+            onActionInsert(action.content);
+          }
         }
         rawBufferRef.current = cleanText;
         setStreaming(rawBufferRef.current);
@@ -65,6 +81,7 @@ export default function AgentPanel({ getContext, onActionInsert }: AgentPanelPro
         }
         setStreaming("");
         setIsStreaming(false);
+        onActionsCompleted();
       });
     };
 
@@ -74,7 +91,7 @@ export default function AgentPanel({ getContext, onActionInsert }: AgentPanelPro
       if (unlistenChunk) unlistenChunk();
       if (unlistenEnd) unlistenEnd();
     };
-  }, [onActionInsert]);
+  }, [onActionInsert, onActionReplace, onActionsCompleted]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -92,8 +109,8 @@ export default function AgentPanel({ getContext, onActionInsert }: AgentPanelPro
     rawBufferRef.current = "";
 
     try {
-      const { full, paragraph } = getContext();
-      await invoke("ask_agent", { message: text, context: full, paragraph });
+      const { full, paragraph, selected } = getContext();
+      await invoke("ask_agent", { message: text, context: full, paragraph, selectedText: selected });
     } catch (e) {
       setStreaming("");
       setIsStreaming(false);

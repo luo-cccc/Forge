@@ -1,13 +1,25 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import type { Editor } from "@tiptap/core";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+interface SelectionState {
+  from: number;
+  to: number;
+  text: string;
+}
 
 interface EditorPanelProps {
   onEditorReady?: (editor: Editor) => void;
+  onSelectionUpdate?: (sel: SelectionState) => void;
+  actionEpoch?: number;
 }
 
-export default function EditorPanel({ onEditorReady }: EditorPanelProps) {
+export default function EditorPanel({
+  onEditorReady,
+  onSelectionUpdate,
+  actionEpoch,
+}: EditorPanelProps) {
   const editor = useEditor({
     extensions: [StarterKit],
     content: "<p>Start writing your novel here...</p>",
@@ -25,6 +37,31 @@ export default function EditorPanel({ onEditorReady }: EditorPanelProps) {
     }
   }, [editor, onEditorReady]);
 
+  useEffect(() => {
+    if (!editor || !onSelectionUpdate) return;
+
+    const handler = () => {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to, " ");
+      onSelectionUpdate({ from, to, text });
+    };
+
+    editor.on("selectionUpdate", handler);
+    return () => {
+      editor.off("selectionUpdate", handler);
+    };
+  }, [editor, onSelectionUpdate]);
+
+  const [showToast, setShowToast] = useState(false);
+
+  useEffect(() => {
+    if (actionEpoch && actionEpoch > 0) {
+      setShowToast(true);
+      const timer = setTimeout(() => setShowToast(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionEpoch]);
+
   if (!editor) {
     return (
       <div className="flex items-center justify-center h-full text-slate-500">
@@ -35,8 +72,13 @@ export default function EditorPanel({ onEditorReady }: EditorPanelProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-slate-700 text-sm text-slate-400 font-medium flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-slate-700 text-sm text-slate-400 font-medium flex items-center justify-between relative">
         <span>Editor</span>
+        {showToast && (
+          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-1.5 rounded-md bg-emerald-900/90 border border-emerald-700 text-emerald-200 text-xs whitespace-nowrap transition-opacity">
+            AI writing complete. Press Ctrl+Z / Cmd+Z to undo
+          </div>
+        )}
         <div className="flex gap-1">
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
