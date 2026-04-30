@@ -88,6 +88,24 @@ function App() {
     }
   }, []);
 
+  const handleApplyFix = useCallback((quote: string, suggestion: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const docText = editor.getText();
+    const idx = docText.indexOf(quote);
+    if (idx !== -1) {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection({ from: idx, to: idx + quote.length })
+        .deleteSelection()
+        .insertContent(suggestion)
+        .run();
+    } else {
+      editor.commands.insertContent(suggestion);
+    }
+  }, []);
+
   const getContext = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return { full: "", paragraph: "", selected: "" };
@@ -102,7 +120,11 @@ function App() {
   return (
     <div className="h-screen bg-bg-deep text-text-primary flex">
       <div className="w-48 h-full flex-shrink-0">
-        <ProjectTree onSelectChapter={handleSelectChapter} />
+        <ProjectTree
+          onSelectChapter={handleSelectChapter}
+          editorRef={editorRef}
+          onApplyFix={handleApplyFix}
+        />
       </div>
       <div className="flex-1 h-full min-w-0">
         <EditorPanel

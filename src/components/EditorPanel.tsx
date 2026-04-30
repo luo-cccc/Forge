@@ -6,6 +6,7 @@ import type { Editor } from "@tiptap/core";
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import AIPreviewMark from "../extensions/AIPreviewMark";
+import CommentMark from "../extensions/CommentMark";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 
@@ -34,7 +35,7 @@ export default function EditorPanel({
   const setIsInlineRequest = useAppStore((s) => s.setIsInlineRequest);
   const incrementActionEpoch = useAppStore((s) => s.incrementActionEpoch);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark],
+    extensions: [StarterKit, AIPreviewMark, CommentMark],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {

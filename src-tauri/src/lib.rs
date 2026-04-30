@@ -469,6 +469,81 @@ fn save_chapter_internal(app: &tauri::AppHandle, title: &str, content: &str) -> 
     atomic_write(&path, content)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewItem {
+    quote: String,
+    #[serde(rename = "type")]
+    review_type: String,
+    issue: String,
+    suggestion: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewReport {
+    reviews: Vec<ReviewItem>,
+}
+
+#[tauri::command]
+async fn analyze_chapter(_app: tauri::AppHandle, content: String) -> Result<Vec<ReviewItem>, String> {
+    let api_key =
+        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let system_prompt = r#"You are a professional novel editor. Analyze the chapter and output a JSON object with a "reviews" array.
+
+Each review must have:
+- "quote": exact text from the chapter (copy verbatim, at least 10 characters)
+- "type": one of "logic" | "ooc" | "pacing" | "prose"
+- "issue": what the problem is
+- "suggestion": how to fix it (in Chinese, specific rewrite suggestion)
+
+Output ONLY the JSON object, no explanation outside. Example:
+{"reviews":[{"quote":"他走出了房间","type":"prose","issue":"缺乏画面感","suggestion":"他推开吱呀作响的木门，幽暗的走廊里只有自己的脚步声在回荡。"}]}"#;
+
+    let truncated = truncate_context(&content, 8000);
+    let resp = client
+        .post(format!("{}/chat/completions", api_base))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": format!("Analyze this chapter:\n\n{}", truncated)}
+            ],
+            "stream": false,
+            "response_format": {"type": "json_object"}
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status.as_u16(), text));
+    }
+
+    let body: serde_json::Value =
+        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
+    let text = body["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+
+    let report: ReviewReport =
+        serde_json::from_str(text).map_err(|e| format!("Failed to parse review JSON: {}", e))?;
+
+    Ok(report.reviews)
+}
+
 #[tauri::command]
 async fn ask_agent(
     app: tauri::AppHandle,
@@ -726,7 +801,8 @@ pub fn run() {
             save_outline_node,
             delete_outline_node,
             update_outline_status,
-            batch_generate_chapter
+            batch_generate_chapter,
+            analyze_chapter
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

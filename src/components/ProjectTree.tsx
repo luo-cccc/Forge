@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../store";
 import OutlinePanel from "./OutlinePanel";
+import ScriptDoctorPanel from "./ScriptDoctorPanel";
+import type { Editor } from "@tiptap/core";
 
 interface ChapterInfo {
   title: string;
@@ -10,13 +12,15 @@ interface ChapterInfo {
 
 interface ProjectTreeProps {
   onSelectChapter: (title: string) => void;
+  editorRef: { current: Editor | null };
+  onApplyFix: (quote: string, suggestion: string) => void;
 }
 
-export default function ProjectTree({ onSelectChapter }: ProjectTreeProps) {
+export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: ProjectTreeProps) {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [newTitle, setNewTitle] = useState("");
-  const [tab, setTab] = useState<"chapters" | "outline">("chapters");
+  const [tab, setTab] = useState<"chapters" | "outline" | "doctor">("chapters");
 
   const refresh = useCallback(async () => {
     try {
@@ -66,6 +70,16 @@ export default function ProjectTree({ onSelectChapter }: ProjectTreeProps) {
         >
           Outline
         </button>
+        <button
+          onClick={() => setTab("doctor")}
+          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
+            tab === "doctor"
+              ? "bg-bg-deep text-accent border-b border-accent"
+              : "text-text-muted hover:text-text-secondary"
+          }`}
+        >
+          Doctor
+        </button>
       </div>
 
       {tab === "chapters" ? (
@@ -101,8 +115,10 @@ export default function ProjectTree({ onSelectChapter }: ProjectTreeProps) {
             </button>
           </div>
         </>
-      ) : (
+      ) : tab === "outline" ? (
         <OutlinePanel />
+      ) : (
+        <ScriptDoctorPanel editorRef={editorRef} onApplyFix={onApplyFix} />
       )}
     </div>
   );
