@@ -15,6 +15,11 @@ interface Message {
   content: string;
 }
 
+interface SearchStatus {
+  keyword: string;
+  round: number;
+}
+
 interface AgentPanelProps {
   getContext: () => { full: string; paragraph: string; selected: string };
   onActionInsert: (text: string) => void;
@@ -48,15 +53,18 @@ export default function AgentPanel({
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
   useEffect(() => {
     let unlistenChunk: UnlistenFn;
     let unlistenEnd: UnlistenFn;
+    let unlistenSearch: UnlistenFn;
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
+        if (searchStatus) setSearchStatus(null);
         rawBufferRef.current += event.payload.content;
 
         const { actions, cleanText } = extractActions(rawBufferRef.current);
@@ -71,6 +79,14 @@ export default function AgentPanel({
         setStreaming(rawBufferRef.current);
       });
 
+      unlistenSearch = await listen<SearchStatus>(
+        "agent-search-status",
+        (event) => {
+          rawBufferRef.current = "";
+          setSearchStatus(event.payload);
+        },
+      );
+
       unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
         // Flush remaining buffer
         const finalText = rawBufferRef.current.replace(ACTION_RE, "");
@@ -81,6 +97,7 @@ export default function AgentPanel({
         }
         setStreaming("");
         setIsStreaming(false);
+        setSearchStatus(null);
         onActionsCompleted();
       });
     };
@@ -90,6 +107,7 @@ export default function AgentPanel({
     return () => {
       if (unlistenChunk) unlistenChunk();
       if (unlistenEnd) unlistenEnd();
+      if (unlistenSearch) unlistenSearch();
     };
   }, [onActionInsert, onActionReplace, onActionsCompleted]);
 
@@ -143,6 +161,11 @@ export default function AgentPanel({
             {msg.content}
           </div>
         ))}
+        {searchStatus && (
+          <div className="text-sm max-w-[90%] rounded-lg px-3 py-2 bg-amber-900/50 border border-amber-700 text-amber-200 whitespace-pre-wrap">
+            🔍 Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...
+          </div>
+        )}
         {streaming && (
           <div className="text-sm max-w-[90%] rounded-lg px-3 py-2 bg-slate-800 text-slate-200 whitespace-pre-wrap">
             {streaming}

@@ -2,6 +2,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import type { Editor } from "@tiptap/core";
 import { useEffect, useState } from "react";
+import LorebookDrawer from "./LorebookDrawer";
 
 interface SelectionState {
   from: number;
@@ -53,6 +54,7 @@ export default function EditorPanel({
   }, [editor, onSelectionUpdate]);
 
   const [showToast, setShowToast] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (actionEpoch && actionEpoch > 0) {
@@ -113,6 +115,17 @@ export default function EditorPanel({
           >
             S
           </button>
+          <button
+            onClick={() => setDrawerOpen(!drawerOpen)}
+            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              drawerOpen
+                ? "bg-slate-700 text-white"
+                : "text-slate-400 hover:text-white"
+            }`}
+            title="Lorebook"
+          >
+            📖
+          </button>
           <span className="w-px bg-slate-600 mx-1" />
           <button
             onClick={() =>
@@ -140,6 +153,10 @@ export default function EditorPanel({
           </button>
         </div>
       </div>
+      <LorebookDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+      />
       <div className="flex-1 overflow-y-auto">
         <EditorContent editor={editor} />
       </div>
