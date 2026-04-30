@@ -113,6 +113,308 @@ fn delete_lore_entry(app: tauri::AppHandle, id: String) -> Result<Vec<LoreEntry>
     Ok(entries)
 }
 
+fn project_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        .join("project");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create project dir: {}", e))?;
+    Ok(dir)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChapterInfo {
+    title: String,
+    filename: String,
+}
+
+#[tauri::command]
+fn read_project_dir(app: tauri::AppHandle) -> Result<Vec<ChapterInfo>, String> {
+    let dir = project_dir(&app)?;
+    let mut chapters = Vec::new();
+    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().map(|e| e == "md").unwrap_or(false) {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let title = stem.replace('-', " ");
+            chapters.push(ChapterInfo {
+                filename: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                title,
+            });
+        }
+    }
+    chapters.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(chapters)
+}
+
+#[tauri::command]
+fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, String> {
+    let dir = project_dir(&app)?;
+    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
+    let path = dir.join(&filename);
+    if !path.exists() {
+        std::fs::write(&path, "").map_err(|e| e.to_string())?;
+    }
+    Ok(ChapterInfo { title, filename })
+}
+
+#[tauri::command]
+fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<(), String> {
+    let dir = project_dir(&app)?;
+    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
+    let path = dir.join(&filename);
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_chapter(app: tauri::AppHandle, title: String) -> Result<String, String> {
+    let dir = project_dir(&app)?;
+    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
+    let path = dir.join(&filename);
+    if !path.exists() {
+        return Err(format!("Chapter '{}' not found", title));
+    }
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OutlineNode {
+    chapter_title: String,
+    summary: String,
+    status: String,
+}
+
+fn outline_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
+    Ok(dir.join("outline.json"))
+}
+
+fn load_outline(app: &tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
+    let path = outline_path(app)?;
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
+}
+
+fn save_outline(app: &tauri::AppHandle, nodes: &[OutlineNode]) -> Result<(), String> {
+    let path = outline_path(app)?;
+    let json = serde_json::to_string_pretty(nodes).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_outline(app: tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
+    load_outline(&app)
+}
+
+#[tauri::command]
+fn save_outline_node(
+    app: tauri::AppHandle,
+    chapter_title: String,
+    summary: String,
+) -> Result<Vec<OutlineNode>, String> {
+    let mut nodes = load_outline(&app)?;
+    let status = if let Some(existing) = nodes.iter().find(|n| n.chapter_title == chapter_title) {
+        existing.status.clone()
+    } else {
+        "empty".to_string()
+    };
+    if let Some(node) = nodes.iter_mut().find(|n| n.chapter_title == chapter_title) {
+        node.summary = summary;
+    } else {
+        nodes.push(OutlineNode {
+            chapter_title,
+            summary,
+            status,
+        });
+    }
+    save_outline(&app, &nodes)?;
+    Ok(nodes)
+}
+
+#[tauri::command]
+fn delete_outline_node(
+    app: tauri::AppHandle,
+    chapter_title: String,
+) -> Result<Vec<OutlineNode>, String> {
+    let mut nodes = load_outline(&app)?;
+    nodes.retain(|n| n.chapter_title != chapter_title);
+    save_outline(&app, &nodes)?;
+    Ok(nodes)
+}
+
+#[tauri::command]
+fn update_outline_status(
+    app: tauri::AppHandle,
+    chapter_title: String,
+    status: String,
+) -> Result<Vec<OutlineNode>, String> {
+    let mut nodes = load_outline(&app)?;
+    if let Some(node) = nodes.iter_mut().find(|n| n.chapter_title == chapter_title) {
+        node.status = status;
+    }
+    save_outline(&app, &nodes)?;
+    Ok(nodes)
+}
+
+#[derive(Serialize, Clone)]
+struct BatchStatus {
+    chapter_title: String,
+    status: String,
+    error: String,
+}
+
+#[tauri::command]
+async fn batch_generate_chapter(
+    app: tauri::AppHandle,
+    chapter_title: String,
+    summary: String,
+) -> Result<(), String> {
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+
+    let app_clone = app.clone();
+    let title_clone = chapter_title.clone();
+
+    tokio::spawn(async move {
+        let _ = app_clone.emit(
+            "batch-status",
+            BatchStatus {
+                chapter_title: title_clone.clone(),
+                status: "generating".to_string(),
+                error: String::new(),
+            },
+        );
+
+        // Gather context
+        let lorebook = load_lorebook(&app_clone).unwrap_or_default();
+        let lore_context = if lorebook.is_empty() {
+            String::from("No lorebook entries.")
+        } else {
+            lorebook
+                .iter()
+                .map(|e| format!("[{}]: {}", e.keyword, e.content))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // Get previous chapter summary from outline
+        let outline = load_outline(&app_clone).unwrap_or_default();
+        let prev_summary = outline
+            .iter()
+            .take_while(|n| n.chapter_title != title_clone)
+            .last()
+            .map(|n| n.summary.clone())
+            .unwrap_or_else(|| "None (first chapter)".to_string());
+
+        let system_prompt = format!(
+            "You are a professional novelist. Write a complete chapter based on the beat sheet.\n\n\
+             ## Lorebook (world setting)\n{}\n\n\
+             ## Previous chapter summary\n{}\n\n\
+             ## Current chapter beat\n{}\n\n\
+             Write this chapter in full prose. Do NOT use any action tags. \
+             Write naturally in Chinese. Output ONLY the chapter content, no meta-commentary.",
+            lore_context, prev_summary, summary
+        );
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("{}/chat/completions", api_base))
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": format!(
+                        "Write the full chapter for: {}", summary
+                    )}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => {
+                if r.status().is_success() {
+                    let body: serde_json::Value = r.json().await.unwrap_or_default();
+                    let content = body["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+
+                    if !content.is_empty() {
+                        // Write to chapter file
+                        let _ = crate::save_chapter_internal(&app_clone, &title_clone, &content);
+
+                        // Update outline status
+                        let _ = crate::update_outline_status(
+                            app_clone.clone(),
+                            title_clone.clone(),
+                            "generated".to_string(),
+                        );
+                    }
+
+                    let _ = app_clone.emit(
+                        "batch-status",
+                        BatchStatus {
+                            chapter_title: title_clone,
+                            status: "complete".to_string(),
+                            error: String::new(),
+                        },
+                    );
+                } else {
+                    let _ = app_clone.emit(
+                        "batch-status",
+                        BatchStatus {
+                            chapter_title: title_clone,
+                            status: "error".to_string(),
+                            error: format!("HTTP {}", r.status().as_u16()),
+                        },
+                    );
+                }
+            }
+            Err(e) => {
+                let _ = app_clone.emit(
+                    "batch-status",
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "error".to_string(),
+                        error: e.to_string(),
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn save_chapter_internal(app: &tauri::AppHandle, title: &str, content: &str) -> Result<(), String> {
+    let dir = project_dir(app)?;
+    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
+    let path = dir.join(&filename);
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn ask_agent(
     app: tauri::AppHandle,
@@ -340,7 +642,16 @@ pub fn run() {
             ask_agent,
             get_lorebook,
             save_lore_entry,
-            delete_lore_entry
+            delete_lore_entry,
+            read_project_dir,
+            create_chapter,
+            save_chapter,
+            load_chapter,
+            get_outline,
+            save_outline_node,
+            delete_outline_node,
+            update_outline_status,
+            batch_generate_chapter
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
