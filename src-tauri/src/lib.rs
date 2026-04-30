@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use agent_harness_core::{
-    chunk_text, hermes_memory::HermesDB, vector_db::{Chunk, VectorDB},
+    chunk_text, classify_intent, hermes_memory::HermesDB, vector_db::{Chunk, VectorDB},
 };
 
 const KEYRING_SERVICE: &str = "agent-writer";
@@ -607,6 +607,14 @@ async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content
 }
 
 #[derive(Serialize, Clone)]
+struct CoTEvent {
+    step: u32,
+    total: u32,
+    description: String,
+    status: String,
+}
+
+#[derive(Serialize, Clone)]
 struct Epiphany {
     skill: String,
     category: String,
@@ -1173,6 +1181,22 @@ async fn ask_agent(
     let state = app.state::<AppState>();
 
     let truncated_context = truncate_context(&context, 2000);
+
+    // Semantic router: classify intent
+    let has_lore = load_lorebook(&app).map(|l| !l.is_empty()).unwrap_or(false);
+    let has_outline = load_outline(&app).map(|o| !o.is_empty()).unwrap_or(false);
+    let intent = classify_intent(&message, has_lore, has_outline);
+
+    // Emit CoT: intent detection
+    let _ = app.emit(
+        "agent-chain-of-thought",
+        CoTEvent {
+            step: 0,
+            total: 1,
+            description: format!("Intent: {:?}", intent),
+            status: "done".to_string(),
+        },
+    );
 
     // Log user message to Hermes memory
     {

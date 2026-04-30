@@ -59,6 +59,15 @@ impl HermesDB {
                 source TEXT DEFAULT 'extracted'
             );
 
+            CREATE TABLE IF NOT EXISTS hierarchical_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                level TEXT NOT NULL CHECK(level IN ('chunk','chapter','book')),
+                ref_key TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_hs_level_key ON hierarchical_summaries(level, ref_key);
+
             CREATE TABLE IF NOT EXISTS agent_skills (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 skill TEXT NOT NULL,
@@ -223,6 +232,39 @@ impl HermesDB {
         )?;
 
         Ok((decayed, merged, pruned))
+    }
+
+    // ---- hierarchical_summaries ----
+
+    pub fn upsert_summary(&self, level: &str, ref_key: &str, summary: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO hierarchical_summaries (level, ref_key, summary)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT DO UPDATE SET summary=?3",
+            params![level, ref_key, summary],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_summaries(&self, level: &str, limit: usize) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT summary FROM hierarchical_summaries WHERE level = ?1
+             ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![level, limit as i64], |row| row.get(0))?;
+        let mut summaries = Vec::new();
+        for r in rows {
+            summaries.push(r?);
+        }
+        Ok(summaries)
+    }
+
+    pub fn get_recent_summaries_by_level(
+        &self,
+        level: &str,
+        limit: usize,
+    ) -> SqlResult<Vec<String>> {
+        self.get_summaries(level, limit)
     }
 
     /// Clean session_history older than 7 days

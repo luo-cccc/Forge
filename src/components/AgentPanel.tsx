@@ -60,6 +60,7 @@ export default function AgentPanel({
   const [lastInput, setLastInput] = useState<string>("");
   const [brainMode, setBrainMode] = useState(false);
   const [epiphanies, setEpiphanies] = useState<{ id: number; skill: string; category: string }[]>([]);
+  const [cotSteps, setCotSteps] = useState<{ step: number; total: number; description: string; status: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -69,6 +70,7 @@ export default function AgentPanel({
     let unlistenSearch: UnlistenFn;
     let unlistenError: UnlistenFn;
     let unlistenEpiphany: UnlistenFn;
+    let unlistenCot: UnlistenFn;
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
@@ -107,6 +109,23 @@ export default function AgentPanel({
         },
       );
 
+      unlistenCot = await listen<{
+        step: number;
+        total: number;
+        description: string;
+        status: string;
+      }>("agent-chain-of-thought", (event) => {
+        setCotSteps((prev) => {
+          const existing = prev.findIndex((s) => s.step === event.payload.step);
+          if (existing !== -1) {
+            const next = [...prev];
+            next[existing] = event.payload;
+            return next;
+          }
+          return [...prev, event.payload];
+        });
+      });
+
       unlistenError = await listen<{ message: string; source: string }>(
         "agent-error",
         (event) => {
@@ -142,6 +161,7 @@ export default function AgentPanel({
       if (unlistenSearch) unlistenSearch();
       if (unlistenError) unlistenError();
       if (unlistenEpiphany) unlistenEpiphany();
+      if (unlistenCot) unlistenCot();
     };
   }, [onActionInsert, onActionReplace, isInlineRequest, setIsAgentThinking, incrementActionEpoch]);
 
@@ -251,6 +271,23 @@ export default function AgentPanel({
                 <span className="text-[10px] text-purple-400 px-1.5 py-0.5 rounded-sm bg-purple-500/15">
                   {ep.category}
                 </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {cotSteps.length > 0 && (
+          <div className="text-xs max-w-[90%] rounded-sm px-3 py-2 bg-bg-raised border border-border-subtle space-y-1.5">
+            {cotSteps.map((s) => (
+              <div key={s.step} className="flex items-center gap-2">
+                <span className={`text-[10px] ${s.status === "done" ? "text-success" : s.status === "running" ? "text-accent animate-pulse" : "text-text-muted"}`}>
+                  {s.status === "done" ? "✓" : s.status === "running" ? "◉" : "○"}
+                </span>
+                <span className={`flex-1 ${s.status === "done" ? "text-text-secondary" : "text-text-primary"}`}>
+                  {s.description}
+                </span>
+                {s.step > 0 && s.total > 1 && (
+                  <span className="text-[10px] text-text-muted">{s.step}/{s.total}</span>
+                )}
               </div>
             ))}
           </div>

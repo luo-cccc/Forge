@@ -2,12 +2,15 @@ pub mod actions;
 pub mod config;
 pub mod hermes_memory;
 pub mod llm;
+pub mod planner;
+pub mod router;
 pub mod vector_db;
 
 pub use actions::{parse_actions, Action};
 pub use config::HarnessConfig;
 pub use hermes_memory::HermesDB;
 pub use llm::LLMClient;
+pub use router::{classify_intent, Intent};
 pub use vector_db::{chunk_text, cosine_similarity, extract_keywords, Chunk, VectorDB};
 
 /// 通用文本截断 — 取最后 max_chars 字符，从词边界断开
