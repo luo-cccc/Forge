@@ -191,4 +191,46 @@ impl HermesDB {
         )?;
         Ok(())
     }
+
+    /// Consolidation: decay → merge → prune (SimpleMem pattern)
+    /// Returns (decayed, merged, pruned) counts
+    pub fn consolidate(&self) -> SqlResult<(usize, usize, usize)> {
+        // 1. Decay: deactivate skills older than 90 days
+        let decayed = self.conn.execute(
+            "UPDATE agent_skills SET active = 0
+             WHERE active = 1 AND julianday('now') - julianday(created_at) > 90",
+            [],
+        )?;
+
+        // 2. Merge: deactivate exact duplicates (keep earliest)
+        let merged = self.conn.execute(
+            "UPDATE agent_skills SET active = 0 WHERE id IN (
+                SELECT a.id FROM agent_skills a
+                INNER JOIN agent_skills b ON a.skill = b.skill
+                AND a.id > b.id AND a.active = 1 AND b.active = 1
+            )",
+            [],
+        )?;
+
+        // 3. Prune: keep only most recent 200 active skills
+        let pruned = self.conn.execute(
+            "UPDATE agent_skills SET active = 0
+             WHERE active = 1 AND id NOT IN (
+                 SELECT id FROM agent_skills WHERE active = 1
+                 ORDER BY id DESC LIMIT 200
+             )",
+            [],
+        )?;
+
+        Ok((decayed, merged, pruned))
+    }
+
+    /// Clean session_history older than 7 days
+    pub fn clean_old_sessions(&self) -> SqlResult<usize> {
+        self.conn.execute(
+            "DELETE FROM session_history
+             WHERE julianday('now') - julianday(created_at) > 7",
+            [],
+        )
+    }
 }

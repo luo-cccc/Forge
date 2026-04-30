@@ -533,7 +533,7 @@ async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content
     let mut db = VectorDB::load(&path).unwrap_or_else(|_| VectorDB::new());
     db.remove_chapter(chapter_title);
 
-    for (i, chunk_text) in chunks.iter().enumerate() {
+    for (i, (chunk_text, keywords, topic)) in chunks.iter().enumerate() {
         if chunk_text.trim().len() < 20 {
             continue;
         }
@@ -546,6 +546,8 @@ async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content
             chapter: chapter_title.to_string(),
             text: chunk_text.to_string(),
             embedding,
+            keywords: keywords.clone(),
+            topic: topic.clone(),
         });
     }
 
@@ -646,7 +648,28 @@ async fn extract_skills_from_recent(app: &tauri::AppHandle) {
                 );
             }
         }
+        // SimpleMem-inspired consolidation: decay → merge → prune
+        let _ = db.consolidate();
+        let _ = db.clean_old_sessions();
     }
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+fn budget_items(items: &[String], max_tokens: usize) -> Vec<String> {
+    let mut accepted = Vec::new();
+    let mut consumed = 0;
+    for item in items {
+        let cost = estimate_tokens(item);
+        if consumed + cost > max_tokens {
+            break;
+        }
+        accepted.push(item.clone());
+        consumed += cost;
+    }
+    accepted
 }
 
 fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
@@ -662,14 +685,17 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
                 .iter()
                 .map(|p| format!("- {}: {} (confidence {:.0}%)", p.key, p.value, p.confidence * 100.0))
                 .collect();
-            parts.push(format!(
-                "## User Preferences (learned over time)\n{}\n",
-                profile_text.join("\n")
-            ));
+            let budgeted = budget_items(&profile_text, 200);
+            if !budgeted.is_empty() {
+                parts.push(format!(
+                    "## User Preferences (learned over time)\n{}\n",
+                    budgeted.join("\n")
+                ));
+            }
         }
     }
 
-    // 2. Relevant skills (keyword match against query)
+    // 2. Relevant skills (keyword match + token budget capped at 300)
     if !query.is_empty() {
         if let Ok(skills) = db.search_skills(query) {
             if !skills.is_empty() {
@@ -677,10 +703,13 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
                     .iter()
                     .map(|s| format!("- [{}] {}", s.category, s.skill))
                     .collect();
-                parts.push(format!(
-                    "## Relevant Learned Skills\n{}\n",
-                    skill_text.join("\n")
-                ));
+                let budgeted = budget_items(&skill_text, 300);
+                if !budgeted.is_empty() {
+                    parts.push(format!(
+                        "## Relevant Learned Skills\n{}\n",
+                        budgeted.join("\n")
+                    ));
+                }
             }
         }
     }
@@ -792,7 +821,7 @@ async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), S
     // 2. Search vector DB for top 5 chunks
     let brain_path = brain_path(&app)?;
     let db = VectorDB::load(&brain_path).unwrap_or_else(|_| VectorDB::new());
-    let results = db.search(&query_embedding, 5);
+    let results = db.search_hybrid(&query, &query_embedding, 5);
 
     // 3. Build context from top chunks
     let context = if results.is_empty() {
