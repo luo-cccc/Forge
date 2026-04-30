@@ -1,13 +1,11 @@
-mod hermes_memory;
-mod vector_db;
-
 use std::sync::Mutex;
 
+use agent_harness_core::{
+    chunk_text, hermes_memory::HermesDB, vector_db::{Chunk, VectorDB},
+};
 use futures_util::StreamExt;
-use hermes_memory::HermesDB;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
-use vector_db::{chunk_text, Chunk, VectorDB};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 enum HarnessState {
@@ -37,32 +35,8 @@ struct SearchStatus {
     round: u32,
 }
 
-fn truncate_context(text: &str, max_chars: usize) -> &str {
-    if text.len() <= max_chars {
-        return text;
-    }
-    let start = text.len().saturating_sub(max_chars);
-    // Find nearest char boundary and space
-    let slice = &text[start..];
-    // Skip to first complete character after a space for cleaner truncation
-    if let Some(idx) = slice.find(' ') {
-        &slice[idx + 1..]
-    } else {
-        slice
-    }
-}
-
-fn extract_action_search(text: &str) -> Option<String> {
-    let tag = "<ACTION_SEARCH>";
-    let end_tag = "</ACTION_SEARCH>";
-    if let Some(start) = text.find(tag) {
-        let content_start = start + tag.len();
-        if let Some(end) = text[content_start..].find(end_tag) {
-            return Some(text[content_start..content_start + end].trim().to_string());
-        }
-    }
-    None
-}
+use agent_harness_core::actions::extract_search_action as extract_action_search;
+use agent_harness_core::truncate_context;
 
 #[tauri::command]
 fn harness_echo(message: String) -> String {
@@ -1021,7 +995,7 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
         let path = dir.join(&filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
             let content_lower = content.to_lowercase();
-            let mut found: Vec<&String> = entity_names
+            let found: Vec<&String> = entity_names
                 .iter()
                 .filter(|name| content_lower.contains(&name.to_lowercase()))
                 .collect();

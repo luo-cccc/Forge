@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "agent-harness-core",
+    "src-tauri",
+]
+resolver = "2"

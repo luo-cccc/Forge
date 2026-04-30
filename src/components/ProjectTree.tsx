@@ -5,6 +5,7 @@ import OutlinePanel from "./OutlinePanel";
 import ScriptDoctorPanel from "./ScriptDoctorPanel";
 import LoreGraphView from "./LoreGraphView";
 import StoryboardView from "./StoryboardView";
+import SandboxView from "./SandboxView";
 import type { Editor } from "@tiptap/core";
 
 interface ChapterInfo {
@@ -22,7 +23,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
   const currentChapter = useAppStore((s) => s.currentChapter);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [newTitle, setNewTitle] = useState("");
-  const [tab, setTab] = useState<"chapters" | "outline" | "doctor" | "graph" | "storyboard">("chapters");
+  const [tab, setTab] = useState<"chapters" | "outline" | "doctor" | "graph" | "storyboard" | "sandbox">("chapters");
 
   const refresh = useCallback(async () => {
     try {
@@ -102,6 +103,16 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
         >
           Board
         </button>
+        <button
+          onClick={() => setTab("sandbox")}
+          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
+            tab === "sandbox"
+              ? "bg-bg-deep text-accent border-b border-accent"
+              : "text-text-muted hover:text-text-secondary"
+          }`}
+        >
+          🧪
+        </button>
       </div>
 
       {tab === "chapters" ? (
@@ -143,8 +154,10 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
         <ScriptDoctorPanel editorRef={editorRef} onApplyFix={onApplyFix} />
       ) : tab === "graph" ? (
         <LoreGraphView />
-      ) : (
+      ) : tab === "storyboard" ? (
         <StoryboardView />
+      ) : (
+        <SandboxView />
       )}
     </div>
   );
