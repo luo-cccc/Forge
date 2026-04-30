@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAppStore } from "../store";
 import OutlinePanel from "./OutlinePanel";
 
 interface ChapterInfo {
@@ -8,14 +9,11 @@ interface ChapterInfo {
 }
 
 interface ProjectTreeProps {
-  currentChapter: string;
   onSelectChapter: (title: string) => void;
 }
 
-export default function ProjectTree({
-  currentChapter,
-  onSelectChapter,
-}: ProjectTreeProps) {
+export default function ProjectTree({ onSelectChapter }: ProjectTreeProps) {
+  const currentChapter = useAppStore((s) => s.currentChapter);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [newTitle, setNewTitle] = useState("");
   const [tab, setTab] = useState<"chapters" | "outline">("chapters");

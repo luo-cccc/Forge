@@ -31,6 +31,21 @@ struct SearchStatus {
     round: u32,
 }
 
+fn truncate_context(text: &str, max_chars: usize) -> &str {
+    if text.len() <= max_chars {
+        return text;
+    }
+    let start = text.len().saturating_sub(max_chars);
+    // Find nearest char boundary and space
+    let slice = &text[start..];
+    // Skip to first complete character after a space for cleaner truncation
+    if let Some(idx) = slice.find(' ') {
+        &slice[idx + 1..]
+    } else {
+        slice
+    }
+}
+
 fn extract_action_search(text: &str) -> Option<String> {
     let tag = "<ACTION_SEARCH>";
     let end_tag = "</ACTION_SEARCH>";
@@ -170,7 +185,7 @@ fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result
     let dir = project_dir(&app)?;
     let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
     let path = dir.join(&filename);
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    atomic_write(&path, &content)
 }
 
 #[tauri::command]
@@ -277,6 +292,22 @@ struct BatchStatus {
     error: String,
 }
 
+#[derive(Serialize, Clone)]
+struct AgentError {
+    message: String,
+    source: String,
+}
+
+fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
+    let _ = app.emit(
+        "agent-error",
+        AgentError {
+            message: message.to_string(),
+            source: source.to_string(),
+        },
+    );
+}
+
 #[tauri::command]
 async fn batch_generate_chapter(
     app: tauri::AppHandle,
@@ -315,26 +346,43 @@ async fn batch_generate_chapter(
                 .join("\n")
         };
 
-        // Get previous chapter summary from outline
+        // Get previous 2 chapter summaries from outline (sliding window)
         let outline = load_outline(&app_clone).unwrap_or_default();
-        let prev_summary = outline
+        let prev_idx = outline
             .iter()
-            .take_while(|n| n.chapter_title != title_clone)
-            .last()
-            .map(|n| n.summary.clone())
-            .unwrap_or_else(|| "None (first chapter)".to_string());
+            .position(|n| n.chapter_title == title_clone);
+        let prev_summaries: Vec<&OutlineNode> = if let Some(idx) = prev_idx {
+            let start = idx.saturating_sub(2);
+            outline[start..idx].iter().collect()
+        } else {
+            // Chapter not in outline yet; take last 2
+            let start = outline.len().saturating_sub(2);
+            outline[start..].iter().collect()
+        };
+        let prev_context = if prev_summaries.is_empty() {
+            "None (first chapter)".to_string()
+        } else {
+            prev_summaries
+                .iter()
+                .map(|n| format!("[{}]: {}", n.chapter_title, n.summary))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
 
         let system_prompt = format!(
             "You are a professional novelist. Write a complete chapter based on the beat sheet.\n\n\
              ## Lorebook (world setting)\n{}\n\n\
-             ## Previous chapter summary\n{}\n\n\
+             ## Previous chapters (last 2)\n{}\n\n\
              ## Current chapter beat\n{}\n\n\
              Write this chapter in full prose. Do NOT use any action tags. \
              Write naturally in Chinese. Output ONLY the chapter content, no meta-commentary.",
-            lore_context, prev_summary, summary
+            lore_context, prev_context, summary
         );
 
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .expect("Failed to build HTTP client");
         let resp = client
             .post(format!("{}/chat/completions", api_base))
             .header("Authorization", format!("Bearer {}", api_key))
@@ -408,11 +456,17 @@ async fn batch_generate_chapter(
     Ok(())
 }
 
+fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("Atomic rename failed: {}", e))
+}
+
 fn save_chapter_internal(app: &tauri::AppHandle, title: &str, content: &str) -> Result<(), String> {
     let dir = project_dir(app)?;
     let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
     let path = dir.join(&filename);
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    atomic_write(&path, content)
 }
 
 #[tauri::command]
@@ -432,10 +486,12 @@ async fn ask_agent(
 
     let state = app.state::<AppState>();
 
+    let truncated_context = truncate_context(&context, 2000);
+
     let system_prompt = format!(
         "You are a creative writing assistant helping the user write a novel.\n\
 \n\
-Current full draft:\n\
+Current draft (last ~2000 chars):\n\
 \"\"\"\n\
 {}\n\
 \"\"\"\n\
@@ -463,7 +519,7 @@ Selected text (user wants to rewrite this):\n\
 7. If you need to know details about a character, location, or world setting that may exist in the lorebook, use:\n\
    <ACTION_SEARCH>keyword</ACTION_SEARCH>\n\
    The system will search the lorebook and return matching entries. Always search before inventing new details about named characters or settings.",
-        context, paragraph, selected_text
+        truncated_context, paragraph, selected_text
     );
 
     let mut messages: Vec<serde_json::Value> = vec![
@@ -471,7 +527,10 @@ Selected text (user wants to rewrite this):\n\
         serde_json::json!({"role": "user", "content": message}),
     ];
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let max_rounds = 3u32;
 
     for round in 0..max_rounds {
@@ -510,7 +569,23 @@ Selected text (user wants to rewrite this):\n\
         let mut found_search = false;
 
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    emit_error(&app, &format!("Stream error: {}", e), "stream");
+                    {
+                        let mut s = state.harness_state.lock().unwrap_or_else(|_| panic!("lock"));
+                        *s = HarnessState::Idle;
+                    }
+                    let _ = app.emit(
+                        "agent-stream-end",
+                        StreamEnd {
+                            reason: "error".to_string(),
+                        },
+                    );
+                    return Err(format!("Stream error: {}", e));
+                }
+            };
             let text = String::from_utf8_lossy(&chunk);
             sse_buffer.push_str(&text);
 

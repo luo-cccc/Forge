@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useAppStore } from "../store";
 
 interface StreamChunk {
   content: string;
@@ -24,8 +25,6 @@ interface AgentPanelProps {
   getContext: () => { full: string; paragraph: string; selected: string };
   onActionInsert: (text: string) => void;
   onActionReplace: (text: string) => void;
-  onActionsCompleted: () => void;
-  isInlineRequestRef: React.RefObject<boolean>;
 }
 
 const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
@@ -48,14 +47,17 @@ export default function AgentPanel({
   getContext,
   onActionInsert,
   onActionReplace,
-  onActionsCompleted,
-  isInlineRequestRef,
 }: AgentPanelProps) {
+  const isInlineRequest = useAppStore((s) => s.isInlineRequest);
+  const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
+  const incrementActionEpoch = useAppStore((s) => s.incrementActionEpoch);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [lastInput, setLastInput] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -63,10 +65,11 @@ export default function AgentPanel({
     let unlistenChunk: UnlistenFn;
     let unlistenEnd: UnlistenFn;
     let unlistenSearch: UnlistenFn;
+    let unlistenError: UnlistenFn;
 
     const setup = async () => {
       unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
-        if (isInlineRequestRef.current) return;
+        if (isInlineRequest) return;
         if (searchStatus) setSearchStatus(null);
         rawBufferRef.current += event.payload.content;
 
@@ -85,14 +88,25 @@ export default function AgentPanel({
       unlistenSearch = await listen<SearchStatus>(
         "agent-search-status",
         (event) => {
-          if (isInlineRequestRef.current) return;
+          if (isInlineRequest) return;
           rawBufferRef.current = "";
           setSearchStatus(event.payload);
         },
       );
 
+      unlistenError = await listen<{ message: string; source: string }>(
+        "agent-error",
+        (event) => {
+          if (isInlineRequest) return;
+          setIsStreaming(false);
+          setIsAgentThinking(false);
+          setStreaming("");
+          setAgentError(event.payload.message);
+        },
+      );
+
       unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
-        if (isInlineRequestRef.current) return;
+        if (isInlineRequest) return;
         const finalText = rawBufferRef.current.replace(ACTION_RE, "");
         rawBufferRef.current = "";
 
@@ -101,8 +115,9 @@ export default function AgentPanel({
         }
         setStreaming("");
         setIsStreaming(false);
+        setIsAgentThinking(false);
         setSearchStatus(null);
-        onActionsCompleted();
+        incrementActionEpoch();
       });
     };
 
@@ -112,8 +127,9 @@ export default function AgentPanel({
       if (unlistenChunk) unlistenChunk();
       if (unlistenEnd) unlistenEnd();
       if (unlistenSearch) unlistenSearch();
+      if (unlistenError) unlistenError();
     };
-  }, [onActionInsert, onActionReplace, onActionsCompleted]);
+  }, [onActionInsert, onActionReplace, isInlineRequest, setIsAgentThinking, incrementActionEpoch]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -126,8 +142,11 @@ export default function AgentPanel({
     if (!text || isStreaming) return;
 
     setInput("");
+    setLastInput(text);
+    setAgentError(null);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setIsStreaming(true);
+    setIsAgentThinking(true);
     rawBufferRef.current = "";
 
     try {
@@ -136,12 +155,30 @@ export default function AgentPanel({
     } catch (e) {
       setStreaming("");
       setIsStreaming(false);
+      setIsAgentThinking(false);
       setMessages((prev) => [
         ...prev,
         { role: "agent", content: `Error: ${e}` },
       ]);
     }
-  }, [input, isStreaming, getContext]);
+  }, [input, isStreaming, getContext, setIsAgentThinking]);
+
+  const handleRetry = useCallback(async () => {
+    if (!lastInput) return;
+    setAgentError(null);
+    setIsStreaming(true);
+    setIsAgentThinking(true);
+    rawBufferRef.current = "";
+    try {
+      const { full, paragraph, selected } = getContext();
+      await invoke("ask_agent", { message: lastInput, context: full, paragraph, selectedText: selected });
+    } catch (e) {
+      setStreaming("");
+      setIsStreaming(false);
+      setIsAgentThinking(false);
+      setMessages((prev) => [...prev, { role: "agent", content: `Error: ${e}` }]);
+    }
+  }, [lastInput, getContext, setIsAgentThinking]);
 
   return (
     <div className="flex flex-col h-full border-l border-border-subtle">
@@ -165,6 +202,17 @@ export default function AgentPanel({
             {msg.content}
           </div>
         ))}
+        {agentError && (
+          <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-danger/20 border border-danger text-danger whitespace-pre-wrap flex items-center gap-3">
+            <span>{agentError}</span>
+            <button
+              onClick={handleRetry}
+              className="text-xs px-2 py-0.5 rounded-sm bg-danger text-white hover:bg-danger/80 transition-colors flex-shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         {searchStatus && (
           <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-accent-subtle border border-accent text-accent whitespace-pre-wrap">
             Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...

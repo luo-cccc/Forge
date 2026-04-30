@@ -3,7 +3,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Editor } from "@tiptap/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useAppStore } from "../store";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
@@ -17,8 +18,6 @@ interface SelectionState {
 interface EditorPanelProps {
   onEditorReady?: (editor: Editor) => void;
   onSelectionUpdate?: (sel: SelectionState) => void;
-  actionEpoch?: number;
-  isInlineRequestRef: React.RefObject<boolean>;
 }
 
 interface StreamChunk {
@@ -30,9 +29,10 @@ const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
 export default function EditorPanel({
   onEditorReady,
   onSelectionUpdate,
-  actionEpoch,
-  isInlineRequestRef,
 }: EditorPanelProps) {
+  const actionEpoch = useAppStore((s) => s.actionEpoch);
+  const setIsInlineRequest = useAppStore((s) => s.setIsInlineRequest);
+  const incrementActionEpoch = useAppStore((s) => s.incrementActionEpoch);
   const editor = useEditor({
     extensions: [StarterKit, AIPreviewMark],
     content: "<p>Start writing your novel here...</p>",
@@ -77,6 +77,35 @@ export default function EditorPanel({
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [bubbleThinking, setBubbleThinking] = useState(false);
   const [inlineDone, setInlineDone] = useState(false);
+  const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentChapter = useAppStore((s) => s.currentChapter);
+
+  // Debounced auto-save: 3s after typing stops
+  useEffect(() => {
+    if (!editor) return;
+    const handler = () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        const content = editor.getHTML();
+        try {
+          await invoke("save_chapter", { title: currentChapter, content });
+          const now = new Date();
+          setSaveIndicator(
+            `Saved at ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
+          );
+          setTimeout(() => setSaveIndicator(null), 3000);
+        } catch (e) {
+          console.error("Auto-save failed:", e);
+        }
+      }, 3000);
+    };
+    editor.on("update", handler);
+    return () => {
+      editor.off("update", handler);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [editor, currentChapter]);
 
   useEffect(() => {
     if (!editor) return;
@@ -98,7 +127,7 @@ export default function EditorPanel({
     if (!editor) return;
     const editorRef = { current: editor };
 
-    isInlineRequestRef.current = true;
+    setIsInlineRequest(true);
     setBubbleThinking(true);
 
     const fullText = editor.getText();
@@ -156,10 +185,11 @@ export default function EditorPanel({
     unlistenEnd = await listen("agent-stream-end", () => {
       unlistenChunk();
       unlistenEnd();
-      isInlineRequestRef.current = false;
+      setIsInlineRequest(false);
       setBubbleThinking(false);
       setBubbleVisible(false);
       setInlineDone(true);
+      incrementActionEpoch();
     });
 
     try {
@@ -172,7 +202,7 @@ export default function EditorPanel({
     } catch {
       unlistenChunk();
       unlistenEnd();
-      isInlineRequestRef.current = false;
+      setIsInlineRequest(false);
       setBubbleThinking(false);
       setBubbleVisible(false);
     }
@@ -246,6 +276,11 @@ export default function EditorPanel({
     <div className="flex flex-col h-full">
       <div className="px-4 py-2.5 border-b border-border-subtle text-sm text-text-secondary flex items-center justify-between relative">
         <span className="font-display tracking-wider text-xs">Editor</span>
+        {saveIndicator && (
+          <span className="text-[10px] text-text-muted tracking-wide ml-2">
+            {saveIndicator}
+          </span>
+        )}
         {showToast && (
           <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-1.5 rounded-sm bg-success/20 border border-success text-success text-xs whitespace-nowrap">
             AI writing complete. Press Ctrl+Z / Cmd+Z to undo
