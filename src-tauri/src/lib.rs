@@ -3,6 +3,86 @@ use std::sync::Mutex;
 use agent_harness_core::{
     chunk_text, hermes_memory::HermesDB, vector_db::{Chunk, VectorDB},
 };
+
+const KEYRING_SERVICE: &str = "agent-writer";
+
+#[tauri::command]
+fn set_api_key(provider: String, key: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
+        .map_err(|e| format!("Keyring error: {}", e))?;
+    entry.set_password(&key).map_err(|e| format!("Set error: {}", e))
+}
+
+#[tauri::command]
+fn get_api_key(provider: String) -> Result<String, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
+        .map_err(|e| format!("Keyring error: {}", e))?;
+    entry.get_password().map_err(|e| format!("Get error: {}", e))
+}
+
+#[tauri::command]
+fn check_api_key(provider: String) -> Result<bool, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
+        .map_err(|e| format!("Keyring error: {}", e))?;
+    Ok(entry.get_password().is_ok())
+}
+
+fn load_api_key_from_keychain() -> Option<String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, "openai").ok()?;
+    entry.get_password().ok()
+}
+
+#[tauri::command]
+fn export_diagnostic_logs() -> Result<String, String> {
+    use std::io::Write;
+
+    let log_dir = log_dir()?;
+    let out_path = log_dir.join("diagnostic-export.zip");
+    let file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default();
+
+    // Pack recent log files
+    if let Ok(entries) = std::fs::read_dir(&log_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "log").unwrap_or(false) {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                zip.start_file(&*name, opts).map_err(|e| e.to_string())?;
+                zip.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
+fn log_dir() -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA")
+            .map(|p| std::path::PathBuf::from(p).join("agent-writer").join("logs"))
+            .map_err(|_| "APPDATA not set".to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dirs::home_dir()
+            .map(|p| p.join(".config").join("agent-writer").join("logs"))
+            .ok_or_else(|| "Home dir not found".to_string())
+    }
+}
+
+fn resolve_api_key() -> Option<String> {
+    load_api_key_from_keychain()
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+        .filter(|k| !k.is_empty())
+}
+
+fn require_api_key() -> Result<String, String> {
+    resolve_api_key().ok_or_else(|| "API key not set. Go to Settings.".to_string())
+}
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -313,8 +393,7 @@ async fn batch_generate_chapter(
     chapter_title: String,
     summary: String,
 ) -> Result<(), String> {
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -456,8 +535,7 @@ async fn batch_generate_chapter(
 }
 
 async fn embed_text(text: &str) -> Result<Vec<f32>, String> {
-    let api_key =
-        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
 
@@ -536,10 +614,7 @@ struct Epiphany {
 }
 
 async fn extract_skills_from_recent(app: &tauri::AppHandle) {
-    let api_key = match std::env::var("OPENAI_API_KEY") {
-        Ok(k) => k,
-        Err(_) => return,
-    };
+    let Some(api_key) = resolve_api_key() else { return; };
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -721,8 +796,7 @@ struct ReviewReport {
 
 #[tauri::command]
 async fn analyze_chapter(_app: tauri::AppHandle, content: String) -> Result<Vec<ReviewItem>, String> {
-    let api_key =
-        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -782,8 +856,7 @@ Output ONLY the JSON object, no explanation outside. Example:
 
 #[tauri::command]
 async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
-    let api_key =
-        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -1028,8 +1101,7 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
 
 #[tauri::command]
 async fn analyze_pacing(summaries: String) -> Result<String, String> {
-    let api_key =
-        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -1092,8 +1164,7 @@ async fn ask_agent(
     paragraph: String,
     selected_text: String,
 ) -> Result<(), String> {
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| "OPENAI_API_KEY not set in .env".to_string())?;
+    let api_key = require_api_key()?;
     let api_base = std::env::var("OPENAI_API_BASE")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
     let model = std::env::var("OPENAI_MODEL")
@@ -1373,7 +1444,11 @@ pub fn run() {
             ask_project_brain,
             get_project_graph_data,
             analyze_pacing,
-            rename_chapter_file
+            rename_chapter_file,
+            set_api_key,
+            get_api_key,
+            check_api_key,
+            export_diagnostic_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
