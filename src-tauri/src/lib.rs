@@ -136,6 +136,7 @@ async fn ask_agent(app: tauri::AppHandle, message: String) -> Result<(), String>
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    dotenvy::dotenv().ok();
     tauri::Builder::default()
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
