@@ -1,10 +1,11 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import type { Editor } from "@tiptap/core";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
+import { ACTION_RE, Commands, Events, type StreamChunk } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
 import LorebookDrawer from "./LorebookDrawer";
@@ -20,12 +21,6 @@ interface EditorPanelProps {
   onEditorReady?: (editor: Editor) => void;
   onSelectionUpdate?: (sel: SelectionState) => void;
 }
-
-interface StreamChunk {
-  content: string;
-}
-
-const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
 
 export default function EditorPanel({
   onEditorReady,
@@ -68,9 +63,12 @@ export default function EditorPanel({
 
   useEffect(() => {
     if (actionEpoch && actionEpoch > 0) {
-      setShowToast(true);
-      const timer = setTimeout(() => setShowToast(false), 4000);
-      return () => clearTimeout(timer);
+      const showTimer = setTimeout(() => setShowToast(true), 0);
+      const hideTimer = setTimeout(() => setShowToast(false), 4000);
+      return () => {
+        clearTimeout(showTimer);
+        clearTimeout(hideTimer);
+      };
     }
   }, [actionEpoch]);
 
@@ -90,7 +88,7 @@ export default function EditorPanel({
       saveTimerRef.current = setTimeout(async () => {
         const content = editor.getHTML();
         try {
-          await invoke("save_chapter", { title: currentChapter, content });
+          await invoke(Commands.saveChapter, { title: currentChapter, content });
           const now = new Date();
           setSaveIndicator(
             `Saved at ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
@@ -133,11 +131,9 @@ export default function EditorPanel({
 
     const fullText = editor.getText();
 
-    let unlistenChunk: UnlistenFn;
-    let unlistenEnd: UnlistenFn;
     let rawBuffer = "";
 
-    unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
+    const unlistenChunk = await listen<StreamChunk>(Events.agentStreamChunk, (event) => {
       rawBuffer += event.payload.content;
       const ed = editorRef.current;
       if (!ed) return;
@@ -183,7 +179,7 @@ export default function EditorPanel({
       rawBuffer = rawBuffer.replace(ACTION_RE, "");
     });
 
-    unlistenEnd = await listen("agent-stream-end", () => {
+    const unlistenEnd = await listen(Events.agentStreamEnd, () => {
       unlistenChunk();
       unlistenEnd();
       setIsInlineRequest(false);
@@ -194,7 +190,7 @@ export default function EditorPanel({
     });
 
     try {
-      await invoke("ask_agent", {
+      await invoke(Commands.askAgent, {
         message: command,
         context: fullText,
         paragraph: "",
@@ -213,7 +209,7 @@ export default function EditorPanel({
     setBubbleVisible(false);
   };
 
-  const handleAccept = () => {
+  const handleAccept = useCallback(() => {
     if (!editor) return;
     const rangesToClear: { from: number; to: number }[] = [];
     editor.state.doc.descendants((node, pos) => {
@@ -230,9 +226,9 @@ export default function EditorPanel({
         .run();
     }
     setInlineDone(false);
-  };
+  }, [editor]);
 
-  const handleReject = () => {
+  const handleReject = useCallback(() => {
     if (!editor) return;
     const rangesToDelete: { from: number; to: number }[] = [];
     editor.state.doc.descendants((node, pos) => {
@@ -245,7 +241,7 @@ export default function EditorPanel({
       editor.chain().focus().deleteRange({ from: r.from, to: r.to }).run();
     }
     setInlineDone(false);
-  };
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || !inlineDone) return;
@@ -260,7 +256,7 @@ export default function EditorPanel({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [editor, inlineDone]);
+  }, [editor, inlineDone, handleAccept, handleReject]);
 
   const btnActive = (active: boolean) =>
     active ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary";

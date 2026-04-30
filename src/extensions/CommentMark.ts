@@ -1,4 +1,4 @@
-import { Mark } from "@tiptap/core";
+import { Mark, type RawCommands } from "@tiptap/core";
 
 interface CommentMarkOptions {
   HTMLAttributes: Record<string, unknown>;
@@ -52,13 +52,13 @@ const CommentMark = Mark.create<CommentMarkOptions>({
     return {
       setComment:
         (commentId: string) =>
-        ({ commands }: { commands: any }) =>
+        ({ commands }) =>
           commands.setMark(this.name, { commentId }),
       unsetComment:
         () =>
-        ({ commands }: { commands: any }) =>
+        ({ commands }) =>
           commands.unsetMark(this.name),
-    } as any;
+    } satisfies Partial<RawCommands>;
   },
 });
 

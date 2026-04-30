@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { Commands, Events } from "../protocol";
 
 interface OutlineNode {
   chapter_title: string;
@@ -23,7 +24,7 @@ export default function OutlinePanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await invoke<OutlineNode[]>("get_outline");
+      const result = await invoke<OutlineNode[]>(Commands.getOutline);
       setNodes(result);
     } catch (e) {
       console.error("Failed to load outline:", e);
@@ -31,13 +32,16 @@ export default function OutlinePanel() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    const timer = setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [refresh]);
 
   useEffect(() => {
     let unlisten: UnlistenFn;
     const setup = async () => {
-      unlisten = await listen<BatchStatus>("batch-status", (event) => {
+      unlisten = await listen<BatchStatus>(Events.batchStatus, (event) => {
         const { chapter_title, status, error } = event.payload;
         if (status === "generating") {
           setGenerating((prev) => new Set(prev).add(chapter_title));
@@ -74,7 +78,7 @@ export default function OutlinePanel() {
     const sum = summary.trim();
     if (!title || !sum) return;
     try {
-      const result = await invoke<OutlineNode[]>("save_outline_node", {
+      const result = await invoke<OutlineNode[]>(Commands.saveOutlineNode, {
         chapterTitle: title,
         summary: sum,
       });
@@ -88,7 +92,7 @@ export default function OutlinePanel() {
 
   const handleDelete = async (title: string) => {
     try {
-      const result = await invoke<OutlineNode[]>("delete_outline_node", {
+      const result = await invoke<OutlineNode[]>(Commands.deleteOutlineNode, {
         chapterTitle: title,
       });
       setNodes(result);
@@ -99,7 +103,7 @@ export default function OutlinePanel() {
 
   const handleGenerate = async (node: OutlineNode) => {
     try {
-      await invoke("batch_generate_chapter", {
+      await invoke(Commands.batchGenerateChapter, {
         chapterTitle: node.chapter_title,
         summary: node.summary,
       });

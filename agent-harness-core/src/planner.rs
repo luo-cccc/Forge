@@ -38,7 +38,13 @@ impl ExecutionPlan {
 pub enum PlanState {
     Idle,
     Planning,
-    Executing { current: u32, total: u32, description: String },
+    Executing {
+        current: u32,
+        total: u32,
+        description: String,
+    },
     Completed,
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
 }

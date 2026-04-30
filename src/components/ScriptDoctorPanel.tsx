@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Editor } from "@tiptap/core";
+import { Commands } from "../protocol";
 
 interface ReviewItem {
   quote: string;
@@ -78,7 +79,7 @@ export default function ScriptDoctorPanel({ editorRef, onApplyFix }: ScriptDocto
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<ReviewItem[]>("analyze_chapter", { content });
+      const result = await invoke<ReviewItem[]>(Commands.analyzeChapter, { content });
       const docText = editor.getText();
 
       const withIds = result

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Commands } from "../protocol";
 
 interface GraphChapter {
   title: string;
@@ -16,7 +17,7 @@ export default function StoryboardView() {
 
   const load = useCallback(async () => {
     try {
-      const data = await invoke<{ chapters: GraphChapter[] }>("get_project_graph_data");
+      const data = await invoke<{ chapters: GraphChapter[] }>(Commands.getProjectGraphData);
       setChapters(data.chapters);
     } catch (e) {
       console.error("Failed to load chapters:", e);
@@ -24,12 +25,15 @@ export default function StoryboardView() {
   }, []);
 
   useEffect(() => {
-    load();
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   const handleDragStart = (idx: number) => setDragIdx(idx);
 
-  const handleDragOver = (e: React.DragEvent, _idx: number) => {
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
@@ -39,34 +43,20 @@ export default function StoryboardView() {
       setDragIdx(null);
       return;
     }
+    const previous = chapters;
     const reordered = [...chapters];
     const [moved] = reordered.splice(dragIdx, 1);
     reordered.splice(targetIdx, 0, moved);
     setChapters(reordered);
     setDragIdx(null);
 
-    // Persist order to outline.json
     try {
-      for (let i = 0; i < reordered.length; i++) {
-        await invoke("save_outline_node", {
-          chapterTitle: reordered[i].title,
-          summary: reordered[i].summary,
-        });
-      }
+      await invoke(Commands.reorderOutlineNodes, {
+        orderedTitles: reordered.map((chapter) => chapter.title),
+      });
     } catch (e) {
       console.error("Failed to persist order:", e);
-    }
-    // Also reorder physical files by renaming with prefix
-    try {
-      for (let i = 0; i < reordered.length; i++) {
-        const oldName = formatFilename(reordered[i].title);
-        const newName = formatFilename(`${String(i + 1).padStart(2, "0")}-${reordered[i].title}`);
-        if (oldName !== newName) {
-          await invoke("rename_chapter_file", { oldName, newName }).catch(() => {});
-        }
-      }
-    } catch {
-      // Non-critical: file rename can fail if files don't exist yet
+      setChapters(previous);
     }
   };
 
@@ -75,7 +65,7 @@ export default function StoryboardView() {
     setAnalysis(null);
     try {
       const summaries = chapters.map((c, i) => `${i + 1}. ${c.title}: ${c.summary} (${c.word_count} words)`).join("\n");
-      const result = await invoke<string>("analyze_pacing", { summaries });
+      const result = await invoke<string>(Commands.analyzePacing, { summaries });
       setAnalysis(result);
     } catch (e) {
       setAnalysis(`Analysis failed: ${e}`);
@@ -126,7 +116,7 @@ export default function StoryboardView() {
             key={ch.title}
             draggable
             onDragStart={() => handleDragStart(idx)}
-            onDragOver={(e) => handleDragOver(e, idx)}
+            onDragOver={handleDragOver}
             onDrop={() => handleDrop(idx)}
             className={`rounded-sm px-3 py-2.5 border cursor-grab active:cursor-grabbing transition-colors ${
               dragIdx === idx
@@ -160,8 +150,4 @@ export default function StoryboardView() {
       </div>
     </div>
   );
-}
-
-function formatFilename(title: string): string {
-  return title.replace(/\s+/g, "-").toLowerCase() + ".md";
 }

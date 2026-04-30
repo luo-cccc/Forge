@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Commands } from "../protocol";
 
 export default function SettingsView() {
   const [apiKey, setApiKey] = useState("");
@@ -11,16 +12,18 @@ export default function SettingsView() {
   useEffect(() => {
     const check = async () => {
       try {
-        const ok = await invoke<boolean>("check_api_key", { provider: "openai" });
+        const ok = await invoke<boolean>(Commands.checkApiKey, { provider: "openai" });
         setHasKey(ok);
-      } catch {}
+      } catch (e) {
+        console.error("Failed to check API key:", e);
+      }
     };
     check();
   }, []);
 
   const handleSave = useCallback(async () => {
     try {
-      await invoke("set_api_key", { provider: "openai", key: apiKey });
+      await invoke(Commands.setApiKey, { provider: "openai", key: apiKey });
       setSaved(true);
       setHasKey(true);
       setTimeout(() => setSaved(false), 3000);
@@ -32,7 +35,7 @@ export default function SettingsView() {
   const handleVerify = useCallback(async () => {
     setVerifying(true);
     try {
-      const key = await invoke<string>("get_api_key", { provider: "openai" });
+      const key = await invoke<string>(Commands.getApiKey, { provider: "openai" });
       setLogs(key ? `Key stored: ${key.substring(0, 8)}...` : "No key found");
     } catch (e) {
       setLogs(`Verify failed: ${e}`);
@@ -43,7 +46,7 @@ export default function SettingsView() {
 
   const handleExportLogs = useCallback(async () => {
     try {
-      const path = await invoke<string>("export_diagnostic_logs");
+      const path = await invoke<string>(Commands.exportDiagnosticLogs);
       setLogs(`Logs exported to: ${path}`);
     } catch (e) {
       setLogs(`Export failed: ${e}`);

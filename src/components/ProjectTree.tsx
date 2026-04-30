@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../store";
+import { Commands } from "../protocol";
 import OutlinePanel from "./OutlinePanel";
 import ScriptDoctorPanel from "./ScriptDoctorPanel";
 import LoreGraphView from "./LoreGraphView";
@@ -28,7 +29,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
 
   const refresh = useCallback(async () => {
     try {
-      const result = await invoke<ChapterInfo[]>("read_project_dir");
+      const result = await invoke<ChapterInfo[]>(Commands.readProjectDir);
       setChapters(result);
     } catch (e) {
       console.error("Failed to read project dir:", e);
@@ -36,14 +37,17 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
   }, []);
 
   useEffect(() => {
-    refresh();
+    const timer = setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [refresh]);
 
   const handleCreate = async () => {
     const title = newTitle.trim();
     if (!title) return;
     try {
-      await invoke("create_chapter", { title });
+      await invoke(Commands.createChapter, { title });
       setNewTitle("");
       await refresh();
     } catch (e) {

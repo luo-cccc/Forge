@@ -17,7 +17,11 @@ fn main() {
     // Panic hook: log to tracing + show native dialog
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
-        let msg = format!("PANIC: {}\nBacktrace:\n{}", info, std::backtrace::Backtrace::capture());
+        let msg = format!(
+            "PANIC: {}\nBacktrace:\n{}",
+            info,
+            std::backtrace::Backtrace::capture()
+        );
         tracing::error!("{}", msg);
         // Try native message box
         let _ = msgbox::create("Agent-Writer Error", &msg, msgbox::IconType::Error);
@@ -31,9 +35,11 @@ fn main() {
 fn dirs_next() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|p| std::path::PathBuf::from(p).join("agent-writer").join("logs"))
+        std::env::var("APPDATA").ok().map(|p| {
+            std::path::PathBuf::from(p)
+                .join("agent-writer")
+                .join("logs")
+        })
     }
     #[cfg(not(target_os = "windows"))]
     {

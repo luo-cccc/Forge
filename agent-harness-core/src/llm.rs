@@ -1,5 +1,5 @@
-use futures_util::StreamExt;
 use crate::config::HarnessConfig;
+use futures_util::StreamExt;
 
 /// 通用 LLM 客户端 — 支持流式聊天、嵌入、非流式 JSON 输出
 #[derive(Clone)]
@@ -17,15 +17,16 @@ impl LLMClient {
                 .map_err(|_| "OPENAI_API_KEY not set".to_string())?,
             api_base: std::env::var("OPENAI_API_BASE")
                 .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-            model: std::env::var("OPENAI_MODEL")
-                .unwrap_or_else(|_| "gpt-4o-mini".to_string()),
+            model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string()),
             config,
         })
     }
 
     fn client(&self) -> Result<reqwest::Client, String> {
         reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.config.request_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                self.config.request_timeout_secs,
+            ))
             .build()
             .map_err(|e| format!("Failed to build client: {}", e))
     }
@@ -66,12 +67,22 @@ impl LLMClient {
             while let Some(line_end) = sse_buf.find('\n') {
                 let line = sse_buf[..line_end].trim().to_string();
                 sse_buf = sse_buf[line_end + 1..].to_string();
-                if line.is_empty() { continue; }
-                let data = if let Some(d) = line.strip_prefix("data: ") { d } else { continue };
-                if data == "[DONE]" { continue; }
+                if line.is_empty() {
+                    continue;
+                }
+                let data = if let Some(d) = line.strip_prefix("data: ") {
+                    d
+                } else {
+                    continue;
+                };
+                if data == "[DONE]" {
+                    continue;
+                }
                 let parsed: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
                 let content = parsed["choices"][0]["delta"]["content"]
-                    .as_str().unwrap_or("").to_string();
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
                 if !content.is_empty() {
                     full.push_str(&content);
                     on_chunk(content);
@@ -107,7 +118,9 @@ impl LLMClient {
         }
 
         let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON: {}", e))?;
-        let text = body["choices"][0]["message"]["content"].as_str().unwrap_or("");
+        let text = body["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
         serde_json::from_str(text).map_err(|e| format!("Parse: {}", e))
     }
 

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Commands } from "../protocol";
 
 interface GraphEntity {
   id: string;
@@ -107,7 +108,7 @@ export default function LoreGraphView() {
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await invoke<GraphData>("get_project_graph_data");
+        const data = await invoke<GraphData>(Commands.getProjectGraphData);
         setGraphData(data);
 
         const w = 700;
@@ -154,7 +155,7 @@ export default function LoreGraphView() {
   const handleAskBrain = useCallback(() => {
     if (!selectedNode) return;
     // Trigger a Project Brain query
-    invoke("ask_project_brain", {
+    invoke(Commands.askProjectBrain, {
       query: `Tell me everything about ${selectedNode.name}`,
     }).catch(console.error);
   }, [selectedNode]);

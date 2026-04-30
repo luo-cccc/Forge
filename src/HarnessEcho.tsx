@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Commands } from "./protocol";
 
 export default function HarnessEcho() {
   const [input, setInput] = useState("");
@@ -7,7 +8,7 @@ export default function HarnessEcho() {
 
   const handleInvoke = async () => {
     try {
-      const result = await invoke<string>("harness_echo", { message: input });
+      const result = await invoke<string>(Commands.harnessEcho, { message: input });
       setResponse(result);
     } catch (e) {
       setResponse(`Error: ${e}`);

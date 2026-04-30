@@ -3,12 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-
-interface StreamChunk { content: string }
-interface StreamEnd { reason: string }
-interface SearchStatus { keyword: string; round: number }
-interface AgentError { message: string; source: string }
-interface Epiphany { id: number; skill: string; category: string }
+import {
+  Commands,
+  Events,
+  type AgentError,
+  type Epiphany,
+  type SearchStatus,
+  type StreamChunk,
+  type StreamEnd,
+} from "../protocol";
 
 export default function SandboxView() {
   const [input, setInput] = useState("");
@@ -33,24 +36,24 @@ export default function SandboxView() {
     let unlistenEpiphany: UnlistenFn;
 
     const setup = async () => {
-      unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (e) => {
+      unlistenChunk = await listen<StreamChunk>(Events.agentStreamChunk, (e) => {
         setStreaming((p) => p + e.payload.content);
       });
 
-      unlistenSearch = await listen<SearchStatus>("agent-search-status", (e) => {
+      unlistenSearch = await listen<SearchStatus>(Events.agentSearchStatus, (e) => {
         log(`🔍 Searching: ${e.payload.keyword} (round ${e.payload.round})`);
       });
 
-      unlistenError = await listen<AgentError>("agent-error", (e) => {
+      unlistenError = await listen<AgentError>(Events.agentError, (e) => {
         log(`❌ Error: ${e.payload.message}`);
         setIsLoading(false);
       });
 
-      unlistenEpiphany = await listen<Epiphany>("agent-epiphany", (e) => {
+      unlistenEpiphany = await listen<Epiphany>(Events.agentEpiphany, (e) => {
         log(`💡 Learned: [${e.payload.category}] ${e.payload.skill}`);
       });
 
-      unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
+      unlistenEnd = await listen<StreamEnd>(Events.agentStreamEnd, () => {
         setStreaming((p) => {
           if (p) log(`📝 Response: ${p.substring(0, 200)}...`);
           return "";
@@ -76,7 +79,7 @@ export default function SandboxView() {
     setIsLoading(true);
     log(`🔎 RAG query: ${q}`);
     try {
-      await invoke("ask_project_brain", { query: q });
+      await invoke(Commands.askProjectBrain, { query: q });
     } catch (e) {
       log(`❌ ${e}`);
       setIsLoading(false);
@@ -90,7 +93,7 @@ export default function SandboxView() {
     setIsLoading(true);
     log(`👤 ${msg}`);
     try {
-      await invoke("ask_agent", { message: msg, context: "", paragraph: "", selectedText: "" });
+      await invoke(Commands.askAgent, { message: msg, context: "", paragraph: "", selectedText: "" });
     } catch (e) {
       log(`❌ ${e}`);
       setIsLoading(false);
@@ -99,7 +102,7 @@ export default function SandboxView() {
 
   const handleMemory = async () => {
     try {
-      const data = await invoke<{ entities: unknown[]; chapters: unknown[] }>("get_project_graph_data");
+      const data = await invoke<{ entities: unknown[]; chapters: unknown[] }>(Commands.getProjectGraphData);
       log(`📊 Graph: ${data.entities.length} entities, ${data.chapters.length} chapters`);
     } catch (e) {
       log(`❌ ${e}`);

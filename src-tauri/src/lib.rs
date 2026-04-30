@@ -1,23 +1,40 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
-use agent_harness_core::{
-    chunk_text, classify_intent, hermes_memory::HermesDB, vector_db::{Chunk, VectorDB},
-};
+use agent_harness_core::{classify_intent, hermes_memory::HermesDB};
+
+mod brain_service;
+mod llm_runtime;
+mod storage;
+use storage::{ChapterInfo, LoreEntry, OutlineNode};
 
 const KEYRING_SERVICE: &str = "agent-writer";
+
+mod events {
+    pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
+    pub const AGENT_EPIPHANY: &str = "agent-epiphany";
+    pub const AGENT_ERROR: &str = "agent-error";
+    pub const AGENT_SEARCH_STATUS: &str = "agent-search-status";
+    pub const AGENT_STREAM_CHUNK: &str = "agent-stream-chunk";
+    pub const AGENT_STREAM_END: &str = "agent-stream-end";
+    pub const BATCH_STATUS: &str = "batch-status";
+}
 
 #[tauri::command]
 fn set_api_key(provider: String, key: String) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
         .map_err(|e| format!("Keyring error: {}", e))?;
-    entry.set_password(&key).map_err(|e| format!("Set error: {}", e))
+    entry
+        .set_password(&key)
+        .map_err(|e| format!("Set error: {}", e))
 }
 
 #[tauri::command]
 fn get_api_key(provider: String) -> Result<String, String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
         .map_err(|e| format!("Keyring error: {}", e))?;
-    entry.get_password().map_err(|e| format!("Get error: {}", e))
+    entry
+        .get_password()
+        .map_err(|e| format!("Get error: {}", e))
 }
 
 #[tauri::command]
@@ -50,7 +67,8 @@ fn export_diagnostic_logs() -> Result<String, String> {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                 zip.start_file(&*name, opts).map_err(|e| e.to_string())?;
-                zip.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+                zip.write_all(content.as_bytes())
+                    .map_err(|e| e.to_string())?;
             }
         }
     }
@@ -63,7 +81,11 @@ fn log_dir() -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         std::env::var("APPDATA")
-            .map(|p| std::path::PathBuf::from(p).join("agent-writer").join("logs"))
+            .map(|p| {
+                std::path::PathBuf::from(p)
+                    .join("agent-writer")
+                    .join("logs")
+            })
             .map_err(|_| "APPDATA not set".to_string())
     }
     #[cfg(not(target_os = "windows"))]
@@ -83,7 +105,6 @@ fn resolve_api_key() -> Option<String> {
 fn require_api_key() -> Result<String, String> {
     resolve_api_key().ok_or_else(|| "API key not set. Go to Settings.".to_string())
 }
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -97,6 +118,20 @@ enum HarnessState {
 struct AppState {
     harness_state: Mutex<HarnessState>,
     hermes_db: Mutex<HermesDB>,
+}
+
+fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
+    state
+        .hermes_db
+        .lock()
+        .map_err(|_| "Hermes memory lock poisoned".to_string())
+}
+
+fn lock_harness_state<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HarnessState>, String> {
+    state
+        .harness_state
+        .lock()
+        .map_err(|_| "Harness state lock poisoned".to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -123,40 +158,9 @@ fn harness_echo(message: String) -> String {
     format!("Harness Received: {}", message)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LoreEntry {
-    id: String,
-    keyword: String,
-    content: String,
-}
-
-fn lorebook_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
-    Ok(dir.join("lorebook.json"))
-}
-
-fn load_lorebook(app: &tauri::AppHandle) -> Result<Vec<LoreEntry>, String> {
-    let path = lorebook_path(app)?;
-    if !path.exists() {
-        return Ok(vec![]);
-    }
-    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
-}
-
-fn save_lorebook(app: &tauri::AppHandle, entries: &[LoreEntry]) -> Result<(), String> {
-    let path = lorebook_path(app)?;
-    let json = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
-}
-
 #[tauri::command]
 fn get_lorebook(app: tauri::AppHandle) -> Result<Vec<LoreEntry>, String> {
-    load_lorebook(&app)
+    storage::load_lorebook(&app)
 }
 
 #[tauri::command]
@@ -165,87 +169,27 @@ fn save_lore_entry(
     keyword: String,
     content: String,
 ) -> Result<Vec<LoreEntry>, String> {
-    let mut entries = load_lorebook(&app)?;
-    if let Some(entry) = entries.iter_mut().find(|e| e.keyword == keyword) {
-        entry.content = content;
-    } else {
-        let id = (entries.len() + 1).to_string();
-        entries.push(LoreEntry {
-            id,
-            keyword,
-            content,
-        });
-    }
-    save_lorebook(&app, &entries)?;
-    Ok(entries)
+    storage::upsert_lore_entry(&app, keyword, content)
 }
 
 #[tauri::command]
 fn delete_lore_entry(app: tauri::AppHandle, id: String) -> Result<Vec<LoreEntry>, String> {
-    let mut entries = load_lorebook(&app)?;
-    entries.retain(|e| e.id != id);
-    save_lorebook(&app, &entries)?;
-    Ok(entries)
-}
-
-fn project_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?
-        .join("project");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create project dir: {}", e))?;
-    Ok(dir)
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ChapterInfo {
-    title: String,
-    filename: String,
+    storage::remove_lore_entry(&app, id)
 }
 
 #[tauri::command]
 fn read_project_dir(app: tauri::AppHandle) -> Result<Vec<ChapterInfo>, String> {
-    let dir = project_dir(&app)?;
-    let mut chapters = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.extension().map(|e| e == "md").unwrap_or(false) {
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let title = stem.replace('-', " ");
-            chapters.push(ChapterInfo {
-                filename: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                title,
-            });
-        }
-    }
-    chapters.sort_by(|a, b| a.title.cmp(&b.title));
-    Ok(chapters)
+    storage::read_project_dir(&app)
 }
 
 #[tauri::command]
 fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, String> {
-    let dir = project_dir(&app)?;
-    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
-    let path = dir.join(&filename);
-    if !path.exists() {
-        std::fs::write(&path, "").map_err(|e| e.to_string())?;
-    }
-    Ok(ChapterInfo { title, filename })
+    storage::create_chapter(&app, title)
 }
 
 #[tauri::command]
 fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<(), String> {
-    let dir = project_dir(&app)?;
-    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
-    let path = dir.join(&filename);
-    atomic_write(&path, &content)?;
+    storage::save_chapter_content(&app, &title, &content)?;
 
     // Background auto-embed
     let app_clone = app.clone();
@@ -260,58 +204,12 @@ fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result
 
 #[tauri::command]
 fn load_chapter(app: tauri::AppHandle, title: String) -> Result<String, String> {
-    let dir = project_dir(&app)?;
-    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
-    let path = dir.join(&filename);
-    if !path.exists() {
-        return Err(format!("Chapter '{}' not found", title));
-    }
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OutlineNode {
-    chapter_title: String,
-    summary: String,
-    status: String,
-}
-
-fn outline_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
-    Ok(dir.join("outline.json"))
-}
-
-fn load_outline(app: &tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
-    let path = outline_path(app)?;
-    if !path.exists() {
-        return Ok(vec![]);
-    }
-    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
-}
-
-fn brain_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
-    Ok(dir.join("project_brain.json"))
-}
-
-fn save_outline(app: &tauri::AppHandle, nodes: &[OutlineNode]) -> Result<(), String> {
-    let path = outline_path(app)?;
-    let json = serde_json::to_string_pretty(nodes).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    storage::load_chapter(&app, title)
 }
 
 #[tauri::command]
 fn get_outline(app: tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
-    load_outline(&app)
+    storage::load_outline(&app)
 }
 
 #[tauri::command]
@@ -320,23 +218,7 @@ fn save_outline_node(
     chapter_title: String,
     summary: String,
 ) -> Result<Vec<OutlineNode>, String> {
-    let mut nodes = load_outline(&app)?;
-    let status = if let Some(existing) = nodes.iter().find(|n| n.chapter_title == chapter_title) {
-        existing.status.clone()
-    } else {
-        "empty".to_string()
-    };
-    if let Some(node) = nodes.iter_mut().find(|n| n.chapter_title == chapter_title) {
-        node.summary = summary;
-    } else {
-        nodes.push(OutlineNode {
-            chapter_title,
-            summary,
-            status,
-        });
-    }
-    save_outline(&app, &nodes)?;
-    Ok(nodes)
+    storage::upsert_outline_node(&app, chapter_title, summary)
 }
 
 #[tauri::command]
@@ -344,10 +226,7 @@ fn delete_outline_node(
     app: tauri::AppHandle,
     chapter_title: String,
 ) -> Result<Vec<OutlineNode>, String> {
-    let mut nodes = load_outline(&app)?;
-    nodes.retain(|n| n.chapter_title != chapter_title);
-    save_outline(&app, &nodes)?;
-    Ok(nodes)
+    storage::remove_outline_node(&app, chapter_title)
 }
 
 #[tauri::command]
@@ -356,12 +235,15 @@ fn update_outline_status(
     chapter_title: String,
     status: String,
 ) -> Result<Vec<OutlineNode>, String> {
-    let mut nodes = load_outline(&app)?;
-    if let Some(node) = nodes.iter_mut().find(|n| n.chapter_title == chapter_title) {
-        node.status = status;
-    }
-    save_outline(&app, &nodes)?;
-    Ok(nodes)
+    storage::update_outline_status(&app, chapter_title, status)
+}
+
+#[tauri::command]
+fn reorder_outline_nodes(
+    app: tauri::AppHandle,
+    ordered_titles: Vec<String>,
+) -> Result<Vec<OutlineNode>, String> {
+    storage::reorder_outline_nodes(&app, ordered_titles)
 }
 
 #[derive(Serialize, Clone)]
@@ -379,7 +261,7 @@ struct AgentError {
 
 fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
     let _ = app.emit(
-        "agent-error",
+        events::AGENT_ERROR,
         AgentError {
             message: message.to_string(),
             source: source.to_string(),
@@ -394,17 +276,14 @@ async fn batch_generate_chapter(
     summary: String,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let settings = llm_runtime::settings(api_key);
 
     let app_clone = app.clone();
     let title_clone = chapter_title.clone();
 
     tokio::spawn(async move {
         let _ = app_clone.emit(
-            "batch-status",
+            events::BATCH_STATUS,
             BatchStatus {
                 chapter_title: title_clone.clone(),
                 status: "generating".to_string(),
@@ -413,7 +292,7 @@ async fn batch_generate_chapter(
         );
 
         // Gather context
-        let lorebook = load_lorebook(&app_clone).unwrap_or_default();
+        let lorebook = storage::load_lorebook(&app_clone).unwrap_or_default();
         let lore_context = if lorebook.is_empty() {
             String::from("No lorebook entries.")
         } else {
@@ -425,10 +304,8 @@ async fn batch_generate_chapter(
         };
 
         // Get previous 2 chapter summaries from outline (sliding window)
-        let outline = load_outline(&app_clone).unwrap_or_default();
-        let prev_idx = outline
-            .iter()
-            .position(|n| n.chapter_title == title_clone);
+        let outline = storage::load_outline(&app_clone).unwrap_or_default();
+        let prev_idx = outline.iter().position(|n| n.chapter_title == title_clone);
         let prev_summaries: Vec<&OutlineNode> = if let Some(idx) = prev_idx {
             let start = idx.saturating_sub(2);
             outline[start..idx].iter().collect()
@@ -457,70 +334,52 @@ async fn batch_generate_chapter(
             lore_context, prev_context, summary
         );
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("Failed to build HTTP client");
-        let resp = client
-            .post(format!("{}/chat/completions", api_base))
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&serde_json::json!({
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": format!(
-                        "Write the full chapter for: {}", summary
-                    )}
-                ],
-                "stream": false
-            }))
-            .send()
-            .await;
+        let resp = llm_runtime::chat_text(
+            &settings,
+            vec![
+                serde_json::json!({"role": "system", "content": system_prompt}),
+                serde_json::json!({"role": "user", "content": format!(
+                    "Write the full chapter for: {}", summary
+                )}),
+            ],
+            false,
+            60,
+        )
+        .await;
 
         match resp {
-            Ok(r) => {
-                if r.status().is_success() {
-                    let body: serde_json::Value = r.json().await.unwrap_or_default();
-                    let content = body["choices"][0]["message"]["content"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
+            Ok(content) => {
+                if !content.is_empty() {
+                    // Write to chapter file
+                    let _ = storage::save_chapter_content(&app_clone, &title_clone, &content);
 
-                    if !content.is_empty() {
-                        // Write to chapter file
-                        let _ = crate::save_chapter_internal(&app_clone, &title_clone, &content);
+                    let embed_app = app_clone.clone();
+                    let embed_title = title_clone.clone();
+                    let embed_content = content.clone();
+                    tokio::spawn(async move {
+                        auto_embed_chapter(&embed_app, &embed_title, &embed_content).await;
+                    });
 
-                        // Update outline status
-                        let _ = crate::update_outline_status(
-                            app_clone.clone(),
-                            title_clone.clone(),
-                            "generated".to_string(),
-                        );
-                    }
-
-                    let _ = app_clone.emit(
-                        "batch-status",
-                        BatchStatus {
-                            chapter_title: title_clone,
-                            status: "complete".to_string(),
-                            error: String::new(),
-                        },
-                    );
-                } else {
-                    let _ = app_clone.emit(
-                        "batch-status",
-                        BatchStatus {
-                            chapter_title: title_clone,
-                            status: "error".to_string(),
-                            error: format!("HTTP {}", r.status().as_u16()),
-                        },
+                    // Update outline status
+                    let _ = crate::update_outline_status(
+                        app_clone.clone(),
+                        title_clone.clone(),
+                        "generated".to_string(),
                     );
                 }
+
+                let _ = app_clone.emit(
+                    events::BATCH_STATUS,
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "complete".to_string(),
+                        error: String::new(),
+                    },
+                );
             }
             Err(e) => {
                 let _ = app_clone.emit(
-                    "batch-status",
+                    events::BATCH_STATUS,
                     BatchStatus {
                         chapter_title: title_clone,
                         status: "error".to_string(),
@@ -534,76 +393,19 @@ async fn batch_generate_chapter(
     Ok(())
 }
 
-async fn embed_text(text: &str) -> Result<Vec<f32>, String> {
-    let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
-
-    let resp = client
-        .post(format!("{}/embeddings", api_base))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": "text-embedding-3-small",
-            "input": text
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Embed request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Embed API error: {}", resp.status()));
-    }
-
-    let body: serde_json::Value =
-        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
-    let embedding: Vec<f32> = body["data"][0]["embedding"]
-        .as_array()
-        .ok_or("Missing embedding in response")?
-        .iter()
-        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-        .collect();
-
-    Ok(embedding)
-}
-
 async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
-    let chunks = chunk_text(content, 500);
-    if chunks.is_empty() {
+    let Some(api_key) = resolve_api_key() else {
         return;
-    }
-
-    let path = match brain_path(app) {
-        Ok(p) => p,
-        Err(_) => return,
     };
-    let mut db = VectorDB::load(&path).unwrap_or_else(|_| VectorDB::new());
-    db.remove_chapter(chapter_title);
+    let settings = llm_runtime::settings(api_key);
 
-    for (i, (chunk_text, keywords, topic)) in chunks.iter().enumerate() {
-        if chunk_text.trim().len() < 20 {
-            continue;
-        }
-        let embedding = match embed_text(chunk_text).await {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        db.upsert(Chunk {
-            id: format!("{}-{}", chapter_title, i),
-            chapter: chapter_title.to_string(),
-            text: chunk_text.to_string(),
-            embedding,
-            keywords: keywords.clone(),
-            topic: topic.clone(),
-        });
+    if let Err(e) = brain_service::embed_chapter(app, &settings, chapter_title, content).await {
+        tracing::warn!(
+            "Failed to update Project Brain for '{}': {}",
+            chapter_title,
+            e
+        );
     }
-
-    let _ = db.save(&path);
 }
 
 #[derive(Serialize, Clone)]
@@ -622,15 +424,17 @@ struct Epiphany {
 }
 
 async fn extract_skills_from_recent(app: &tauri::AppHandle) {
-    let Some(api_key) = resolve_api_key() else { return; };
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let Some(api_key) = resolve_api_key() else {
+        return;
+    };
+    let settings = llm_runtime::settings(api_key);
 
     let state = app.state::<AppState>();
     let recent = {
-        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        let Ok(db) = lock_hermes(&state) else {
+            tracing::error!("Failed to lock Hermes memory for recent interactions");
+            return;
+        };
         db.recent_interactions(20).unwrap_or_default()
     };
     // Guard dropped before any .await
@@ -645,49 +449,26 @@ async fn extract_skills_from_recent(app: &tauri::AppHandle) {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
+    let parsed = match llm_runtime::chat_json(
+        &settings,
+        vec![
+            serde_json::json!({"role": "system", "content": "You are a reflection engine. Analyze the recent interaction transcript and extract 1-2 reusable writing rules or user preferences. Output JSON: {\"skills\": [{\"skill\": \"...\", \"category\": \"style|character|pacing|preference\"}]}. If nothing new, output {\"skills\": []}."}),
+            serde_json::json!({"role": "user", "content": format!("Transcript:\n{}", transcript)}),
+        ],
+        30,
+    )
+    .await
     {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let resp = client
-        .post(format!("{}/chat/completions", api_base))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a reflection engine. Analyze the recent interaction transcript and extract 1-2 reusable writing rules or user preferences. Output JSON: {\"skills\": [{\"skill\": \"...\", \"category\": \"style|character|pacing|preference\"}]}. If nothing new, output {\"skills\": []}."},
-                {"role": "user", "content": format!("Transcript:\n{}", transcript)}
-            ],
-            "stream": false,
-            "response_format": {"type": "json_object"}
-        }))
-        .send()
-        .await;
-
-    let resp = match resp {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    let body: serde_json::Value = match resp.json().await {
         Ok(b) => b,
-        Err(_) => return,
-    };
-    let text = body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
-    let parsed: serde_json::Value = match serde_json::from_str(text) {
-        Ok(p) => p,
         Err(_) => return,
     };
 
     let skills = parsed["skills"].as_array();
     if let Some(skills) = skills {
-        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        let Ok(db) = lock_hermes(&state) else {
+            tracing::error!("Failed to lock Hermes memory for skill extraction");
+            return;
+        };
         for s in skills {
             let skill_text = s["skill"].as_str().unwrap_or("").to_string();
             let category = s["category"].as_str().unwrap_or("general").to_string();
@@ -696,7 +477,7 @@ async fn extract_skills_from_recent(app: &tauri::AppHandle) {
             }
             if let Ok(id) = db.insert_skill(&skill_text, &category) {
                 let _ = app.emit(
-                    "agent-epiphany",
+                    events::AGENT_EPIPHANY,
                     Epiphany {
                         skill: skill_text,
                         category,
@@ -731,7 +512,10 @@ fn budget_items(items: &[String], max_tokens: usize) -> Vec<String> {
 
 fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
     let state = app.state::<AppState>();
-    let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+    let Ok(db) = lock_hermes(&state) else {
+        tracing::error!("Failed to lock Hermes memory for context injection");
+        return String::new();
+    };
 
     let mut parts = Vec::new();
 
@@ -740,7 +524,14 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
         if !profiles.is_empty() {
             let profile_text: Vec<String> = profiles
                 .iter()
-                .map(|p| format!("- {}: {} (confidence {:.0}%)", p.key, p.value, p.confidence * 100.0))
+                .map(|p| {
+                    format!(
+                        "- {}: {} (confidence {:.0}%)",
+                        p.key,
+                        p.value,
+                        p.confidence * 100.0
+                    )
+                })
                 .collect();
             let budgeted = budget_items(&profile_text, 200);
             if !budgeted.is_empty() {
@@ -775,19 +566,6 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
     parts.join("\n")
 }
 
-fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("Atomic rename failed: {}", e))
-}
-
-fn save_chapter_internal(app: &tauri::AppHandle, title: &str, content: &str) -> Result<(), String> {
-    let dir = project_dir(app)?;
-    let filename = format!("{}.md", title.replace(' ', "-").to_lowercase());
-    let path = dir.join(&filename);
-    atomic_write(&path, content)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReviewItem {
     quote: String,
@@ -803,17 +581,12 @@ struct ReviewReport {
 }
 
 #[tauri::command]
-async fn analyze_chapter(_app: tauri::AppHandle, content: String) -> Result<Vec<ReviewItem>, String> {
+async fn analyze_chapter(
+    _app: tauri::AppHandle,
+    content: String,
+) -> Result<Vec<ReviewItem>, String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let settings = llm_runtime::settings(api_key);
 
     let system_prompt = r#"You are a professional novel editor. Analyze the chapter and output a JSON object with a "reviews" array.
 
@@ -827,37 +600,18 @@ Output ONLY the JSON object, no explanation outside. Example:
 {"reviews":[{"quote":"他走出了房间","type":"prose","issue":"缺乏画面感","suggestion":"他推开吱呀作响的木门，幽暗的走廊里只有自己的脚步声在回荡。"}]}"#;
 
     let truncated = truncate_context(&content, 8000);
-    let resp = client
-        .post(format!("{}/chat/completions", api_base))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": format!("Analyze this chapter:\n\n{}", truncated)}
-            ],
-            "stream": false,
-            "response_format": {"type": "json_object"}
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status.as_u16(), text));
-    }
-
-    let body: serde_json::Value =
-        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
-    let text = body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let body = llm_runtime::chat_json(
+        &settings,
+        vec![
+            serde_json::json!({"role": "system", "content": system_prompt}),
+            serde_json::json!({"role": "user", "content": format!("Analyze this chapter:\n\n{}", truncated)}),
+        ],
+        60,
+    )
+    .await?;
 
     let report: ReviewReport =
-        serde_json::from_str(text).map_err(|e| format!("Failed to parse review JSON: {}", e))?;
+        serde_json::from_value(body).map_err(|e| format!("Failed to parse review JSON: {}", e))?;
 
     Ok(report.reviews)
 }
@@ -865,98 +619,20 @@ Output ONLY the JSON object, no explanation outside. Example:
 #[tauri::command]
 async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let settings = llm_runtime::settings(api_key);
 
-    // 1. Embed the query
-    let query_embedding = embed_text(&query).await.map_err(|e| format!("Embed error: {}", e))?;
+    brain_service::answer_query(&app, &settings, &query, |content| {
+        let _ = app.emit(events::AGENT_STREAM_CHUNK, StreamChunk { content });
+        Ok(llm_runtime::StreamControl::Continue)
+    })
+    .await?;
 
-    // 2. Search vector DB for top 5 chunks
-    let brain_path = brain_path(&app)?;
-    let db = VectorDB::load(&brain_path).unwrap_or_else(|_| VectorDB::new());
-    let results = db.search_hybrid(&query, &query_embedding, 5);
-
-    // 3. Build context from top chunks
-    let context = if results.is_empty() {
-        "No relevant chunks found in the book.".to_string()
-    } else {
-        results
-            .iter()
-            .enumerate()
-            .map(|(i, (score, chunk))| {
-                format!(
-                    "[Chunk {} · {} · score {:.3}]\n{}",
-                    i + 1,
-                    chunk.chapter,
-                    score,
-                    chunk.text
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
-
-    // 4. Stream LLM response
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
-
-    let messages = vec![
-        serde_json::json!({"role": "system", "content": format!(
-            "You are an expert on this novel. Answer the user's question using ONLY the provided book excerpts. \
-             If the excerpts don't contain relevant information, say so honestly.\n\nBook excerpts:\n{}",
-            context
-        )}),
-        serde_json::json!({"role": "user", "content": query}),
-    ];
-
-    let resp = client
-        .post(format!("{}/chat/completions", api_base))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": true
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status.as_u16(), text));
-    }
-
-    let mut stream = resp.bytes_stream();
-    let mut sse_buffer = String::new();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-        let text = String::from_utf8_lossy(&chunk);
-        sse_buffer.push_str(&text);
-
-        while let Some(line_end) = sse_buffer.find('\n') {
-            let line = sse_buffer[..line_end].trim().to_string();
-            sse_buffer = sse_buffer[line_end + 1..].to_string();
-            if line.is_empty() { continue; }
-            let data = if let Some(d) = line.strip_prefix("data: ") { d } else { continue };
-            if data == "[DONE]" { continue; }
-            let parsed: serde_json::Value =
-                serde_json::from_str(data).unwrap_or_default();
-            let content = parsed["choices"][0]["delta"]["content"]
-                .as_str().unwrap_or("").to_string();
-            if !content.is_empty() {
-                let _ = app.emit("agent-stream-chunk", StreamChunk { content });
-            }
-        }
-    }
-
-    let _ = app.emit("agent-stream-end", StreamEnd { reason: "complete".to_string() });
+    let _ = app.emit(
+        events::AGENT_STREAM_END,
+        StreamEnd {
+            reason: "complete".to_string(),
+        },
+    );
     Ok(())
 }
 
@@ -997,7 +673,7 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
     let mut chapters = Vec::new();
 
     // 1. Entities from Lorebook
-    let lore_entries = load_lorebook(&app)?;
+    let lore_entries = storage::load_lorebook(&app)?;
     for entry in lore_entries {
         entities.push(GraphEntity {
             id: format!("lore-{}", entry.id),
@@ -1009,7 +685,7 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
 
     // 2. Entities from agent_skills (extracted character rules)
     let state = app.state::<AppState>();
-    let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+    let db = lock_hermes(&state)?;
     if let Ok(skills) = db.get_active_skills() {
         for skill in skills {
             if skill.category == "character" {
@@ -1027,8 +703,8 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
     drop(db);
 
     // 3. Chapters from file tree + outline
-    let dir = project_dir(&app)?;
-    if let Ok(outline_nodes) = load_outline(&app) {
+    let dir = storage::project_dir(&app)?;
+    if let Ok(outline_nodes) = storage::load_outline(&app) {
         for node in outline_nodes {
             // Count words in chapter file
             let filename = format!("{}.md", node.chapter_title.replace(' ', "-").to_lowercase());
@@ -1055,7 +731,11 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    let title = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                    let title = path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let content = std::fs::read_to_string(&path).unwrap_or_default();
                     let word_count = content.split_whitespace().count();
                     chapters.push(GraphChapter {
@@ -1110,58 +790,32 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
 #[tauri::command]
 async fn analyze_pacing(summaries: String) -> Result<String, String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let settings = llm_runtime::settings(api_key);
+    let text = llm_runtime::chat_text(
+        &settings,
+        vec![
+            serde_json::json!({"role": "system", "content": "You are a structural editor. Analyze the chapter sequence for pacing issues, slow sections, abrupt transitions, and unresolved arcs. Be specific and concise."}),
+            serde_json::json!({"role": "user", "content": format!("Chapter summaries:\n{}", summaries)}),
+        ],
+        false,
+        60,
+    )
+    .await?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
-
-    let resp = client
-        .post(format!("{}/chat/completions", api_base))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a structural editor. Analyze the chapter sequence for pacing issues, slow sections, abrupt transitions, and unresolved arcs. Be specific and concise."},
-                {"role": "user", "content": format!("Chapter summaries:\n{}", summaries)}
-            ],
-            "stream": false
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("API error: {}", resp.status()));
-    }
-
-    let body: serde_json::Value =
-        resp.json().await.map_err(|e| format!("JSON parse: {}", e))?;
-    Ok(body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("No analysis generated")
-        .to_string())
+    Ok(if text.is_empty() {
+        "No analysis generated".to_string()
+    } else {
+        text
+    })
 }
 
 #[tauri::command]
 fn rename_chapter_file(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
-    let dir = project_dir(&_app)?;
-    let old_path = dir.join(&old_name);
-    let new_path = dir.join(&new_name);
-    if old_path.exists() && !new_path.exists() {
-        std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())
-    } else {
-        Ok(())
-    }
+    storage::rename_chapter_file(&app, old_name, new_name)
 }
 
 #[tauri::command]
@@ -1173,23 +827,24 @@ async fn ask_agent(
     selected_text: String,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let settings = llm_runtime::settings(api_key);
 
     let state = app.state::<AppState>();
 
     let truncated_context = truncate_context(&context, 2000);
 
     // Semantic router: classify intent
-    let has_lore = load_lorebook(&app).map(|l| !l.is_empty()).unwrap_or(false);
-    let has_outline = load_outline(&app).map(|o| !o.is_empty()).unwrap_or(false);
+    let has_lore = storage::load_lorebook(&app)
+        .map(|l| !l.is_empty())
+        .unwrap_or(false);
+    let has_outline = storage::load_outline(&app)
+        .map(|o| !o.is_empty())
+        .unwrap_or(false);
     let intent = classify_intent(&message, has_lore, has_outline);
 
     // Emit CoT: intent detection
     let _ = app.emit(
-        "agent-chain-of-thought",
+        events::AGENT_CHAIN_OF_THOUGHT,
         CoTEvent {
             step: 0,
             total: 1,
@@ -1201,7 +856,7 @@ async fn ask_agent(
     // Log user message to Hermes memory
     {
         let state = app.state::<AppState>();
-        let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+        let db = lock_hermes(&state)?;
         let _ = db.log_interaction("user", &message);
     }
 
@@ -1247,163 +902,99 @@ Selected text (user wants to rewrite this):\n\
         serde_json::json!({"role": "user", "content": message}),
     ];
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let max_rounds = 3u32;
 
     for round in 0..max_rounds {
         {
-            let mut s = state.harness_state.lock().map_err(|e| e.to_string())?;
+            let mut s = lock_harness_state(&state)?;
             *s = HarnessState::Thinking;
         }
 
-        let resp = client
-            .post(format!("{}/chat/completions", api_base))
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&serde_json::json!({
-                "model": model,
-                "messages": messages,
-                "stream": true
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(format!("API error {}: {}", status.as_u16(), text));
-        }
-
         {
-            let mut s = state.harness_state.lock().map_err(|e| e.to_string())?;
+            let mut s = lock_harness_state(&state)?;
             *s = HarnessState::Streaming;
         }
 
-        let mut stream = resp.bytes_stream();
         let mut raw_buffer = String::new();
-        let mut sse_buffer = String::new();
         let mut found_search = false;
+        let mut search_keyword = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = match chunk {
-                Ok(c) => c,
-                Err(e) => {
-                    emit_error(&app, &format!("Stream error: {}", e), "stream");
-                    {
-                        let mut s = state.harness_state.lock().unwrap_or_else(|_| panic!("lock"));
-                        *s = HarnessState::Idle;
-                    }
-                    let _ = app.emit(
-                        "agent-stream-end",
-                        StreamEnd {
-                            reason: "error".to_string(),
-                        },
-                    );
-                    return Err(format!("Stream error: {}", e));
-                }
+        let stream_result = llm_runtime::stream_chat(&settings, messages.clone(), 60, |content| {
+            raw_buffer.push_str(&content);
+
+            if let Some(keyword) = extract_action_search(&raw_buffer) {
+                found_search = true;
+                search_keyword = keyword;
+                return Ok(llm_runtime::StreamControl::Stop);
+            }
+
+            let _ = app.emit(events::AGENT_STREAM_CHUNK, StreamChunk { content });
+            Ok(llm_runtime::StreamControl::Continue)
+        })
+        .await;
+
+        if let Err(e) = stream_result {
+            emit_error(&app, &e, "stream");
+            {
+                let mut s = lock_harness_state(&state)?;
+                *s = HarnessState::Idle;
+            }
+            let _ = app.emit(
+                events::AGENT_STREAM_END,
+                StreamEnd {
+                    reason: "error".to_string(),
+                },
+            );
+            return Err(e);
+        }
+
+        if found_search {
+            let keyword = search_keyword;
+            let _ = app.emit(
+                events::AGENT_SEARCH_STATUS,
+                SearchStatus {
+                    keyword: keyword.clone(),
+                    round: round + 1,
+                },
+            );
+
+            messages.push(serde_json::json!({"role": "assistant", "content": raw_buffer.clone()}));
+
+            let entries = storage::load_lorebook(&app)?;
+            let results: Vec<&LoreEntry> = entries
+                .iter()
+                .filter(|e| {
+                    e.keyword.to_lowercase().contains(&keyword.to_lowercase())
+                        || keyword.to_lowercase().contains(&e.keyword.to_lowercase())
+                })
+                .collect();
+
+            let search_result = if results.is_empty() {
+                format!("No lorebook entries found for '{}'.", keyword)
+            } else {
+                results
+                    .iter()
+                    .map(|e| format!("[{}]: {}", e.keyword, e.content))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             };
-            let text = String::from_utf8_lossy(&chunk);
-            sse_buffer.push_str(&text);
 
-            while let Some(line_end) = sse_buffer.find('\n') {
-                let line = sse_buffer[..line_end].trim().to_string();
-                sse_buffer = sse_buffer[line_end + 1..].to_string();
-
-                if line.is_empty() {
-                    continue;
-                }
-
-                let data = if let Some(d) = line.strip_prefix("data: ") {
-                    d
-                } else {
-                    continue;
-                };
-
-                if data == "[DONE]" {
-                    continue;
-                }
-
-                let parsed: serde_json::Value =
-                    serde_json::from_str(data).map_err(|e| format!("JSON parse error: {}", e))?;
-
-                let content = parsed["choices"][0]["delta"]["content"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-
-                if content.is_empty() {
-                    continue;
-                }
-
-                raw_buffer.push_str(&content);
-
-                // Check for complete ACTION_SEARCH tag
-                if let Some(keyword) = extract_action_search(&raw_buffer) {
-                    found_search = true;
-
-                    let _ = app.emit(
-                        "agent-search-status",
-                        SearchStatus {
-                            keyword: keyword.clone(),
-                            round: round + 1,
-                        },
-                    );
-
-                    // Add assistant response (including the SEARCH tag) to history
-                    let clean_response = raw_buffer.clone();
-                    messages.push(serde_json::json!({"role": "assistant", "content": clean_response}));
-
-                    // Search lorebook
-                    let entries = load_lorebook(&app)?;
-                    let results: Vec<&LoreEntry> = entries
-                        .iter()
-                        .filter(|e| {
-                            e.keyword.to_lowercase().contains(&keyword.to_lowercase())
-                                || keyword.to_lowercase().contains(&e.keyword.to_lowercase())
-                        })
-                        .collect();
-
-                    let search_result = if results.is_empty() {
-                        format!("No lorebook entries found for '{}'.", keyword)
-                    } else {
-                        results
-                            .iter()
-                            .map(|e| format!("[{}]: {}", e.keyword, e.content))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    };
-
-                    messages.push(serde_json::json!({"role": "user", "content": format!(
-                        "SYSTEM SEARCH RESULT for '{}':\n{}\n\nContinue based on this information.",
-                        keyword, search_result
-                    )}));
-
-                    break; // exit stream loop, enter next round
-                }
-
-                // Stream content to frontend
-                let _ = app.emit("agent-stream-chunk", StreamChunk { content });
-            }
-
-            if found_search {
-                break; // exit outer while loop
-            }
+            messages.push(serde_json::json!({"role": "user", "content": format!(
+                "SYSTEM SEARCH RESULT for '{}':\n{}\n\nContinue based on this information.",
+                keyword, search_result
+            )}));
         }
 
         if !found_search {
             // Natural completion — no search needed
             {
-                let mut s = state.harness_state.lock().map_err(|e| e.to_string())?;
+                let mut s = lock_harness_state(&state)?;
                 *s = HarnessState::Idle;
             }
             {
                 // Log assistant response to Hermes memory
                 let state = app.state::<AppState>();
-                let db = state.hermes_db.lock().unwrap_or_else(|_| panic!("lock"));
+                let db = lock_hermes(&state)?;
                 let _ = db.log_interaction("assistant", &raw_buffer);
             }
 
@@ -1412,7 +1003,7 @@ Selected text (user wants to rewrite this):\n\
             tokio::spawn(async move { extract_skills_from_recent(&app_clone).await });
 
             let _ = app.emit(
-                "agent-stream-end",
+                events::AGENT_STREAM_END,
                 StreamEnd {
                     reason: "complete".to_string(),
                 },
@@ -1423,11 +1014,11 @@ Selected text (user wants to rewrite this):\n\
 
     // Max rounds exhausted
     {
-        let mut s = state.harness_state.lock().map_err(|e| e.to_string())?;
+        let mut s = lock_harness_state(&state)?;
         *s = HarnessState::Idle;
     }
     let _ = app.emit(
-        "agent-stream-end",
+        events::AGENT_STREAM_END,
         StreamEnd {
             reason: "max_rounds".to_string(),
         },
@@ -1442,9 +1033,17 @@ pub fn run() {
     let db_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("hermes_memory.db");
-    let hermes_db = HermesDB::open(&db_path).expect("Failed to open Hermes memory DB");
+    let hermes_db = match HermesDB::open(&db_path) {
+        Ok(db) => db,
+        Err(e) => {
+            let message = format!("Failed to open Hermes memory DB: {}", e);
+            tracing::error!("{}", message);
+            let _ = msgbox::create("Agent-Writer Error", &message, msgbox::IconType::Error);
+            return;
+        }
+    };
 
-    tauri::Builder::default()
+    if let Err(e) = tauri::Builder::default()
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
@@ -1463,6 +1062,7 @@ pub fn run() {
             save_outline_node,
             delete_outline_node,
             update_outline_status,
+            reorder_outline_nodes,
             batch_generate_chapter,
             analyze_chapter,
             ask_project_brain,
@@ -1475,5 +1075,9 @@ pub fn run() {
             export_diagnostic_logs
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        let message = format!("Error while running Tauri application: {}", e);
+        tracing::error!("{}", message);
+        let _ = msgbox::create("Agent-Writer Error", &message, msgbox::IconType::Error);
+    }
 }

@@ -2,45 +2,28 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-
-interface StreamChunk {
-  content: string;
-}
-
-interface StreamEnd {
-  reason: string;
-}
+import {
+  ACTION_RE,
+  Commands,
+  Events,
+  extractActions,
+  type AgentError,
+  type ChainOfThoughtStep,
+  type Epiphany,
+  type SearchStatus,
+  type StreamChunk,
+  type StreamEnd,
+} from "../protocol";
 
 interface Message {
   role: "user" | "agent";
   content: string;
 }
 
-interface SearchStatus {
-  keyword: string;
-  round: number;
-}
-
 interface AgentPanelProps {
   getContext: () => { full: string; paragraph: string; selected: string };
   onActionInsert: (text: string) => void;
   onActionReplace: (text: string) => void;
-}
-
-const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
-
-interface ParsedAction {
-  kind: "insert" | "replace";
-  content: string;
-}
-
-function extractActions(buffer: string): { actions: ParsedAction[]; cleanText: string } {
-  const actions: ParsedAction[] = [];
-  const cleanText = buffer.replace(ACTION_RE, (_, kind: string, content: string) => {
-    actions.push({ kind: kind.toLowerCase() as "insert" | "replace", content });
-    return "";
-  });
-  return { actions, cleanText };
 }
 
 export default function AgentPanel({
@@ -59,8 +42,8 @@ export default function AgentPanel({
   const [agentError, setAgentError] = useState<string | null>(null);
   const [lastInput, setLastInput] = useState<string>("");
   const [brainMode, setBrainMode] = useState(false);
-  const [epiphanies, setEpiphanies] = useState<{ id: number; skill: string; category: string }[]>([]);
-  const [cotSteps, setCotSteps] = useState<{ step: number; total: number; description: string; status: string }[]>([]);
+  const [epiphanies, setEpiphanies] = useState<Epiphany[]>([]);
+  const [cotSteps, setCotSteps] = useState<ChainOfThoughtStep[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -73,9 +56,9 @@ export default function AgentPanel({
     let unlistenCot: UnlistenFn;
 
     const setup = async () => {
-      unlistenChunk = await listen<StreamChunk>("agent-stream-chunk", (event) => {
+      unlistenChunk = await listen<StreamChunk>(Events.agentStreamChunk, (event) => {
         if (isInlineRequest) return;
-        if (searchStatus) setSearchStatus(null);
+        setSearchStatus((prev) => (prev ? null : prev));
         rawBufferRef.current += event.payload.content;
 
         const { actions, cleanText } = extractActions(rawBufferRef.current);
@@ -91,7 +74,7 @@ export default function AgentPanel({
       });
 
       unlistenSearch = await listen<SearchStatus>(
-        "agent-search-status",
+        Events.agentSearchStatus,
         (event) => {
           if (isInlineRequest) return;
           rawBufferRef.current = "";
@@ -99,8 +82,8 @@ export default function AgentPanel({
         },
       );
 
-      unlistenEpiphany = await listen<{ id: number; skill: string; category: string }>(
-        "agent-epiphany",
+      unlistenEpiphany = await listen<Epiphany>(
+        Events.agentEpiphany,
         (event) => {
           setEpiphanies((prev) => [
             { id: event.payload.id, skill: event.payload.skill, category: event.payload.category },
@@ -109,12 +92,7 @@ export default function AgentPanel({
         },
       );
 
-      unlistenCot = await listen<{
-        step: number;
-        total: number;
-        description: string;
-        status: string;
-      }>("agent-chain-of-thought", (event) => {
+      unlistenCot = await listen<ChainOfThoughtStep>(Events.agentChainOfThought, (event) => {
         setCotSteps((prev) => {
           const existing = prev.findIndex((s) => s.step === event.payload.step);
           if (existing !== -1) {
@@ -126,8 +104,8 @@ export default function AgentPanel({
         });
       });
 
-      unlistenError = await listen<{ message: string; source: string }>(
-        "agent-error",
+      unlistenError = await listen<AgentError>(
+        Events.agentError,
         (event) => {
           if (isInlineRequest) return;
           setIsStreaming(false);
@@ -137,7 +115,7 @@ export default function AgentPanel({
         },
       );
 
-      unlistenEnd = await listen<StreamEnd>("agent-stream-end", () => {
+      unlistenEnd = await listen<StreamEnd>(Events.agentStreamEnd, () => {
         if (isInlineRequest) return;
         const finalText = rawBufferRef.current.replace(ACTION_RE, "");
         rawBufferRef.current = "";
@@ -186,9 +164,9 @@ export default function AgentPanel({
     try {
       const { full, paragraph, selected } = getContext();
       if (brainMode) {
-        await invoke("ask_project_brain", { query: text });
+        await invoke(Commands.askProjectBrain, { query: text });
       } else {
-        await invoke("ask_agent", { message: text, context: full, paragraph, selectedText: selected });
+        await invoke(Commands.askAgent, { message: text, context: full, paragraph, selectedText: selected });
       }
     } catch (e) {
       setStreaming("");
@@ -209,10 +187,10 @@ export default function AgentPanel({
     rawBufferRef.current = "";
     try {
       if (brainMode) {
-        await invoke("ask_project_brain", { query: lastInput });
+        await invoke(Commands.askProjectBrain, { query: lastInput });
       } else {
         const { full, paragraph, selected } = getContext();
-        await invoke("ask_agent", { message: lastInput, context: full, paragraph, selectedText: selected });
+        await invoke(Commands.askAgent, { message: lastInput, context: full, paragraph, selectedText: selected });
       }
     } catch (e) {
       setStreaming("");

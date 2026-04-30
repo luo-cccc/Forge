@@ -2,6 +2,7 @@ import { useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Editor } from "@tiptap/core";
 import { useAppStore } from "./store";
+import { Commands } from "./protocol";
 import EditorPanel from "./components/EditorPanel";
 import AgentPanel from "./components/AgentPanel";
 import ProjectTree from "./components/ProjectTree";
@@ -22,12 +23,12 @@ function App() {
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
     try {
-      await invoke("create_chapter", { title: "Chapter-1" });
+      await invoke(Commands.createChapter, { title: "Chapter-1" });
     } catch {
       // Already exists
     }
     try {
-      const content = await invoke<string>("load_chapter", { title: "Chapter-1" });
+      const content = await invoke<string>(Commands.loadChapter, { title: "Chapter-1" });
       editor.commands.setContent(content || "<p>Start writing...</p>");
     } catch {
       // No content yet
@@ -45,13 +46,13 @@ function App() {
       if (editor) {
         const content = editor.getHTML();
         try {
-          await invoke("save_chapter", { title: currentChapter, content });
+          await invoke(Commands.saveChapter, { title: currentChapter, content });
         } catch (e) {
           console.error("Auto-save failed:", e);
         }
       }
       try {
-        const content = await invoke<string>("load_chapter", { title });
+        const content = await invoke<string>(Commands.loadChapter, { title });
         if (editorRef.current) {
           editorRef.current.commands.setContent(content || "<p></p>");
         }
@@ -59,7 +60,7 @@ function App() {
       } catch (e) {
         console.error("Load chapter failed:", e);
         try {
-          await invoke("create_chapter", { title });
+          await invoke(Commands.createChapter, { title });
           if (editorRef.current) {
             editorRef.current.commands.setContent("<p>Start writing...</p>");
           }

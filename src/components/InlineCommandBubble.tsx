@@ -35,8 +35,9 @@ export default function InlineCommandBubble({
   }, [editor]);
 
   useEffect(() => {
-    calcPosition();
+    const timer = setTimeout(calcPosition, 0);
     inputRef.current?.focus();
+    return () => clearTimeout(timer);
   }, [calcPosition]);
 
   const handleSubmit = () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Commands } from "../protocol";
 
 interface LoreEntry {
   id: string;
@@ -19,7 +20,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
 
   const fetchEntries = useCallback(async () => {
     try {
-      const result = await invoke<LoreEntry[]>("get_lorebook");
+      const result = await invoke<LoreEntry[]>(Commands.getLorebook);
       setEntries(result);
     } catch (e) {
       console.error("Failed to load lorebook:", e);
@@ -28,7 +29,10 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
 
   useEffect(() => {
     if (isOpen) {
-      fetchEntries();
+      const timer = setTimeout(() => {
+        void fetchEntries();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, fetchEntries]);
 
@@ -38,7 +42,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
     if (!kw || !ct) return;
 
     try {
-      const result = await invoke<LoreEntry[]>("save_lore_entry", {
+      const result = await invoke<LoreEntry[]>(Commands.saveLoreEntry, {
         keyword: kw,
         content: ct,
       });
@@ -52,7 +56,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
 
   const handleDelete = async (id: string) => {
     try {
-      const result = await invoke<LoreEntry[]>("delete_lore_entry", { id });
+      const result = await invoke<LoreEntry[]>(Commands.deleteLoreEntry, { id });
       setEntries(result);
     } catch (e) {
       console.error("Failed to delete entry:", e);
