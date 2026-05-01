@@ -822,9 +822,23 @@ impl WriterAgentKernel {
                 value,
                 confidence,
             } => {
+                let rationale = format!(
+                    "Author confirmed canon update: {}.{} = {}",
+                    entity, attribute, value
+                );
                 self.memory
                     .update_canon_attribute(entity, attribute, value, *confidence)
                     .map_err(|e| format!("canon: {}", e))?;
+                self.memory
+                    .record_decision(
+                        self.active_chapter.as_deref().unwrap_or("project"),
+                        &format!("Canon update: {}", entity),
+                        "updated_canon",
+                        &[],
+                        &rationale,
+                        &[format!("canon:{}:{}", entity, attribute)],
+                    )
+                    .ok();
                 Ok(OperationResult {
                     success: true,
                     operation,

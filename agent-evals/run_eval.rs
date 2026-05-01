@@ -277,6 +277,16 @@ fn run_canon_conflict_update_canon_eval() -> EvalResult {
     {
         errors.push("canon warning repeated after updating canon".to_string());
     }
+    if !kernel
+        .ledger_snapshot()
+        .recent_decisions
+        .iter()
+        .any(|decision| {
+            decision.decision == "updated_canon" && decision.rationale.contains("weapon")
+        })
+    {
+        errors.push("canon update did not record a creative decision".to_string());
+    }
 
     eval_result(
         "writer_agent:canon_conflict_update_canon_resolves_future_warning",
