@@ -205,6 +205,45 @@ impl WriterMemory {
         rows.collect()
     }
 
+    pub fn update_canon_attribute(
+        &self,
+        entity_name: &str,
+        attribute: &str,
+        value: &str,
+        confidence: f64,
+    ) -> rusqlite::Result<()> {
+        let Some(resolved_name) = self.resolve_canon_entity_name(entity_name)? else {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        };
+
+        let (entity_id, attributes_json): (i64, String) = self.conn.query_row(
+            "SELECT id, attributes_json FROM canon_entities WHERE name=?1",
+            rusqlite::params![resolved_name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let mut attributes =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&attributes_json)
+                .unwrap_or_default();
+        attributes.insert(
+            attribute.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+        self.conn.execute(
+            "UPDATE canon_entities SET attributes_json=?1, confidence=?2, updated_at=datetime('now') WHERE id=?3",
+            rusqlite::params![serde_json::Value::Object(attributes).to_string(), confidence, entity_id],
+        )?;
+        self.conn.execute(
+            "DELETE FROM canon_facts WHERE entity_id=?1 AND key=?2",
+            rusqlite::params![entity_id, attribute],
+        )?;
+        self.conn.execute(
+            "INSERT INTO canon_facts (entity_id, key, value, source_ref, confidence, status, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'active', datetime('now'))",
+            rusqlite::params![entity_id, attribute, value, "canon.update_attribute", confidence],
+        )?;
+        Ok(())
+    }
+
     pub fn resolve_canon_entity_name(&self, entity_name: &str) -> rusqlite::Result<Option<String>> {
         let mut stmt = self
             .conn

@@ -816,6 +816,22 @@ impl WriterAgentKernel {
                     revision_after: None,
                 })
             }
+            WriterOperation::CanonUpdateAttribute {
+                entity,
+                attribute,
+                value,
+                confidence,
+            } => {
+                self.memory
+                    .update_canon_attribute(entity, attribute, value, *confidence)
+                    .map_err(|e| format!("canon: {}", e))?;
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
             WriterOperation::PromiseAdd { promise } => {
                 self.memory
                     .add_promise(

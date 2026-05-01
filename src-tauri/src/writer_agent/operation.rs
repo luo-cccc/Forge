@@ -31,6 +31,13 @@ pub enum WriterOperation {
     },
     #[serde(rename = "canon.upsert_entity")]
     CanonUpsertEntity { entity: CanonEntityOp },
+    #[serde(rename = "canon.update_attribute")]
+    CanonUpdateAttribute {
+        entity: String,
+        attribute: String,
+        value: String,
+        confidence: f64,
+    },
     #[serde(rename = "canon.upsert_rule")]
     CanonUpsertRule { rule: CanonRuleOp },
     #[serde(rename = "promise.add")]

@@ -207,10 +207,80 @@ fn run_canon_conflict_eval() -> EvalResult {
     }) {
         errors.push("continuity warning lacks executable canon text replacement".to_string());
     }
+    if !conflict.is_some_and(|proposal| {
+        proposal
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, WriterOperation::CanonUpdateAttribute { .. }))
+    }) {
+        errors.push("continuity warning lacks executable canon update alternative".to_string());
+    }
 
     eval_result(
         "writer_agent:canon_conflict_weapon",
         format!("proposals={}", proposals.len()),
+        errors,
+    )
+}
+
+fn run_canon_conflict_update_canon_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let paragraph = "林墨拔出长剑，指向门外的人。";
+    let proposals = kernel.observe(observation(paragraph)).unwrap();
+    let operation = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+        .and_then(|proposal| {
+            proposal
+                .operations
+                .iter()
+                .find(|operation| matches!(operation, WriterOperation::CanonUpdateAttribute { .. }))
+                .cloned()
+        });
+
+    let mut errors = Vec::new();
+    let Some(operation) = operation else {
+        return eval_result(
+            "writer_agent:canon_conflict_update_canon_resolves_future_warning",
+            format!("proposals={}", proposals.len()),
+            vec!["missing canon.update_attribute operation".to_string()],
+        );
+    };
+    let result = kernel.approve_editor_operation(operation, "").unwrap();
+    if !result.success {
+        errors.push(format!(
+            "canon update failed: {}",
+            result
+                .error
+                .as_ref()
+                .map(|error| error.message.as_str())
+                .unwrap_or("unknown")
+        ));
+    }
+    let mut next = observation(paragraph);
+    next.id = "eval-canon-updated".to_string();
+    let next_proposals = kernel.observe(next).unwrap();
+    if next_proposals
+        .iter()
+        .any(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+    {
+        errors.push("canon warning repeated after updating canon".to_string());
+    }
+
+    eval_result(
+        "writer_agent:canon_conflict_update_canon_resolves_future_warning",
+        format!("success={} next={}", result.success, next_proposals.len()),
         errors,
     )
 }
@@ -858,6 +928,7 @@ fn main() {
     let mut results = Vec::new();
     results.extend(run_intent_eval());
     results.push(run_canon_conflict_eval());
+    results.push(run_canon_conflict_update_canon_eval());
     results.push(run_canon_conflict_apply_eval());
     results.push(run_story_review_queue_canon_eval());
     results.push(run_multi_ghost_eval());

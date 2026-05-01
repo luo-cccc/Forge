@@ -588,6 +588,7 @@ export type WriterOperation =
   | { kind: "text.replace"; chapter: string; from: number; to: number; text: string; revision: string }
   | { kind: "text.annotate"; chapter: string; from: number; to: number; message: string; severity: string }
   | { kind: "canon.upsert_entity"; entity: unknown }
+  | { kind: "canon.update_attribute"; entity: string; attribute: string; value: string; confidence: number }
   | { kind: "canon.upsert_rule"; rule: unknown }
   | { kind: "promise.add"; promise: unknown }
   | { kind: "promise.resolve"; promiseId: string; chapter: string }

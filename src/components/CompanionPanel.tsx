@@ -86,6 +86,10 @@ function debtPrimaryOperation(entry: StoryDebtEntry): WriterOperation | undefine
   return entry.operations[0];
 }
 
+function canonUpdateOperation(operations: WriterOperation[]): WriterOperation | undefined {
+  return operations.find((operation) => operation.kind === "canon.update_attribute");
+}
+
 function severityClass(severity: StoryReviewQueueEntry["severity"]): string {
   if (severity === "error") return "border-danger/40 bg-danger/10";
   if (severity === "warning") return "border-accent/30 bg-accent-subtle/20";
@@ -280,6 +284,37 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     }
   }, [currentChapterRevision, onApplyOperation, recordFeedback]);
 
+  const handleApplyQueueOperation = useCallback(async (
+    entry: StoryReviewQueueEntry,
+    operation: WriterOperation,
+    feedbackReason: string,
+  ) => {
+    setOperationError(null);
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision: currentChapterRevision ?? "",
+      });
+      if (!result.success) {
+        setOperationError(result.error?.message ?? "Operation was rejected by the kernel.");
+        return;
+      }
+
+      const applied = isEditorTextOperation(operation)
+        ? onApplyOperation?.(operation) ?? false
+        : true;
+      if (!applied) {
+        setOperationError("The editor could not apply this operation.");
+        return;
+      }
+
+      const finalText = isEditorTextOperation(operation) ? operation.text : entry.message;
+      await recordFeedback(entry.proposalId, "accepted", finalText, feedbackReason);
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+
   const handleResolvePromise = useCallback(async (promiseId: number) => {
     setOperationError(null);
     const operation: WriterOperation = {
@@ -337,6 +372,43 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setOperationError(String(e));
     }
   }, [currentChapterRevision, onApplyOperation, recordFeedback, refreshStatus]);
+
+  const handleApplyDebtOperation = useCallback(async (
+    entry: StoryDebtEntry,
+    operation: WriterOperation,
+    feedbackReason: string,
+  ) => {
+    setOperationError(null);
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision: currentChapterRevision ?? "",
+      });
+      if (!result.success) {
+        setOperationError(result.error?.message ?? "Could not apply this story debt action.");
+        return;
+      }
+
+      const applied = isEditorTextOperation(operation)
+        ? onApplyOperation?.(operation) ?? false
+        : true;
+      if (!applied) {
+        setOperationError("The editor could not apply this operation.");
+        return;
+      }
+
+      const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
+      if (proposalId) {
+        const finalText = isEditorTextOperation(operation) ? operation.text : entry.message;
+        await recordFeedback(proposalId, "accepted", finalText, feedbackReason);
+      } else {
+        await refreshStatus();
+      }
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapterRevision, onApplyOperation, recordFeedback, refreshStatus]);
+
 
   const handleIgnoreDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
     const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
@@ -563,37 +635,48 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     <div className="text-[10px] text-text-muted">pacing</div>
                   </div>
                 </div>
-                {storyDebt.entries.slice(0, 3).map((entry) => (
-                  <div key={entry.id} className="mt-2 border-t border-border-subtle pt-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-text-secondary">{entry.title}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${severityBadgeClass(entry.severity)}`}>
-                        {entry.category}
-                      </span>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-text-muted">{entry.message}</p>
-                    {(entry.operations.length > 0 || entry.relatedReviewIds.length > 0) && (
-                      <div className="mt-2 flex gap-1">
-                        {entry.operations.length > 0 && (
-                          <button
-                            onClick={() => handleApplyDebtEntry(entry)}
-                            className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
-                          >
-                            Resolve
-                          </button>
-                        )}
-                        {entry.relatedReviewIds.length > 0 && (
-                          <button
-                            onClick={() => handleIgnoreDebtEntry(entry)}
-                            className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-muted border border-border-subtle hover:bg-bg-surface"
-                          >
-                            Ignore
-                          </button>
-                        )}
+                {storyDebt.entries.slice(0, 3).map((entry) => {
+                  const canonOperation = canonUpdateOperation(entry.operations);
+                  return (
+                    <div key={entry.id} className="mt-2 border-t border-border-subtle pt-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-text-secondary">{entry.title}</span>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${severityBadgeClass(entry.severity)}`}>
+                          {entry.category}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      <p className="mt-1 line-clamp-2 text-text-muted">{entry.message}</p>
+                      {(entry.operations.length > 0 || entry.relatedReviewIds.length > 0) && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {entry.operations.length > 0 && (
+                            <button
+                              onClick={() => handleApplyDebtEntry(entry)}
+                              className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
+                            >
+                              Resolve
+                            </button>
+                          )}
+                          {canonOperation && (
+                            <button
+                              onClick={() => handleApplyDebtOperation(entry, canonOperation, "Updated canon from story debt.")}
+                              className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                            >
+                              Update Canon
+                            </button>
+                          )}
+                          {entry.relatedReviewIds.length > 0 && (
+                            <button
+                              onClick={() => handleIgnoreDebtEntry(entry)}
+                              className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-muted border border-border-subtle hover:bg-bg-surface"
+                            >
+                              Ignore
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {visibleReviewQueue.length === 0 && (
@@ -603,6 +686,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             {visibleReviewQueue.map((entry) => {
               const operation = queuePrimaryOperation(entry);
+              const canonOperation = canonUpdateOperation(entry.operations);
               return (
                 <div key={entry.id} className={`rounded border p-2 ${severityClass(entry.severity)}`}>
                   <div className="flex items-start justify-between gap-2">
@@ -649,6 +733,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     >
                       Snooze
                     </button>
+                    {canonOperation && (
+                      <button
+                        onClick={() => handleApplyQueueOperation(entry, canonOperation, "Updated canon instead of changing text.")}
+                        className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                      >
+                        Update Canon
+                      </button>
+                    )}
                   </div>
                 </div>
               );

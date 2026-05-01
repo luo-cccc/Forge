@@ -362,13 +362,21 @@ fn canon_conflict_operations(
         }];
     }
 
-    vec![WriterOperation::TextReplace {
-        chapter: chapter_id.to_string(),
-        from,
-        to,
-        text: replacement.to_string(),
-        revision: "missing".to_string(),
-    }]
+    vec![
+        WriterOperation::TextReplace {
+            chapter: chapter_id.to_string(),
+            from,
+            to,
+            text: replacement.to_string(),
+            revision: "missing".to_string(),
+        },
+        WriterOperation::CanonUpdateAttribute {
+            entity: entity.to_string(),
+            attribute: attribute.to_string(),
+            value: mentioned_value.to_string(),
+            confidence: 0.82,
+        },
+    ]
 }
 
 fn weapon_family(value: &str) -> &str {
