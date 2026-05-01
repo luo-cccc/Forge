@@ -61,6 +61,7 @@ export const Events = {
   editorSemanticLint: "editor-semantic-lint",
   editorEntityCard: "editor-entity-card",
   editorHoverHint: "editor-hover-hint",
+  inlineWriterOperation: "inline-writer-operation",
   chapterRestored: "chapter-restored",
   projectFileRestored: "project-file-restored",
   storyboardMarker: "storyboard-marker",
@@ -132,6 +133,12 @@ export interface EditorSemanticLint {
   to: number;
   message: string;
   severity: "info" | "warning" | "error" | string;
+}
+
+export interface InlineWriterOperationEvent {
+  requestId: string;
+  proposal: AgentProposal;
+  operation: WriterOperation;
 }
 
 export interface EditorEntityCard {

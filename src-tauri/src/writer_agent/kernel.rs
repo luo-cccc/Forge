@@ -498,6 +498,102 @@ impl WriterAgentKernel {
             .ok_or_else(|| "duplicate LLM continuation suppressed".to_string())
     }
 
+    pub fn create_inline_operation_proposal(
+        &mut self,
+        observation: WriterObservation,
+        instruction: &str,
+        draft: String,
+        model: &str,
+    ) -> Result<AgentProposal, String> {
+        let draft = sanitize_continuation(&draft);
+        if draft.is_empty() {
+            return Err("empty inline operation draft".to_string());
+        }
+
+        let context_pack = assemble_observation_context(
+            AgentTask::InlineRewrite,
+            &observation,
+            &self.memory,
+            4_500,
+        );
+        let chapter = observation
+            .chapter_title
+            .clone()
+            .or_else(|| self.active_chapter.clone())
+            .unwrap_or_else(|| "Chapter-1".to_string());
+        let revision = observation
+            .chapter_revision
+            .clone()
+            .unwrap_or_else(|| "missing".to_string());
+        let operation = if let Some(selection) = observation.selection.as_ref() {
+            if selection.from < selection.to {
+                WriterOperation::TextReplace {
+                    chapter: chapter.clone(),
+                    from: selection.from,
+                    to: selection.to,
+                    text: draft.clone(),
+                    revision,
+                }
+            } else {
+                WriterOperation::TextInsert {
+                    chapter: chapter.clone(),
+                    at: observation
+                        .cursor
+                        .as_ref()
+                        .map(|c| c.to)
+                        .unwrap_or(selection.to),
+                    text: draft.clone(),
+                    revision,
+                }
+            }
+        } else {
+            WriterOperation::TextInsert {
+                chapter: chapter.clone(),
+                at: observation.cursor.as_ref().map(|c| c.to).unwrap_or(0),
+                text: draft.clone(),
+                revision,
+            }
+        };
+
+        let target = match &operation {
+            WriterOperation::TextReplace { from, to, .. } => Some(super::observation::TextRange {
+                from: *from,
+                to: *to,
+            }),
+            WriterOperation::TextInsert { at, .. } => {
+                Some(super::observation::TextRange { from: *at, to: *at })
+            }
+            _ => None,
+        };
+
+        let proposal = AgentProposal {
+            id: proposal_id(&self.session_id, self.proposal_counter),
+            observation_id: observation.id.clone(),
+            kind: ProposalKind::ParallelDraft,
+            priority: ProposalPriority::Normal,
+            target,
+            preview: draft.clone(),
+            operations: vec![operation],
+            rationale: format!(
+                "Inline typed operation via {}. Instruction: {}. ContextPack: {} sources, {}/{} chars.",
+                model,
+                snippet(instruction, 120),
+                context_pack.sources.len(),
+                context_pack.total_chars,
+                context_pack.budget_limit
+            ),
+            evidence: context_pack_evidence(&context_pack, &observation),
+            risks: vec!["Inline operation should be previewed before accepting.".into()],
+            alternatives: vec![],
+            confidence: 0.78,
+            expires_at: Some(observation.created_at + 120_000),
+        };
+
+        self.proposal_counter += 1;
+        self.register_proposal(proposal)
+            .ok_or_else(|| "duplicate inline operation suppressed".to_string())
+    }
+
     pub fn create_llm_memory_proposals(
         &mut self,
         observation: WriterObservation,
@@ -2739,6 +2835,58 @@ mod tests {
             Some(WriterOperation::TextInsert { .. })
         ));
         assert_eq!(kernel.status().pending_proposals, 1);
+    }
+
+    #[test]
+    fn create_inline_operation_proposal_uses_selection_replace() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs = observation("林墨握住刀柄，沉默片刻。");
+        obs.reason = ObservationReason::Explicit;
+        obs.selection = Some(super::super::observation::TextSelection {
+            from: 2,
+            to: 6,
+            text: "握住刀柄".to_string(),
+        });
+
+        let proposal = kernel
+            .create_inline_operation_proposal(
+                obs,
+                "改得更紧张",
+                "指节一点点扣紧刀柄".to_string(),
+                "test-model",
+            )
+            .unwrap();
+
+        assert_eq!(proposal.kind, ProposalKind::ParallelDraft);
+        assert!(proposal.rationale.contains("Inline typed operation"));
+        assert!(matches!(
+            proposal.operations.first(),
+            Some(WriterOperation::TextReplace { from: 2, to: 6, .. })
+        ));
+    }
+
+    #[test]
+    fn create_inline_operation_proposal_without_selection_inserts_at_cursor() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs = observation("林墨停在门前。");
+        obs.reason = ObservationReason::Explicit;
+        obs.cursor = Some(TextRange { from: 7, to: 7 });
+
+        let proposal = kernel
+            .create_inline_operation_proposal(
+                obs,
+                "补一句动作",
+                "他把呼吸压得更低。".to_string(),
+                "test-model",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            proposal.operations.first(),
+            Some(WriterOperation::TextInsert { at: 7, .. })
+        ));
     }
 
     #[test]

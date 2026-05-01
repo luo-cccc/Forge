@@ -6,7 +6,6 @@ import type { Editor } from "@tiptap/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import {
-  ACTION_RE,
   Commands,
   Events,
   type AgentMode,
@@ -18,11 +17,12 @@ import {
   type EditorGhostEnd,
   type EditorSemanticLint,
   type EditorStatePayload,
+  type InlineWriterOperationEvent,
   type ParallelDraft,
   type ParallelDraftPayload,
   type ProposalFeedback,
   type SemanticLintPayload,
-  type StreamChunk,
+  type WriterOperation,
 } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
@@ -84,6 +84,57 @@ function makeSemanticLintRequestId(): string {
 
 function textCharPosition(editor: Editor, pos: number): number {
   return Array.from(editor.state.doc.textBetween(0, pos, "\n")).length;
+}
+
+function docPositionFromTextCharIndex(editor: Editor, targetCharIndex: number): number {
+  const target = Math.max(0, Math.min(targetCharIndex, Array.from(editor.getText()).length));
+  let low = 0;
+  let high = editor.state.doc.content.size;
+  let position = 0;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const charsBefore = Array.from(editor.state.doc.textBetween(0, mid, "\n")).length;
+    if (charsBefore <= target) {
+      position = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return Math.max(0, Math.min(position, editor.state.doc.content.size));
+}
+
+function applyInlineWriterOperation(editor: Editor, operation: WriterOperation): boolean {
+  if (operation.kind === "text.insert") {
+    const at = docPositionFromTextCharIndex(editor, operation.at);
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(at, operation.text)
+      .setTextSelection({ from: at, to: at + operation.text.length })
+      .setMark("aiPreview")
+      .setTextSelection(at + operation.text.length)
+      .run();
+    return true;
+  }
+
+  if (operation.kind === "text.replace") {
+    const from = docPositionFromTextCharIndex(editor, operation.from);
+    const to = docPositionFromTextCharIndex(editor, operation.to);
+    editor
+      .chain()
+      .focus()
+      .insertContentAt({ from, to }, operation.text)
+      .setTextSelection({ from, to: from + operation.text.length })
+      .setMark("aiPreview")
+      .setTextSelection(from + operation.text.length)
+      .run();
+    return true;
+  }
+
+  return false;
 }
 
 function sliceAroundCursor(editor: Editor): EditorStatePayload {
@@ -231,6 +282,7 @@ export default function EditorPanel({
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [bubbleThinking, setBubbleThinking] = useState(false);
   const [inlineDone, setInlineDone] = useState(false);
+  const [inlineProposalId, setInlineProposalId] = useState<string | null>(null);
   const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
   const [entityHover, setEntityHover] = useState<EntityHoverState | null>(null);
   const [parallelDraftsOpen, setParallelDraftsOpen] = useState(false);
@@ -703,89 +755,85 @@ export default function EditorPanel({
   const handleBubbleSubmit = async (command: string) => {
     if (!editor) return;
     const editorRef = { current: editor };
+    const requestId = `inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     setIsInlineRequest(true);
     setBubbleThinking(true);
 
     const fullText = editor.getText();
+    const { from, to } = editor.state.selection;
+    const selectedText = from < to ? editor.state.doc.textBetween(from, to, " ") : "";
+    const $from = editor.state.doc.resolve(from);
+    const paragraph = editor.state.doc.textBetween($from.start(), $from.end(), " ");
 
-    let rawBuffer = "";
-
-    const unlistenChunk = await listen<StreamChunk>(Events.agentStreamChunk, (event) => {
-      rawBuffer += event.payload.content;
-      const ed = editorRef.current;
-      if (!ed) return;
-
-      let m: RegExpExecArray | null;
-      const re = new RegExp(ACTION_RE.source, "gs");
-      while ((m = re.exec(rawBuffer)) !== null) {
-        const [, kind, content] = m;
-
-        if (kind === "replace") {
-          const sel = ed.state.selection;
-          const rFrom = sel.from;
-          const rTo = sel.to;
-          if (rFrom < rTo) {
-            ed.chain()
-              .focus()
-              .insertContentAt({ from: rFrom, to: rTo }, content)
-              .setTextSelection({ from: rFrom, to: rFrom + content.length })
-              .setMark("aiPreview")
-              .setTextSelection(rFrom + content.length)
-              .run();
-          } else {
-            const p = ed.state.selection.from;
-            ed.chain()
-              .focus()
-              .insertContent(content)
-              .setTextSelection({ from: p, to: p + content.length })
-              .setMark("aiPreview")
-              .setTextSelection(p + content.length)
-              .run();
-          }
-        } else {
-          const p = ed.state.selection.from;
-          ed.chain()
-            .focus()
-            .insertContent(content)
-            .setTextSelection({ from: p, to: p + content.length })
-            .setMark("aiPreview")
-            .setTextSelection(p + content.length)
-            .run();
-        }
-      }
-      rawBuffer = rawBuffer.replace(ACTION_RE, "");
-    });
-
-    const unlistenEnd = await listen(Events.agentStreamEnd, () => {
-      unlistenChunk();
-      unlistenEnd();
+    const cleanup = () => {
       setIsInlineRequest(false);
       setBubbleThinking(false);
       setBubbleVisible(false);
-      setInlineDone(true);
-      incrementActionEpoch();
+    };
+
+    const unlistenInline = await listen<InlineWriterOperationEvent>(
+      Events.inlineWriterOperation,
+      (event) => {
+        if (event.payload.requestId !== requestId) return;
+        unlistenInline();
+        void (async () => {
+          try {
+            const result = await invoke<{
+              success: boolean;
+              error?: { code: string; message: string };
+            }>(Commands.approveWriterOperation, {
+              operation: event.payload.operation,
+              currentRevision: currentChapterRevision ?? "",
+            });
+            cleanup();
+            if (!result.success) {
+              console.error(
+                "Inline writer operation rejected:",
+                result.error?.message ?? "Operation rejected",
+              );
+              return;
+            }
+            const applied = applyInlineWriterOperation(editorRef.current, event.payload.operation);
+            if (applied) {
+              setInlineProposalId(event.payload.proposal.id);
+              setInlineDone(true);
+              incrementActionEpoch();
+            }
+          } catch (e) {
+            cleanup();
+            console.error("Inline writer operation approval failed:", e);
+          }
+        })();
+      },
+    );
+
+    const unlistenError = await listen<{ message: string }>(Events.agentError, () => {
+      unlistenInline();
+      unlistenError();
+      cleanup();
     });
 
     try {
       await invoke(Commands.askAgent, {
         message: command,
         context: fullText,
-        paragraph: "",
-        selectedText: "",
+        paragraph,
+        selectedText,
         contextPayload: {
+          mode: "inline_operation",
+          requestId,
           chapterTitle: currentChapter,
           chapterRevision: currentChapterRevision ?? undefined,
           cursorPosition: textCharPosition(editor, editor.state.selection.from),
           dirty: isEditorDirty,
         },
       });
+      unlistenError();
     } catch {
-      unlistenChunk();
-      unlistenEnd();
-      setIsInlineRequest(false);
-      setBubbleThinking(false);
-      setBubbleVisible(false);
+      unlistenInline();
+      unlistenError();
+      cleanup();
     }
   };
 
@@ -810,7 +858,19 @@ export default function EditorPanel({
         .run();
     }
     setInlineDone(false);
-  }, [editor]);
+    if (inlineProposalId) {
+      const feedback: ProposalFeedback = {
+        proposalId: inlineProposalId,
+        action: "accepted",
+        reason: "Accepted inline typed operation preview.",
+        createdAt: Date.now(),
+      };
+      void invoke(Commands.applyProposalFeedback, { feedback }).catch((e) => {
+        console.error("Failed to record inline operation feedback:", e);
+      });
+      setInlineProposalId(null);
+    }
+  }, [editor, inlineProposalId]);
 
   const handleReject = useCallback(() => {
     if (!editor) return;
@@ -825,7 +885,19 @@ export default function EditorPanel({
       editor.chain().focus().deleteRange({ from: r.from, to: r.to }).run();
     }
     setInlineDone(false);
-  }, [editor]);
+    if (inlineProposalId) {
+      const feedback: ProposalFeedback = {
+        proposalId: inlineProposalId,
+        action: "rejected",
+        reason: "Rejected inline typed operation preview.",
+        createdAt: Date.now(),
+      };
+      void invoke(Commands.applyProposalFeedback, { feedback }).catch((e) => {
+        console.error("Failed to record inline operation rejection:", e);
+      });
+      setInlineProposalId(null);
+    }
+  }, [editor, inlineProposalId]);
 
   const handleAcceptSuggestion = useCallback(
     (suggestion: AgentSuggestion) => {

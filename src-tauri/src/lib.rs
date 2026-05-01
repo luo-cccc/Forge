@@ -36,6 +36,7 @@ mod events {
     pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
     pub const EDITOR_ENTITY_CARD: &str = "editor-entity-card";
     pub const EDITOR_HOVER_HINT: &str = "editor-hover-hint";
+    pub const INLINE_WRITER_OPERATION: &str = "inline-writer-operation";
     pub const STORYBOARD_MARKER: &str = "storyboard-marker";
 }
 
@@ -268,6 +269,14 @@ struct StreamChunk {
 #[derive(Serialize, Clone)]
 struct StreamEnd {
     reason: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct InlineWriterOperationEvent {
+    request_id: String,
+    proposal: writer_agent::proposal::AgentProposal,
+    operation: writer_agent::operation::WriterOperation,
 }
 
 use agent_harness_core::truncate_context;
@@ -619,6 +628,15 @@ struct AskAgentContext {
     chapter_revision: Option<String>,
     cursor_position: Option<usize>,
     dirty: Option<bool>,
+    mode: Option<AskAgentMode>,
+    request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum AskAgentMode {
+    Chat,
+    InlineOperation,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2312,11 +2330,111 @@ fn writer_agent_ghost_messages(
     ]
 }
 
+fn writer_agent_inline_operation_messages(
+    message: &str,
+    observation: &writer_agent::observation::WriterObservation,
+    pack: &writer_agent::context::WritingContextPack,
+) -> Vec<serde_json::Value> {
+    let context = render_writer_context_pack(pack);
+    let selected = observation.selected_text();
+    vec![
+        serde_json::json!({
+            "role": "system",
+            "content": "你是 Forge 的 Cursor 式中文小说写作 Agent。你只为当前光标生成可执行的正文改写或插入文本，不聊天，不解释，不输出 Markdown，不输出 XML action 标签。必须尊重 ContextPack、设定、伏笔和光标后文。输出必须是可直接进入小说正文的中文文本。"
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!(
+                "作者指令: {}\n章节: {}\n光标文本位置: {}\n选中文本:\n{}\n\n光标前文:\n{}\n\n光标后文:\n{}\n\nContextPack:\n{}\n\n请只输出要应用到正文中的文本:",
+                message,
+                observation.chapter_title.as_deref().unwrap_or("current chapter"),
+                observation.cursor.as_ref().map(|c| c.to).unwrap_or(0),
+                selected,
+                observation.prefix,
+                observation.suffix,
+                context
+            )
+        }),
+    ]
+}
+
 fn source_refs_from_context_pack(pack: &writer_agent::context::WritingContextPack) -> Vec<String> {
     pack.sources
         .iter()
         .map(|source| format!("{:?}", source.source))
         .collect()
+}
+
+fn ask_agent_request_id(context_payload: Option<&AskAgentContext>) -> String {
+    context_payload
+        .and_then(|payload| payload.request_id.clone())
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| format!("ask-{}", agent_runtime::now_ms()))
+}
+
+async fn run_inline_writer_operation(
+    app: tauri::AppHandle,
+    message: String,
+    context: String,
+    paragraph: String,
+    selected_text: String,
+    context_payload: Option<AskAgentContext>,
+) -> Result<(), String> {
+    let api_key = require_api_key()?;
+    let settings = llm_runtime::settings(api_key);
+    let model = settings.model.clone();
+    let project_id = storage::active_project_id(&app)?;
+    let request_id = ask_agent_request_id(context_payload.as_ref());
+    let observation = build_manual_writer_observation(
+        &message,
+        &context,
+        &paragraph,
+        &selected_text,
+        context_payload.as_ref(),
+        &project_id,
+    );
+    let (context_pack, local_proposals) = {
+        let state = app.state::<AppState>();
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        refresh_kernel_canon_from_lorebook(&app, &mut kernel);
+        let local_proposals = kernel.observe(observation.clone())?;
+        let context_pack = kernel.context_pack_for(
+            writer_agent::context::AgentTask::InlineRewrite,
+            &observation,
+            4_500,
+        );
+        (context_pack, local_proposals)
+    };
+
+    for proposal in local_proposals {
+        app.emit(events::AGENT_PROPOSAL, proposal)
+            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+    }
+
+    let messages = writer_agent_inline_operation_messages(&message, &observation, &context_pack);
+    let draft = llm_runtime::chat_text(&settings, messages, false, 30).await?;
+    let proposal = {
+        let state = app.state::<AppState>();
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        kernel.create_inline_operation_proposal(observation.clone(), &message, draft, &model)?
+    };
+    let Some(operation) = proposal.operations.first().cloned() else {
+        return Err("Inline operation proposal did not include an operation".to_string());
+    };
+
+    app.emit(events::AGENT_PROPOSAL, proposal.clone())
+        .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+    app.emit(
+        events::INLINE_WRITER_OPERATION,
+        InlineWriterOperationEvent {
+            request_id,
+            proposal,
+            operation,
+        },
+    )
+    .map_err(|e| format!("Failed to emit inline writer operation: {}", e))?;
+
+    Ok(())
 }
 
 fn render_writer_ledger_snapshot(
@@ -2781,6 +2899,22 @@ async fn ask_agent(
     selected_text: String,
     context_payload: Option<AskAgentContext>,
 ) -> Result<(), String> {
+    if context_payload
+        .as_ref()
+        .and_then(|payload| payload.mode.as_ref())
+        .is_some_and(|mode| *mode == AskAgentMode::InlineOperation)
+    {
+        return run_inline_writer_operation(
+            app,
+            message,
+            context,
+            paragraph,
+            selected_text,
+            context_payload,
+        )
+        .await;
+    }
+
     let api_key = require_api_key()?;
     let api_base =
         std::env::var("OPENAI_API_BASE").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());

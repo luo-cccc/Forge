@@ -1206,11 +1206,15 @@ mod tests {
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         let unique = unix_time_ms();
-        std::env::temp_dir().join(format!(
+        let path = std::env::temp_dir().join(format!(
             "forge-storage-test-{}-{}-{}",
             std::process::id(),
             unique,
             name
-        ))
+        ));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        path
     }
 }
