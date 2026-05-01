@@ -94,6 +94,7 @@ pub struct StoryDebtSnapshot {
     pub total: usize,
     pub open_count: usize,
     pub contract_count: usize,
+    pub mission_count: usize,
     pub canon_risk_count: usize,
     pub promise_count: usize,
     pub pacing_count: usize,
@@ -120,6 +121,7 @@ pub struct StoryDebtEntry {
 #[serde(rename_all = "snake_case")]
 pub enum StoryDebtCategory {
     StoryContract,
+    ChapterMission,
     CanonRisk,
     TimelineRisk,
     Promise,
@@ -1474,6 +1476,10 @@ impl WriterAgentKernel {
             .iter()
             .filter(|entry| entry.category == StoryDebtCategory::StoryContract)
             .count();
+        let mission_count = entries
+            .iter()
+            .filter(|entry| entry.category == StoryDebtCategory::ChapterMission)
+            .count();
         let canon_risk_count = entries
             .iter()
             .filter(|entry| entry.category == StoryDebtCategory::CanonRisk)
@@ -1492,6 +1498,7 @@ impl WriterAgentKernel {
             total: entries.len(),
             open_count,
             contract_count,
+            mission_count,
             canon_risk_count,
             promise_count,
             pacing_count,
@@ -2193,6 +2200,7 @@ fn review_title_for_proposal(proposal: &AgentProposal) -> String {
     match proposal.kind {
         ProposalKind::ContinuityWarning => "Story truth conflict".to_string(),
         ProposalKind::StoryContract => "Story contract guard".to_string(),
+        ProposalKind::ChapterMission => "Chapter mission guard".to_string(),
         ProposalKind::PlotPromise => {
             if proposal
                 .operations
@@ -2337,6 +2345,7 @@ fn story_debt_category_for_review(entry: &StoryReviewQueueEntry) -> StoryDebtCat
             }
         }
         ProposalKind::StoryContract => StoryDebtCategory::StoryContract,
+        ProposalKind::ChapterMission => StoryDebtCategory::ChapterMission,
         ProposalKind::PlotPromise => StoryDebtCategory::Promise,
         ProposalKind::StyleNote => StoryDebtCategory::Pacing,
         ProposalKind::CanonUpdate => StoryDebtCategory::Memory,
@@ -2624,6 +2633,7 @@ fn diagnostic_to_proposal(
         DiagnosticCategory::UnresolvedPromise => ProposalKind::PlotPromise,
         DiagnosticCategory::CanonConflict => ProposalKind::ContinuityWarning,
         DiagnosticCategory::StoryContractViolation => ProposalKind::StoryContract,
+        DiagnosticCategory::ChapterMissionViolation => ProposalKind::ChapterMission,
         DiagnosticCategory::PacingNote => ProposalKind::StyleNote,
         DiagnosticCategory::CharacterVoiceInconsistency => ProposalKind::StyleNote,
         DiagnosticCategory::TimelineIssue => ProposalKind::ContinuityWarning,
@@ -2636,6 +2646,7 @@ fn diagnostic_to_proposal(
                 "canon" => EvidenceSource::Canon,
                 "promise" => EvidenceSource::PromiseLedger,
                 "story_contract" => EvidenceSource::StoryContract,
+                "chapter_mission" => EvidenceSource::ChapterMission,
                 "outline" => EvidenceSource::Outline,
                 "style" => EvidenceSource::StyleLedger,
                 _ => EvidenceSource::ChapterText,
@@ -3412,9 +3423,10 @@ fn context_pack_evidence(
             ContextSource::CanonSlice => EvidenceSource::Canon,
             ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
             ContextSource::ProjectBrief => EvidenceSource::StoryContract,
+            ContextSource::ChapterMission => EvidenceSource::ChapterMission,
             ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
-            ContextSource::OutlineSlice | ContextSource::ChapterMission => EvidenceSource::Outline,
+            ContextSource::OutlineSlice => EvidenceSource::Outline,
             ContextSource::ResultFeedback => EvidenceSource::ChapterText,
             _ => EvidenceSource::ChapterText,
         };

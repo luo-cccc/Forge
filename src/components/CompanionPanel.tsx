@@ -254,6 +254,7 @@ function buildSecondBrainItems(
   currentChapter: string,
 ): SecondBrainItem[] {
   const contractDebt = firstDebt(storyDebt, ["story_contract"]);
+  const missionDebt = firstDebt(storyDebt, ["chapter_mission"]);
   const canonRisk = firstDebt(storyDebt, ["canon_risk", "timeline_risk"]);
   const promiseDebt = firstDebt(storyDebt, ["promise"]);
   const pacingDebt = firstDebt(storyDebt, ["pacing"]);
@@ -282,7 +283,7 @@ function buildSecondBrainItems(
     storyContract.readerPromise.includes("保持主线清晰")
   ));
 
-  const sceneGoal = contractDebt ?? canonRisk ?? promiseDebt ?? pacingDebt;
+  const sceneGoal = contractDebt ?? missionDebt ?? canonRisk ?? promiseDebt ?? pacingDebt;
   const sceneValue = sceneGoal
     ? compactLine(sceneGoal.title, "Resolve current story debt", 72)
     : nextBeat
@@ -372,7 +373,9 @@ function buildSecondBrainItems(
         "Book-level promise is active.",
       )
     : "Set the book-level promise so the agent can judge local choices against the whole novel.";
-  const missionValue = chapterMission
+  const missionValue = missionDebt
+    ? compactLine(missionDebt.title, "Chapter mission guard", 72)
+    : chapterMission
     ? compactLine(
         `${missionStatusLabel(chapterMission.status)} · ${chapterMission.mission || chapterMission.expectedEnding}`,
         "Current chapter mission",
@@ -381,7 +384,9 @@ function buildSecondBrainItems(
     : currentChapter
       ? "No chapter mission"
       : "No chapter loaded";
-  const missionDetail = chapterMission
+  const missionDetail = missionDebt
+    ? compactLine(missionDebt.message, "Resolve or update this chapter mission")
+    : chapterMission
     ? compactLine(
         [
           chapterMission.mustInclude && `Must: ${chapterMission.mustInclude}`,
@@ -422,7 +427,7 @@ function buildSecondBrainItems(
       label: "Chapter Mission",
       value: missionValue,
       detail: missionDetail,
-      tone: chapterMission ? missionStatusTone(chapterMission.status) : "accent",
+      tone: missionDebt ? "danger" : chapterMission ? missionStatusTone(chapterMission.status) : "accent",
     },
     {
       label: "Last Result",
@@ -1102,7 +1107,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     {storyDebt.chapterTitle || currentChapter || "project"}
                   </span>
                 </div>
-                <div className="mt-2 grid grid-cols-5 gap-1 text-center">
+                <div className="mt-2 grid grid-cols-6 gap-1 text-center">
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-text-primary">{storyDebt.openCount}</div>
                     <div className="text-[10px] text-text-muted">open</div>
@@ -1110,6 +1115,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.contractCount}</div>
                     <div className="text-[10px] text-text-muted">contract</div>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-danger">{storyDebt.missionCount}</div>
+                    <div className="text-[10px] text-text-muted">mission</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.canonRiskCount}</div>

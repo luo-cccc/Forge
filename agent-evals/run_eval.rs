@@ -772,6 +772,62 @@ fn run_chapter_mission_result_feedback_eval() -> EvalResult {
     )
 }
 
+fn run_chapter_mission_guard_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落，但不能提前揭开真相。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨直接揭开了真相，玉佩来自禁地。",
+            "Chapter-2",
+        ))
+        .unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    let guard = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::ChapterMission);
+    if guard.is_none() {
+        errors.push("missing chapter mission guard proposal".to_string());
+    }
+    if !guard.is_some_and(|proposal| {
+        proposal
+            .evidence
+            .iter()
+            .any(|evidence| evidence.source == EvidenceSource::ChapterMission)
+            && proposal
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::TextAnnotate { .. }))
+    }) {
+        errors.push(
+            "chapter mission guard lacks mission evidence or annotation operation".to_string(),
+        );
+    }
+    if !debt.entries.iter().any(|entry| {
+        entry.category == StoryDebtCategory::ChapterMission && entry.title.contains("mission")
+    }) {
+        errors.push("chapter mission guard did not enter story debt".to_string());
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_guard_story_debt",
+        format!("proposals={} debt={}", proposals.len(), debt.total),
+        errors,
+    )
+}
+
 fn run_next_beat_context_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1387,6 +1443,7 @@ fn main() {
     results.push(run_story_contract_context_eval());
     results.push(run_story_contract_guard_eval());
     results.push(run_chapter_mission_result_feedback_eval());
+    results.push(run_chapter_mission_guard_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());

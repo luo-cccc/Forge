@@ -4,7 +4,7 @@
 //! - Unresolved plot promises in current chapter scope
 //! - Timeline inconsistencies
 
-use super::memory::{StoryContractSummary, WriterMemory};
+use super::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
 use super::operation::{AnnotationSeverity, WriterOperation};
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,7 @@ pub enum DiagnosticCategory {
     CanonConflict,
     UnresolvedPromise,
     StoryContractViolation,
+    ChapterMissionViolation,
     TimelineIssue,
     CharacterVoiceInconsistency,
     PacingNote,
@@ -177,7 +178,35 @@ impl DiagnosticsEngine {
             }
         }
 
-        // 3. Open promises for this chapter.
+        // 3. Chapter mission guard checks.
+        if let Ok(Some(mission)) = memory.get_chapter_mission(project_id, chapter_id) {
+            for issue in detect_chapter_mission_violations(paragraph, paragraph_offset, &mission) {
+                results.push(DiagnosticResult {
+                    id: next_id(),
+                    severity: issue.severity,
+                    category: DiagnosticCategory::ChapterMissionViolation,
+                    message: issue.message,
+                    entity_name: None,
+                    from: issue.from,
+                    to: issue.to,
+                    evidence: vec![DiagnosticEvidence {
+                        source: "chapter_mission".into(),
+                        reference: issue.reference,
+                        snippet: issue.snippet,
+                    }],
+                    fix_suggestion: Some(issue.fix_suggestion),
+                    operations: vec![WriterOperation::TextAnnotate {
+                        chapter: chapter_id.to_string(),
+                        from: issue.from,
+                        to: issue.to,
+                        message: issue.annotation,
+                        severity: issue.annotation_severity,
+                    }],
+                });
+            }
+        }
+
+        // 4. Open promises for this chapter.
         if let Ok(promises) = memory.get_open_promise_summaries() {
             for promise in &promises {
                 if !is_later_chapter(chapter_id, &promise.introduced_chapter) {
@@ -249,7 +278,7 @@ impl DiagnosticsEngine {
             }
         }
 
-        // 4. Pacing check (paragraph length).
+        // 5. Pacing check (paragraph length).
         if paragraph.chars().count() > 2000 {
             results.push(DiagnosticResult {
                 id: next_id(),
@@ -539,6 +568,18 @@ struct StoryContractIssue {
     annotation_severity: AnnotationSeverity,
 }
 
+struct ChapterMissionIssue {
+    severity: DiagnosticSeverity,
+    message: String,
+    from: usize,
+    to: usize,
+    reference: String,
+    snippet: String,
+    fix_suggestion: String,
+    annotation: String,
+    annotation_severity: AnnotationSeverity,
+}
+
 fn detect_story_contract_violations(
     paragraph: &str,
     paragraph_offset: usize,
@@ -555,6 +596,114 @@ fn detect_story_contract_violations(
     }
 
     issues
+}
+
+fn detect_chapter_mission_violations(
+    paragraph: &str,
+    paragraph_offset: usize,
+    mission: &ChapterMissionSummary,
+) -> Vec<ChapterMissionIssue> {
+    let mut issues = Vec::new();
+
+    if let Some(issue) = detect_mission_must_not_violation(
+        paragraph,
+        paragraph_offset,
+        &mission.chapter_title,
+        &mission.must_not,
+    ) {
+        issues.push(issue);
+    }
+
+    issues
+}
+
+fn detect_mission_must_not_violation(
+    paragraph: &str,
+    paragraph_offset: usize,
+    chapter_title: &str,
+    must_not: &str,
+) -> Option<ChapterMissionIssue> {
+    let must_not = must_not.trim();
+    if must_not.is_empty() {
+        return None;
+    }
+
+    let terms = mission_guard_terms(must_not);
+    let matched = terms
+        .iter()
+        .find_map(|term| match_mission_guard_term(paragraph, term))?;
+    let from = paragraph_offset + matched.0;
+    let to = paragraph_offset + matched.1.max(matched.0 + 1);
+
+    Some(ChapterMissionIssue {
+        severity: DiagnosticSeverity::Error,
+        message: format!(
+            "章节任务违例: {} 的禁止事项被触碰「{}」",
+            chapter_title, must_not
+        ),
+        from,
+        to,
+        reference: format!("{}:must_not", chapter_title),
+        snippet: must_not.to_string(),
+        fix_suggestion: "保留悬念、换成误导或旁证，或先更新本章任务再继续。".to_string(),
+        annotation: format!("疑似违反本章禁止事项：{}", must_not),
+        annotation_severity: AnnotationSeverity::Error,
+    })
+}
+
+fn mission_guard_terms(must_not: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for term in meaningful_terms(must_not) {
+        if is_mission_guard_stop_term(&term) {
+            continue;
+        }
+        push_term(&mut terms, &term);
+    }
+
+    let chars = must_not.chars().collect::<Vec<_>>();
+    for pair in chars.windows(2) {
+        let term = pair.iter().collect::<String>();
+        if term.chars().all(is_term_char)
+            && !is_mission_guard_stop_term(&term)
+            && !is_stop_term(&term)
+        {
+            push_term(&mut terms, &term);
+        }
+    }
+
+    terms
+}
+
+fn match_mission_guard_term(paragraph: &str, term: &str) -> Option<(usize, usize)> {
+    if let Some(byte_pos) = paragraph.find(term) {
+        let from = byte_to_char_index(paragraph, byte_pos);
+        return Some((from, from + term.chars().count()));
+    }
+
+    if term.chars().count() == 2 {
+        let chars = term.chars().collect::<Vec<_>>();
+        if chars.len() == 2 && paragraph.contains(chars[0]) && paragraph.contains(chars[1]) {
+            let first = paragraph
+                .find(chars[0])
+                .map(|pos| byte_to_char_index(paragraph, pos))?;
+            let second = paragraph
+                .find(chars[1])
+                .map(|pos| byte_to_char_index(paragraph, pos))?;
+            let from = first.min(second);
+            let to = first.max(second) + 1;
+            return Some((from, to));
+        }
+    }
+
+    None
+}
+
+fn is_mission_guard_stop_term(term: &str) -> bool {
+    const STOP_TERMS: &[&str] = &[
+        "不得", "不要", "不能", "禁止", "不许", "避免", "提前", "泄露", "揭露", "揭示", "揭开",
+        "本章", "事项",
+    ];
+    STOP_TERMS.iter().any(|stop| term.contains(stop))
 }
 
 fn detect_structural_boundary_violation(
@@ -986,6 +1135,35 @@ mod tests {
             .unwrap();
         assert!(warning.message.contains("书级合同违例"));
         assert_eq!(warning.evidence[0].source, "story_contract");
+    }
+
+    #[test]
+    fn test_chapter_mission_must_not_violation_warns() {
+        let m = test_memory();
+        m.ensure_chapter_mission_seed(
+            "default",
+            "Chapter-2",
+            "让林墨追查玉佩下落。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "test",
+        )
+        .unwrap();
+        let engine = DiagnosticsEngine::new();
+        let results = engine.diagnose(
+            "林墨直接揭开了真相，玉佩来自禁地。",
+            0,
+            "Chapter-2",
+            "default",
+            &m,
+        );
+        let warning = results
+            .iter()
+            .find(|result| matches!(result.category, DiagnosticCategory::ChapterMissionViolation))
+            .unwrap();
+        assert!(warning.message.contains("章节任务违例"));
+        assert_eq!(warning.evidence[0].source, "chapter_mission");
     }
 
     #[test]
