@@ -476,3 +476,79 @@ export interface EditorEventPayload {
   full_text_snippet?: string;
 }
 
+
+// === Writer Agent Protocol (replaces XML action tags) ===
+
+export interface WriterObservation {
+  id: string;
+  createdAt: number;
+  source: "editor" | "outline" | "lorebook" | "chapter_save" | "manual_request";
+  reason: "typed" | "idle" | "selection" | "chapter_switch" | "save" | "explicit";
+  projectId: string;
+  chapterTitle?: string;
+  chapterRevision?: string;
+  cursor?: { from: number; to: number };
+  selection?: { from: number; to: number; text: string };
+  prefix: string;
+  suffix: string;
+  paragraph: string;
+  fullTextDigest?: string;
+  editorDirty: boolean;
+}
+
+export interface AgentProposal {
+  id: string;
+  observationId: string;
+  kind: "ghost" | "parallel_draft" | "continuity_warning" | "canon_update"
+    | "style_note" | "plot_promise" | "chapter_structure" | "question";
+  priority: "ambient" | "normal" | "urgent";
+  target?: { from: number; to: number };
+  preview: string;
+  operations: WriterOperation[];
+  rationale: string;
+  evidence: EvidenceRef[];
+  risks: string[];
+  confidence: number;
+  expiresAt?: number;
+}
+
+export interface EvidenceRef {
+  source: "lorebook" | "outline" | "chapter_text" | "canon" | "style_ledger" | "promise_ledger" | "author_feedback";
+  reference: string;
+  snippet: string;
+}
+
+export type WriterOperation =
+  | { kind: "text.insert"; chapter: string; at: number; text: string }
+  | { kind: "text.replace"; chapter: string; from: number; to: number; text: string }
+  | { kind: "text.annotate"; chapter: string; from: number; to: number; message: string; severity: string }
+  | { kind: "canon.upsert_entity"; entity: unknown }
+  | { kind: "canon.upsert_rule"; rule: unknown }
+  | { kind: "promise.add"; promise: unknown }
+  | { kind: "promise.resolve"; promiseId: string; chapter: string }
+  | { kind: "style.update_preference"; key: string; value: string }
+  | { kind: "outline.update"; nodeId: string; patch: unknown };
+
+export interface ProposalFeedback {
+  proposalId: string;
+  action: "accepted" | "rejected" | "edited" | "snoozed" | "explained";
+  finalText?: string;
+  reason?: string;
+  createdAt: number;
+}
+
+export interface WriterAgentStatus {
+  projectId: string;
+  sessionId: string;
+  activeChapter: string | null;
+  observationCount: number;
+  proposalCount: number;
+  openPromiseCount: number;
+  pendingProposals: number;
+  totalFeedbackEvents: number;
+}
+
+export const WriterAgentCommands = {
+  getWriterAgentStatus: "get_writer_agent_status",
+  agentObserve: "agent_observe",
+} as const;

@@ -13,6 +13,7 @@ mod chapter_generation;
 mod llm_runtime;
 mod storage;
 mod tool_bridge;
+mod writer_agent;
 use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
@@ -128,6 +129,7 @@ struct AppState {
     harness_state: Mutex<HarnessState>,
     hermes_db: Mutex<HermesDB>,
     editor_prediction: Mutex<Option<EditorPredictionTask>>,
+    writer_kernel: Mutex<writer_agent::WriterAgentKernel>,
 }
 
 struct EditorPredictionTask {
@@ -1582,6 +1584,12 @@ fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, 
 }
 
 #[tauri::command]
+fn get_writer_agent_status(state: tauri::State<'_, AppState>) -> Result<writer_agent::WriterAgentStatus, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.status())
+}
+
+#[tauri::command]
 fn agent_observe(
     app: tauri::AppHandle,
     observation: AgentObservation,
@@ -1845,6 +1853,16 @@ pub fn run() {
             ambient_agents::context_fetcher::ContextCache::default(),
         ));
 
+    // Initialize Writer Agent Kernel with creative memory
+    let writer_kernel = {
+        let writer_memory_path = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("writer_memory.db");
+        let writer_memory = writer_agent::memory::WriterMemory::open(&writer_memory_path)
+            .unwrap_or_else(|_| writer_agent::memory::WriterMemory::open(std::path::Path::new(":memory:")).unwrap());
+        writer_agent::WriterAgentKernel::new("default", writer_memory)
+    };
+
     // Capture clones before the setup closure
     let cache1 = cache.clone();
 
@@ -1852,23 +1870,16 @@ pub fn run() {
         .setup(move |app| {
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
             let ah = app.handle().clone();
-            let output_app = ah.clone();
-            event_bus.set_output_handler(std::sync::Arc::new(move |output| {
-                emit_ambient_output(&output_app, output);
-            }));
 
-            event_bus.spawn_agent(std::sync::Arc::new(
-                ambient_agents::context_fetcher::ContextFetcherAgent {
-                    app: ah.clone(),
-                    cache: cache1,
-                },
-            ));
-            event_bus.spawn_agent(std::sync::Arc::new(
-                ambient_agents::continuity_watcher::ContinuityWatcher { app: ah.clone() },
-            ));
-            event_bus.spawn_agent(std::sync::Arc::new(
-                ambient_agents::pacing_analyst::PacingAnalyst { app: ah.clone() },
-            ));
+            event_bus.spawn(
+                std::sync::Arc::new(
+                    ambient_agents::context_fetcher::ContextFetcherAgent {
+                        app: ah.clone(),
+                        cache: cache1,
+                    },
+                ),
+                std::sync::Arc::new(|_| {}),
+            );
 
             app.manage(Mutex::new(event_bus));
             Ok(())
@@ -1877,6 +1888,7 @@ pub fn run() {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
             editor_prediction: Mutex::new(None),
+            writer_kernel: Mutex::new(writer_kernel),
         })
         .manage(cache)
         .invoke_handler(tauri::generate_handler![
@@ -1888,6 +1900,7 @@ pub fn run() {
             agent_observe,
             get_agent_domain_profile,
             get_agent_kernel_status,
+            get_writer_agent_status,
             get_agent_tools,
             get_lorebook,
             save_lore_entry,
