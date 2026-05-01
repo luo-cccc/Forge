@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::compaction::{should_compact, compact_messages, CompactionConfig, CompactionResult};
 use crate::provider::{LlmMessage, LlmRequest, Provider, StreamEvent};
 use crate::router::{classify_intent, Intent};
 use crate::tool_executor::{ToolExecution, ToolExecutor, ToolHandler};
@@ -27,6 +28,12 @@ pub enum AgentLoopEvent {
     },
     #[serde(rename = "doom_loop_warning")]
     DoomLoopWarning { tool: String },
+    #[serde(rename = "compaction")]
+    Compaction {
+        before_tokens: u64,
+        after_tokens: u64,
+        compacted_count: usize,
+    },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "complete")]
@@ -253,6 +260,28 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             });
 
             rounds += 1;
+
+            // Auto-compaction check after each tool-execution round
+            let compaction_cfg = CompactionConfig::default();
+            if should_compact(&self.messages, &self.config.system_prompt, &compaction_cfg) {
+                let before = self.estimate_tokens();
+                match compact_messages(&self.messages, &compaction_cfg, &*self.provider).await {
+                    Ok((compacted, report)) => {
+                        self.messages = compacted;
+                        self.emit(AgentLoopEvent::Compaction {
+                            before_tokens: before,
+                            after_tokens: report.tokens_after,
+                            compacted_count: report.compacted_count,
+                        });
+                    }
+                    Err(e) => {
+                        self.emit(AgentLoopEvent::Error {
+                            message: format!("Compaction failed: {}", e),
+                        });
+                        // Continue without compaction — better than crashing
+                    }
+                }
+            }
         }
 
         // Check max rounds exceeded

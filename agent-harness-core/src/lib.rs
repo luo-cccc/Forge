@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agent_loop;
+pub mod compaction;
 pub mod config;
 pub mod context_pack;
 pub mod domain;
@@ -16,6 +17,10 @@ pub mod vector_db;
 
 pub use actions::{parse_actions, Action};
 pub use agent_loop::{AgentLoop, AgentLoopConfig, AgentLoopEvent};
+pub use compaction::{
+    compact_messages, estimate_message_tokens, find_safe_boundary, should_compact,
+    CompactionConfig, CompactionResult,
+};
 pub use config::HarnessConfig;
 pub use context_pack::{
     char_count, truncate_text_report, ContextBudgetReport, ContextPacker, ContextSourceReport,
