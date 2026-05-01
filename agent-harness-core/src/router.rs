@@ -1,13 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Semantic intents the router can classify
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Intent {
     Chat,
     RetrieveKnowledge,
     AnalyzeText,
     GenerateContent,
     ExecutePlan,
+    Linter,
 }
 
 /// Lightweight intent classifier — regex/pattern-based, no LLM call

@@ -1,13 +1,19 @@
 use std::sync::{Mutex, MutexGuard};
 
-use agent_harness_core::{classify_intent, hermes_memory::HermesDB};
+use agent_harness_core::{
+    classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, writing_domain_profile,
+    AgentLoop, AgentLoopConfig, AgentLoopEvent,
+    provider::openai_compat::OpenAiCompatProvider,
+};
 
-mod brain_service;
 mod agent_runtime;
+mod ambient_agents;
+mod brain_service;
 mod chapter_generation;
 mod llm_runtime;
 mod storage;
-use agent_runtime::{AgentObserveResult, AgentObservation, AgentToolDescriptor};
+mod tool_bridge;
+use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
 };
@@ -25,6 +31,9 @@ mod events {
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
     pub const BATCH_STATUS: &str = "batch-status";
     pub const CHAPTER_GENERATION: &str = "chapter-generation";
+    pub const EDITOR_GHOST_CHUNK: &str = "editor-ghost-chunk";
+    pub const EDITOR_GHOST_END: &str = "editor-ghost-end";
+    pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
 }
 
 #[tauri::command]
@@ -115,6 +124,7 @@ fn require_api_key() -> Result<String, String> {
 }
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 enum HarnessState {
@@ -126,6 +136,12 @@ enum HarnessState {
 struct AppState {
     harness_state: Mutex<HarnessState>,
     hermes_db: Mutex<HermesDB>,
+    editor_prediction: Mutex<Option<EditorPredictionTask>>,
+}
+
+struct EditorPredictionTask {
+    request_id: String,
+    cancel: CancellationToken,
 }
 
 fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
@@ -140,6 +156,15 @@ fn lock_harness_state<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HarnessS
         .harness_state
         .lock()
         .map_err(|_| "Harness state lock poisoned".to_string())
+}
+
+fn lock_editor_prediction<'a>(
+    state: &'a AppState,
+) -> Result<MutexGuard<'a, Option<EditorPredictionTask>>, String> {
+    state
+        .editor_prediction
+        .lock()
+        .map_err(|_| "Editor prediction lock poisoned".to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -278,6 +303,67 @@ struct AgentError {
     source: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentKernelStatus {
+    tool_generation: u64,
+    tool_count: usize,
+    approval_required_tool_count: usize,
+    write_tool_count: usize,
+    domain_id: String,
+    capability_count: usize,
+    quality_gate_count: usize,
+    trace_enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorStatePayload {
+    request_id: String,
+    prefix: String,
+    suffix: String,
+    cursor_position: usize,
+    paragraph: String,
+    chapter_title: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostChunk {
+    request_id: String,
+    cursor_position: usize,
+    content: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostEnd {
+    request_id: String,
+    cursor_position: usize,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SemanticLintPayload {
+    request_id: String,
+    paragraph: String,
+    paragraph_from: usize,
+    cursor_position: usize,
+    chapter_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorSemanticLint {
+    request_id: String,
+    cursor_position: usize,
+    from: usize,
+    to: usize,
+    message: String,
+    severity: String,
+}
+
 fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
     let _ = app.emit(
         events::AGENT_ERROR,
@@ -286,6 +372,349 @@ fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
             source: source.to_string(),
         },
     );
+}
+
+fn realtime_cowrite_enabled() -> bool {
+    std::env::var("AGENT_WRITER_REALTIME_COWRITE")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
+        })
+        .unwrap_or(true)
+}
+
+fn build_fim_messages(
+    prefix: &str,
+    suffix: &str,
+    chapter_title: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let title = chapter_title.unwrap_or("current chapter");
+    let system_prompt = "You are a low-latency fill-in-the-middle writing engine for a novelist. \
+Complete only the text that belongs exactly at the cursor. Return 1-3 short Chinese sentences at most. \
+Do not explain, do not quote the prompt, do not wrap the answer in markdown, and stop at a natural boundary.";
+    let user_prompt = format!(
+        "<|fim_prefix|>\n# {}\n{}\n<|fim_suffix|>\n{}\n<|fim_middle|>",
+        title, prefix, suffix
+    );
+
+    vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": user_prompt}),
+    ]
+}
+
+fn paragraph_hint(paragraph: &str) -> String {
+    let trimmed = paragraph.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("\nCurrent paragraph:\n{}\n", trimmed)
+    }
+}
+
+fn trim_ghost_completion(text: &str) -> String {
+    let without_markers = text
+        .replace("<|fim_middle|>", "")
+        .replace("<|fim_prefix|>", "")
+        .replace("<|fim_suffix|>", "");
+    let trimmed = without_markers.trim_matches(|c: char| c == '`' || c.is_whitespace());
+    trimmed.chars().take(180).collect::<String>()
+}
+
+fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
+    text[..byte_index.min(text.len())].chars().count()
+}
+
+fn find_char_range(text: &str, needle: &str) -> Option<(usize, usize)> {
+    let start_byte = text.find(needle)?;
+    let start = byte_to_char_index(text, start_byte);
+    let end = start + needle.chars().count();
+    Some((start, end))
+}
+
+fn semantic_lint_enabled() -> bool {
+    std::env::var("AGENT_WRITER_AMBIENT_LINTER")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
+        })
+        .unwrap_or(true)
+}
+
+fn build_lore_conflict_hint(
+    paragraph: &str,
+    lore_keyword: &str,
+    lore_content: &str,
+) -> Option<(usize, usize, String)> {
+    let keyword_present = !lore_keyword.trim().is_empty() && paragraph.contains(lore_keyword);
+    if !keyword_present {
+        return None;
+    }
+
+    let content = lore_content.to_lowercase();
+    let weapon_conflicts: [(&str, &[&str]); 3] = [
+        ("剑", &["刀", "弯刀", "短刀", "长刀", "匕首"]),
+        ("长剑", &["刀", "弯刀", "短刀", "长刀", "匕首"]),
+        ("枪", &["刀", "剑", "弓"]),
+    ];
+
+    for (draft_term, lore_terms) in weapon_conflicts {
+        if !paragraph.contains(draft_term) {
+            continue;
+        }
+
+        if let Some(preferred) = lore_terms.iter().find(|term| content.contains(*term)) {
+            let (start, end) = find_char_range(paragraph, draft_term)?;
+            return Some((
+                start,
+                end,
+                format!(
+                    "设定冲突：{} 的设定更接近使用{}，这里写成{}可能需要确认。",
+                    lore_keyword, preferred, draft_term
+                ),
+            ));
+        }
+    }
+
+    let contradiction_markers = ["不会", "不擅长", "不能", "从不", "禁止", "忌用"];
+    for marker in contradiction_markers {
+        let Some(marker_byte) = lore_content.find(marker) else {
+            continue;
+        };
+        let after_marker = &lore_content[marker_byte + marker.len()..];
+        let term: String = after_marker
+            .chars()
+            .skip_while(|c| c.is_whitespace() || *c == '用' || *c == '使')
+            .take_while(|c| c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(c))
+            .take(4)
+            .collect();
+
+        if term.chars().count() >= 1 && paragraph.contains(&term) {
+            let (start, end) = find_char_range(paragraph, &term)?;
+            return Some((
+                start,
+                end,
+                format!(
+                    "设定冲突：{} 的设定里提到“{}{}”。",
+                    lore_keyword, marker, term
+                ),
+            ));
+        }
+    }
+
+    None
+}
+
+fn find_semantic_lint(
+    app: &tauri::AppHandle,
+    payload: &SemanticLintPayload,
+) -> Option<EditorSemanticLint> {
+    let paragraph = payload.paragraph.trim();
+    if paragraph.chars().count() < 8 {
+        return None;
+    }
+    let chapter_label = payload
+        .chapter_title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("当前章节");
+
+    let lore_entries = storage::load_lorebook(app).unwrap_or_default();
+    for entry in lore_entries {
+        if let Some((from, to, message)) =
+            build_lore_conflict_hint(paragraph, &entry.keyword, &entry.content)
+        {
+            return Some(EditorSemanticLint {
+                request_id: payload.request_id.clone(),
+                cursor_position: payload.cursor_position,
+                from: payload.paragraph_from + from,
+                to: payload.paragraph_from + to,
+                message: format!("{}：{}", chapter_label, message),
+                severity: "warning".to_string(),
+            });
+        }
+    }
+
+    let state = app.state::<AppState>();
+    let Ok(db) = lock_hermes(&state) else {
+        return None;
+    };
+    let skills = db.get_active_skills().unwrap_or_default();
+    drop(db);
+
+    for skill in skills {
+        if let Some((from, to, message)) =
+            build_lore_conflict_hint(paragraph, &skill.category, &skill.skill)
+        {
+            return Some(EditorSemanticLint {
+                request_id: payload.request_id.clone(),
+                cursor_position: payload.cursor_position,
+                from: payload.paragraph_from + from,
+                to: payload.paragraph_from + to,
+                message: format!("{}：{}", chapter_label, message),
+                severity: "warning".to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+fn abort_editor_prediction_task(
+    state: &AppState,
+    request_id: Option<&str>,
+) -> Result<bool, String> {
+    let mut task = lock_editor_prediction(state)?;
+    let should_cancel = match (&*task, request_id) {
+        (Some(active), Some(request_id)) => active.request_id == request_id,
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+
+    if should_cancel {
+        if let Some(active) = task.take() {
+            active.cancel.cancel();
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn clear_editor_prediction_task(state: &AppState, request_id: &str) -> Result<(), String> {
+    let mut task = lock_editor_prediction(state)?;
+    if task
+        .as_ref()
+        .is_some_and(|active| active.request_id == request_id)
+    {
+        *task = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn abort_editor_prediction(
+    app: tauri::AppHandle,
+    request_id: Option<String>,
+) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    abort_editor_prediction_task(&state, request_id.as_deref())
+}
+
+#[tauri::command]
+async fn report_editor_state(
+    app: tauri::AppHandle,
+    payload: EditorStatePayload,
+) -> Result<(), String> {
+    if !realtime_cowrite_enabled() {
+        return Ok(());
+    }
+
+    let prefix = payload.prefix.trim_end();
+    if prefix.chars().count() < 12 {
+        return Ok(());
+    }
+
+    let Some(api_key) = resolve_api_key() else {
+        return Ok(());
+    };
+
+    let request_id = payload.request_id.clone();
+    let cursor_position = payload.cursor_position;
+    let cancel = CancellationToken::new();
+
+    {
+        let state = app.state::<AppState>();
+        abort_editor_prediction_task(&state, None)?;
+        let mut task = lock_editor_prediction(&state)?;
+        *task = Some(EditorPredictionTask {
+            request_id: request_id.clone(),
+            cancel: cancel.clone(),
+        });
+    }
+
+    let settings = llm_runtime::settings(api_key);
+    let mut prefix = payload.prefix.clone();
+    prefix.push_str(&paragraph_hint(&payload.paragraph));
+    let messages = build_fim_messages(&prefix, &payload.suffix, payload.chapter_title.as_deref());
+    let app_clone = app.clone();
+
+    tokio::spawn(async move {
+        let mut emitted_chars = 0usize;
+        let stream_result = llm_runtime::stream_chat_cancellable(
+            &settings,
+            messages,
+            8,
+            cancel.clone(),
+            |content| {
+                let content = trim_ghost_completion(&content);
+                if content.is_empty() {
+                    return Ok(llm_runtime::StreamControl::Continue);
+                }
+
+                emitted_chars += content.chars().count();
+                let _ = app_clone.emit(
+                    events::EDITOR_GHOST_CHUNK,
+                    EditorGhostChunk {
+                        request_id: request_id.clone(),
+                        cursor_position,
+                        content,
+                    },
+                );
+
+                if emitted_chars >= 180 {
+                    Ok(llm_runtime::StreamControl::Stop)
+                } else {
+                    Ok(llm_runtime::StreamControl::Continue)
+                }
+            },
+        )
+        .await;
+
+        let reason = match stream_result {
+            Ok(_) => "complete",
+            Err(ref e) if e == "cancelled" || cancel.is_cancelled() => "cancelled",
+            Err(e) => {
+                tracing::warn!("Ghost completion failed: {}", e);
+                "error"
+            }
+        }
+        .to_string();
+
+        let _ = app_clone.emit(
+            events::EDITOR_GHOST_END,
+            EditorGhostEnd {
+                request_id: request_id.clone(),
+                cursor_position,
+                reason,
+            },
+        );
+
+        let state = app_clone.state::<AppState>();
+        let _ = clear_editor_prediction_task(&state, &request_id);
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn report_semantic_lint_state(
+    app: tauri::AppHandle,
+    payload: SemanticLintPayload,
+) -> Result<(), String> {
+    if !semantic_lint_enabled() {
+        return Ok(());
+    }
+
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        let _intent = agent_harness_core::Intent::Linter;
+        if let Some(lint) = find_semantic_lint(&app_clone, &payload) {
+            let _ = app_clone.emit(events::EDITOR_SEMANTIC_LINT, lint);
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -593,6 +1022,7 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
     }
 
     drop(db);
+
     parts.join("\n")
 }
 
@@ -842,6 +1272,32 @@ fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
 }
 
 #[tauri::command]
+fn get_agent_kernel_status() -> Result<AgentKernelStatus, String> {
+    let registry = default_writing_tool_registry();
+    let tools = registry.list();
+    let domain = writing_domain_profile();
+
+    Ok(AgentKernelStatus {
+        tool_generation: registry.generation(),
+        tool_count: tools.len(),
+        approval_required_tool_count: tools.iter().filter(|tool| tool.requires_approval).count(),
+        write_tool_count: tools
+            .iter()
+            .filter(|tool| tool.side_effect_level == agent_harness_core::ToolSideEffectLevel::Write)
+            .count(),
+        domain_id: domain.id,
+        capability_count: domain.capabilities.len(),
+        quality_gate_count: domain.quality_gates.len(),
+        trace_enabled: true,
+    })
+}
+
+#[tauri::command]
+fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, String> {
+    Ok(writing_domain_profile())
+}
+
+#[tauri::command]
 fn agent_observe(
     app: tauri::AppHandle,
     observation: AgentObservation,
@@ -860,15 +1316,18 @@ fn agent_observe(
         });
     }
 
-    let outline_summary = observation.chapter_title.as_ref().and_then(|chapter_title| {
-        storage::load_outline(&app).ok().and_then(|nodes| {
-            nodes
-                .into_iter()
-                .find(|node| &node.chapter_title == chapter_title)
-                .map(|node| node.summary)
-                .filter(|summary| !summary.trim().is_empty())
-        })
-    });
+    let outline_summary = observation
+        .chapter_title
+        .as_ref()
+        .and_then(|chapter_title| {
+            storage::load_outline(&app).ok().and_then(|nodes| {
+                nodes
+                    .into_iter()
+                    .find(|node| &node.chapter_title == chapter_title)
+                    .map(|node| node.summary)
+                    .filter(|summary| !summary.trim().is_empty())
+            })
+        });
 
     let paragraph_lower = observation.current_paragraph.to_lowercase();
     let nearby_lower = observation.nearby_text.to_lowercase();
@@ -886,8 +1345,12 @@ fn agent_observe(
     let profile_count = collect_user_profile_entries(&app)
         .map(|entries| entries.len())
         .unwrap_or(0);
-    let source_summaries =
-        agent_runtime::build_source_summaries(&observation, outline_summary, lore_hits, profile_count);
+    let source_summaries = agent_runtime::build_source_summaries(
+        &observation,
+        outline_summary,
+        lore_hits,
+        profile_count,
+    );
     let suggestion = agent_runtime::build_suggestion(
         &observation,
         request_id.clone(),
@@ -947,38 +1410,21 @@ async fn ask_agent(
     selected_text: String,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "deepseek/deepseek-v4-flash".into());
 
     let state = app.state::<AppState>();
-
     let truncated_context = truncate_context(&context, 2000);
 
-    // Semantic router: classify intent
+    // Check lore / outline availability for intent routing
     let has_lore = storage::load_lorebook(&app)
         .map(|l| !l.is_empty())
         .unwrap_or(false);
     let has_outline = storage::load_outline(&app)
         .map(|o| !o.is_empty())
         .unwrap_or(false);
-    let intent = classify_intent(&message, has_lore, has_outline);
-
-    // Emit CoT: intent detection
-    let _ = app.emit(
-        events::AGENT_CHAIN_OF_THOUGHT,
-        CoTEvent {
-            step: 0,
-            total: 1,
-            description: format!("Intent: {:?}", intent),
-            status: "done".to_string(),
-        },
-    );
-
-    // Log user message to Hermes memory
-    {
-        let state = app.state::<AppState>();
-        let db = lock_hermes(&state)?;
-        let _ = db.log_interaction("user", &message);
-    }
 
     // Build context injection from learned memory
     let memory_context = build_context_injection(&app, &message);
@@ -987,166 +1433,120 @@ async fn ask_agent(
         "You are a creative writing assistant helping the user write a novel.\n\
 {}\n\
 Current draft (last ~2000 chars):\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
 Current paragraph the user is focused on:\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
-Selected text (user wants to rewrite this):\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+Selected text:\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
-## Rules\n\
-1. Respond conversationally to the user's requests about their writing.\n\
-2. When you want to write NEW content into the editor, use:\n\
-   <ACTION_INSERT>your text here</ACTION_INSERT>\n\
-3. When the user provides selected text and asks you to rewrite, polish, or modify it, output ONLY the rewritten version wrapped in:\n\
-   <ACTION_REPLACE>rewritten text</ACTION_REPLACE>\n\
-   Do NOT include the original text in your response. Do NOT add explanations inside the tags.\n\
-4. You may use multiple ACTION_INSERT or ACTION_REPLACE blocks in a single response.\n\
-5. Do NOT wrap normal conversation in action tags — only content meant for the editor.\n\
-6. Action tags will be intercepted automatically; the user will NOT see them in chat.\n\
-7. If you need to know details about a character, location, or world setting that may exist in the lorebook, use:\n\
-   <ACTION_SEARCH>keyword</ACTION_SEARCH>\n\
-   The system will search the lorebook and return matching entries. Always search before inventing new details about named characters or settings.",
+Use the available tools to retrieve information about characters, settings, \
+and lore before inventing new details. Search the lorebook for named entities.",
         memory_context, truncated_context, paragraph, selected_text
     );
 
-    let mut messages: Vec<serde_json::Value> = vec![
-        serde_json::json!({"role": "system", "content": system_prompt}),
-        serde_json::json!({"role": "user", "content": message}),
-    ];
+    // Build provider
+    let provider = std::sync::Arc::new(OpenAiCompatProvider::new(
+        &api_base,
+        &api_key,
+        &model,
+    ));
 
-    let max_rounds = 3u32;
+    // Build tool registry + bridge
+    let registry = default_writing_tool_registry();
+    let bridge = tool_bridge::TauriToolBridge {
+        app: app.clone(),
+    };
 
-    for round in 0..max_rounds {
-        {
-            let mut s = lock_harness_state(&state)?;
-            *s = HarnessState::Thinking;
-        }
-
-        {
-            let mut s = lock_harness_state(&state)?;
-            *s = HarnessState::Streaming;
-        }
-
-        let mut raw_buffer = String::new();
-        let mut found_search = false;
-        let mut search_keyword = String::new();
-
-        let stream_result = llm_runtime::stream_chat(&settings, messages.clone(), 60, |content| {
-            raw_buffer.push_str(&content);
-
-            if let Some(keyword) = extract_action_search(&raw_buffer) {
-                found_search = true;
-                search_keyword = keyword;
-                return Ok(llm_runtime::StreamControl::Stop);
-            }
-
-            let _ = app.emit(events::AGENT_STREAM_CHUNK, StreamChunk { content });
-            Ok(llm_runtime::StreamControl::Continue)
-        })
-        .await;
-
-        if let Err(e) = stream_result {
-            emit_error(&app, &e, "stream");
-            {
-                let mut s = lock_harness_state(&state)?;
-                *s = HarnessState::Idle;
-            }
-            let _ = app.emit(
-                events::AGENT_STREAM_END,
-                StreamEnd {
-                    reason: "error".to_string(),
-                },
-            );
-            return Err(e);
-        }
-
-        if found_search {
-            let keyword = search_keyword;
-            let _ = app.emit(
-                events::AGENT_SEARCH_STATUS,
-                SearchStatus {
-                    keyword: keyword.clone(),
-                    round: round + 1,
-                },
-            );
-
-            messages.push(serde_json::json!({"role": "assistant", "content": raw_buffer.clone()}));
-
-            let entries = storage::load_lorebook(&app)?;
-            let results: Vec<&LoreEntry> = entries
-                .iter()
-                .filter(|e| {
-                    e.keyword.to_lowercase().contains(&keyword.to_lowercase())
-                        || keyword.to_lowercase().contains(&e.keyword.to_lowercase())
-                })
-                .collect();
-
-            let search_result = if results.is_empty() {
-                format!("No lorebook entries found for '{}'.", keyword)
-            } else {
-                results
-                    .iter()
-                    .map(|e| format!("[{}]: {}", e.keyword, e.content))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-
-            messages.push(serde_json::json!({"role": "user", "content": format!(
-                "SYSTEM SEARCH RESULT for '{}':\n{}\n\nContinue based on this information.",
-                keyword, search_result
-            )}));
-        }
-
-        if !found_search {
-            // Natural completion — no search needed
-            {
-                let mut s = lock_harness_state(&state)?;
-                *s = HarnessState::Idle;
-            }
-            {
-                // Log assistant response to Hermes memory
-                let state = app.state::<AppState>();
-                let db = lock_hermes(&state)?;
-                let _ = db.log_interaction("assistant", &raw_buffer);
-            }
-
-            // Trigger background skill extraction (Hermes pattern)
-            let app_clone = app.clone();
-            tokio::spawn(async move { extract_skills_from_recent(&app_clone).await });
-
-            let _ = app.emit(
-                events::AGENT_STREAM_END,
-                StreamEnd {
-                    reason: "complete".to_string(),
-                },
-            );
-            return Ok(());
-        }
-    }
-
-    // Max rounds exhausted
-    {
-        let mut s = lock_harness_state(&state)?;
-        *s = HarnessState::Idle;
-    }
-    let _ = app.emit(
-        events::AGENT_STREAM_END,
-        StreamEnd {
-            reason: "max_rounds".to_string(),
+    // Build agent loop
+    let mut agent = AgentLoop::new(
+        AgentLoopConfig {
+            max_rounds: 10,
+            system_prompt,
         },
+        provider,
+        registry,
+        bridge,
     );
 
-    Ok(())
-}
+    // Wire events to Tauri frontend
+    let app_handle = app.clone();
+    agent.set_event_callback(std::sync::Arc::new(move |event| {
+        match event {
+            AgentLoopEvent::Intent { intent } => {
+                let _ = app_handle.emit(
+                    events::AGENT_CHAIN_OF_THOUGHT,
+                    serde_json::json!({
+                        "step": 1,
+                        "total": 3,
+                        "description": format!("Intent: {}", intent),
+                        "status": "done",
+                    }),
+                );
+            }
+            AgentLoopEvent::TextChunk { content } => {
+                let _ = app_handle.emit(
+                    events::AGENT_STREAM_CHUNK,
+                    serde_json::json!({"content": content}),
+                );
+            }
+            AgentLoopEvent::Error { message } => {
+                let _ = app_handle.emit(
+                    events::AGENT_ERROR,
+                    serde_json::json!({"message": message, "source": "agent_loop"}),
+                );
+            }
+            AgentLoopEvent::Complete { .. } => {
+                let _ = app_handle.emit(
+                    events::AGENT_STREAM_END,
+                    serde_json::json!({"reason": "complete"}),
+                );
+            }
+            _ => {
+                let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
+            }
+        }
+    }));
 
+    // Log user message to Hermes memory
+    {
+        let db = lock_hermes(&state)?;
+        let _ = db.log_interaction("user", &message);
+    }
+
+    agent.add_user_message(message.clone());
+
+    // Run the agent loop
+    match agent.run(&message, has_lore, has_outline).await {
+        Ok(final_text) => {
+            // Log assistant response to Hermes memory
+            {
+                let db = lock_hermes(&state)?;
+                let _ = db.log_interaction("assistant", &final_text);
+            }
+
+            // Background skill extraction
+            let app_clone = app.clone();
+            tokio::spawn(async move {
+                extract_skills_from_recent(&app_clone).await;
+            });
+
+            {
+                let mut s = lock_harness_state(&state)?;
+                *s = HarnessState::Idle;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            {
+                let mut s = lock_harness_state(&state)?;
+                *s = HarnessState::Idle;
+            }
+            Err(e)
+        }
+    }
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
@@ -1163,15 +1563,61 @@ pub fn run() {
         }
     };
 
+    // Shared context cache for ambient agents
+    let cache: std::sync::Arc<tokio::sync::Mutex<ambient_agents::context_fetcher::ContextCache>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(
+            ambient_agents::context_fetcher::ContextCache::default(),
+        ));
+
+    // Capture clones before the setup closure
+    let cache1 = cache.clone();
+    let cache2 = cache.clone();
+
     if let Err(e) = tauri::Builder::default()
+        .setup(move |app| {
+            let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
+            let ah = app.handle().clone();
+
+            event_bus.spawn(
+                std::sync::Arc::new(ambient_agents::context_fetcher::ContextFetcherAgent {
+                    app: ah.clone(),
+                    cache: cache1,
+                }),
+                std::sync::Arc::new(|_| {}),
+            );
+
+            let ah_clone = ah.clone();
+            event_bus.spawn(
+                std::sync::Arc::new(ambient_agents::co_writer::CoWriterAgent {
+                    app: ah.clone(),
+                    cache: cache2,
+                }),
+                std::sync::Arc::new(move |output| {
+                    if let agent_harness_core::AgentOutput::GhostText { text, position } = output {
+                        let _ = ah_clone.emit("editor-ghost-chunk", serde_json::json!({
+                            "content": text, "position": position,
+                        }));
+                    }
+                }),
+            );
+
+            app.manage(Mutex::new(event_bus));
+            Ok(())
+        })
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
+            editor_prediction: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            abort_editor_prediction,
             harness_echo,
+            report_editor_state,
+            report_semantic_lint_state,
             ask_agent,
             agent_observe,
+            get_agent_domain_profile,
+            get_agent_kernel_status,
             get_agent_tools,
             get_lorebook,
             save_lore_entry,

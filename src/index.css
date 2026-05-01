@@ -32,3 +32,146 @@ body {
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
 }
+
+.ghost-text {
+  color: color-mix(in srgb, var(--color-text-muted) 78%, transparent);
+  font-style: italic;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.semantic-lint {
+  cursor: help;
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.semantic-lint-warning {
+  text-decoration-color: var(--color-accent);
+}
+
+.semantic-lint-error {
+  text-decoration-color: var(--color-danger);
+}
+
+.semantic-lint-info {
+  text-decoration-color: var(--color-success);
+}
+
+/* Patch Review Overlay */
+.patch-review-overlay {
+  position: fixed;
+  bottom: 32px;
+  right: 0;
+  width: 384px;
+  max-height: 60vh;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-active);
+  border-radius: 8px 8px 0 0;
+  overflow-y: auto;
+  z-index: 40;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+}
+.patch-review-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.patch-review-title { font-weight: 600; color: var(--color-text-primary); }
+.patch-review-stats { color: var(--color-text-muted); flex: 1; }
+.patch-review-actions { display: flex; gap: 4px; }
+.patch-btn-accept, .patch-btn-accept-small {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.patch-btn-reject, .patch-btn-reject-small {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-active);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.patch-btn-dismiss {
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-border-active);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.patch-review-list { padding: 4px 0; }
+.patch-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: opacity 0.15s;
+}
+.patch-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.patch-item-index {
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: 11px;
+}
+.patch-item-desc {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  flex: 1;
+}
+.patch-item-severity { font-size: 10px; text-transform: uppercase; padding: 1px 4px; border-radius: 2px; }
+.patch-sev-warning { background: var(--color-accent-subtle); color: var(--color-accent); }
+.patch-sev-info { background: rgba(90,138,106,0.15); color: var(--color-success); }
+.patch-sev-suggestion { background: var(--color-bg-raised); color: var(--color-text-muted); }
+.patch-item-diff { font-size: 11px; margin: 4px 0; }
+.patch-old { color: var(--color-danger); }
+.patch-new { color: var(--color-success); }
+.patch-label { font-weight: 600; margin-right: 4px; }
+.patch-item-actions { display: flex; gap: 4px; margin-top: 4px; }
+.patch-mark.patch-pending {
+  background-color: rgba(212,148,58,0.15);
+  border-bottom: 2px solid var(--color-accent);
+  cursor: pointer;
+}
+.patch-mark.patch-review {
+  background-color: rgba(212,148,58,0.25);
+  border-bottom: 2px dashed var(--color-accent);
+}
+
+/* CoWriter Status Bar */
+.cowriter-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 12px;
+  background: var(--color-bg-deep);
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.status-left { min-width: 120px; }
+.status-thinking { color: var(--color-accent); }
+.status-idle { color: var(--color-success); }
+.status-center { display: flex; align-items: center; gap: 6px; }
+.context-bar { width: 120px; height: 4px; background: var(--color-bg-raised); border-radius: 2px; overflow: hidden; }
+.context-fill { height: 100%; background: var(--color-accent); transition: width 0.3s; }
+.context-label { font-size: 10px; }
+.status-right { min-width: 100px; text-align: right; }
+.status-model { color: var(--color-text-secondary); }

@@ -28,6 +28,13 @@ pub struct AgentSkill {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionSearchResult {
+    pub role: String,
+    pub content: String,
+    pub created_at: String,
+}
+
 pub struct HermesDB {
     conn: Connection,
 }
@@ -72,6 +79,39 @@ impl HermesDB {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 skill TEXT NOT NULL,
                 category TEXT DEFAULT 'general',
+                active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS character_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'active',
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_char_name ON character_state(name);
+
+            CREATE TABLE IF NOT EXISTS plot_thread (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                introduced_chapter TEXT DEFAULT '',
+                resolved_chapter TEXT DEFAULT '',
+                priority INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open','foreshadowed','developed','resolved')),
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_plot_status ON plot_thread(status);
+
+            CREATE TABLE IF NOT EXISTS world_rule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule TEXT NOT NULL UNIQUE,
+                category TEXT NOT NULL DEFAULT 'general',
+                priority INTEGER DEFAULT 0,
+                source_chapter TEXT DEFAULT '',
                 active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now'))
             );",
@@ -274,5 +314,131 @@ impl HermesDB {
              WHERE julianday('now') - julianday(created_at) > 7",
             [],
         )
+    }
+
+    // ---- character_state ----
+
+    pub fn upsert_character_state(
+        &self,
+        name: &str,
+        chapter_id: &str,
+        state_json: &str,
+    ) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO character_state (name, chapter_id, state_json, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(name, chapter_id) DO UPDATE SET
+             state_json = ?3, updated_at = datetime('now')",
+            rusqlite::params![name, chapter_id, state_json],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_characters_for_chapter(&self, chapter_id: &str) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name, state_json FROM character_state
+             WHERE chapter_id = ?1 AND status = 'active'
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![chapter_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        rows.collect()
+    }
+
+    // ---- plot_thread ----
+
+    pub fn add_plot_thread(
+        &self,
+        name: &str,
+        description: &str,
+        chapter: &str,
+        priority: i32,
+    ) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT INTO plot_thread (name, description, introduced_chapter, priority)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![name, description, chapter, priority],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_open_plot_threads(&self) -> SqlResult<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name, description, introduced_chapter FROM plot_thread
+             WHERE status != 'resolved' ORDER BY priority DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect()
+    }
+
+    pub fn resolve_plot_thread(&self, name: &str, chapter: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE plot_thread SET status = 'resolved', resolved_chapter = ?2
+             WHERE name = ?1",
+            rusqlite::params![name, chapter],
+        )?;
+        Ok(())
+    }
+
+    // ---- world_rule ----
+
+    pub fn add_world_rule(&self, rule: &str, category: &str, priority: i32) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO world_rule (rule, category, priority) VALUES (?1, ?2, ?3)",
+            rusqlite::params![rule, category, priority],
+        )?;
+        Ok(())
+    }
+
+    pub fn check_world_rules(&self, statement: &str) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT rule FROM world_rule WHERE active = 1",
+        )?;
+        let rules: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let violations: Vec<String> = rules
+            .into_iter()
+            .filter(|rule| {
+                if let Some(negated) = rule.strip_prefix("没有") {
+                    statement.contains(negated)
+                } else if let Some(forbidden) = rule.strip_prefix("禁止") {
+                    statement.contains(forbidden)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        Ok(violations)
+    }
+
+    // ---- session_search ----
+
+    pub fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> SqlResult<Vec<SessionSearchResult>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content, created_at FROM session_history
+             WHERE content LIKE ?1
+             ORDER BY created_at DESC
+             LIMIT ?2",
+        )?;
+        let pattern = format!("%{}%", query);
+        let rows = stmt.query_map(rusqlite::params![pattern, limit], |row| {
+            Ok(SessionSearchResult {
+                role: row.get(0)?,
+                content: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        rows.collect()
     }
 }

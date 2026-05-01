@@ -14,11 +14,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 agent-harness-core = { path = "../agent-harness-core" }
+async-trait = "0.1"
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 dotenvy = "0.15"
 futures-util = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }

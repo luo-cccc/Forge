@@ -1,4 +1,5 @@
 export const Commands = {
+  abortEditorPrediction: "abort_editor_prediction",
   analyzeChapter: "analyze_chapter",
   analyzePacing: "analyze_pacing",
   agentObserve: "agent_observe",
@@ -12,6 +13,8 @@ export const Commands = {
   exportDiagnosticLogs: "export_diagnostic_logs",
   generateChapterAutonomous: "generate_chapter_autonomous",
   getApiKey: "get_api_key",
+  getAgentDomainProfile: "get_agent_domain_profile",
+  getAgentKernelStatus: "get_agent_kernel_status",
   getAgentTools: "get_agent_tools",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
@@ -20,6 +23,8 @@ export const Commands = {
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
+  reportEditorState: "report_editor_state",
+  reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
   renameChapterFile: "rename_chapter_file",
   saveChapter: "save_chapter",
@@ -38,6 +43,9 @@ export const Events = {
   agentStreamEnd: "agent-stream-end",
   batchStatus: "batch-status",
   chapterGeneration: "chapter-generation",
+  editorGhostChunk: "editor-ghost-chunk",
+  editorGhostEnd: "editor-ghost-end",
+  editorSemanticLint: "editor-semantic-lint",
 } as const;
 
 export interface StreamChunk {
@@ -46,6 +54,44 @@ export interface StreamChunk {
 
 export interface StreamEnd {
   reason: string;
+}
+
+export interface EditorStatePayload {
+  requestId: string;
+  prefix: string;
+  suffix: string;
+  cursorPosition: number;
+  paragraph: string;
+  chapterTitle?: string;
+}
+
+export interface SemanticLintPayload {
+  requestId: string;
+  paragraph: string;
+  paragraphFrom: number;
+  cursorPosition: number;
+  chapterTitle?: string;
+}
+
+export interface EditorGhostChunk {
+  requestId: string;
+  cursorPosition: number;
+  content: string;
+}
+
+export interface EditorGhostEnd {
+  requestId: string;
+  cursorPosition: number;
+  reason: "complete" | "cancelled" | "error" | string;
+}
+
+export interface EditorSemanticLint {
+  requestId: string;
+  cursorPosition: number;
+  from: number;
+  to: number;
+  message: string;
+  severity: "info" | "warning" | "error" | string;
 }
 
 export interface SearchStatus {
@@ -150,12 +196,59 @@ export interface AgentObserveResult {
 
 export interface AgentToolDescriptor {
   name: string;
+  description: string;
   inputType: string;
   outputType: string;
-  sideEffectLevel: "none" | "read" | "provider_call" | "write";
+  sideEffectLevel: "none" | "read" | "provider_call" | "write" | "external";
   requiresApproval: boolean;
   timeoutMs: number;
   contextCostChars: number;
+  tags: string[];
+  stage: "observe" | "plan" | "context" | "execute" | "reflect";
+  source: string;
+  supportedIntents: Array<
+    "chat" | "retrieve_knowledge" | "analyze_text" | "generate_content" | "execute_plan" | "linter"
+  >;
+  enabledByDefault: boolean;
+  inputSchema?: unknown;
+}
+
+export interface AgentKernelStatus {
+  toolGeneration: number;
+  toolCount: number;
+  approvalRequiredToolCount: number;
+  writeToolCount: number;
+  domainId: string;
+  capabilityCount: number;
+  qualityGateCount: number;
+  traceEnabled: boolean;
+}
+
+export interface AgentDomainCapability {
+  id: string;
+  label: string;
+  description: string;
+  stage: AgentToolDescriptor["stage"];
+  intents: AgentToolDescriptor["supportedIntents"];
+  contextSources: string[];
+  qualityChecks: string[];
+  priority: number;
+}
+
+export interface AgentContextPriority {
+  sourceType: string;
+  priority: number;
+  maxChars: number;
+  required: boolean;
+}
+
+export interface AgentDomainProfile {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: AgentDomainCapability[];
+  contextPriorities: AgentContextPriority[];
+  qualityGates: string[];
 }
 
 export interface FrontendChapterStateSnapshot {
@@ -277,3 +370,66 @@ export function extractActions(buffer: string): {
   });
   return { actions, cleanText };
 }
+
+// === Patch Review System (OpenCode apply_patch pattern) ===
+
+export interface TextPatch {
+  id: string;
+  from: number;
+  to: number;
+  replacement: string;
+  description: string;
+  severity: "info" | "warning" | "suggestion";
+  original: string;
+}
+
+export interface PatchSet {
+  patches: TextPatch[];
+  requestId: string;
+  baseText: string;
+  createdAt: number;
+}
+
+export type PatchStatus = "pending" | "accepted" | "rejected";
+
+// === Agent Loop Events (matches Rust AgentLoopEvent) ===
+
+export interface AgentLoopEventPayload {
+  kind: string;
+  intent?: string;
+  tool?: string;
+  args?: unknown;
+  result?: {
+    tool_name: string;
+    error: string | null;
+    duration_ms: number;
+  };
+  content?: string;
+  message?: string;
+  round?: number;
+  before_tokens?: number;
+  after_tokens?: number;
+  compacted_count?: number;
+  rounds?: number;
+  tool_calls?: number;
+  tokens_used?: number;
+}
+
+// === Editor Events for Ambient Agents ===
+
+export interface EditorEventPayload {
+  kind: string;
+  idle_ms?: number;
+  chapter?: string;
+  paragraph?: string;
+  cursor_position?: number;
+  from?: number;
+  to?: number;
+  text?: string;
+  content_length?: number;
+  revision?: string;
+  keywords?: string[];
+  change_summary?: string;
+  full_text_snippet?: string;
+}
+

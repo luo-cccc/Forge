@@ -13,13 +13,23 @@ import {
   type AgentObservation,
   type AgentObservationReason,
   type AgentSuggestion,
+  type EditorGhostChunk,
+  type EditorGhostEnd,
+  type EditorSemanticLint,
+  type EditorStatePayload,
+  type SemanticLintPayload,
   type StreamChunk,
 } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
+import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
+import SemanticLint from "../extensions/SemanticLint";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
+import { PatchReviewOverlay } from "./PatchReviewOverlay";
+import { CoWriterStatusBar } from "./CoWriterStatusBar";
+import PatchMark from "../extensions/PatchMark";
 
 interface SelectionState {
   from: number;
@@ -35,6 +45,10 @@ interface EditorPanelProps {
 const OBSERVATION_DEBOUNCE_MS = 1100;
 const OBSERVATION_WINDOW_CHARS = 1800;
 const PARAGRAPH_BUDGET_CHARS = 900;
+const EDITOR_TELEMETRY_DEBOUNCE_MS = 400;
+const SEMANTIC_LINT_IDLE_MS = 10000;
+const FIM_PREFIX_CHARS = 1000;
+const FIM_SUFFIX_CHARS = 500;
 
 function limitChars(text: string, maxChars: number): string {
   const chars = Array.from(text);
@@ -43,6 +57,45 @@ function limitChars(text: string, maxChars: number): string {
 
 function makeObservationId(): string {
   return `obs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeEditorRequestId(): string {
+  return `fim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeSemanticLintRequestId(): string {
+  return `lint-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sliceAroundCursor(editor: Editor): EditorStatePayload {
+  const { from } = editor.state.selection;
+  const $from = editor.state.doc.resolve(from);
+  const docStart = Math.max(0, from - FIM_PREFIX_CHARS);
+  const docEnd = Math.min(editor.state.doc.content.size, from + FIM_SUFFIX_CHARS);
+  const prefix = editor.state.doc.textBetween(docStart, from, "\n");
+  const suffix = editor.state.doc.textBetween(from, docEnd, "\n");
+  const paragraph = editor.state.doc.textBetween($from.start(), $from.end(), " ");
+
+  return {
+    requestId: makeEditorRequestId(),
+    prefix,
+    suffix,
+    cursorPosition: from,
+    paragraph,
+  };
+}
+
+function buildSemanticLintPayload(editor: Editor, chapterTitle: string): SemanticLintPayload {
+  const { from } = editor.state.selection;
+  const $from = editor.state.doc.resolve(from);
+
+  return {
+    requestId: makeSemanticLintRequestId(),
+    paragraph: editor.state.doc.textBetween($from.start(), $from.end(), " "),
+    paragraphFrom: $from.start(),
+    cursorPosition: from,
+    chapterTitle,
+  };
 }
 
 function buildObservation(
@@ -112,7 +165,7 @@ export default function EditorPanel({
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark, CommentMark],
+    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText, SemanticLint, PatchMark],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -153,8 +206,13 @@ export default function EditorPanel({
   const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
   const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
   const observationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const semanticLintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeGhostRequestIdRef = useRef<string | null>(null);
+  const activeSemanticLintRequestIdRef = useRef<string | null>(null);
   const lastEditAtRef = useRef(0);
   const lastObservationKeyRef = useRef("");
+  const lastSemanticLintKeyRef = useRef("");
 
   useEffect(() => {
     lastEditAtRef.current = Date.now();
@@ -231,12 +289,160 @@ export default function EditorPanel({
     [agentMode, submitObservation],
   );
 
+  const abortGhostRequest = useCallback((requestId?: string | null) => {
+    if (telemetryTimerRef.current) {
+      clearTimeout(telemetryTimerRef.current);
+      telemetryTimerRef.current = null;
+    }
+
+    const activeRequestId = requestId ?? activeGhostRequestIdRef.current;
+    editor?.commands.clearGhostText();
+    if (!activeRequestId) return;
+    activeGhostRequestIdRef.current = null;
+    void invoke(Commands.abortEditorPrediction, { requestId: activeRequestId }).catch((e) => {
+      console.error("Failed to abort ghost completion:", e);
+    });
+  }, [editor]);
+
+  const scheduleEditorTelemetry = useCallback(() => {
+    if (!editor || agentMode === "off") return;
+    if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
+    telemetryTimerRef.current = setTimeout(() => {
+      if (editor.state.selection.from !== editor.state.selection.to) return;
+
+      const payload = {
+        ...sliceAroundCursor(editor),
+        chapterTitle: currentChapter,
+      };
+      activeGhostRequestIdRef.current = payload.requestId;
+
+      void invoke(Commands.reportEditorState, { payload }).catch((e) => {
+        if (activeGhostRequestIdRef.current === payload.requestId) {
+          activeGhostRequestIdRef.current = null;
+        }
+        console.error("Editor telemetry failed:", e);
+      });
+    }, EDITOR_TELEMETRY_DEBOUNCE_MS);
+  }, [agentMode, currentChapter, editor]);
+
+  const scheduleSemanticLint = useCallback(() => {
+    if (!editor || agentMode === "off") return;
+    if (semanticLintTimerRef.current) clearTimeout(semanticLintTimerRef.current);
+
+    const selectionAtSchedule = editor.state.selection.from;
+    const paragraphAtSchedule = (() => {
+      const $from = editor.state.doc.resolve(selectionAtSchedule);
+      return editor.state.doc.textBetween($from.start(), $from.end(), " ");
+    })();
+
+    semanticLintTimerRef.current = setTimeout(() => {
+      if (!editor || editor.state.selection.from !== selectionAtSchedule) return;
+      const payload = buildSemanticLintPayload(editor, currentChapter);
+      const key = [
+        payload.chapterTitle ?? "",
+        payload.cursorPosition,
+        payload.paragraphFrom,
+        payload.paragraph,
+      ].join("|");
+
+      if (key === lastSemanticLintKeyRef.current || payload.paragraph !== paragraphAtSchedule) {
+        return;
+      }
+
+      lastSemanticLintKeyRef.current = key;
+      activeSemanticLintRequestIdRef.current = payload.requestId;
+      void invoke(Commands.reportSemanticLintState, { payload }).catch((e) => {
+        if (activeSemanticLintRequestIdRef.current === payload.requestId) {
+          activeSemanticLintRequestIdRef.current = null;
+        }
+        console.error("Semantic lint failed:", e);
+      });
+    }, SEMANTIC_LINT_IDLE_MS);
+  }, [agentMode, currentChapter, editor]);
+
+  useEffect(() => {
+    if (!editor || agentMode === "off") return;
+
+    let unlistenChunk: (() => void) | undefined;
+    let unlistenEnd: (() => void) | undefined;
+
+    const setup = async () => {
+      unlistenChunk = await listen<EditorGhostChunk>(Events.editorGhostChunk, (event) => {
+        const chunk = event.payload;
+        const selection = editor.state.selection;
+        if (
+          chunk.requestId !== activeGhostRequestIdRef.current ||
+          chunk.cursorPosition !== selection.from ||
+          selection.from !== selection.to
+        ) {
+          return;
+        }
+
+        const currentGhost = ghostTextPluginKey.getState(editor.state);
+        if (!currentGhost) {
+          editor.commands.setGhostText({
+            requestId: chunk.requestId,
+            position: chunk.cursorPosition,
+            text: chunk.content,
+          });
+          return;
+        }
+
+        editor.commands.appendGhostText(chunk.requestId, chunk.cursorPosition, chunk.content);
+      });
+
+      unlistenEnd = await listen<EditorGhostEnd>(Events.editorGhostEnd, (event) => {
+        const end = event.payload;
+        if (end.requestId !== activeGhostRequestIdRef.current) return;
+        activeGhostRequestIdRef.current = null;
+        if (end.reason !== "complete") {
+          editor.commands.clearGhostText();
+        }
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlistenChunk) unlistenChunk();
+      if (unlistenEnd) unlistenEnd();
+    };
+  }, [agentMode, editor]);
+
+  useEffect(() => {
+    if (!editor || agentMode === "off") return;
+
+    let unlistenLint: (() => void) | undefined;
+    const setup = async () => {
+      unlistenLint = await listen<EditorSemanticLint>(Events.editorSemanticLint, (event) => {
+        const lint = event.payload;
+        const selection = editor.state.selection;
+        if (
+          lint.requestId !== activeSemanticLintRequestIdRef.current ||
+          lint.cursorPosition !== selection.from
+        ) {
+          return;
+        }
+
+        activeSemanticLintRequestIdRef.current = null;
+        editor.commands.setSemanticLint(lint);
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlistenLint) unlistenLint();
+    };
+  }, [agentMode, editor]);
+
   useEffect(() => {
     if (!editor || !onSelectionUpdate) return;
     const handler = () => {
       const { from, to } = editor.state.selection;
       const text = editor.state.doc.textBetween(from, to, " ");
       onSelectionUpdate({ from, to, text });
+      abortGhostRequest();
+      scheduleEditorTelemetry();
+      scheduleSemanticLint();
       if (from < to) {
         scheduleObservation("selection_change");
       }
@@ -245,7 +451,14 @@ export default function EditorPanel({
     return () => {
       editor.off("selectionUpdate", handler);
     };
-  }, [editor, onSelectionUpdate, scheduleObservation]);
+  }, [
+    abortGhostRequest,
+    editor,
+    onSelectionUpdate,
+    scheduleEditorTelemetry,
+    scheduleObservation,
+    scheduleSemanticLint,
+  ]);
 
   // Debounced auto-save: 3s after typing stops
   useEffect(() => {
@@ -253,6 +466,10 @@ export default function EditorPanel({
     const handler = () => {
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
+      abortGhostRequest();
+      editor.commands.clearSemanticLint();
+      scheduleEditorTelemetry();
+      scheduleSemanticLint();
       scheduleObservation("user_typed");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
@@ -276,17 +493,40 @@ export default function EditorPanel({
       editor.off("update", handler);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (observationTimerRef.current) clearTimeout(observationTimerRef.current);
+      if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
+      if (semanticLintTimerRef.current) clearTimeout(semanticLintTimerRef.current);
+      abortGhostRequest();
     };
-  }, [editor, currentChapter, scheduleObservation, setCurrentChapterRevision, setIsEditorDirty]);
+  }, [
+    abortGhostRequest,
+    currentChapter,
+    editor,
+    scheduleEditorTelemetry,
+    scheduleObservation,
+    scheduleSemanticLint,
+    setCurrentChapterRevision,
+    setIsEditorDirty,
+  ]);
 
   useEffect(() => {
     if (!editor || agentMode === "off") return;
     scheduleObservation("chapter_switch");
-  }, [agentMode, currentChapter, editor, scheduleObservation]);
+    scheduleSemanticLint();
+  }, [agentMode, currentChapter, editor, scheduleObservation, scheduleSemanticLint]);
 
   useEffect(() => {
     if (!editor) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "Tab" && ghostTextPluginKey.getState(editor.state)?.text) {
+        event.preventDefault();
+        const accepted = editor.commands.acceptGhostText();
+        if (accepted) {
+          activeGhostRequestIdRef.current = null;
+          incrementActionEpoch();
+        }
+        return;
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key === "k") {
         event.preventDefault();
         setBubbleVisible(true);
@@ -298,7 +538,7 @@ export default function EditorPanel({
     const view = editor.view;
     view.dom.addEventListener("keydown", handler);
     return () => view.dom.removeEventListener("keydown", handler);
-  }, [editor, bubbleVisible]);
+  }, [editor, bubbleVisible, incrementActionEpoch]);
 
   const handleBubbleSubmit = async (command: string) => {
     if (!editor) return;
@@ -582,6 +822,8 @@ export default function EditorPanel({
             onSnooze={handleSnoozeSuggestions}
           />
         )}
+        <PatchReviewOverlay />
+        <CoWriterStatusBar />
       </div>
     </div>
   );
