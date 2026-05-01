@@ -16,6 +16,8 @@ import type {
   StoryDebtSnapshot,
   StoryDebtEntry,
   StoryReviewQueueEntry,
+  WriterAgentTraceSnapshot,
+  WriterProposalTrace,
   WriterOperation,
 } from "../protocol";
 
@@ -198,6 +200,38 @@ function secondBrainValueClass(tone: SecondBrainTone): string {
   return "text-text-primary";
 }
 
+function latestContextProposal(trace: WriterAgentTraceSnapshot | null): WriterProposalTrace | undefined {
+  return trace?.recentProposals.find((proposal) => proposal.contextBudget);
+}
+
+function contextBudgetTone(trace: WriterAgentTraceSnapshot | null): SecondBrainTone {
+  const budget = latestContextProposal(trace)?.contextBudget;
+  if (!budget) return "neutral";
+  if (budget.used > budget.totalBudget) return "danger";
+  if (budget.sourceReports.some((source) => source.truncated)) return "accent";
+  return "success";
+}
+
+function formatContextBudgetValue(proposal: WriterProposalTrace | undefined): string {
+  const budget = proposal?.contextBudget;
+  if (!budget) return "No trace yet";
+  return `${budget.used}/${budget.totalBudget} chars`;
+}
+
+function formatContextBudgetDetail(proposal: WriterProposalTrace | undefined): string {
+  const budget = proposal?.contextBudget;
+  if (!budget) return "Waiting for the next context-backed agent proposal.";
+  const truncated = budget.sourceReports.filter((source) => source.truncated).length;
+  const pct = budget.totalBudget > 0
+    ? Math.round((budget.used / budget.totalBudget) * 100)
+    : 0;
+  return `${budget.task} · ${budget.sourceReports.length} sources · ${pct}% used · ${truncated} truncated`;
+}
+
+function sourceBudgetClass(truncated: boolean): string {
+  return truncated ? "text-accent" : "text-text-muted";
+}
+
 function buildSecondBrainItems(
   ledger: WriterAgentLedgerSnapshot | null,
   storyDebt: StoryDebtSnapshot | null,
@@ -305,18 +339,20 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
+  const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<"status" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt] = await Promise.all([
+      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt, nextTrace] = await Promise.all([
         invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
         invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
         invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
+        invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 12 }),
       ]);
       invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
         .then(setStorageDiagnostics)
@@ -333,6 +369,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
       setStoryDebt(nextStoryDebt);
+      setTrace(nextTrace);
       setProposals((prev) => {
         const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
         return merged.filter((proposal) =>
@@ -603,6 +640,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     pendingProposals,
     currentChapter,
   );
+  const latestContextTrace = latestContextProposal(trace);
+  const latestContextBudget = latestContextTrace?.contextBudget;
+  const latestContextTone = contextBudgetTone(trace);
   const availableTabs =
     mode === "write"
       ? (["status", "promises", "canon"] as const)
@@ -725,6 +765,39 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   </div>
                 ))}
               </div>
+            </div>
+            <div className={`rounded border p-2 text-xs ${secondBrainToneClass(latestContextTone)}`}>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                  Context Engine
+                </span>
+                <span className="font-mono text-[10px] text-text-muted">
+                  {latestContextTrace?.kind ?? "idle"}
+                </span>
+              </div>
+              <div className={`font-medium ${secondBrainValueClass(latestContextTone)}`}>
+                {formatContextBudgetValue(latestContextTrace)}
+              </div>
+              <div className="mt-1 text-[10px] leading-snug text-text-secondary">
+                {formatContextBudgetDetail(latestContextTrace)}
+              </div>
+              {latestContextBudget && (
+                <div className="mt-2 space-y-1">
+                  {latestContextBudget.sourceReports.slice(0, 4).map((source) => (
+                    <div
+                      key={`${latestContextTrace.id}-${source.source}`}
+                      className="flex items-center justify-between gap-2 rounded bg-bg-deep px-1.5 py-1"
+                    >
+                      <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
+                        {source.source}
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                        {source.provided}/{source.requested}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="text-xs text-text-muted">
               <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
@@ -1164,8 +1237,71 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
         {effectiveTab === "audit" && (
           <div className="space-y-2 text-xs">
-            {(ledger?.memoryAudit.length ?? 0) === 0 && (
-              <p className="text-text-muted">No memory audit events yet.</p>
+            {(trace?.recentProposals.length ?? 0) === 0 && (ledger?.memoryAudit.length ?? 0) === 0 && (
+              <p className="text-text-muted">No agent audit events yet.</p>
+            )}
+            {(trace?.recentProposals.length ?? 0) > 0 && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Context Trace</span>
+                  <span className="text-[10px] text-text-muted">
+                    {trace?.recentProposals.filter((proposal) => proposal.contextBudget).length ?? 0} budgeted
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {trace?.recentProposals.slice(0, 6).map((proposal) => {
+                    const budget = proposal.contextBudget;
+                    const truncated = budget?.sourceReports.filter((source) => source.truncated).length ?? 0;
+                    return (
+                      <div key={proposal.id} className="rounded border border-border-subtle bg-bg-deep p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium text-text-secondary" title={proposal.previewSnippet}>
+                            {proposal.kind} · {proposal.state}
+                          </span>
+                          <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                            {budget ? `${budget.used}/${budget.totalBudget}` : "no budget"}
+                          </span>
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-[10px] text-text-muted">
+                          {proposal.previewSnippet || proposal.observationId}
+                        </div>
+                        {budget && (
+                          <>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              <span className={`rounded px-1.5 py-0.5 text-[10px] ${truncated > 0 ? "bg-accent-subtle text-accent" : "bg-success/10 text-success"}`}>
+                                {budget.task}
+                              </span>
+                              <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                                wasted {budget.wasted}
+                              </span>
+                              <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                                truncated {truncated}
+                              </span>
+                            </div>
+                            <div className="mt-2 space-y-1">
+                              {budget.sourceReports.slice(0, 5).map((source) => (
+                                <div key={`${proposal.id}-${source.source}`} className="flex items-center justify-between gap-2">
+                                  <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
+                                    {source.source}
+                                  </span>
+                                  <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                                    {source.provided}/{source.requested}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {(ledger?.memoryAudit.length ?? 0) > 0 && (
+              <div className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                Memory Audit
+              </div>
             )}
             {ledger?.memoryAudit.map((entry) => (
               <div key={`${entry.proposalId}-${entry.createdAt}`} className="rounded bg-bg-raised border border-border-subtle p-2">
