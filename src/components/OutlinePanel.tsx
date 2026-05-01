@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Commands, Events, type ChapterGenerationEvent } from "../protocol";
+import { Commands, Events, type ChapterGenerationEvent, type ProjectFileRestored } from "../protocol";
 
 interface OutlineNode {
   chapter_title: string;
@@ -72,6 +72,17 @@ export default function OutlinePanel() {
       if (unlisten) unlisten();
       if (unlistenChapter) unlistenChapter();
     };
+  }, [refresh]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectFileRestored>).detail;
+      if (detail?.kind === "outline") {
+        void refresh();
+      }
+    };
+    window.addEventListener(Events.projectFileRestored, handler);
+    return () => window.removeEventListener(Events.projectFileRestored, handler);
   }, [refresh]);
 
   useEffect(() => {

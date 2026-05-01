@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Commands } from "../protocol";
+import { Commands, Events, type ProjectFileRestored } from "../protocol";
 
 interface LoreEntry {
   id: string;
@@ -35,6 +35,17 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
       return () => clearTimeout(timer);
     }
   }, [isOpen, fetchEntries]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectFileRestored>).detail;
+      if (detail?.kind === "lorebook") {
+        void fetchEntries();
+      }
+    };
+    window.addEventListener(Events.projectFileRestored, handler);
+    return () => window.removeEventListener(Events.projectFileRestored, handler);
+  }, [fetchEntries]);
 
   const handleAdd = async () => {
     const kw = keyword.trim();

@@ -62,12 +62,17 @@ export const Events = {
   editorEntityCard: "editor-entity-card",
   editorHoverHint: "editor-hover-hint",
   chapterRestored: "chapter-restored",
+  projectFileRestored: "project-file-restored",
   storyboardMarker: "storyboard-marker",
 } as const;
 
 export interface ChapterRestored {
   title: string;
   revision: string;
+}
+
+export interface ProjectFileRestored {
+  kind: "lorebook" | "outline" | "project_brain";
 }
 
 export interface StreamChunk {

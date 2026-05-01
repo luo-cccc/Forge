@@ -635,6 +635,7 @@ pub fn restore_file_backup(
     }
     let content = std::fs::read_to_string(&backup_path)
         .map_err(|e| format!("Failed to read backup '{}': {}", backup_path.display(), e))?;
+    validate_backup_content(&target, &content, &backup_path)?;
     atomic_write(&target_path, &content)
 }
 
@@ -647,6 +648,33 @@ fn backup_target_path(
         BackupTarget::Outline => outline_path(app),
         BackupTarget::ProjectBrain => brain_path(app),
         BackupTarget::Chapter { title } => chapter_path(app, title),
+    }
+}
+
+fn validate_backup_content(
+    target: &BackupTarget,
+    content: &str,
+    backup_path: &std::path::Path,
+) -> Result<(), String> {
+    match target {
+        BackupTarget::Lorebook => serde_json::from_str::<Vec<LoreEntry>>(content)
+            .map(|_| ())
+            .map_err(|e| format!("Invalid lorebook backup '{}': {}", backup_path.display(), e)),
+        BackupTarget::Outline => serde_json::from_str::<Vec<OutlineNode>>(content)
+            .map(|_| ())
+            .map_err(|e| format!("Invalid outline backup '{}': {}", backup_path.display(), e)),
+        BackupTarget::ProjectBrain => {
+            serde_json::from_str::<Vec<agent_harness_core::vector_db::Chunk>>(content)
+                .map(|_| ())
+                .map_err(|e| {
+                    format!(
+                        "Invalid project brain backup '{}': {}",
+                        backup_path.display(),
+                        e
+                    )
+                })
+        }
+        BackupTarget::Chapter { .. } => Ok(()),
     }
 }
 
@@ -1140,6 +1168,21 @@ mod tests {
         assert_eq!(backups[0].bytes, 2);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn validate_backup_content_rejects_corrupt_json_targets() {
+        let path = std::path::Path::new("outline.json");
+
+        assert!(validate_backup_content(&BackupTarget::Outline, "{bad", path).is_err());
+        assert!(validate_backup_content(
+            &BackupTarget::Chapter {
+                title: "Chapter-1".to_string(),
+            },
+            "{bad",
+            path,
+        )
+        .is_ok());
     }
 
     #[test]

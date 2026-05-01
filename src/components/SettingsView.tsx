@@ -1,6 +1,31 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Commands } from "../protocol";
+import {
+  Commands,
+  Events,
+  type BackupTarget,
+  type FileBackupInfo,
+  type ProjectFileRestored,
+} from "../protocol";
+
+const RECOVERY_TARGETS = [
+  { id: "lorebook", label: "Lorebook", target: { kind: "lorebook" } },
+  { id: "outline", label: "Outline", target: { kind: "outline" } },
+  { id: "project_brain", label: "Project Brain", target: { kind: "project_brain" } },
+] satisfies Array<{ id: ProjectFileRestored["kind"]; label: string; target: BackupTarget }>;
+
+type BackupMap = Record<ProjectFileRestored["kind"], FileBackupInfo[]>;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatTime(ms: number): string {
+  if (!ms) return "unknown";
+  return new Date(ms).toLocaleString();
+}
 
 export default function SettingsView() {
   const [apiKey, setApiKey] = useState("");
@@ -8,6 +33,24 @@ export default function SettingsView() {
   const [hasKey, setHasKey] = useState(false);
   const [logs, setLogs] = useState("");
   const [verifying, setVerifying] = useState(false);
+  const [backups, setBackups] = useState<BackupMap>({
+    lorebook: [],
+    outline: [],
+    project_brain: [],
+  });
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  const refreshBackups = useCallback(async () => {
+    const pairs = await Promise.all(
+      RECOVERY_TARGETS.map(async (item) => {
+        const rows = await invoke<FileBackupInfo[]>(Commands.listFileBackups, {
+          target: item.target,
+        });
+        return [item.id, rows.slice(0, 5)] as const;
+      }),
+    );
+    setBackups(Object.fromEntries(pairs) as BackupMap);
+  }, []);
 
   useEffect(() => {
     const check = async () => {
@@ -18,7 +61,23 @@ export default function SettingsView() {
         console.error("Failed to check API key:", e);
       }
     };
-    check();
+    const loadBackups = async () => {
+      try {
+        const pairs = await Promise.all(
+          RECOVERY_TARGETS.map(async (item) => {
+            const rows = await invoke<FileBackupInfo[]>(Commands.listFileBackups, {
+              target: item.target,
+            });
+            return [item.id, rows.slice(0, 5)] as const;
+          }),
+        );
+        setBackups(Object.fromEntries(pairs) as BackupMap);
+      } catch (e) {
+        console.error("Failed to load backups:", e);
+      }
+    };
+    void check();
+    void loadBackups();
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -55,8 +114,31 @@ export default function SettingsView() {
     }
   }, []);
 
+  const handleRestore = useCallback(async (
+    item: (typeof RECOVERY_TARGETS)[number],
+    backup: FileBackupInfo,
+  ) => {
+    const restoreKey = `${item.id}:${backup.id}`;
+    setRestoring(restoreKey);
+    try {
+      await invoke(Commands.restoreFileBackup, {
+        target: item.target,
+        backupId: backup.id,
+      });
+      window.dispatchEvent(new CustomEvent<ProjectFileRestored>(Events.projectFileRestored, {
+        detail: { kind: item.id },
+      }));
+      setLogs(`${item.label} restored from ${backup.filename}`);
+      await refreshBackups();
+    } catch (e) {
+      setLogs(`Restore failed: ${e}`);
+    } finally {
+      setRestoring(null);
+    }
+  }, [refreshBackups]);
+
   return (
-    <div className="flex flex-col h-full p-4 space-y-4">
+    <div className="flex flex-col h-full overflow-y-auto p-4 space-y-4">
       <h2 className="text-sm font-display text-text-primary tracking-wider">Settings</h2>
 
       <div className="space-y-2">
@@ -95,6 +177,56 @@ export default function SettingsView() {
         >
           Export Diagnostic Logs
         </button>
+      </div>
+
+      <div className="space-y-2 border-t border-border-subtle pt-4">
+        <div>
+          <h3 className="text-xs font-medium text-text-primary">Recovery</h3>
+          <p className="mt-1 text-[10px] text-text-muted">
+            Restore project support files from bounded local backups.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {RECOVERY_TARGETS.map((item) => {
+            const rows = backups[item.id] ?? [];
+            return (
+              <div key={item.id} className="rounded-sm border border-border-subtle bg-bg-raised p-2">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-xs text-text-secondary">{item.label}</span>
+                  <span className="font-mono text-[10px] text-text-muted">{rows.length}</span>
+                </div>
+                {rows.length === 0 ? (
+                  <div className="text-[10px] text-text-muted">No backups yet.</div>
+                ) : (
+                  <div className="space-y-1">
+                    {rows.slice(0, 3).map((backup) => {
+                      const restoreKey = `${item.id}:${backup.id}`;
+                      return (
+                        <div key={backup.id} className="flex items-center justify-between gap-2 rounded bg-bg-deep px-2 py-1">
+                          <div className="min-w-0">
+                            <div className="truncate text-[10px] text-text-secondary" title={backup.filename}>
+                              {formatTime(backup.modifiedAt)}
+                            </div>
+                            <div className="font-mono text-[10px] text-text-muted">
+                              {formatBytes(backup.bytes)}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleRestore(item, backup)}
+                            disabled={restoring === restoreKey}
+                            className="shrink-0 rounded-sm border border-border-subtle px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent disabled:opacity-50"
+                          >
+                            {restoring === restoreKey ? "..." : "Restore"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {logs && (
