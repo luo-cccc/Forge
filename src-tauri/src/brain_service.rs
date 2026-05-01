@@ -68,7 +68,7 @@ pub async fn answer_query(
     app: &tauri::AppHandle,
     settings: &llm_runtime::LlmSettings,
     query: &str,
-    mut on_delta: impl FnMut(String) -> Result<llm_runtime::StreamControl, String>,
+    on_delta: impl FnMut(String) -> Result<llm_runtime::StreamControl, String>,
 ) -> Result<(), String> {
     let query_embedding = llm_runtime::embed(settings, query, 30)
         .await
@@ -88,7 +88,7 @@ pub async fn answer_query(
         serde_json::json!({"role": "user", "content": query}),
     ];
 
-    llm_runtime::stream_chat(settings, messages, 60, |content| on_delta(content)).await?;
+    llm_runtime::stream_chat(settings, messages, 60, on_delta).await?;
 
     Ok(())
 }

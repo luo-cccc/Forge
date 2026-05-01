@@ -4,6 +4,7 @@ export const Commands = {
   analyzePacing: "analyze_pacing",
   agentObserve: "agent_observe",
   askAgent: "ask_agent",
+  generateParallelDrafts: "generate_parallel_drafts",
   askProjectBrain: "ask_project_brain",
   batchGenerateChapter: "batch_generate_chapter",
   checkApiKey: "check_api_key",
@@ -12,7 +13,6 @@ export const Commands = {
   deleteOutlineNode: "delete_outline_node",
   exportDiagnosticLogs: "export_diagnostic_logs",
   generateChapterAutonomous: "generate_chapter_autonomous",
-  getApiKey: "get_api_key",
   getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",
   getAgentTools: "get_agent_tools",
@@ -46,6 +46,9 @@ export const Events = {
   editorGhostChunk: "editor-ghost-chunk",
   editorGhostEnd: "editor-ghost-end",
   editorSemanticLint: "editor-semantic-lint",
+  editorEntityCard: "editor-entity-card",
+  editorHoverHint: "editor-hover-hint",
+  storyboardMarker: "storyboard-marker",
 } as const;
 
 export interface StreamChunk {
@@ -77,6 +80,14 @@ export interface EditorGhostChunk {
   requestId: string;
   cursorPosition: number;
   content: string;
+  intent?: string;
+  candidates?: EditorGhostCandidate[];
+}
+
+export interface EditorGhostCandidate {
+  id: string;
+  label: string;
+  text: string;
 }
 
 export interface EditorGhostEnd {
@@ -92,6 +103,38 @@ export interface EditorSemanticLint {
   to: number;
   message: string;
   severity: "info" | "warning" | "error" | string;
+}
+
+export interface EditorEntityCard {
+  keyword: string;
+  content: string;
+  chapter: string;
+}
+
+export interface EditorHoverHint {
+  message: string;
+  from: number;
+  to: number;
+}
+
+export interface StoryboardMarker {
+  chapter: string;
+  message: string;
+  level: string;
+}
+
+export interface ParallelDraft {
+  id: string;
+  label: string;
+  text: string;
+}
+
+export interface ParallelDraftPayload {
+  prefix: string;
+  suffix: string;
+  paragraph: string;
+  selectedText: string;
+  chapterTitle?: string;
 }
 
 export interface SearchStatus {

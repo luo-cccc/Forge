@@ -50,7 +50,7 @@ export const CoWriterStatusBar: React.FC = () => {
         <span className="context-label">上下文 {contextUsage}%</span>
       </div>
       <div className="status-right">
-        <span className="status-model">DeepSeek V4</span>
+        <span className="status-model">DeepSeek V4 Flash</span>
       </div>
     </div>
   );

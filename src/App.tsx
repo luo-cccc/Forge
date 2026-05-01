@@ -5,7 +5,6 @@ import { useAppStore } from "./store";
 import { Commands } from "./protocol";
 import EditorPanel from "./components/EditorPanel";
 import AgentPanel from "./components/AgentPanel";
-import { CoWriterStatusBar } from "./components/CoWriterStatusBar";
 import ProjectTree from "./components/ProjectTree";
 
 interface SelectionState {
@@ -153,9 +152,6 @@ function App() {
           onActionInsert={handleActionInsert}
           onActionReplace={handleActionReplace}
         />
-      </div>
-      <div className="fixed bottom-0 left-0 right-0 z-50">
-        <CoWriterStatusBar />
       </div>
     </div>
   );

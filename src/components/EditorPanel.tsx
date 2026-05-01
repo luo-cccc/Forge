@@ -1,6 +1,6 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Editor } from "@tiptap/core";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,10 +13,13 @@ import {
   type AgentObservation,
   type AgentObservationReason,
   type AgentSuggestion,
+  type EditorEntityCard,
   type EditorGhostChunk,
   type EditorGhostEnd,
   type EditorSemanticLint,
   type EditorStatePayload,
+  type ParallelDraft,
+  type ParallelDraftPayload,
   type SemanticLintPayload,
   type StreamChunk,
 } from "../protocol";
@@ -24,17 +27,26 @@ import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
 import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
 import SemanticLint from "../extensions/SemanticLint";
+import EntityAnchor from "../extensions/EntityAnchor";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
 import { PatchReviewOverlay } from "./PatchReviewOverlay";
 import { CoWriterStatusBar } from "./CoWriterStatusBar";
 import PatchMark from "../extensions/PatchMark";
+import EntityHoverCard from "./EntityHoverCard";
+import ParallelDraftsPane from "./ParallelDraftsPane";
 
 interface SelectionState {
   from: number;
   to: number;
   text: string;
+}
+
+interface EntityHoverState {
+  card: EditorEntityCard;
+  x: number;
+  y: number;
 }
 
 interface EditorPanelProps {
@@ -49,6 +61,8 @@ const EDITOR_TELEMETRY_DEBOUNCE_MS = 400;
 const SEMANTIC_LINT_IDLE_MS = 10000;
 const FIM_PREFIX_CHARS = 1000;
 const FIM_SUFFIX_CHARS = 500;
+const PARALLEL_DRAFT_PREFIX_CHARS = 3000;
+const PARALLEL_DRAFT_SUFFIX_CHARS = 1000;
 
 function limitChars(text: string, maxChars: number): string {
   const chars = Array.from(text);
@@ -94,6 +108,21 @@ function buildSemanticLintPayload(editor: Editor, chapterTitle: string): Semanti
     paragraph: editor.state.doc.textBetween($from.start(), $from.end(), " "),
     paragraphFrom: $from.start(),
     cursorPosition: from,
+    chapterTitle,
+  };
+}
+
+function buildParallelDraftPayload(editor: Editor, chapterTitle: string): ParallelDraftPayload {
+  const { from, to } = editor.state.selection;
+  const $from = editor.state.doc.resolve(from);
+  const docStart = Math.max(0, from - PARALLEL_DRAFT_PREFIX_CHARS);
+  const docEnd = Math.min(editor.state.doc.content.size, to + PARALLEL_DRAFT_SUFFIX_CHARS);
+
+  return {
+    prefix: editor.state.doc.textBetween(docStart, from, "\n"),
+    suffix: editor.state.doc.textBetween(to, docEnd, "\n"),
+    paragraph: editor.state.doc.textBetween($from.start(), $from.end(), " "),
+    selectedText: from < to ? editor.state.doc.textBetween(from, to, " ") : "",
     chapterTitle,
   };
 }
@@ -164,8 +193,28 @@ export default function EditorPanel({
   const setLatestObservation = useAppStore((s) => s.setLatestObservation);
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
+  const entityCards = useAppStore((s) => s.entityCards);
+  const [showToast, setShowToast] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [bubbleVisible, setBubbleVisible] = useState(false);
+  const [bubbleThinking, setBubbleThinking] = useState(false);
+  const [inlineDone, setInlineDone] = useState(false);
+  const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
+  const [entityHover, setEntityHover] = useState<EntityHoverState | null>(null);
+  const [parallelDraftsOpen, setParallelDraftsOpen] = useState(false);
+  const [parallelDraftsLoading, setParallelDraftsLoading] = useState(false);
+  const [parallelDraftsError, setParallelDraftsError] = useState<string | null>(null);
+  const [parallelDrafts, setParallelDrafts] = useState<ParallelDraft[]>([]);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText, SemanticLint, PatchMark],
+    extensions: [
+      StarterKit,
+      AIPreviewMark,
+      CommentMark,
+      GhostText,
+      SemanticLint,
+      EntityAnchor,
+      PatchMark,
+    ],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -181,7 +230,44 @@ export default function EditorPanel({
     }
   }, [editor, onEditorReady]);
 
-  const [showToast, setShowToast] = useState(false);
+  useEffect(() => {
+    if (!editor) return;
+    editor.commands.setEntityAnchors(entityCards);
+  }, [editor, entityCards]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const root = editor.view.dom;
+    const handleMouseMove = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest<HTMLElement>(".entity-anchor");
+      if (!anchor) {
+        setEntityHover(null);
+        return;
+      }
+
+      const keyword = anchor.dataset.entityKeyword;
+      const card = entityCards.find((entry) => entry.keyword === keyword);
+      if (!card) {
+        setEntityHover(null);
+        return;
+      }
+
+      setEntityHover({
+        card,
+        x: Math.min(event.clientX + 14, window.innerWidth - 340),
+        y: Math.min(event.clientY + 16, window.innerHeight - 220),
+      });
+    };
+    const handleMouseLeave = () => setEntityHover(null);
+
+    root.addEventListener("mousemove", handleMouseMove);
+    root.addEventListener("mouseleave", handleMouseLeave);
+    return () => {
+      root.removeEventListener("mousemove", handleMouseMove);
+      root.removeEventListener("mouseleave", handleMouseLeave);
+    };
+  }, [editor, entityCards]);
 
   useEffect(() => {
     if (actionEpoch && actionEpoch > 0) {
@@ -194,11 +280,6 @@ export default function EditorPanel({
     }
   }, [actionEpoch]);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [bubbleVisible, setBubbleVisible] = useState(false);
-  const [bubbleThinking, setBubbleThinking] = useState(false);
-  const [inlineDone, setInlineDone] = useState(false);
-  const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
@@ -380,10 +461,17 @@ export default function EditorPanel({
 
         const currentGhost = ghostTextPluginKey.getState(editor.state);
         if (!currentGhost) {
+          const candidates =
+            chunk.candidates && chunk.candidates.length > 0
+              ? chunk.candidates
+              : [{ id: "a", label: "A", text: chunk.content }];
           editor.commands.setGhostText({
             requestId: chunk.requestId,
             position: chunk.cursorPosition,
             text: chunk.content,
+            intent: chunk.intent,
+            candidates,
+            activeIndex: 0,
           });
           return;
         }
@@ -416,14 +504,18 @@ export default function EditorPanel({
       unlistenLint = await listen<EditorSemanticLint>(Events.editorSemanticLint, (event) => {
         const lint = event.payload;
         const selection = editor.state.selection;
+        const isAmbientLint = lint.requestId.startsWith("ambient-lint-");
         if (
-          lint.requestId !== activeSemanticLintRequestIdRef.current ||
-          lint.cursorPosition !== selection.from
+          !isAmbientLint &&
+          (lint.requestId !== activeSemanticLintRequestIdRef.current ||
+            lint.cursorPosition !== selection.from)
         ) {
           return;
         }
 
-        activeSemanticLintRequestIdRef.current = null;
+        if (!isAmbientLint) {
+          activeSemanticLintRequestIdRef.current = null;
+        }
         editor.commands.setSemanticLint(lint);
       });
     };
@@ -524,6 +616,12 @@ export default function EditorPanel({
           activeGhostRequestIdRef.current = null;
           incrementActionEpoch();
         }
+        return;
+      }
+
+      if (event.key === "ArrowRight" && ghostTextPluginKey.getState(editor.state)?.text) {
+        event.preventDefault();
+        editor.commands.nextGhostCandidate();
         return;
       }
 
@@ -691,6 +789,35 @@ export default function EditorPanel({
     snoozeSuggestions(5 * 60 * 1000);
   }, [snoozeSuggestions]);
 
+  const handleGenerateParallelDrafts = useCallback(async () => {
+    if (!editor || parallelDraftsLoading) return;
+    setParallelDraftsOpen(true);
+    setParallelDraftsLoading(true);
+    setParallelDraftsError(null);
+    try {
+      if (!isTauri()) {
+        throw new Error("Parallel drafts require the Tauri desktop runtime and an API key.");
+      }
+      const payload = buildParallelDraftPayload(editor, currentChapter);
+      const drafts = await invoke<ParallelDraft[]>(Commands.generateParallelDrafts, { payload });
+      setParallelDrafts(drafts);
+    } catch (e) {
+      setParallelDraftsError(String(e));
+    } finally {
+      setParallelDraftsLoading(false);
+    }
+  }, [currentChapter, editor, parallelDraftsLoading]);
+
+  const handleInsertParallelDraft = useCallback(
+    (text: string) => {
+      if (!editor) return;
+      const insertAt = editor.state.selection.from;
+      editor.chain().focus().insertContent(text).setTextSelection(insertAt + text.length).run();
+      incrementActionEpoch();
+    },
+    [editor, incrementActionEpoch],
+  );
+
   useEffect(() => {
     if (!editor || !inlineDone) return;
     const handler = (e: KeyboardEvent) => {
@@ -763,6 +890,17 @@ export default function EditorPanel({
           >
             Lorebook
           </button>
+          <button
+            onClick={handleGenerateParallelDrafts}
+            className={`px-2.5 py-1 rounded-sm text-xs transition-colors ${
+              parallelDraftsOpen
+                ? "bg-bg-raised text-accent"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+            title="Parallel drafts"
+          >
+            Drafts
+          </button>
           <span className="w-px h-4 bg-border-subtle mx-1 self-center" />
           <button
             onClick={() => editor.commands.toggleHeading({ level: 2 })}
@@ -785,8 +923,22 @@ export default function EditorPanel({
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
-      <div className="flex-1 overflow-y-auto relative">
-        <EditorContent editor={editor} />
+      <div className="flex-1 min-h-0 relative flex">
+        <div className="flex-1 min-w-0 flex flex-col relative">
+          <div className="flex-1 overflow-y-auto relative">
+            <EditorContent editor={editor} />
+          </div>
+          <CoWriterStatusBar />
+        </div>
+        {parallelDraftsOpen && (
+          <ParallelDraftsPane
+            drafts={parallelDrafts}
+            loading={parallelDraftsLoading}
+            error={parallelDraftsError}
+            onInsert={handleInsertParallelDraft}
+            onClose={() => setParallelDraftsOpen(false)}
+          />
+        )}
         {bubbleVisible && (
           <InlineCommandBubble
             editor={editor}
@@ -823,7 +975,7 @@ export default function EditorPanel({
           />
         )}
         <PatchReviewOverlay />
-        <CoWriterStatusBar />
+        <EntityHoverCard hover={entityHover} />
       </div>
     </div>
   );

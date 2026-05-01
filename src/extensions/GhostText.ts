@@ -7,13 +7,24 @@ export interface GhostTextState {
   requestId: string;
   position: number;
   text: string;
+  intent?: string;
+  candidates: GhostTextCandidate[];
+  activeIndex: number;
+}
+
+export interface GhostTextCandidate {
+  id: string;
+  label: string;
+  text: string;
 }
 
 interface GhostTextMeta {
-  type: "set" | "append" | "clear";
+  type: "set" | "append" | "clear" | "next";
   requestId?: string;
   position?: number;
   text?: string;
+  intent?: string;
+  candidates?: GhostTextCandidate[];
 }
 
 declare module "@tiptap/core" {
@@ -22,6 +33,7 @@ declare module "@tiptap/core" {
       setGhostText: (state: GhostTextState) => ReturnType;
       appendGhostText: (requestId: string, position: number, text: string) => ReturnType;
       clearGhostText: () => ReturnType;
+      nextGhostCandidate: () => ReturnType;
       acceptGhostText: () => ReturnType;
     };
   }
@@ -35,7 +47,15 @@ function createGhostDecoration(doc: ProseMirrorNode, state: GhostTextState): Dec
     () => {
       const span = document.createElement("span");
       span.className = "ghost-text";
-      span.textContent = state.text;
+      const current = state.candidates[state.activeIndex] ?? {
+        label: "A",
+        text: state.text,
+      };
+      span.dataset.intent = state.intent ?? "";
+      span.textContent =
+        state.candidates.length > 1
+          ? ` ${current.text}  [${current.label} · ${state.activeIndex + 1}/${state.candidates.length}]`
+          : state.text;
       return span;
     },
     { side: 1, key: `ghost-${state.requestId}` },
@@ -81,18 +101,29 @@ const GhostText = Extension.create({
           }
           return true;
         },
+      nextGhostCandidate:
+        () =>
+        ({ tr, dispatch }) => {
+          if (dispatch) {
+            tr.setMeta(ghostTextPluginKey, { type: "next" } satisfies GhostTextMeta);
+            dispatch(tr);
+          }
+          return true;
+        },
       acceptGhostText:
         () =>
         ({ editor }) => {
           const state = ghostTextPluginKey.getState(editor.state);
           if (!state?.text) return false;
+          const candidate = state.candidates[state.activeIndex];
+          const text = candidate?.text ?? state.text;
 
           editor
             .chain()
             .focus()
             .clearGhostText()
-            .insertContentAt(state.position, state.text)
-            .setTextSelection(state.position + state.text.length)
+            .insertContentAt(state.position, text)
+            .setTextSelection(state.position + text.length)
             .run();
           return true;
         },
@@ -113,10 +144,16 @@ const GhostText = Extension.create({
             }
 
             if (meta?.type === "set" && meta.requestId && meta.position !== undefined) {
+              const candidates = meta.candidates?.length
+                ? meta.candidates
+                : [{ id: "a", label: "A", text: meta.text ?? "" }];
               return {
                 requestId: meta.requestId,
                 position: meta.position,
-                text: meta.text ?? "",
+                text: candidates[0]?.text ?? meta.text ?? "",
+                intent: meta.intent,
+                candidates,
+                activeIndex: 0,
               };
             }
 
@@ -129,6 +166,22 @@ const GhostText = Extension.create({
               return {
                 ...value,
                 text: `${value.text}${meta.text ?? ""}`,
+                candidates: value.candidates.length
+                  ? value.candidates.map((candidate, index) =>
+                      index === value.activeIndex
+                        ? { ...candidate, text: `${candidate.text}${meta.text ?? ""}` }
+                        : candidate,
+                    )
+                  : [],
+              };
+            }
+
+            if (meta?.type === "next" && value?.candidates.length) {
+              const activeIndex = (value.activeIndex + 1) % value.candidates.length;
+              return {
+                ...value,
+                activeIndex,
+                text: value.candidates[activeIndex]?.text ?? value.text,
               };
             }
 

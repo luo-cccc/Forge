@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173; script-src 'self' 'unsafe-eval' http://localhost:5173; style-src 'self' 'unsafe-inline' http://localhost:5173; img-src 'self' data: asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 https://openrouter.ai https://api.openai.com; font-src 'self' data:"
     }
   },
   "bundle": {

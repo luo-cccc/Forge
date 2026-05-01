@@ -167,7 +167,10 @@ impl OpenAiCompatProvider {
                 super::ToolCall {
                     id,
                     call_type: "function".to_string(),
-                    function: super::ToolCallFunction { name, arguments: args },
+                    function: super::ToolCallFunction {
+                        name,
+                        arguments: args,
+                    },
                 }
             })
             .collect();
@@ -281,7 +284,11 @@ impl Provider for OpenAiCompatProvider {
 
         json["data"][0]["embedding"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_f64().map(|f| f as f32))
+                    .collect()
+            })
             .ok_or_else(|| "Missing embedding in response".to_string())
     }
 
@@ -289,14 +296,7 @@ impl Provider for OpenAiCompatProvider {
         // Rough heuristic: 1 token ≈ 3 chars for CJK-heavy text + 8 token per-message overhead
         messages
             .iter()
-            .map(|m| {
-                (m.content
-                    .as_ref()
-                    .map(|c| c.chars().count())
-                    .unwrap_or(0) as u64)
-                    / 3
-                    + 8
-            })
+            .map(|m| (m.content.as_ref().map(|c| c.chars().count()).unwrap_or(0) as u64) / 3 + 8)
             .sum()
     }
 

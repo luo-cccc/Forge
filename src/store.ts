@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import type {
   AgentMode,
+  EditorEntityCard,
+  EditorHoverHint,
   AgentObservation,
   AgentSuggestion,
   PatchSet,
   PatchStatus,
+  StoryboardMarker,
 } from "./protocol";
 
 interface OutlineNode {
@@ -42,6 +45,13 @@ interface AppState {
   dismissSuggestion: (id: string) => void;
   snoozeSuggestions: (durationMs: number) => void;
   clearExpiredSnooze: (now: number) => void;
+  companionNotes: string[];
+  entityCards: EditorEntityCard[];
+  hoverHints: EditorHoverHint[];
+  storyboardMarkers: StoryboardMarker[];
+  addEntityCard: (card: EditorEntityCard) => void;
+  addHoverHint: (hint: EditorHoverHint) => void;
+  addStoryboardMarker: (marker: StoryboardMarker) => void;
   activePatchSet: PatchSet | null;
   patchStatuses: Record<string, PatchStatus>;
   setPatchSet: (ps: PatchSet) => void;
@@ -133,6 +143,31 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   clearExpiredSnooze: (now) =>
     set((s) => (s.snoozedUntil && s.snoozedUntil <= now ? { snoozedUntil: null } : {})),
+
+  companionNotes: [],
+  entityCards: [],
+  hoverHints: [],
+  storyboardMarkers: [],
+  addEntityCard: (card) =>
+    set((s) => ({
+      entityCards: [
+        card,
+        ...s.entityCards.filter(
+          (existing) => existing.keyword !== card.keyword || existing.chapter !== card.chapter,
+        ),
+      ].slice(0, 8),
+      companionNotes: [`设定锚点：${card.keyword} 已载入。`, ...s.companionNotes].slice(0, 8),
+    })),
+  addHoverHint: (hint) =>
+    set((s) => ({
+      hoverHints: [hint, ...s.hoverHints].slice(0, 8),
+      companionNotes: [hint.message, ...s.companionNotes].slice(0, 8),
+    })),
+  addStoryboardMarker: (marker) =>
+    set((s) => ({
+      storyboardMarkers: [marker, ...s.storyboardMarkers].slice(0, 8),
+      companionNotes: [marker.message, ...s.companionNotes].slice(0, 8),
+    })),
 
   activePatchSet: null,
   patchStatuses: {},

@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 fn jieba() -> &'static jieba_rs::Jieba {
     static JIEBA: OnceLock<jieba_rs::Jieba> = OnceLock::new();
-    JIEBA.get_or_init(|| jieba_rs::Jieba::new())
+    JIEBA.get_or_init(jieba_rs::Jieba::new)
 }
 
 /// Tokenize text for BM25. Uses jieba for Chinese segmentation,
@@ -40,6 +40,12 @@ pub struct Chunk {
 pub struct VectorDB {
     pub chunks: Vec<Chunk>,
     avg_text_len: f32,
+}
+
+impl Default for VectorDB {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VectorDB {
@@ -207,7 +213,9 @@ pub fn extract_keywords(text: &str) -> Vec<String> {
             w.trim_matches(|c: char| !c.is_alphanumeric())
                 .to_lowercase()
         })
-        .filter(|w| w.chars().count() >= 2 && !stopwords.contains(&w.as_str()) && seen.insert(w.clone()))
+        .filter(|w| {
+            w.chars().count() >= 2 && !stopwords.contains(&w.as_str()) && seen.insert(w.clone())
+        })
         .take(8)
         .collect()
 }

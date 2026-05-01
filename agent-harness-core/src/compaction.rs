@@ -65,7 +65,7 @@ What should happen next?"#;
 /// This prevents "orphaned tool result" errors with OpenAI-compatible providers.
 /// Ported from Claw Code `compact.rs` lines 119-158.
 pub fn find_safe_boundary(messages: &[LlmMessage], desired_cut: usize) -> usize {
-    let mut boundary = desired_cut.min(messages.len());
+    let boundary = desired_cut.min(messages.len());
 
     // Track pending tool call IDs that straddle the boundary.
     // If an assistant before the boundary has a tool_call, and the corresponding
@@ -114,11 +114,7 @@ pub fn estimate_message_tokens(messages: &[LlmMessage]) -> u64 {
     messages
         .iter()
         .map(|m| {
-            let content_chars = m
-                .content
-                .as_ref()
-                .map(|c| c.chars().count())
-                .unwrap_or(0) as u64;
+            let content_chars = m.content.as_ref().map(|c| c.chars().count()).unwrap_or(0) as u64;
             content_chars / 3 + 8
         })
         .sum()
@@ -141,13 +137,7 @@ pub fn should_compact(
 pub fn build_compaction_prompt(messages_to_compact: &[LlmMessage]) -> String {
     let conversation_text: String = messages_to_compact
         .iter()
-        .map(|m| {
-            format!(
-                "[{}]: {}",
-                m.role,
-                m.content.as_deref().unwrap_or("")
-            )
-        })
+        .map(|m| format!("[{}]: {}", m.role, m.content.as_deref().unwrap_or("")))
         .collect::<Vec<_>>()
         .join("\n\n");
 
@@ -256,7 +246,11 @@ mod tests {
         }
     }
 
-    fn make_tool_call_msg(role: &str, tool_calls: Option<Vec<crate::provider::ToolCall>>, call_id: Option<&str>) -> LlmMessage {
+    fn make_tool_call_msg(
+        role: &str,
+        tool_calls: Option<Vec<crate::provider::ToolCall>>,
+        call_id: Option<&str>,
+    ) -> LlmMessage {
         LlmMessage {
             role: role.into(),
             content: Some("tool content".into()),
@@ -295,7 +289,11 @@ mod tests {
         ];
         // Cutting at 2 would split the assistant(tool_call) from tool(result)
         let boundary = find_safe_boundary(&messages, 2);
-        assert!(boundary >= 3, "boundary should extend past the tool result, got {}", boundary);
+        assert!(
+            boundary >= 3,
+            "boundary should extend past the tool result, got {}",
+            boundary
+        );
     }
 
     #[test]
@@ -320,7 +318,10 @@ mod tests {
 
     #[test]
     fn test_estimate_tokens_cjk() {
-        let messages = vec![make_msg("user", &"主角在破庙里发现了一把古老的剑。".repeat(10))];
+        let messages = vec![make_msg(
+            "user",
+            &"主角在破庙里发现了一把古老的剑。".repeat(10),
+        )];
         let tokens = estimate_message_tokens(&messages);
         // ~170 CJK chars / 3 ≈ 57 + 8 overhead ≈ 65 tokens
         assert!(tokens > 30 && tokens < 200);

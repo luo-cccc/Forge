@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, lazy, useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
 import { Commands, Events, type ChapterGenerationEvent } from "../protocol";
-import OutlinePanel from "./OutlinePanel";
-import ScriptDoctorPanel from "./ScriptDoctorPanel";
-import LoreGraphView from "./LoreGraphView";
-import StoryboardView from "./StoryboardView";
-import SandboxView from "./SandboxView";
-import SettingsView from "./SettingsView";
 import type { Editor } from "@tiptap/core";
+
+const OutlinePanel = lazy(() => import("./OutlinePanel"));
+const ScriptDoctorPanel = lazy(() => import("./ScriptDoctorPanel"));
+const LoreGraphView = lazy(() => import("./LoreGraphView"));
+const StoryboardView = lazy(() => import("./StoryboardView"));
+const SandboxView = lazy(() => import("./SandboxView"));
+const SettingsView = lazy(() => import("./SettingsView"));
 
 interface ChapterInfo {
   title: string;
@@ -20,6 +21,14 @@ interface ProjectTreeProps {
   onSelectChapter: (title: string) => void;
   editorRef: { current: Editor | null };
   onApplyFix: (quote: string, suggestion: string) => void;
+}
+
+function PanelFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center text-xs text-text-muted">
+      Loading panel...
+    </div>
+  );
 }
 
 export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: ProjectTreeProps) {
@@ -180,18 +189,22 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
             </button>
           </div>
         </>
-      ) : tab === "outline" ? (
-        <OutlinePanel />
-      ) : tab === "doctor" ? (
-        <ScriptDoctorPanel editorRef={editorRef} onApplyFix={onApplyFix} />
-      ) : tab === "graph" ? (
-        <LoreGraphView />
-      ) : tab === "storyboard" ? (
-        <StoryboardView />
-      ) : tab === "sandbox" ? (
-        <SandboxView />
       ) : (
-        <SettingsView />
+        <Suspense fallback={<PanelFallback />}>
+          {tab === "outline" ? (
+            <OutlinePanel />
+          ) : tab === "doctor" ? (
+            <ScriptDoctorPanel editorRef={editorRef} onApplyFix={onApplyFix} />
+          ) : tab === "graph" ? (
+            <LoreGraphView />
+          ) : tab === "storyboard" ? (
+            <StoryboardView />
+          ) : tab === "sandbox" ? (
+            <SandboxView />
+          ) : (
+            <SettingsView />
+          )}
+        </Suspense>
       )}
     </div>
   );

@@ -12,10 +12,13 @@ import {
   type ChapterGenerationEvent,
   type ChapterGenerationStart,
   type ChainOfThoughtStep,
+  type EditorEntityCard,
+  type EditorHoverHint,
   type Epiphany,
   type FrontendChapterStateSnapshot,
   type GenerateChapterAutonomousPayload,
   type SearchStatus,
+  type StoryboardMarker,
   type StreamChunk,
   type StreamEnd,
 } from "../protocol";
@@ -77,6 +80,13 @@ export default function AgentPanel({
   const setAgentMode = useAppStore((s) => s.setAgentMode);
   const latestObservation = useAppStore((s) => s.latestObservation);
   const suggestionQueue = useAppStore((s) => s.suggestionQueue);
+  const companionNotes = useAppStore((s) => s.companionNotes);
+  const entityCards = useAppStore((s) => s.entityCards);
+  const hoverHints = useAppStore((s) => s.hoverHints);
+  const storyboardMarkers = useAppStore((s) => s.storyboardMarkers);
+  const addEntityCard = useAppStore((s) => s.addEntityCard);
+  const addHoverHint = useAppStore((s) => s.addHoverHint);
+  const addStoryboardMarker = useAppStore((s) => s.addStoryboardMarker);
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
   const incrementActionEpoch = useAppStore((s) => s.incrementActionEpoch);
@@ -104,6 +114,9 @@ export default function AgentPanel({
     let unlistenCot: UnlistenFn;
     let unlistenChapter: UnlistenFn;
     let unlistenLoop: UnlistenFn;
+    let unlistenEntity: UnlistenFn;
+    let unlistenHover: UnlistenFn;
+    let unlistenMarker: UnlistenFn;
 
     const setup = async () => {
       // Listen for new agent-loop-event (replaces legacy chunk/error/end events)
@@ -214,6 +227,16 @@ export default function AgentPanel({
         },
       );
 
+      unlistenEntity = await listen<EditorEntityCard>(Events.editorEntityCard, (event) => {
+        addEntityCard(event.payload);
+      });
+      unlistenHover = await listen<EditorHoverHint>(Events.editorHoverHint, (event) => {
+        addHoverHint(event.payload);
+      });
+      unlistenMarker = await listen<StoryboardMarker>(Events.storyboardMarker, (event) => {
+        addStoryboardMarker(event.payload);
+      });
+
       unlistenError = await listen<AgentError>(
         Events.agentError,
         (event) => {
@@ -252,8 +275,20 @@ export default function AgentPanel({
       if (unlistenLoop) unlistenLoop();
       if (unlistenCot) unlistenCot();
       if (unlistenChapter) unlistenChapter();
+      if (unlistenEntity) unlistenEntity();
+      if (unlistenHover) unlistenHover();
+      if (unlistenMarker) unlistenMarker();
     };
-  }, [onActionInsert, onActionReplace, isInlineRequest, setIsAgentThinking, incrementActionEpoch]);
+  }, [
+    onActionInsert,
+    onActionReplace,
+    isInlineRequest,
+    setIsAgentThinking,
+    incrementActionEpoch,
+    addEntityCard,
+    addHoverHint,
+    addStoryboardMarker,
+  ]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -372,9 +407,9 @@ export default function AgentPanel({
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        <div className="rounded-sm border border-border-subtle bg-bg-raised px-3 py-2 text-xs text-text-muted space-y-1.5">
+        <div className="rounded-sm border border-border-subtle bg-bg-raised px-3 py-2 text-xs text-text-muted space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-text-secondary">Agent loop</span>
+            <span className="text-text-secondary">伴生面板</span>
             <span className={agentMode === "proactive" ? "text-accent" : "text-text-muted"}>
               {agentMode}
             </span>
@@ -398,6 +433,41 @@ export default function AgentPanel({
               : ""}
           </div>
         </div>
+        {(entityCards.length > 0 || companionNotes.length > 0 || storyboardMarkers.length > 0) && (
+          <div className="rounded-sm border border-border-subtle bg-bg-surface px-3 py-2 text-xs space-y-3">
+            {entityCards[0] && (
+              <div className="space-y-1">
+                <div className="text-accent">设定卡 · {entityCards[0].keyword}</div>
+                <div className="text-text-secondary line-clamp-4">{entityCards[0].content}</div>
+              </div>
+            )}
+            {companionNotes.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-text-secondary">待处理便签</div>
+                {companionNotes.slice(0, 3).map((note, index) => (
+                  <div key={`${note}-${index}`} className="text-text-muted">
+                    {note}
+                  </div>
+                ))}
+              </div>
+            )}
+            {storyboardMarkers.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-text-secondary">节奏标记</div>
+                {storyboardMarkers.slice(0, 2).map((marker, index) => (
+                  <div key={`${marker.chapter}-${index}`} className="text-text-muted">
+                    {marker.chapter}: {marker.message}
+                  </div>
+                ))}
+              </div>
+            )}
+            {hoverHints.length > 0 && (
+              <div className="text-text-muted">
+                最近提示：{hoverHints[0].message}
+              </div>
+            )}
+          </div>
+        )}
         {messages.length === 0 && !streaming && !searchStatus && (
           <p className="text-text-muted text-xs">Agent responses will appear here.</p>
         )}

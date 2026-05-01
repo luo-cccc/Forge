@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::compaction::{should_compact, compact_messages, CompactionConfig, CompactionResult};
+use crate::compaction::{compact_messages, should_compact, CompactionConfig};
 use crate::provider::{LlmMessage, LlmRequest, Provider, StreamEvent};
 use crate::router::{classify_intent, Intent};
 use crate::tool_executor::{ToolExecution, ToolExecutor, ToolHandler};
@@ -22,10 +22,7 @@ pub enum AgentLoopEvent {
         args: serde_json::Value,
     },
     #[serde(rename = "tool_call_end")]
-    ToolCallEnd {
-        tool: String,
-        result: ToolExecution,
-    },
+    ToolCallEnd { tool: String, result: ToolExecution },
     #[serde(rename = "doom_loop_warning")]
     DoomLoopWarning { tool: String },
     #[serde(rename = "compaction")]
@@ -75,7 +72,12 @@ pub struct AgentLoop<P: Provider, H: ToolHandler> {
 }
 
 impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
-    pub fn new(config: AgentLoopConfig, provider: Arc<P>, registry: ToolRegistry, handler: H) -> Self {
+    pub fn new(
+        config: AgentLoopConfig,
+        provider: Arc<P>,
+        registry: ToolRegistry,
+        handler: H,
+    ) -> Self {
         Self {
             config,
             provider,
@@ -171,8 +173,7 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
                 .stream_call(
                     request,
                     Box::new(move |ev| {
-                        if let (StreamEvent::TextDelta { content }, Some(ref cb)) =
-                            (&ev, &event_cb)
+                        if let (StreamEvent::TextDelta { content }, Some(ref cb)) = (&ev, &event_cb)
                         {
                             cb(AgentLoopEvent::TextChunk {
                                 content: content.clone(),
@@ -181,11 +182,8 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
                     }),
                 )
                 .await
-                .map_err(|e| {
-                    self.emit(AgentLoopEvent::Error {
-                        message: e.clone(),
-                    });
-                    e
+                .inspect_err(|e| {
+                    self.emit(AgentLoopEvent::Error { message: e.clone() });
                 })?;
 
             let response_tool_calls = response.tool_calls.unwrap_or_default();

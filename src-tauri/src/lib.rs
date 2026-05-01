@@ -1,9 +1,9 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, writing_domain_profile,
-    AgentLoop, AgentLoopConfig, AgentLoopEvent,
-    provider::openai_compat::OpenAiCompatProvider,
+    ambient::EditorEvent, default_writing_tool_registry, hermes_memory::HermesDB,
+    provider::openai_compat::OpenAiCompatProvider, writing_domain_profile, AgentLoop,
+    AgentLoopConfig, AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -26,7 +26,6 @@ mod events {
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
     pub const AGENT_ERROR: &str = "agent-error";
     pub const AGENT_SUGGESTION: &str = "agent-suggestion";
-    pub const AGENT_SEARCH_STATUS: &str = "agent-search-status";
     pub const AGENT_STREAM_CHUNK: &str = "agent-stream-chunk";
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
     pub const BATCH_STATUS: &str = "batch-status";
@@ -34,6 +33,9 @@ mod events {
     pub const EDITOR_GHOST_CHUNK: &str = "editor-ghost-chunk";
     pub const EDITOR_GHOST_END: &str = "editor-ghost-end";
     pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
+    pub const EDITOR_ENTITY_CARD: &str = "editor-entity-card";
+    pub const EDITOR_HOVER_HINT: &str = "editor-hover-hint";
+    pub const STORYBOARD_MARKER: &str = "storyboard-marker";
 }
 
 #[tauri::command]
@@ -43,15 +45,6 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
     entry
         .set_password(&key)
         .map_err(|e| format!("Set error: {}", e))
-}
-
-#[tauri::command]
-fn get_api_key(provider: String) -> Result<String, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
-        .map_err(|e| format!("Keyring error: {}", e))?;
-    entry
-        .get_password()
-        .map_err(|e| format!("Get error: {}", e))
 }
 
 #[tauri::command]
@@ -129,8 +122,6 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 enum HarnessState {
     Idle,
-    Thinking,
-    Streaming,
 }
 
 struct AppState {
@@ -177,13 +168,6 @@ struct StreamEnd {
     reason: String,
 }
 
-#[derive(Serialize, Clone)]
-struct SearchStatus {
-    keyword: String,
-    round: u32,
-}
-
-use agent_harness_core::actions::extract_search_action as extract_action_search;
 use agent_harness_core::truncate_context;
 
 #[tauri::command]
@@ -223,6 +207,16 @@ fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, S
 #[tauri::command]
 fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<String, String> {
     let revision = storage::save_chapter_content_and_revision(&app, &title, &content)?;
+
+    if let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() {
+        if let Ok(bus) = bus_state.lock() {
+            let _ = bus.publish(EditorEvent::ChapterSaved {
+                chapter: title.clone(),
+                content_length: content.chars().count(),
+                revision: revision.clone(),
+            });
+        }
+    }
 
     // Background auto-embed
     let app_clone = app.clone();
@@ -297,12 +291,6 @@ struct ChapterGenerationStart {
     request_id: String,
 }
 
-#[derive(Serialize, Clone)]
-struct AgentError {
-    message: String,
-    source: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentKernelStatus {
@@ -333,6 +321,16 @@ struct EditorGhostChunk {
     request_id: String,
     cursor_position: usize,
     content: String,
+    intent: Option<String>,
+    candidates: Vec<EditorGhostCandidate>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostCandidate {
+    id: String,
+    label: String,
+    text: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -353,6 +351,24 @@ struct SemanticLintPayload {
     chapter_title: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParallelDraftPayload {
+    prefix: String,
+    suffix: String,
+    paragraph: String,
+    selected_text: String,
+    chapter_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParallelDraft {
+    id: String,
+    label: String,
+    text: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EditorSemanticLint {
@@ -364,16 +380,6 @@ struct EditorSemanticLint {
     severity: String,
 }
 
-fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
-    let _ = app.emit(
-        events::AGENT_ERROR,
-        AgentError {
-            message: message.to_string(),
-            source: source.to_string(),
-        },
-    );
-}
-
 fn realtime_cowrite_enabled() -> bool {
     std::env::var("AGENT_WRITER_REALTIME_COWRITE")
         .map(|value| {
@@ -381,26 +387,6 @@ fn realtime_cowrite_enabled() -> bool {
             !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
         })
         .unwrap_or(true)
-}
-
-fn build_fim_messages(
-    prefix: &str,
-    suffix: &str,
-    chapter_title: Option<&str>,
-) -> Vec<serde_json::Value> {
-    let title = chapter_title.unwrap_or("current chapter");
-    let system_prompt = "You are a low-latency fill-in-the-middle writing engine for a novelist. \
-Complete only the text that belongs exactly at the cursor. Return 1-3 short Chinese sentences at most. \
-Do not explain, do not quote the prompt, do not wrap the answer in markdown, and stop at a natural boundary.";
-    let user_prompt = format!(
-        "<|fim_prefix|>\n# {}\n{}\n<|fim_suffix|>\n{}\n<|fim_middle|>",
-        title, prefix, suffix
-    );
-
-    vec![
-        serde_json::json!({"role": "system", "content": system_prompt}),
-        serde_json::json!({"role": "user", "content": user_prompt}),
-    ]
 }
 
 fn paragraph_hint(paragraph: &str) -> String {
@@ -419,6 +405,259 @@ fn trim_ghost_completion(text: &str) -> String {
         .replace("<|fim_suffix|>", "");
     let trimmed = without_markers.trim_matches(|c: char| c == '`' || c.is_whitespace());
     trimmed.chars().take(180).collect::<String>()
+}
+
+fn trim_parallel_draft(text: &str) -> String {
+    text.trim_matches(|c: char| c == '`' || c.is_whitespace())
+        .chars()
+        .take(1200)
+        .collect::<String>()
+}
+
+fn parse_parallel_drafts(raw: &str) -> Vec<ParallelDraft> {
+    let labels = ["A 顺势推进", "B 冲突加压", "C 情绪转折"];
+    let ids = ["a", "b", "c"];
+    let mut drafts = Vec::new();
+    let mut current_idx: Option<usize> = None;
+    let mut current_text = String::new();
+
+    let flush = |drafts: &mut Vec<ParallelDraft>,
+                 current_idx: &mut Option<usize>,
+                 current_text: &mut String| {
+        let Some(idx) = current_idx.take() else {
+            current_text.clear();
+            return;
+        };
+        let text = trim_parallel_draft(current_text);
+        current_text.clear();
+        if text.is_empty() {
+            return;
+        }
+        drafts.push(ParallelDraft {
+            id: ids[idx].to_string(),
+            label: labels[idx].to_string(),
+            text,
+        });
+    };
+
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        let marker = trimmed
+            .split_once(':')
+            .or_else(|| trimmed.split_once('：'))
+            .and_then(|(head, body)| {
+                let idx = match head.trim().chars().next().map(|c| c.to_ascii_uppercase()) {
+                    Some('A') => 0,
+                    Some('B') => 1,
+                    Some('C') => 2,
+                    _ => return None,
+                };
+                Some((idx, body.trim_start()))
+            });
+
+        if let Some((idx, body)) = marker {
+            flush(&mut drafts, &mut current_idx, &mut current_text);
+            current_idx = Some(idx);
+            current_text.push_str(body);
+        } else if current_idx.is_some() {
+            if !current_text.is_empty() {
+                current_text.push('\n');
+            }
+            current_text.push_str(line);
+        }
+    }
+    flush(&mut drafts, &mut current_idx, &mut current_text);
+    drafts.truncate(3);
+    drafts
+}
+
+fn extract_keywords_for_ambient(paragraph: &str, app: &tauri::AppHandle) -> Vec<String> {
+    let mut keywords = Vec::new();
+
+    if let Ok(entries) = storage::load_lorebook(app) {
+        for entry in entries {
+            let keyword = entry.keyword.trim();
+            if !keyword.is_empty() && paragraph.contains(keyword) {
+                keywords.push(keyword.to_string());
+            }
+            if keywords.len() >= 8 {
+                break;
+            }
+        }
+    }
+
+    if keywords.is_empty() {
+        keywords.extend(
+            agent_harness_core::extract_keywords(paragraph)
+                .into_iter()
+                .take(4),
+        );
+    }
+
+    keywords
+}
+
+fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::AgentOutput) {
+    match output {
+        agent_harness_core::AgentOutput::GhostText {
+            request_id,
+            text,
+            position,
+        } => {
+            let request_id_value =
+                request_id.unwrap_or_else(|| format!("ambient-{}", agent_runtime::now_ms()));
+            let content = trim_ghost_completion(&text);
+            if content.is_empty() {
+                return;
+            }
+            let _ = app.emit(
+                events::EDITOR_GHOST_CHUNK,
+                EditorGhostChunk {
+                    request_id: request_id_value.clone(),
+                    cursor_position: position,
+                    content,
+                    intent: None,
+                    candidates: Vec::new(),
+                },
+            );
+            let _ = app.emit(
+                events::EDITOR_GHOST_END,
+                EditorGhostEnd {
+                    request_id: request_id_value.clone(),
+                    cursor_position: position,
+                    reason: "complete".to_string(),
+                },
+            );
+            clear_editor_prediction_for_output(app, Some(&request_id_value));
+        }
+        agent_harness_core::AgentOutput::MultiGhost {
+            request_id,
+            position,
+            intent,
+            candidates,
+        } => {
+            let request_id_value =
+                request_id.unwrap_or_else(|| format!("ambient-{}", agent_runtime::now_ms()));
+            let candidates = candidates
+                .into_iter()
+                .map(|candidate| EditorGhostCandidate {
+                    id: candidate.id,
+                    label: candidate.label,
+                    text: trim_ghost_completion(&candidate.text),
+                })
+                .filter(|candidate| !candidate.text.is_empty())
+                .collect::<Vec<_>>();
+            let content = candidates
+                .first()
+                .map(|candidate| candidate.text.clone())
+                .unwrap_or_default();
+            if content.is_empty() {
+                return;
+            }
+            let _ = app.emit(
+                events::EDITOR_GHOST_CHUNK,
+                EditorGhostChunk {
+                    request_id: request_id_value.clone(),
+                    cursor_position: position,
+                    content,
+                    intent: Some(intent),
+                    candidates,
+                },
+            );
+            let _ = app.emit(
+                events::EDITOR_GHOST_END,
+                EditorGhostEnd {
+                    request_id: request_id_value.clone(),
+                    cursor_position: position,
+                    reason: "complete".to_string(),
+                },
+            );
+            clear_editor_prediction_for_output(app, Some(&request_id_value));
+        }
+        agent_harness_core::AgentOutput::GhostEnd {
+            request_id,
+            position,
+            reason,
+        } => {
+            let request_id_value =
+                request_id.unwrap_or_else(|| format!("ambient-{}", agent_runtime::now_ms()));
+            let _ = app.emit(
+                events::EDITOR_GHOST_END,
+                EditorGhostEnd {
+                    request_id: request_id_value.clone(),
+                    cursor_position: position,
+                    reason,
+                },
+            );
+            clear_editor_prediction_for_output(app, Some(&request_id_value));
+        }
+        agent_harness_core::AgentOutput::SemanticLint {
+            message,
+            from,
+            to,
+            severity,
+        } => {
+            let _ = app.emit(
+                events::EDITOR_SEMANTIC_LINT,
+                EditorSemanticLint {
+                    request_id: format!("ambient-lint-{}", agent_runtime::now_ms()),
+                    cursor_position: to,
+                    from,
+                    to,
+                    message,
+                    severity,
+                },
+            );
+        }
+        agent_harness_core::AgentOutput::HoverHint { message, from, to } => {
+            let _ = app.emit(
+                events::EDITOR_HOVER_HINT,
+                serde_json::json!({
+                    "message": message,
+                    "from": from,
+                    "to": to,
+                }),
+            );
+        }
+        agent_harness_core::AgentOutput::EntityCard {
+            keyword,
+            content,
+            chapter,
+        } => {
+            let _ = app.emit(
+                events::EDITOR_ENTITY_CARD,
+                serde_json::json!({
+                    "keyword": keyword,
+                    "content": content,
+                    "chapter": chapter,
+                }),
+            );
+        }
+        agent_harness_core::AgentOutput::StoryboardMarker {
+            chapter,
+            message,
+            level,
+        } => {
+            let _ = app.emit(
+                events::STORYBOARD_MARKER,
+                serde_json::json!({
+                    "chapter": chapter,
+                    "message": message,
+                    "level": level,
+                }),
+            );
+        }
+        agent_harness_core::AgentOutput::Epiphany { skill, category } => {
+            let _ = app.emit(
+                events::AGENT_EPIPHANY,
+                serde_json::json!({
+                    "skill": skill,
+                    "category": category,
+                }),
+            );
+        }
+        agent_harness_core::AgentOutput::None => {}
+    }
 }
 
 fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
@@ -592,13 +831,29 @@ fn clear_editor_prediction_task(state: &AppState, request_id: &str) -> Result<()
     Ok(())
 }
 
+fn clear_editor_prediction_for_output(app: &tauri::AppHandle, request_id: Option<&str>) {
+    let Some(request_id) = request_id else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let _ = clear_editor_prediction_task(&state, request_id);
+}
+
 #[tauri::command]
 fn abort_editor_prediction(
     app: tauri::AppHandle,
     request_id: Option<String>,
 ) -> Result<bool, String> {
     let state = app.state::<AppState>();
-    abort_editor_prediction_task(&state, request_id.as_deref())
+    let aborted = abort_editor_prediction_task(&state, request_id.as_deref())?;
+    if aborted {
+        if let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() {
+            if let Ok(mut bus) = bus_state.lock() {
+                bus.abort_agent("co-writer");
+            }
+        }
+    }
+    Ok(aborted)
 }
 
 #[tauri::command]
@@ -633,66 +888,51 @@ async fn report_editor_state(
         });
     }
 
-    let settings = llm_runtime::settings(api_key);
-    let mut prefix = payload.prefix.clone();
-    prefix.push_str(&paragraph_hint(&payload.paragraph));
-    let messages = build_fim_messages(&prefix, &payload.suffix, payload.chapter_title.as_deref());
-    let app_clone = app.clone();
+    let chapter = payload
+        .chapter_title
+        .clone()
+        .unwrap_or_else(|| "current chapter".to_string());
+    let paragraph = if payload.paragraph.trim().is_empty() {
+        paragraph_hint(&payload.prefix)
+    } else {
+        payload.paragraph.clone()
+    };
 
-    tokio::spawn(async move {
-        let mut emitted_chars = 0usize;
-        let stream_result = llm_runtime::stream_chat_cancellable(
-            &settings,
-            messages,
-            8,
-            cancel.clone(),
-            |content| {
-                let content = trim_ghost_completion(&content);
-                if content.is_empty() {
-                    return Ok(llm_runtime::StreamControl::Continue);
-                }
+    let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() else {
+        return Ok(());
+    };
 
-                emitted_chars += content.chars().count();
-                let _ = app_clone.emit(
-                    events::EDITOR_GHOST_CHUNK,
-                    EditorGhostChunk {
-                        request_id: request_id.clone(),
-                        cursor_position,
-                        content,
-                    },
-                );
-
-                if emitted_chars >= 180 {
-                    Ok(llm_runtime::StreamControl::Stop)
-                } else {
-                    Ok(llm_runtime::StreamControl::Continue)
-                }
-            },
+    let cache = app
+        .state::<std::sync::Arc<tokio::sync::Mutex<ambient_agents::context_fetcher::ContextCache>>>(
         )
-        .await;
-
-        let reason = match stream_result {
-            Ok(_) => "complete",
-            Err(ref e) if e == "cancelled" || cancel.is_cancelled() => "cancelled",
-            Err(e) => {
-                tracing::warn!("Ghost completion failed: {}", e);
-                "error"
-            }
+        .inner()
+        .clone();
+    let keywords = extract_keywords_for_ambient(&paragraph, &app);
+    if let Ok(mut bus) = bus_state.lock() {
+        bus.abort_agent("co-writer");
+        bus.spawn_agent(std::sync::Arc::new(
+            ambient_agents::co_writer::CoWriterAgent { cache },
+        ));
+        if !keywords.is_empty() {
+            let _ = bus.publish(EditorEvent::KeywordDetected {
+                keywords,
+                chapter: chapter.clone(),
+                paragraph: paragraph.clone(),
+            });
         }
-        .to_string();
+        let _ = bus.publish(EditorEvent::IdleTick {
+            request_id: Some(request_id),
+            idle_ms: 500,
+            chapter,
+            paragraph,
+            prefix: payload.prefix,
+            suffix: payload.suffix,
+            cursor_position,
+        });
+    }
 
-        let _ = app_clone.emit(
-            events::EDITOR_GHOST_END,
-            EditorGhostEnd {
-                request_id: request_id.clone(),
-                cursor_position,
-                reason,
-            },
-        );
-
-        let state = app_clone.state::<AppState>();
-        let _ = clear_editor_prediction_task(&state, &request_id);
-    });
+    drop(api_key);
+    drop(cancel);
 
     Ok(())
 }
@@ -865,14 +1105,6 @@ async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content
             e
         );
     }
-}
-
-#[derive(Serialize, Clone)]
-struct CoTEvent {
-    step: u32,
-    total: u32,
-    description: String,
-    status: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -1113,6 +1345,58 @@ async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), S
         },
     );
     Ok(())
+}
+
+#[tauri::command]
+async fn generate_parallel_drafts(
+    payload: ParallelDraftPayload,
+) -> Result<Vec<ParallelDraft>, String> {
+    let api_key = require_api_key()?;
+    let settings = llm_runtime::settings(api_key);
+    let chapter = payload
+        .chapter_title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("当前章节");
+    let focus = if payload.selected_text.trim().is_empty() {
+        payload.paragraph.trim()
+    } else {
+        payload.selected_text.trim()
+    };
+
+    let prompt = format!(
+        "你是中文小说共创写手。请顺着用户已有文本，生成三个不同方向的平行草稿。\n\
+         输出格式必须严格为：\n\
+         A: ...\nB: ...\nC: ...\n\
+         每个版本 2-5 句，可以分段；不要解释，不要 Markdown。\n\
+         A 偏顺势推进，B 偏冲突加压，C 偏情绪转折。\n\
+         ## 章节\n{}\n## 光标前文\n{}\n## 光标后文\n{}\n## 当前焦点\n{}",
+        chapter,
+        truncate_context(&payload.prefix, 3000),
+        truncate_context(&payload.suffix, 1000),
+        focus,
+    );
+
+    let text = llm_runtime::chat_text(
+        &settings,
+        vec![serde_json::json!({"role": "user", "content": prompt})],
+        false,
+        45,
+    )
+    .await?;
+    let drafts = parse_parallel_drafts(&text);
+    if drafts.is_empty() {
+        let fallback = trim_parallel_draft(&text);
+        if fallback.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Ok(vec![ParallelDraft {
+            id: "a".to_string(),
+            label: "A 顺势推进".to_string(),
+            text: fallback,
+        }]);
+    }
+    Ok(drafts)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1410,10 +1694,10 @@ async fn ask_agent(
     selected_text: String,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let api_base = std::env::var("OPENAI_API_BASE")
-        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "deepseek/deepseek-v4-flash".into());
+    let api_base =
+        std::env::var("OPENAI_API_BASE").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
+    let model =
+        std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "deepseek/deepseek-v4-flash".into());
 
     let state = app.state::<AppState>();
     let truncated_context = truncate_context(&context, 2000);
@@ -1447,17 +1731,11 @@ and lore before inventing new details. Search the lorebook for named entities.",
     );
 
     // Build provider
-    let provider = std::sync::Arc::new(OpenAiCompatProvider::new(
-        &api_base,
-        &api_key,
-        &model,
-    ));
+    let provider = std::sync::Arc::new(OpenAiCompatProvider::new(&api_base, &api_key, &model));
 
     // Build tool registry + bridge
     let registry = default_writing_tool_registry();
-    let bridge = tool_bridge::TauriToolBridge {
-        app: app.clone(),
-    };
+    let bridge = tool_bridge::TauriToolBridge { app: app.clone() };
 
     // Build agent loop
     let mut agent = AgentLoop::new(
@@ -1472,40 +1750,38 @@ and lore before inventing new details. Search the lorebook for named entities.",
 
     // Wire events to Tauri frontend
     let app_handle = app.clone();
-    agent.set_event_callback(std::sync::Arc::new(move |event| {
-        match event {
-            AgentLoopEvent::Intent { intent } => {
-                let _ = app_handle.emit(
-                    events::AGENT_CHAIN_OF_THOUGHT,
-                    serde_json::json!({
-                        "step": 1,
-                        "total": 3,
-                        "description": format!("Intent: {}", intent),
-                        "status": "done",
-                    }),
-                );
-            }
-            AgentLoopEvent::TextChunk { content } => {
-                let _ = app_handle.emit(
-                    events::AGENT_STREAM_CHUNK,
-                    serde_json::json!({"content": content}),
-                );
-            }
-            AgentLoopEvent::Error { message } => {
-                let _ = app_handle.emit(
-                    events::AGENT_ERROR,
-                    serde_json::json!({"message": message, "source": "agent_loop"}),
-                );
-            }
-            AgentLoopEvent::Complete { .. } => {
-                let _ = app_handle.emit(
-                    events::AGENT_STREAM_END,
-                    serde_json::json!({"reason": "complete"}),
-                );
-            }
-            _ => {
-                let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
-            }
+    agent.set_event_callback(std::sync::Arc::new(move |event| match event {
+        AgentLoopEvent::Intent { intent } => {
+            let _ = app_handle.emit(
+                events::AGENT_CHAIN_OF_THOUGHT,
+                serde_json::json!({
+                    "step": 1,
+                    "total": 3,
+                    "description": format!("Intent: {}", intent),
+                    "status": "done",
+                }),
+            );
+        }
+        AgentLoopEvent::TextChunk { content } => {
+            let _ = app_handle.emit(
+                events::AGENT_STREAM_CHUNK,
+                serde_json::json!({"content": content}),
+            );
+        }
+        AgentLoopEvent::Error { message } => {
+            let _ = app_handle.emit(
+                events::AGENT_ERROR,
+                serde_json::json!({"message": message, "source": "agent_loop"}),
+            );
+        }
+        AgentLoopEvent::Complete { .. } => {
+            let _ = app_handle.emit(
+                events::AGENT_STREAM_END,
+                serde_json::json!({"reason": "complete"}),
+            );
+        }
+        _ => {
+            let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
         }
     }));
 
@@ -1571,35 +1847,28 @@ pub fn run() {
 
     // Capture clones before the setup closure
     let cache1 = cache.clone();
-    let cache2 = cache.clone();
 
     if let Err(e) = tauri::Builder::default()
         .setup(move |app| {
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
             let ah = app.handle().clone();
+            let output_app = ah.clone();
+            event_bus.set_output_handler(std::sync::Arc::new(move |output| {
+                emit_ambient_output(&output_app, output);
+            }));
 
-            event_bus.spawn(
-                std::sync::Arc::new(ambient_agents::context_fetcher::ContextFetcherAgent {
+            event_bus.spawn_agent(std::sync::Arc::new(
+                ambient_agents::context_fetcher::ContextFetcherAgent {
                     app: ah.clone(),
                     cache: cache1,
-                }),
-                std::sync::Arc::new(|_| {}),
-            );
-
-            let ah_clone = ah.clone();
-            event_bus.spawn(
-                std::sync::Arc::new(ambient_agents::co_writer::CoWriterAgent {
-                    app: ah.clone(),
-                    cache: cache2,
-                }),
-                std::sync::Arc::new(move |output| {
-                    if let agent_harness_core::AgentOutput::GhostText { text, position } = output {
-                        let _ = ah_clone.emit("editor-ghost-chunk", serde_json::json!({
-                            "content": text, "position": position,
-                        }));
-                    }
-                }),
-            );
+                },
+            ));
+            event_bus.spawn_agent(std::sync::Arc::new(
+                ambient_agents::continuity_watcher::ContinuityWatcher { app: ah.clone() },
+            ));
+            event_bus.spawn_agent(std::sync::Arc::new(
+                ambient_agents::pacing_analyst::PacingAnalyst { app: ah.clone() },
+            ));
 
             app.manage(Mutex::new(event_bus));
             Ok(())
@@ -1609,6 +1878,7 @@ pub fn run() {
             hermes_db: Mutex::new(hermes_db),
             editor_prediction: Mutex::new(None),
         })
+        .manage(cache)
         .invoke_handler(tauri::generate_handler![
             abort_editor_prediction,
             harness_echo,
@@ -1636,11 +1906,11 @@ pub fn run() {
             generate_chapter_autonomous,
             analyze_chapter,
             ask_project_brain,
+            generate_parallel_drafts,
             get_project_graph_data,
             analyze_pacing,
             rename_chapter_file,
             set_api_key,
-            get_api_key,
             check_api_key,
             export_diagnostic_logs
         ])
@@ -1649,5 +1919,31 @@ pub fn run() {
         let message = format!("Error while running Tauri application: {}", e);
         tracing::error!("{}", message);
         let _ = msgbox::create("Agent-Writer Error", &message, msgbox::IconType::Error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_parallel_drafts_keeps_multiline_branches() {
+        let drafts = parse_parallel_drafts(
+            "A: 林墨没有立刻回答。\n他只是把刀压低。\nB：门外忽然传来脚步声。\nC: 她看见他眼里的犹豫。",
+        );
+
+        assert_eq!(drafts.len(), 3);
+        assert_eq!(drafts[0].id, "a");
+        assert!(drafts[0].text.contains("把刀压低"));
+        assert_eq!(drafts[1].label, "B 冲突加压");
+        assert_eq!(drafts[2].id, "c");
+    }
+
+    #[test]
+    fn trim_parallel_draft_removes_markdown_fence_noise() {
+        assert_eq!(
+            trim_parallel_draft("```\n林墨停下脚步。\n```"),
+            "林墨停下脚步。"
+        );
     }
 }

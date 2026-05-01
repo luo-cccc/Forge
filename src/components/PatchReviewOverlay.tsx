@@ -30,7 +30,7 @@ export const PatchReviewOverlay: React.FC = () => {
         clearPatches();
       }
     },
-    [activePatchSet, patchStatuses, acceptPatch, rejectPatch, acceptAllPatches, rejectAllPatches, clearPatches],
+    [activePatchSet, patchStatuses, acceptPatch, rejectPatch, acceptAllPatches, clearPatches],
   );
 
   useEffect(() => {

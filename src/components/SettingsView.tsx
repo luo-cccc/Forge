@@ -24,6 +24,7 @@ export default function SettingsView() {
   const handleSave = useCallback(async () => {
     try {
       await invoke(Commands.setApiKey, { provider: "openai", key: apiKey });
+      setApiKey("");
       setSaved(true);
       setHasKey(true);
       setTimeout(() => setSaved(false), 3000);
@@ -35,8 +36,9 @@ export default function SettingsView() {
   const handleVerify = useCallback(async () => {
     setVerifying(true);
     try {
-      const key = await invoke<string>(Commands.getApiKey, { provider: "openai" });
-      setLogs(key ? `Key stored: ${key.substring(0, 8)}...` : "No key found");
+      const ok = await invoke<boolean>(Commands.checkApiKey, { provider: "openai" });
+      setHasKey(ok);
+      setLogs(ok ? "Key is stored in the OS keychain." : "No key found");
     } catch (e) {
       setLogs(`Verify failed: ${e}`);
     } finally {

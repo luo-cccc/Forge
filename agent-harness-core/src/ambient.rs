@@ -7,21 +7,50 @@ use tokio_util::sync::CancellationToken;
 #[serde(tag = "kind")]
 pub enum EditorEvent {
     #[serde(rename = "cursor_moved")]
-    CursorMoved { chapter: String, position: usize, paragraph: String },
+    CursorMoved {
+        chapter: String,
+        position: usize,
+        paragraph: String,
+    },
     #[serde(rename = "text_changed")]
-    TextChanged { chapter: String, full_text_snippet: String, change_summary: String },
+    TextChanged {
+        chapter: String,
+        full_text_snippet: String,
+        change_summary: String,
+    },
     #[serde(rename = "idle_tick")]
-    IdleTick { idle_ms: u64, chapter: String, paragraph: String, cursor_position: usize },
+    IdleTick {
+        request_id: Option<String>,
+        idle_ms: u64,
+        chapter: String,
+        paragraph: String,
+        prefix: String,
+        suffix: String,
+        cursor_position: usize,
+    },
     #[serde(rename = "selection_changed")]
-    SelectionChanged { from: usize, to: usize, text: String, chapter: String },
+    SelectionChanged {
+        from: usize,
+        to: usize,
+        text: String,
+        chapter: String,
+    },
     #[serde(rename = "chapter_saved")]
-    ChapterSaved { chapter: String, content_length: usize, revision: String },
+    ChapterSaved {
+        chapter: String,
+        content_length: usize,
+        revision: String,
+    },
     #[serde(rename = "chapter_switched")]
     ChapterSwitched { from: Option<String>, to: String },
     #[serde(rename = "session_ended")]
     SessionEnded,
     #[serde(rename = "keyword_detected")]
-    KeywordDetected { keywords: Vec<String>, chapter: String, paragraph: String },
+    KeywordDetected {
+        keywords: Vec<String>,
+        chapter: String,
+        paragraph: String,
+    },
 }
 
 /// Result of an ambient agent's processing.
@@ -29,17 +58,60 @@ pub enum EditorEvent {
 #[serde(tag = "output_kind")]
 pub enum AgentOutput {
     #[serde(rename = "ghost_text")]
-    GhostText { text: String, position: usize },
+    GhostText {
+        request_id: Option<String>,
+        text: String,
+        position: usize,
+    },
+    #[serde(rename = "multi_ghost")]
+    MultiGhost {
+        request_id: Option<String>,
+        position: usize,
+        intent: String,
+        candidates: Vec<GhostCandidate>,
+    },
+    #[serde(rename = "ghost_end")]
+    GhostEnd {
+        request_id: Option<String>,
+        position: usize,
+        reason: String,
+    },
     #[serde(rename = "hover_hint")]
-    HoverHint { message: String, from: usize, to: usize },
+    HoverHint {
+        message: String,
+        from: usize,
+        to: usize,
+    },
+    #[serde(rename = "entity_card")]
+    EntityCard {
+        keyword: String,
+        content: String,
+        chapter: String,
+    },
     #[serde(rename = "semantic_lint")]
-    SemanticLint { message: String, from: usize, to: usize, severity: String },
+    SemanticLint {
+        message: String,
+        from: usize,
+        to: usize,
+        severity: String,
+    },
     #[serde(rename = "storyboard_marker")]
-    StoryboardMarker { chapter: String, message: String, level: String },
+    StoryboardMarker {
+        chapter: String,
+        message: String,
+        level: String,
+    },
     #[serde(rename = "epiphany")]
     Epiphany { skill: String, category: String },
     #[serde(rename = "none")]
     None,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GhostCandidate {
+    pub id: String,
+    pub label: String,
+    pub text: String,
 }
 
 /// Trait for ambient agents — background daemons that respond to editor events.
@@ -58,6 +130,7 @@ pub trait AmbientAgent: Send + Sync {
 pub struct AmbientEventBus {
     tx: broadcast::Sender<EditorEvent>,
     agents: Vec<AmbientAgentHandle>,
+    output: Arc<dyn Fn(AgentOutput) + Send + Sync>,
 }
 
 struct AmbientAgentHandle {
@@ -69,15 +142,27 @@ struct AmbientAgentHandle {
 impl AmbientEventBus {
     pub fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
-        Self { tx, agents: Vec::new() }
+        Self {
+            tx,
+            agents: Vec::new(),
+            output: Arc::new(|_| {}),
+        }
+    }
+
+    pub fn set_output_handler(&mut self, output: Arc<dyn Fn(AgentOutput) + Send + Sync>) {
+        self.output = output;
     }
 
     /// Publish an editor event to all subscribers. Non-blocking.
     pub fn publish(
         &self,
         event: EditorEvent,
-    ) -> Result<usize, broadcast::error::SendError<EditorEvent>> {
-        self.tx.send(event)
+    ) -> Result<usize, Box<broadcast::error::SendError<EditorEvent>>> {
+        self.tx.send(event).map_err(Box::new)
+    }
+
+    pub fn spawn_agent<A: AmbientAgent + 'static>(&mut self, agent: Arc<A>) {
+        self.spawn(agent, self.output.clone());
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<EditorEvent> {
@@ -126,15 +211,24 @@ impl AmbientEventBus {
             }
         });
 
-        self.agents.push(AmbientAgentHandle { name: name_for_handle, join_handle: Some(join_handle), cancel });
+        self.agents.push(AmbientAgentHandle {
+            name: name_for_handle,
+            join_handle: Some(join_handle),
+            cancel,
+        });
     }
 
     /// Abort a specific agent. Also used for debounce: when new text arrives,
     /// abort old CoWriter and spawn a fresh one.
     pub fn abort_agent(&mut self, name: &str) {
-        if let Some(h) = self.agents.iter().find(|a| a.name == name) {
-            h.cancel.cancel();
-        }
+        self.agents.retain(|h| {
+            if h.name == name {
+                h.cancel.cancel();
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// Gracefully shut down all agents.
@@ -150,18 +244,38 @@ impl AmbientEventBus {
     }
 }
 
+fn event_kind(event: &EditorEvent) -> &str {
+    match event {
+        EditorEvent::CursorMoved { .. } => "cursor_moved",
+        EditorEvent::TextChanged { .. } => "text_changed",
+        EditorEvent::IdleTick { .. } => "idle_tick",
+        EditorEvent::SelectionChanged { .. } => "selection_changed",
+        EditorEvent::ChapterSaved { .. } => "chapter_saved",
+        EditorEvent::ChapterSwitched { .. } => "chapter_switched",
+        EditorEvent::SessionEnded => "session_ended",
+        EditorEvent::KeywordDetected { .. } => "keyword_detected",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    struct TestAgent { name: String, events: Vec<String> }
+    struct TestAgent {
+        name: String,
+        events: Vec<String>,
+    }
 
     #[async_trait]
     impl AmbientAgent for TestAgent {
-        fn name(&self) -> &str { &self.name }
-        fn subscribed_events(&self) -> Vec<String> { self.events.clone() }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn subscribed_events(&self) -> Vec<String> {
+            self.events.clone()
+        }
         async fn process(&self, _: EditorEvent, _: CancellationToken) -> Option<AgentOutput> {
             Some(AgentOutput::None)
         }
@@ -169,10 +283,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_subscribe() {
-        let mut bus = AmbientEventBus::new(16);
+        let bus = AmbientEventBus::new(16);
         let mut rx = bus.subscribe();
         bus.publish(EditorEvent::SessionEnded).unwrap();
-        assert!(matches!(rx.recv().await.unwrap(), EditorEvent::SessionEnded));
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            EditorEvent::SessionEnded
+        ));
     }
 
     #[tokio::test]
@@ -181,10 +298,24 @@ mod tests {
         let count = Arc::new(AtomicU32::new(0));
         let c = count.clone();
         bus.spawn(
-            Arc::new(TestAgent { name: "t".into(), events: vec!["idle_tick".into()] }),
-            Arc::new(move |_| { c.fetch_add(1, Ordering::Relaxed); }),
+            Arc::new(TestAgent {
+                name: "t".into(),
+                events: vec!["idle_tick".into()],
+            }),
+            Arc::new(move |_| {
+                c.fetch_add(1, Ordering::Relaxed);
+            }),
         );
-        bus.publish(EditorEvent::IdleTick { idle_ms: 500, chapter: "ch1".into(), paragraph: "h".into(), cursor_position: 0 }).unwrap();
+        bus.publish(EditorEvent::IdleTick {
+            request_id: None,
+            idle_ms: 500,
+            chapter: "ch1".into(),
+            paragraph: "h".into(),
+            prefix: "h".into(),
+            suffix: String::new(),
+            cursor_position: 0,
+        })
+        .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         bus.shutdown().await;
         assert!(count.load(Ordering::Relaxed) >= 1);
@@ -196,25 +327,22 @@ mod tests {
         let count = Arc::new(AtomicU32::new(0));
         let c = count.clone();
         bus.spawn(
-            Arc::new(TestAgent { name: "t".into(), events: vec!["chapter_saved".into()] }),
-            Arc::new(move |_| { c.fetch_add(1, Ordering::Relaxed); }),
+            Arc::new(TestAgent {
+                name: "t".into(),
+                events: vec!["chapter_saved".into()],
+            }),
+            Arc::new(move |_| {
+                c.fetch_add(1, Ordering::Relaxed);
+            }),
         );
-        bus.publish(EditorEvent::CursorMoved { chapter: "c".into(), position: 0, paragraph: "h".into() }).unwrap();
+        bus.publish(EditorEvent::CursorMoved {
+            chapter: "c".into(),
+            position: 0,
+            paragraph: "h".into(),
+        })
+        .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         bus.shutdown().await;
         assert_eq!(count.load(Ordering::Relaxed), 0);
-    }
-}
-
-fn event_kind(event: &EditorEvent) -> &str {
-    match event {
-        EditorEvent::CursorMoved { .. } => "cursor_moved",
-        EditorEvent::TextChanged { .. } => "text_changed",
-        EditorEvent::IdleTick { .. } => "idle_tick",
-        EditorEvent::SelectionChanged { .. } => "selection_changed",
-        EditorEvent::ChapterSaved { .. } => "chapter_saved",
-        EditorEvent::ChapterSwitched { .. } => "chapter_switched",
-        EditorEvent::SessionEnded => "session_ended",
-        EditorEvent::KeywordDetected { .. } => "keyword_detected",
     }
 }

@@ -73,11 +73,7 @@ impl<H: ToolHandler> ToolExecutor<H> {
     }
 
     /// Execute a tool and return structured result.
-    pub async fn execute(
-        &mut self,
-        tool_name: &str,
-        args: serde_json::Value,
-    ) -> ToolExecution {
+    pub async fn execute(&mut self, tool_name: &str, args: serde_json::Value) -> ToolExecution {
         let start = std::time::Instant::now();
 
         // Doom loop check

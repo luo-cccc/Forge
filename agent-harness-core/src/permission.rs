@@ -33,7 +33,11 @@ pub struct PermissionPolicy {
 
 impl PermissionPolicy {
     pub fn new(mode: PermissionMode) -> Self {
-        Self { mode, rules: Vec::new(), deny_rules: Vec::new() }
+        Self {
+            mode,
+            rules: Vec::new(),
+            deny_rules: Vec::new(),
+        }
     }
 
     pub fn authorize(
@@ -46,7 +50,9 @@ impl PermissionPolicy {
         for rule in &self.deny_rules {
             if tool_matches(tool_name, &rule.pattern) {
                 if let PermissionDecision::Deny { ref reason } = rule.action {
-                    return PermissionDecision::Deny { reason: reason.clone() };
+                    return PermissionDecision::Deny {
+                        reason: reason.clone(),
+                    };
                 }
             }
         }
@@ -100,7 +106,9 @@ impl PermissionPolicy {
 }
 
 fn tool_matches(tool_name: &str, pattern: &str) -> bool {
-    if pattern == "*" { return true; }
+    if pattern == "*" {
+        return true;
+    }
     if let Some(prefix) = pattern.strip_suffix('*') {
         return tool_name.starts_with(prefix);
     }
@@ -137,7 +145,9 @@ mod tests {
         let mut policy = PermissionPolicy::new(PermissionMode::DangerFullAccess);
         policy.deny_rules.push(PermissionRule {
             pattern: "generate_*".into(),
-            action: PermissionDecision::Deny { reason: "blocked".into() },
+            action: PermissionDecision::Deny {
+                reason: "blocked".into(),
+            },
         });
         let d = policy.authorize("generate_chapter_draft", ToolSideEffectLevel::Write, false);
         assert!(matches!(d, PermissionDecision::Deny { .. }));

@@ -12,15 +12,15 @@ pub struct LlmSettings {
 
 pub enum StreamControl {
     Continue,
-    Stop,
 }
 
 pub fn settings(api_key: String) -> LlmSettings {
     LlmSettings {
         api_key,
         api_base: std::env::var("OPENAI_API_BASE")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-        model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string()),
+            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string()),
+        model: std::env::var("OPENAI_MODEL")
+            .unwrap_or_else(|_| "deepseek/deepseek-v4-flash".to_string()),
         embedding_model: std::env::var("OPENAI_EMBEDDING_MODEL")
             .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
     }
@@ -199,9 +199,7 @@ pub async fn stream_chat(
             }
 
             full.push_str(&content);
-            if matches!(on_delta(content)?, StreamControl::Stop) {
-                return Ok(full);
-            }
+            on_delta(content)?;
         }
     }
 
@@ -285,9 +283,7 @@ pub async fn stream_chat_cancellable(
             }
 
             full.push_str(&content);
-            if matches!(on_delta(content)?, StreamControl::Stop) {
-                return Ok(full);
-            }
+            on_delta(content)?;
         }
     }
 

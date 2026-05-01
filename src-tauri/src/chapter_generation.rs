@@ -59,18 +59,13 @@ pub struct FrontendChapterStateSnapshot {
     pub dirty: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SaveMode {
     CreateIfMissing,
+    #[default]
     ReplaceIfClean,
     SaveAsDraft,
-}
-
-impl Default for SaveMode {
-    fn default() -> Self {
-        Self::ReplaceIfClean
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

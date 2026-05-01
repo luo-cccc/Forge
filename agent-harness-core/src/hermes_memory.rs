@@ -57,6 +57,13 @@ impl HermesDB {
             );
             CREATE INDEX IF NOT EXISTS idx_session_role ON session_history(role);
             CREATE INDEX IF NOT EXISTS idx_session_created ON session_history(created_at);
+            CREATE VIRTUAL TABLE IF NOT EXISTS session_history_fts USING fts5(
+                content,
+                role UNINDEXED,
+                created_at UNINDEXED,
+                content='session_history',
+                content_rowid='id'
+            );
 
             CREATE TABLE IF NOT EXISTS user_drift_profile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +99,12 @@ impl HermesDB {
                 updated_at TEXT DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_char_name ON character_state(name);
+            DELETE FROM character_state
+            WHERE id NOT IN (
+                SELECT MAX(id) FROM character_state GROUP BY name, chapter_id
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_char_name_chapter
+                ON character_state(name, chapter_id);
 
             CREATE TABLE IF NOT EXISTS plot_thread (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +127,12 @@ impl HermesDB {
                 source_chapter TEXT DEFAULT '',
                 active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now'))
-            );",
+            );
+
+            INSERT INTO session_history_fts(rowid, content, role, created_at)
+            SELECT id, content, role, created_at
+            FROM session_history
+            WHERE id NOT IN (SELECT rowid FROM session_history_fts);",
         )
     }
 
@@ -125,7 +143,13 @@ impl HermesDB {
             "INSERT INTO session_history (role, content) VALUES (?1, ?2)",
             params![role, content],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let id = self.conn.last_insert_rowid();
+        self.conn.execute(
+            "INSERT INTO session_history_fts(rowid, content, role, created_at)
+             SELECT id, content, role, created_at FROM session_history WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(id)
     }
 
     pub fn recent_interactions(&self, limit: usize) -> SqlResult<Vec<SessionRecord>> {
@@ -309,11 +333,17 @@ impl HermesDB {
 
     /// Clean session_history older than 7 days
     pub fn clean_old_sessions(&self) -> SqlResult<usize> {
-        self.conn.execute(
+        let deleted = self.conn.execute(
             "DELETE FROM session_history
              WHERE julianday('now') - julianday(created_at) > 7",
             [],
-        )
+        )?;
+        self.conn.execute(
+            "DELETE FROM session_history_fts
+             WHERE rowid NOT IN (SELECT id FROM session_history)",
+            [],
+        )?;
+        Ok(deleted)
     }
 
     // ---- character_state ----
@@ -368,9 +398,7 @@ impl HermesDB {
             "SELECT name, description, introduced_chapter FROM plot_thread
              WHERE status != 'resolved' ORDER BY priority DESC",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect()
     }
 
@@ -394,9 +422,9 @@ impl HermesDB {
     }
 
     pub fn check_world_rules(&self, statement: &str) -> SqlResult<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT rule FROM world_rule WHERE active = 1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT rule FROM world_rule WHERE active = 1")?;
         let rules: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .filter_map(|r| r.ok())
@@ -425,14 +453,17 @@ impl HermesDB {
         query: &str,
         limit: usize,
     ) -> SqlResult<Vec<SessionSearchResult>> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
-            "SELECT role, content, created_at FROM session_history
-             WHERE content LIKE ?1
-             ORDER BY created_at DESC
+            "SELECT role, content, created_at FROM session_history_fts
+             WHERE session_history_fts MATCH ?1
+             ORDER BY bm25(session_history_fts)
              LIMIT ?2",
         )?;
-        let pattern = format!("%{}%", query);
-        let rows = stmt.query_map(rusqlite::params![pattern, limit], |row| {
+        let rows = stmt.query_map(rusqlite::params![query.trim(), limit as i64], |row| {
             Ok(SessionSearchResult {
                 role: row.get(0)?,
                 content: row.get(1)?,
@@ -440,5 +471,43 @@ impl HermesDB {
             })
         })?;
         rows.collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn memory_db() -> HermesDB {
+        let conn = Connection::open_in_memory().unwrap();
+        let db = HermesDB { conn };
+        db.initialize().unwrap();
+        db
+    }
+
+    #[test]
+    fn upsert_character_state_updates_existing_chapter_state() {
+        let db = memory_db();
+        db.upsert_character_state("林墨", "chapter-1", r#"{"mood":"calm"}"#)
+            .unwrap();
+        db.upsert_character_state("林墨", "chapter-1", r#"{"mood":"angry"}"#)
+            .unwrap();
+
+        let rows = db.get_characters_for_chapter("chapter-1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].1.contains("angry"));
+    }
+
+    #[test]
+    fn search_sessions_uses_fts_index() {
+        let db = memory_db();
+        db.log_interaction("user", "Lin Mo found a hidden door in the ruined temple.")
+            .unwrap();
+        db.log_interaction("assistant", "其他无关内容").unwrap();
+
+        let rows = db.search_sessions("hidden", 5).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].role, "user");
+        assert!(rows[0].content.contains("hidden door"));
     }
 }

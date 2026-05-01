@@ -1,5 +1,6 @@
+use chrono::{Duration, Utc};
 use std::collections::HashMap;
-use chrono::{Utc, Duration};
+use std::str::FromStr;
 
 /// A skill extracted from agent experience.
 /// Mirrors Hermes SKILL.md structure + CowAgent agent_skills table.
@@ -31,18 +32,20 @@ pub enum SkillCategory {
     Custom(String),
 }
 
-impl SkillCategory {
-    pub fn from_str(s: &str) -> Self {
+impl std::str::FromStr for SkillCategory {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "style" => SkillCategory::Style,
-            "character" => SkillCategory::Character,
-            "pacing" => SkillCategory::Pacing,
-            "preference" => SkillCategory::Preference,
-            "plot_structure" => SkillCategory::PlotStructure,
-            "dialogue" => SkillCategory::Dialogue,
-            "description" => SkillCategory::Description,
-            "world_building" => SkillCategory::WorldBuilding,
-            other => SkillCategory::Custom(other.to_string()),
+            "style" => Ok(SkillCategory::Style),
+            "character" => Ok(SkillCategory::Character),
+            "pacing" => Ok(SkillCategory::Pacing),
+            "preference" => Ok(SkillCategory::Preference),
+            "plot_structure" => Ok(SkillCategory::PlotStructure),
+            "dialogue" => Ok(SkillCategory::Dialogue),
+            "description" => Ok(SkillCategory::Description),
+            "world_building" => Ok(SkillCategory::WorldBuilding),
+            other => Ok(SkillCategory::Custom(other.to_string())),
         }
     }
 }
@@ -63,13 +66,20 @@ pub struct CuratorConfig {
 
 impl Default for CuratorConfig {
     fn default() -> Self {
-        Self { max_skills: 200, decay_days: 90, min_confidence: 0.3 }
+        Self {
+            max_skills: 200,
+            decay_days: 90,
+            min_confidence: 0.3,
+        }
     }
 }
 
 impl SkillCurator {
     pub fn new(config: CuratorConfig) -> Self {
-        Self { skills: HashMap::new(), config }
+        Self {
+            skills: HashMap::new(),
+            config,
+        }
     }
 
     pub fn upsert_skill(&mut self, skill: Skill) {
@@ -78,7 +88,9 @@ impl SkillCurator {
 
     /// Find skills matching the given context by trigger + category keywords.
     pub fn find_relevant(&self, context: &str, max_results: usize) -> Vec<&Skill> {
-        let mut matches: Vec<(&Skill, f64)> = self.skills.values()
+        let mut matches: Vec<(&Skill, f64)> = self
+            .skills
+            .values()
             .filter(|s| s.active)
             .map(|s| {
                 let score = self.match_score(s, context);
@@ -93,7 +105,9 @@ impl SkillCurator {
     fn match_score(&self, skill: &Skill, context: &str) -> f64 {
         let mut score = 0.0;
         for trigger in &skill.triggers {
-            if context.contains(trigger.as_str()) { score += 0.4; }
+            if context.contains(trigger.as_str()) {
+                score += 0.4;
+            }
         }
         score += skill.confidence * 0.2;
         score.min(1.0)
@@ -120,8 +134,7 @@ impl SkillCurator {
         }
 
         // Phase 2: Prune excess
-        let mut active: Vec<&mut Skill> = self.skills.values_mut()
-            .filter(|s| s.active).collect();
+        let mut active: Vec<&mut Skill> = self.skills.values_mut().filter(|s| s.active).collect();
         if active.len() > self.config.max_skills {
             active.sort_by(|a, b| b.last_used.cmp(&a.last_used));
             for s in active.iter_mut().skip(self.config.max_skills) {
@@ -154,7 +167,7 @@ pub fn skill_from_db(id: i64, text: &str, category: &str, active: bool, created_
         id: format!("skill_{}", id),
         name: text.chars().take(60).collect(),
         description: text.to_string(),
-        category: SkillCategory::from_str(category),
+        category: SkillCategory::from_str(category).unwrap_or_else(|never| match never {}),
         content: text.to_string(),
         triggers: Vec::new(),
         confidence: 0.5,
@@ -171,10 +184,14 @@ mod tests {
 
     fn make_skill(id: &str, triggers: Vec<&str>, confidence: f64) -> Skill {
         Skill {
-            id: id.into(), name: id.into(), description: "test".into(),
-            category: SkillCategory::Style, content: "test".into(),
+            id: id.into(),
+            name: id.into(),
+            description: "test".into(),
+            category: SkillCategory::Style,
+            content: "test".into(),
             triggers: triggers.iter().map(|s| s.to_string()).collect(),
-            confidence, usage_count: 0,
+            confidence,
+            usage_count: 0,
             last_used: Some(Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string()),
             created_at: Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
             active: true,
@@ -202,13 +219,22 @@ mod tests {
 
     #[test]
     fn test_curate_decays_old_skills() {
-        let mut c = SkillCurator::new(CuratorConfig { decay_days: 1, ..Default::default() });
+        let mut c = SkillCurator::new(CuratorConfig {
+            decay_days: 1,
+            ..Default::default()
+        });
         let old = Skill {
-            id: "old".into(), name: "old".into(), description: "t".into(),
-            category: SkillCategory::Style, content: "t".into(), triggers: vec![],
-            confidence: 0.2, usage_count: 0,
+            id: "old".into(),
+            name: "old".into(),
+            description: "t".into(),
+            category: SkillCategory::Style,
+            content: "t".into(),
+            triggers: vec![],
+            confidence: 0.2,
+            usage_count: 0,
             last_used: Some("2020-01-01T00:00:00".into()),
-            created_at: "2020-01-01T00:00:00".into(), active: true,
+            created_at: "2020-01-01T00:00:00".into(),
+            active: true,
         };
         c.upsert_skill(old);
         let r = c.curate();

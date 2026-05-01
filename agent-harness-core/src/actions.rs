@@ -19,7 +19,7 @@ pub fn parse_actions(text: &str) -> (Vec<Action>, String) {
         for tag in &tags {
             let open = format!("<{}>", tag);
             if let Some(pos) = remaining.find(&open) {
-                if earliest.map_or(true, |(p, _, _)| pos < p) {
+                if earliest.is_none_or(|(p, _, _)| pos < p) {
                     earliest = Some((pos, tag, open.len()));
                 }
             }

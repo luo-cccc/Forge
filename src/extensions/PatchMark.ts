@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { TextPatch, PatchStatus } from "../protocol";
@@ -12,7 +13,7 @@ export interface PatchDecoration {
 
 export const patchMarkPluginKey = new PluginKey<PatchDecoration[]>("patchMark");
 
-function buildDecorations(decos: PatchDecoration[]): DecorationSet {
+function buildDecorations(doc: ProseMirrorNode, decos: PatchDecoration[]): DecorationSet {
   const decs: Decoration[] = [];
   for (const d of decos) {
     if (d.status === "accepted" || d.status === "rejected") continue;
@@ -25,9 +26,7 @@ function buildDecorations(decos: PatchDecoration[]): DecorationSet {
       }),
     );
   }
-  const editorEl = document.querySelector(".ProseMirror");
-  const view = (editorEl as any)?.pmViewDesc?.node;
-  return DecorationSet.create(view, decs);
+  return DecorationSet.create(doc, decs);
 }
 
 const PatchMark = Extension.create({
@@ -51,8 +50,8 @@ const PatchMark = Extension.create({
           },
         },
         props: {
-          decorations() {
-            return buildDecorations(decorations);
+          decorations(state) {
+            return buildDecorations(state.doc, decorations);
           },
         },
       }),
