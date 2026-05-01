@@ -245,7 +245,7 @@ impl WriterAgentKernel {
             for (_kind, title, desc, chapter) in &promises {
                 if observation.reason == super::observation::ObservationReason::ChapterSwitch {
                     proposals.push(AgentProposal {
-                        id: format!("prop_{}", self.proposal_counter),
+                        id: proposal_id(&self.session_id, self.proposal_counter),
                         observation_id: obs_id.clone(),
                         kind: ProposalKind::PlotPromise,
                         priority: ProposalPriority::Normal,
@@ -278,6 +278,7 @@ impl WriterAgentKernel {
                 &self.memory,
                 &obs_id,
                 &mut self.proposal_counter,
+                &self.session_id,
             ) {
                 proposals.push(candidate);
             }
@@ -309,7 +310,7 @@ impl WriterAgentKernel {
                     diagnostic,
                     &observation,
                     &obs_id,
-                    &format!("prop_{}", self.proposal_counter),
+                    &proposal_id(&self.session_id, self.proposal_counter),
                 ));
                 self.proposal_counter += 1;
             }
@@ -355,7 +356,7 @@ impl WriterAgentKernel {
             );
 
             proposals.push(AgentProposal {
-                id: format!("prop_{}", self.proposal_counter),
+                id: proposal_id(&self.session_id, self.proposal_counter),
                 observation_id: obs_id.clone(),
                 kind: ProposalKind::Ghost,
                 priority: ProposalPriority::Ambient,
@@ -458,7 +459,7 @@ impl WriterAgentKernel {
             .unwrap_or_else(|| "missing".to_string());
 
         let proposal = AgentProposal {
-            id: format!("prop_{}", self.proposal_counter),
+            id: proposal_id(&self.session_id, self.proposal_counter),
             observation_id: observation.id.clone(),
             kind: ProposalKind::Ghost,
             priority: ProposalPriority::Ambient,
@@ -515,6 +516,7 @@ impl WriterAgentKernel {
                     &observation,
                     &observation.id,
                     &mut self.proposal_counter,
+                    &self.session_id,
                     entity,
                     CandidateSource::Llm(model.to_string()),
                 ),
@@ -522,6 +524,7 @@ impl WriterAgentKernel {
                     &observation,
                     &observation.id,
                     &mut self.proposal_counter,
+                    &self.session_id,
                     promise,
                     CandidateSource::Llm(model.to_string()),
                 ),
@@ -1322,6 +1325,10 @@ fn snippet(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
 
+fn proposal_id(session_id: &str, counter: u64) -> String {
+    format!("prop_{}_{}", session_id, counter)
+}
+
 fn proposal_trace_summary(
     proposal: &AgentProposal,
     state: &str,
@@ -1907,6 +1914,7 @@ fn memory_candidates_from_observation(
     memory: &WriterMemory,
     observation_id: &str,
     proposal_counter: &mut u64,
+    session_id: &str,
 ) -> Vec<AgentProposal> {
     let mut proposals = Vec::new();
     let mut known = memory.get_canon_entity_names().unwrap_or_default();
@@ -1930,6 +1938,7 @@ fn memory_candidates_from_observation(
             observation,
             observation_id,
             proposal_counter,
+            session_id,
             entity,
             CandidateSource::Local,
         ));
@@ -1950,6 +1959,7 @@ fn memory_candidates_from_observation(
             observation,
             observation_id,
             proposal_counter,
+            session_id,
             promise,
             CandidateSource::Local,
         ));
@@ -1962,10 +1972,11 @@ fn canon_candidate_proposal(
     observation: &WriterObservation,
     observation_id: &str,
     proposal_counter: &mut u64,
+    session_id: &str,
     entity: CanonEntityOp,
     source: CandidateSource,
 ) -> AgentProposal {
-    let id = format!("prop_{}", *proposal_counter);
+    let id = proposal_id(session_id, *proposal_counter);
     *proposal_counter += 1;
     let preview = format!("沉淀设定: {} - {}", entity.name, entity.summary);
     let snippet = entity.summary.clone();
@@ -1998,10 +2009,11 @@ fn promise_candidate_proposal(
     observation: &WriterObservation,
     observation_id: &str,
     proposal_counter: &mut u64,
+    session_id: &str,
     promise: PlotPromiseOp,
     source: CandidateSource,
 ) -> AgentProposal {
-    let id = format!("prop_{}", *proposal_counter);
+    let id = proposal_id(session_id, *proposal_counter);
     *proposal_counter += 1;
     let preview = format!("登记伏笔: {} - {}", promise.title, promise.description);
     let snippet = promise.description.clone();
@@ -2965,6 +2977,60 @@ mod tests {
             .any(|feedback| feedback.proposal_id == ghost_id
                 && feedback.action == "Rejected"
                 && feedback.reason.as_deref() == Some("too early")));
+    }
+
+    #[test]
+    fn proposal_ids_do_not_collide_across_kernel_restarts() {
+        let db_path = std::env::temp_dir().join(format!(
+            "forge-proposal-id-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let first_id = {
+            let memory = WriterMemory::open(&db_path).unwrap();
+            let mut kernel = WriterAgentKernel::new("default", memory);
+            let proposals = kernel
+                .observe(observation("林墨停在旧门前，风从裂开的门缝里钻出来，带着潮湿的冷意。他没有立刻推门，只把手按在刀柄上。"))
+                .unwrap();
+            proposals
+                .iter()
+                .find(|proposal| proposal.kind == ProposalKind::Ghost)
+                .unwrap()
+                .id
+                .clone()
+        };
+
+        let second_id = {
+            let memory = WriterMemory::open(&db_path).unwrap();
+            let mut kernel = WriterAgentKernel::new("default", memory);
+            let mut obs = observation("林墨停在旧门前，风从裂开的门缝里钻出来，带着潮湿的冷意。他没有立刻推门，只把手按在刀柄上。");
+            obs.id = "obs-restart-second".to_string();
+            let proposals = kernel.observe(obs).unwrap();
+            proposals
+                .iter()
+                .find(|proposal| proposal.kind == ProposalKind::Ghost)
+                .unwrap()
+                .id
+                .clone()
+        };
+
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let kernel = WriterAgentKernel::new("default", memory);
+        let trace = kernel.trace_snapshot(10);
+        let _ = std::fs::remove_file(&db_path);
+
+        assert_ne!(first_id, second_id);
+        assert!(trace
+            .recent_proposals
+            .iter()
+            .any(|proposal| proposal.id == first_id));
+        assert!(trace
+            .recent_proposals
+            .iter()
+            .any(|proposal| proposal.id == second_id));
     }
 
     #[test]
