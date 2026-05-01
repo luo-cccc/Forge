@@ -772,6 +772,8 @@ export interface ContextSourceBudgetTrace {
   requested: number;
   provided: number;
   truncated: boolean;
+  reason: string;
+  truncationReason?: string;
 }
 
 export interface WriterFeedbackTrace {

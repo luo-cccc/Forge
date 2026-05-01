@@ -185,6 +185,8 @@ pub struct SourceReport {
     pub requested: usize,
     pub provided: usize,
     pub truncated: bool,
+    pub reason: String,
+    pub truncation_reason: Option<String>,
 }
 
 /// Assembles a ContextPack under strict budget constraints.
@@ -290,6 +292,8 @@ pub fn assemble_context_pack(
                 requested: draft.requested,
                 provided: draft.consumed,
                 truncated: draft.raw.chars().count() > draft.consumed,
+                reason: source_inclusion_reason(&task, &draft),
+                truncation_reason: source_truncation_reason(total_budget, &draft),
             });
         }
     }
@@ -316,6 +320,39 @@ struct SourceDraft {
     raw: String,
     required_budget: usize,
     consumed: usize,
+}
+
+fn source_inclusion_reason(task: &AgentTask, draft: &SourceDraft) -> String {
+    if draft.required_budget > 0 {
+        format!(
+            "{:?} required source reserved {} chars before priority fill.",
+            task, draft.required_budget
+        )
+    } else {
+        format!(
+            "{:?} priority {} source included during remaining-budget fill.",
+            task, draft.priority
+        )
+    }
+}
+
+fn source_truncation_reason(total_budget: usize, draft: &SourceDraft) -> Option<String> {
+    let raw_chars = draft.raw.chars().count();
+    if raw_chars <= draft.consumed {
+        return None;
+    }
+
+    if draft.consumed >= draft.requested {
+        Some(format!(
+            "Source content was limited by its per-source budget of {} chars.",
+            draft.requested
+        ))
+    } else {
+        Some(format!(
+            "ContextPack total budget of {} chars was exhausted before this source could be fully included.",
+            total_budget
+        ))
+    }
 }
 
 pub fn assemble_observation_context(

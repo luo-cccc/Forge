@@ -265,6 +265,8 @@ pub struct ContextSourceBudgetTrace {
     pub requested: usize,
     pub provided: usize,
     pub truncated: bool,
+    pub reason: String,
+    pub truncation_reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1505,6 +1507,13 @@ mod tests {
                         requested: 80,
                         provided: 40,
                         truncated: true,
+                        reason:
+                            "GhostWriting required source reserved 240 chars before priority fill."
+                                .to_string(),
+                        truncation_reason: Some(
+                            "Source content was limited by its per-source budget of 80 chars."
+                                .to_string(),
+                        ),
                     }],
                 }),
                 expires_at: Some(1000),

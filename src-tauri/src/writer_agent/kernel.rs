@@ -1590,6 +1590,8 @@ fn context_budget_trace(pack: &WritingContextPack) -> ContextBudgetTrace {
                 requested: source.requested,
                 provided: source.provided,
                 truncated: source.truncated,
+                reason: source.reason.clone(),
+                truncation_reason: source.truncation_reason.clone(),
             })
             .collect(),
     }

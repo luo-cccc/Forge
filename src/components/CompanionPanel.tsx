@@ -1280,13 +1280,23 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                             </div>
                             <div className="mt-2 space-y-1">
                               {budget.sourceReports.slice(0, 5).map((source) => (
-                                <div key={`${proposal.id}-${source.source}`} className="flex items-center justify-between gap-2">
-                                  <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
-                                    {source.source}
-                                  </span>
-                                  <span className="shrink-0 font-mono text-[10px] text-text-muted">
-                                    {source.provided}/{source.requested}
-                                  </span>
+                                <div key={`${proposal.id}-${source.source}`} className="rounded border border-border-subtle bg-bg-surface p-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
+                                      {source.source}
+                                    </span>
+                                    <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                                      {source.provided}/{source.requested}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 line-clamp-2 text-[10px] leading-snug text-text-secondary">
+                                    {source.reason}
+                                  </div>
+                                  {source.truncationReason && (
+                                    <div className="mt-1 line-clamp-2 text-[10px] leading-snug text-accent">
+                                      {source.truncationReason}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>

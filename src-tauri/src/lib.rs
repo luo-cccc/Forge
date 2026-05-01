@@ -2393,8 +2393,17 @@ fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) 
             .iter()
             .map(|report| {
                 format!(
-                    "- {}: requested {}, provided {}, truncated {}",
-                    report.source, report.requested, report.provided, report.truncated
+                    "- {}: requested {}, provided {}, truncated {}, reason: {}{}",
+                    report.source,
+                    report.requested,
+                    report.provided,
+                    report.truncated,
+                    report.reason,
+                    report
+                        .truncation_reason
+                        .as_ref()
+                        .map(|reason| format!(", truncation: {}", reason))
+                        .unwrap_or_default()
                 )
             })
             .collect::<Vec<_>>()
@@ -3474,12 +3483,23 @@ mod tests {
                         requested: 20,
                         provided: 12,
                         truncated: false,
+                        reason:
+                            "InlineRewrite required source reserved 400 chars before priority fill."
+                                .to_string(),
+                        truncation_reason: None,
                     },
                     writer_agent::context::SourceReport {
                         source: "CursorPrefix".to_string(),
                         requested: 20,
                         provided: 6,
                         truncated: true,
+                        reason:
+                            "InlineRewrite required source reserved 160 chars before priority fill."
+                                .to_string(),
+                        truncation_reason: Some(
+                            "Source content was limited by its per-source budget of 20 chars."
+                                .to_string(),
+                        ),
                     },
                 ],
             },
@@ -3513,6 +3533,8 @@ mod tests {
         assert!(rendered.contains("used/budget: 18/32"));
         assert!(rendered.contains("wasted: 14"));
         assert!(rendered.contains("- CursorPrefix: requested 20, provided 6, truncated true"));
+        assert!(rendered.contains("reason: InlineRewrite required source"));
+        assert!(rendered.contains("truncation: Source content was limited"));
         assert!(rendered.contains("# ContextPack Sources"));
         assert!(rendered.contains("## SelectedText"));
         assert!(rendered.contains("林墨握紧寒影刀。"));
