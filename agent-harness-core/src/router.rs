@@ -8,6 +8,7 @@ pub enum Intent {
     AnalyzeText,
     GenerateContent,
     ExecutePlan,
+    Linter,
 }
 
 /// Lightweight intent classifier — regex/pattern-based, no LLM call

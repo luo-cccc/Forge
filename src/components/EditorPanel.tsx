@@ -15,12 +15,15 @@ import {
   type AgentSuggestion,
   type EditorGhostChunk,
   type EditorGhostEnd,
+  type EditorSemanticLint,
   type EditorStatePayload,
+  type SemanticLintPayload,
   type StreamChunk,
 } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
 import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
+import SemanticLint from "../extensions/SemanticLint";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
@@ -40,6 +43,7 @@ const OBSERVATION_DEBOUNCE_MS = 1100;
 const OBSERVATION_WINDOW_CHARS = 1800;
 const PARAGRAPH_BUDGET_CHARS = 900;
 const EDITOR_TELEMETRY_DEBOUNCE_MS = 400;
+const SEMANTIC_LINT_IDLE_MS = 10000;
 const FIM_PREFIX_CHARS = 1000;
 const FIM_SUFFIX_CHARS = 500;
 
@@ -54,6 +58,10 @@ function makeObservationId(): string {
 
 function makeEditorRequestId(): string {
   return `fim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeSemanticLintRequestId(): string {
+  return `lint-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function sliceAroundCursor(editor: Editor): EditorStatePayload {
@@ -71,6 +79,19 @@ function sliceAroundCursor(editor: Editor): EditorStatePayload {
     suffix,
     cursorPosition: from,
     paragraph,
+  };
+}
+
+function buildSemanticLintPayload(editor: Editor, chapterTitle: string): SemanticLintPayload {
+  const { from } = editor.state.selection;
+  const $from = editor.state.doc.resolve(from);
+
+  return {
+    requestId: makeSemanticLintRequestId(),
+    paragraph: editor.state.doc.textBetween($from.start(), $from.end(), " "),
+    paragraphFrom: $from.start(),
+    cursorPosition: from,
+    chapterTitle,
   };
 }
 
@@ -141,7 +162,7 @@ export default function EditorPanel({
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText],
+    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText, SemanticLint],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -183,9 +204,12 @@ export default function EditorPanel({
   const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
   const observationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const semanticLintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeGhostRequestIdRef = useRef<string | null>(null);
+  const activeSemanticLintRequestIdRef = useRef<string | null>(null);
   const lastEditAtRef = useRef(0);
   const lastObservationKeyRef = useRef("");
+  const lastSemanticLintKeyRef = useRef("");
 
   useEffect(() => {
     lastEditAtRef.current = Date.now();
@@ -298,6 +322,41 @@ export default function EditorPanel({
     }, EDITOR_TELEMETRY_DEBOUNCE_MS);
   }, [agentMode, currentChapter, editor]);
 
+  const scheduleSemanticLint = useCallback(() => {
+    if (!editor || agentMode === "off") return;
+    if (semanticLintTimerRef.current) clearTimeout(semanticLintTimerRef.current);
+
+    const selectionAtSchedule = editor.state.selection.from;
+    const paragraphAtSchedule = (() => {
+      const $from = editor.state.doc.resolve(selectionAtSchedule);
+      return editor.state.doc.textBetween($from.start(), $from.end(), " ");
+    })();
+
+    semanticLintTimerRef.current = setTimeout(() => {
+      if (!editor || editor.state.selection.from !== selectionAtSchedule) return;
+      const payload = buildSemanticLintPayload(editor, currentChapter);
+      const key = [
+        payload.chapterTitle ?? "",
+        payload.cursorPosition,
+        payload.paragraphFrom,
+        payload.paragraph,
+      ].join("|");
+
+      if (key === lastSemanticLintKeyRef.current || payload.paragraph !== paragraphAtSchedule) {
+        return;
+      }
+
+      lastSemanticLintKeyRef.current = key;
+      activeSemanticLintRequestIdRef.current = payload.requestId;
+      void invoke(Commands.reportSemanticLintState, { payload }).catch((e) => {
+        if (activeSemanticLintRequestIdRef.current === payload.requestId) {
+          activeSemanticLintRequestIdRef.current = null;
+        }
+        console.error("Semantic lint failed:", e);
+      });
+    }, SEMANTIC_LINT_IDLE_MS);
+  }, [agentMode, currentChapter, editor]);
+
   useEffect(() => {
     if (!editor || agentMode === "off") return;
 
@@ -347,6 +406,32 @@ export default function EditorPanel({
   }, [agentMode, editor]);
 
   useEffect(() => {
+    if (!editor || agentMode === "off") return;
+
+    let unlistenLint: (() => void) | undefined;
+    const setup = async () => {
+      unlistenLint = await listen<EditorSemanticLint>(Events.editorSemanticLint, (event) => {
+        const lint = event.payload;
+        const selection = editor.state.selection;
+        if (
+          lint.requestId !== activeSemanticLintRequestIdRef.current ||
+          lint.cursorPosition !== selection.from
+        ) {
+          return;
+        }
+
+        activeSemanticLintRequestIdRef.current = null;
+        editor.commands.setSemanticLint(lint);
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlistenLint) unlistenLint();
+    };
+  }, [agentMode, editor]);
+
+  useEffect(() => {
     if (!editor || !onSelectionUpdate) return;
     const handler = () => {
       const { from, to } = editor.state.selection;
@@ -354,6 +439,7 @@ export default function EditorPanel({
       onSelectionUpdate({ from, to, text });
       abortGhostRequest();
       scheduleEditorTelemetry();
+      scheduleSemanticLint();
       if (from < to) {
         scheduleObservation("selection_change");
       }
@@ -362,7 +448,14 @@ export default function EditorPanel({
     return () => {
       editor.off("selectionUpdate", handler);
     };
-  }, [abortGhostRequest, editor, onSelectionUpdate, scheduleEditorTelemetry, scheduleObservation]);
+  }, [
+    abortGhostRequest,
+    editor,
+    onSelectionUpdate,
+    scheduleEditorTelemetry,
+    scheduleObservation,
+    scheduleSemanticLint,
+  ]);
 
   // Debounced auto-save: 3s after typing stops
   useEffect(() => {
@@ -371,7 +464,9 @@ export default function EditorPanel({
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
       abortGhostRequest();
+      editor.commands.clearSemanticLint();
       scheduleEditorTelemetry();
+      scheduleSemanticLint();
       scheduleObservation("user_typed");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
@@ -396,6 +491,7 @@ export default function EditorPanel({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (observationTimerRef.current) clearTimeout(observationTimerRef.current);
       if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
+      if (semanticLintTimerRef.current) clearTimeout(semanticLintTimerRef.current);
       abortGhostRequest();
     };
   }, [
@@ -404,6 +500,7 @@ export default function EditorPanel({
     editor,
     scheduleEditorTelemetry,
     scheduleObservation,
+    scheduleSemanticLint,
     setCurrentChapterRevision,
     setIsEditorDirty,
   ]);
@@ -411,7 +508,8 @@ export default function EditorPanel({
   useEffect(() => {
     if (!editor || agentMode === "off") return;
     scheduleObservation("chapter_switch");
-  }, [agentMode, currentChapter, editor, scheduleObservation]);
+    scheduleSemanticLint();
+  }, [agentMode, currentChapter, editor, scheduleObservation, scheduleSemanticLint]);
 
   useEffect(() => {
     if (!editor) return;

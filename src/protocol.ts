@@ -22,6 +22,7 @@ export const Commands = {
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
   reportEditorState: "report_editor_state",
+  reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
   renameChapterFile: "rename_chapter_file",
   saveChapter: "save_chapter",
@@ -59,6 +60,14 @@ export interface EditorStatePayload {
   suffix: string;
   cursorPosition: number;
   paragraph: string;
+  chapterTitle?: string;
+}
+
+export interface SemanticLintPayload {
+  requestId: string;
+  paragraph: string;
+  paragraphFrom: number;
+  cursorPosition: number;
   chapterTitle?: string;
 }
 

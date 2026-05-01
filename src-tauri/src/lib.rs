@@ -27,6 +27,7 @@ mod events {
     pub const CHAPTER_GENERATION: &str = "chapter-generation";
     pub const EDITOR_GHOST_CHUNK: &str = "editor-ghost-chunk";
     pub const EDITOR_GHOST_END: &str = "editor-ghost-end";
+    pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
 }
 
 #[tauri::command]
@@ -323,6 +324,27 @@ struct EditorGhostEnd {
     reason: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SemanticLintPayload {
+    request_id: String,
+    paragraph: String,
+    paragraph_from: usize,
+    cursor_position: usize,
+    chapter_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorSemanticLint {
+    request_id: String,
+    cursor_position: usize,
+    from: usize,
+    to: usize,
+    message: String,
+    severity: String,
+}
+
 fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
     let _ = app.emit(
         events::AGENT_ERROR,
@@ -374,6 +396,139 @@ fn trim_ghost_completion(text: &str) -> String {
         .replace("<|fim_suffix|>", "");
     let trimmed = without_markers.trim_matches(|c: char| c == '`' || c.is_whitespace());
     trimmed.chars().take(180).collect::<String>()
+}
+
+fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
+    text[..byte_index.min(text.len())].chars().count()
+}
+
+fn find_char_range(text: &str, needle: &str) -> Option<(usize, usize)> {
+    let start_byte = text.find(needle)?;
+    let start = byte_to_char_index(text, start_byte);
+    let end = start + needle.chars().count();
+    Some((start, end))
+}
+
+fn semantic_lint_enabled() -> bool {
+    std::env::var("AGENT_WRITER_AMBIENT_LINTER")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
+        })
+        .unwrap_or(true)
+}
+
+fn build_lore_conflict_hint(
+    paragraph: &str,
+    lore_keyword: &str,
+    lore_content: &str,
+) -> Option<(usize, usize, String)> {
+    let keyword_present = !lore_keyword.trim().is_empty() && paragraph.contains(lore_keyword);
+    if !keyword_present {
+        return None;
+    }
+
+    let content = lore_content.to_lowercase();
+    let weapon_conflicts: [(&str, &[&str]); 3] = [
+        ("剑", &["刀", "弯刀", "短刀", "长刀", "匕首"]),
+        ("长剑", &["刀", "弯刀", "短刀", "长刀", "匕首"]),
+        ("枪", &["刀", "剑", "弓"]),
+    ];
+
+    for (draft_term, lore_terms) in weapon_conflicts {
+        if !paragraph.contains(draft_term) {
+            continue;
+        }
+
+        if let Some(preferred) = lore_terms.iter().find(|term| content.contains(*term)) {
+            let (start, end) = find_char_range(paragraph, draft_term)?;
+            return Some((
+                start,
+                end,
+                format!(
+                    "设定冲突：{} 的设定更接近使用{}，这里写成{}可能需要确认。",
+                    lore_keyword, preferred, draft_term
+                ),
+            ));
+        }
+    }
+
+    let contradiction_markers = ["不会", "不擅长", "不能", "从不", "禁止", "忌用"];
+    for marker in contradiction_markers {
+        let Some(marker_byte) = lore_content.find(marker) else {
+            continue;
+        };
+        let after_marker = &lore_content[marker_byte + marker.len()..];
+        let term: String = after_marker
+            .chars()
+            .skip_while(|c| c.is_whitespace() || *c == '用' || *c == '使')
+            .take_while(|c| c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(c))
+            .take(4)
+            .collect();
+
+        if term.chars().count() >= 1 && paragraph.contains(&term) {
+            let (start, end) = find_char_range(paragraph, &term)?;
+            return Some((
+                start,
+                end,
+                format!("设定冲突：{} 的设定里提到“{}{}”。", lore_keyword, marker, term),
+            ));
+        }
+    }
+
+    None
+}
+
+fn find_semantic_lint(app: &tauri::AppHandle, payload: &SemanticLintPayload) -> Option<EditorSemanticLint> {
+    let paragraph = payload.paragraph.trim();
+    if paragraph.chars().count() < 8 {
+        return None;
+    }
+    let chapter_label = payload
+        .chapter_title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("当前章节");
+
+    let lore_entries = storage::load_lorebook(app).unwrap_or_default();
+    for entry in lore_entries {
+        if let Some((from, to, message)) =
+            build_lore_conflict_hint(paragraph, &entry.keyword, &entry.content)
+        {
+            return Some(EditorSemanticLint {
+                request_id: payload.request_id.clone(),
+                cursor_position: payload.cursor_position,
+                from: payload.paragraph_from + from,
+                to: payload.paragraph_from + to,
+                message: format!("{}：{}", chapter_label, message),
+                severity: "warning".to_string(),
+            });
+        }
+    }
+
+    let state = app.state::<AppState>();
+    let Ok(db) = lock_hermes(&state) else {
+        return None;
+    };
+    let skills = db.get_active_skills().unwrap_or_default();
+    drop(db);
+
+    for skill in skills {
+        if let Some((from, to, message)) =
+            build_lore_conflict_hint(paragraph, &skill.category, &skill.skill)
+        {
+            return Some(EditorSemanticLint {
+                request_id: payload.request_id.clone(),
+                cursor_position: payload.cursor_position,
+                from: payload.paragraph_from + from,
+                to: payload.paragraph_from + to,
+                message: format!("{}：{}", chapter_label, message),
+                severity: "warning".to_string(),
+            });
+        }
+    }
+
+    None
 }
 
 fn abort_editor_prediction_task(state: &AppState, request_id: Option<&str>) -> Result<bool, String> {
@@ -505,6 +660,26 @@ async fn report_editor_state(
 
         let state = app_clone.state::<AppState>();
         let _ = clear_editor_prediction_task(&state, &request_id);
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn report_semantic_lint_state(
+    app: tauri::AppHandle,
+    payload: SemanticLintPayload,
+) -> Result<(), String> {
+    if !semantic_lint_enabled() {
+        return Ok(());
+    }
+
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        let _intent = agent_harness_core::Intent::Linter;
+        if let Some(lint) = find_semantic_lint(&app_clone, &payload) {
+            let _ = app_clone.emit(events::EDITOR_SEMANTIC_LINT, lint);
+        }
     });
 
     Ok(())
@@ -1396,6 +1571,7 @@ pub fn run() {
             abort_editor_prediction,
             harness_echo,
             report_editor_state,
+            report_semantic_lint_state,
             ask_agent,
             agent_observe,
             get_agent_tools,

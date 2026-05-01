@@ -39,3 +39,23 @@ body {
   pointer-events: none;
   white-space: pre-wrap;
 }
+
+.semantic-lint {
+  cursor: help;
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.semantic-lint-warning {
+  text-decoration-color: var(--color-accent);
+}
+
+.semantic-lint-error {
+  text-decoration-color: var(--color-danger);
+}
+
+.semantic-lint-info {
+  text-decoration-color: var(--color-success);
+}
