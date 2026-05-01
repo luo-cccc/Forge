@@ -13,11 +13,14 @@ import {
   type AgentObservation,
   type AgentObservationReason,
   type AgentSuggestion,
+  type EditorGhostChunk,
+  type EditorGhostEnd,
   type EditorStatePayload,
   type StreamChunk,
 } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
+import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
@@ -138,7 +141,7 @@ export default function EditorPanel({
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark, CommentMark],
+    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -266,12 +269,13 @@ export default function EditorPanel({
     }
 
     const activeRequestId = requestId ?? activeGhostRequestIdRef.current;
+    editor?.commands.clearGhostText();
     if (!activeRequestId) return;
     activeGhostRequestIdRef.current = null;
     void invoke(Commands.abortEditorPrediction, { requestId: activeRequestId }).catch((e) => {
       console.error("Failed to abort ghost completion:", e);
     });
-  }, []);
+  }, [editor]);
 
   const scheduleEditorTelemetry = useCallback(() => {
     if (!editor || agentMode === "off") return;
@@ -293,6 +297,54 @@ export default function EditorPanel({
       });
     }, EDITOR_TELEMETRY_DEBOUNCE_MS);
   }, [agentMode, currentChapter, editor]);
+
+  useEffect(() => {
+    if (!editor || agentMode === "off") return;
+
+    let unlistenChunk: (() => void) | undefined;
+    let unlistenEnd: (() => void) | undefined;
+
+    const setup = async () => {
+      unlistenChunk = await listen<EditorGhostChunk>(Events.editorGhostChunk, (event) => {
+        const chunk = event.payload;
+        const selection = editor.state.selection;
+        if (
+          chunk.requestId !== activeGhostRequestIdRef.current ||
+          chunk.cursorPosition !== selection.from ||
+          selection.from !== selection.to
+        ) {
+          return;
+        }
+
+        const currentGhost = ghostTextPluginKey.getState(editor.state);
+        if (!currentGhost) {
+          editor.commands.setGhostText({
+            requestId: chunk.requestId,
+            position: chunk.cursorPosition,
+            text: chunk.content,
+          });
+          return;
+        }
+
+        editor.commands.appendGhostText(chunk.requestId, chunk.cursorPosition, chunk.content);
+      });
+
+      unlistenEnd = await listen<EditorGhostEnd>(Events.editorGhostEnd, (event) => {
+        const end = event.payload;
+        if (end.requestId !== activeGhostRequestIdRef.current) return;
+        activeGhostRequestIdRef.current = null;
+        if (end.reason !== "complete") {
+          editor.commands.clearGhostText();
+        }
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlistenChunk) unlistenChunk();
+      if (unlistenEnd) unlistenEnd();
+    };
+  }, [agentMode, editor]);
 
   useEffect(() => {
     if (!editor || !onSelectionUpdate) return;
@@ -364,6 +416,16 @@ export default function EditorPanel({
   useEffect(() => {
     if (!editor) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "Tab" && ghostTextPluginKey.getState(editor.state)?.text) {
+        event.preventDefault();
+        const accepted = editor.commands.acceptGhostText();
+        if (accepted) {
+          activeGhostRequestIdRef.current = null;
+          incrementActionEpoch();
+        }
+        return;
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key === "k") {
         event.preventDefault();
         setBubbleVisible(true);
@@ -375,7 +437,7 @@ export default function EditorPanel({
     const view = editor.view;
     view.dom.addEventListener("keydown", handler);
     return () => view.dom.removeEventListener("keydown", handler);
-  }, [editor, bubbleVisible]);
+  }, [editor, bubbleVisible, incrementActionEpoch]);
 
   const handleBubbleSubmit = async (command: string) => {
     if (!editor) return;

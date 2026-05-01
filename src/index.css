@@ -32,3 +32,10 @@ body {
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
 }
+
+.ghost-text {
+  color: color-mix(in srgb, var(--color-text-muted) 78%, transparent);
+  font-style: italic;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
