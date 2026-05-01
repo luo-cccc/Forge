@@ -165,7 +165,7 @@ export default function EditorPanel({
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const editor = useEditor({
-    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText, SemanticLint],
+    extensions: [StarterKit, AIPreviewMark, CommentMark, GhostText, SemanticLint, PatchMark],
     content: "<p>Start writing your novel here...</p>",
     editorProps: {
       attributes: {
@@ -822,6 +822,8 @@ export default function EditorPanel({
             onSnooze={handleSnoozeSuggestions}
           />
         )}
+        <PatchReviewOverlay />
+        <CoWriterStatusBar />
       </div>
     </div>
   );

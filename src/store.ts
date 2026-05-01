@@ -5,7 +5,6 @@ import type {
   AgentSuggestion,
   PatchSet,
   PatchStatus,
-  TextPatch,
 } from "./protocol";
 
 interface OutlineNode {

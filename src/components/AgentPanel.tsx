@@ -122,7 +122,17 @@ export default function AgentPanel({
             setIsAgentThinking(false);
             break;
           case "complete":
-            finalizeResponse(rawBufferRef.current);
+            setIsStreaming(false);
+            setIsAgentThinking(false);
+            setSearchStatus(null);
+            if (rawBufferRef.current) {
+              const clean = rawBufferRef.current.replace(ACTION_RE, "");
+              rawBufferRef.current = "";
+              if (clean) {
+                setMessages((prev) => [...prev, { role: "agent", content: clean }]);
+              }
+              setStreaming("");
+            }
             break;
           case "compaction":
             // Context was compacted — transparent to user
