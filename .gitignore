@@ -15,6 +15,9 @@ target
 dist-ssr
 *.local
 
+# Worktrees
+.worktrees
+
 # OMX runtime state
 .omx/cache/
 .omx/logs/
