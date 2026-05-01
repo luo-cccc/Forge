@@ -646,6 +646,7 @@ export interface StorageFileDiagnostic {
   exists: boolean;
   bytes?: number;
   recordCount?: number;
+  backupCount: number;
   status: string;
   error?: string;
 }

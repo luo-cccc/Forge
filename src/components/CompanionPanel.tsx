@@ -542,7 +542,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                         {file.label}
                       </span>
                       <span className="shrink-0 font-mono text-[10px] text-text-muted">
-                        {file.recordCount ?? "-"} · {formatBytes(file.bytes)}
+                        {file.recordCount ?? "-"} · {formatBytes(file.bytes)} · b{file.backupCount}
                       </span>
                       <span className={`shrink-0 text-[10px] ${storageStatusClass(file.status)}`}>
                         {file.status}

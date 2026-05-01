@@ -79,7 +79,9 @@ impl VectorDB {
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
         let json = serde_json::to_string_pretty(&self.chunks).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, json).map_err(|e| format!("Write tmp failed: {}", e))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("Atomic rename failed: {}", e))
     }
 
     pub fn upsert(&mut self, chunk: Chunk) {

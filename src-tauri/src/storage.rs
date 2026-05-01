@@ -4,6 +4,7 @@ use tauri::Manager;
 
 pub const HERMES_DB_FILENAME: &str = "hermes_memory.db";
 pub const WRITER_MEMORY_DB_FILENAME: &str = "writer_memory.db";
+const MAX_FILE_BACKUPS: usize = 20;
 
 const HERMES_DIAGNOSTIC_TABLES: &[&str] = &[
     "session_history",
@@ -76,6 +77,7 @@ pub struct StorageFileDiagnostic {
     pub exists: bool,
     pub bytes: Option<u64>,
     pub record_count: Option<usize>,
+    pub backup_count: usize,
     pub status: String,
     pub error: Option<String>,
 }
@@ -702,6 +704,7 @@ fn base_file_diagnostic(label: &str, path: &std::path::Path) -> StorageFileDiagn
         exists: path.exists(),
         bytes: file_size(path),
         record_count: None,
+        backup_count: backup_count(path),
         status: "unknown".to_string(),
         error: None,
     }
@@ -734,9 +737,98 @@ pub fn rename_chapter_file(
 }
 
 pub fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
+    backup_existing_file(path)?;
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("Atomic rename failed: {}", e))
+}
+
+fn backup_existing_file(path: &std::path::Path) -> Result<(), String> {
+    if !path.exists() || path.is_dir() {
+        return Ok(());
+    }
+
+    let backup_dir = backup_dir_for(path)?;
+    std::fs::create_dir_all(&backup_dir).map_err(|e| {
+        format!(
+            "Failed to create backup dir '{}': {}",
+            backup_dir.display(),
+            e
+        )
+    })?;
+    let filename = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let backup_path = backup_dir.join(format!("{}-{}", unix_time_ms(), filename));
+    std::fs::copy(path, &backup_path).map_err(|e| {
+        format!(
+            "Failed to backup '{}' to '{}': {}",
+            path.display(),
+            backup_path.display(),
+            e
+        )
+    })?;
+    prune_backups(&backup_dir, MAX_FILE_BACKUPS)
+}
+
+fn backup_count(path: &std::path::Path) -> usize {
+    let Ok(dir) = backup_dir_for(path) else {
+        return 0;
+    };
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.path().is_file())
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn backup_dir_for(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path '{}' has no parent directory", path.display()))?;
+    let file_stem = path
+        .file_name()
+        .ok_or_else(|| format!("Path '{}' has no filename", path.display()))?
+        .to_string_lossy()
+        .to_string();
+    Ok(parent
+        .join(".backups")
+        .join(safe_backup_segment(&file_stem)))
+}
+
+fn prune_backups(dir: &std::path::Path, keep: usize) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read backup dir '{}': {}", dir.display(), e))?
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, path) in entries.into_iter().skip(keep) {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to prune backup '{}': {}", path.display(), e))?;
+    }
+    Ok(())
+}
+
+fn safe_backup_segment(name: &str) -> String {
+    name.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -821,6 +913,44 @@ mod tests {
         assert_eq!(diagnostic.table_counts[0].table, "canon_entities");
         assert_eq!(diagnostic.table_counts[0].rows, 2);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn atomic_write_creates_bounded_backups_for_existing_files() {
+        let path = temp_path("chapter.md");
+        std::fs::write(&path, "old").unwrap();
+
+        atomic_write(&path, "new").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let backup_dir = backup_dir_for(&path).unwrap();
+        let backups = std::fs::read_dir(&backup_dir)
+            .unwrap()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), "old");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(backup_dir.parent().unwrap());
+    }
+
+    #[test]
+    fn prune_backups_keeps_newest_entries() {
+        let dir = std::env::temp_dir().join(format!(
+            "forge-storage-test-{}-{}-backups",
+            std::process::id(),
+            unix_time_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..5 {
+            std::fs::write(dir.join(format!("{}.txt", i)), i.to_string()).unwrap();
+        }
+
+        prune_backups(&dir, 2).unwrap();
+
+        let count = std::fs::read_dir(&dir).unwrap().flatten().count();
+        assert_eq!(count, 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
