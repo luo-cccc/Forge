@@ -1433,8 +1433,16 @@ fn select_rag_chunks(
     let Ok(path) = storage::brain_path(app) else {
         return vec![];
     };
-    let Ok(db) = VectorDB::load(&path) else {
-        return vec![];
+    let db = match VectorDB::load(&path) {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!(
+                "Skipping Project Brain chunks because '{}' is unreadable: {}",
+                path.display(),
+                e
+            );
+            return vec![];
+        }
     };
 
     let mut scored = db

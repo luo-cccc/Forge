@@ -55,7 +55,13 @@ pub async fn embed_chapter(
     }
 
     let path = storage::brain_path(app)?;
-    let mut db = VectorDB::load(&path).unwrap_or_else(|_| VectorDB::new());
+    let mut db = VectorDB::load(&path).map_err(|e| {
+        format!(
+            "Project Brain index at '{}' is unreadable; restore a backup or rebuild the index: {}",
+            path.display(),
+            e
+        )
+    })?;
     db.remove_chapter(chapter_title);
     for chunk in embedded_chunks {
         db.upsert(chunk);
@@ -75,7 +81,13 @@ pub async fn answer_query(
         .map_err(|e| format!("Embed error: {}", e))?;
 
     let brain_path = storage::brain_path(app)?;
-    let db = VectorDB::load(&brain_path).unwrap_or_else(|_| VectorDB::new());
+    let db = VectorDB::load(&brain_path).map_err(|e| {
+        format!(
+            "Project Brain index at '{}' is unreadable; restore a backup or rebuild the index: {}",
+            brain_path.display(),
+            e
+        )
+    })?;
     let results = db.search_hybrid(query, &query_embedding, TOP_K);
     let context = build_context(&results);
 
@@ -112,4 +124,27 @@ fn build_context(results: &[(f32, &Chunk)]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vector_db_load_reports_corrupt_project_brain() {
+        let path = std::env::temp_dir().join(format!(
+            "forge-project-brain-bad-{}-{}.json",
+            std::process::id(),
+            crate::storage::content_revision("bad")
+        ));
+        std::fs::write(&path, "{bad json").unwrap();
+
+        let err = match VectorDB::load(&path) {
+            Ok(_) => panic!("corrupt project brain should fail to load"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("expected"));
+        let _ = std::fs::remove_file(path);
+    }
 }
