@@ -2,6 +2,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
     classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, writing_domain_profile,
+    AgentLoop, AgentLoopConfig, AgentLoopEvent,
+    provider::openai_compat::OpenAiCompatProvider,
 };
 
 mod agent_runtime;
@@ -9,6 +11,7 @@ mod brain_service;
 mod chapter_generation;
 mod llm_runtime;
 mod storage;
+mod tool_bridge;
 use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
@@ -1406,38 +1409,21 @@ async fn ask_agent(
     selected_text: String,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
+    let api_base = std::env::var("OPENAI_API_BASE")
+        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "deepseek/deepseek-v4-flash".into());
 
     let state = app.state::<AppState>();
-
     let truncated_context = truncate_context(&context, 2000);
 
-    // Semantic router: classify intent
+    // Check lore / outline availability for intent routing
     let has_lore = storage::load_lorebook(&app)
         .map(|l| !l.is_empty())
         .unwrap_or(false);
     let has_outline = storage::load_outline(&app)
         .map(|o| !o.is_empty())
         .unwrap_or(false);
-    let intent = classify_intent(&message, has_lore, has_outline);
-
-    // Emit CoT: intent detection
-    let _ = app.emit(
-        events::AGENT_CHAIN_OF_THOUGHT,
-        CoTEvent {
-            step: 0,
-            total: 1,
-            description: format!("Intent: {:?}", intent),
-            status: "done".to_string(),
-        },
-    );
-
-    // Log user message to Hermes memory
-    {
-        let state = app.state::<AppState>();
-        let db = lock_hermes(&state)?;
-        let _ = db.log_interaction("user", &message);
-    }
 
     // Build context injection from learned memory
     let memory_context = build_context_injection(&app, &message);
@@ -1446,166 +1432,120 @@ async fn ask_agent(
         "You are a creative writing assistant helping the user write a novel.\n\
 {}\n\
 Current draft (last ~2000 chars):\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
 Current paragraph the user is focused on:\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
-Selected text (user wants to rewrite this):\n\
-\"\"\"\n\
-{}\n\
-\"\"\"\n\
+Selected text:\n\
+\"\"\"\n{}\n\"\"\"\n\
 \n\
-## Rules\n\
-1. Respond conversationally to the user's requests about their writing.\n\
-2. When you want to write NEW content into the editor, use:\n\
-   <ACTION_INSERT>your text here</ACTION_INSERT>\n\
-3. When the user provides selected text and asks you to rewrite, polish, or modify it, output ONLY the rewritten version wrapped in:\n\
-   <ACTION_REPLACE>rewritten text</ACTION_REPLACE>\n\
-   Do NOT include the original text in your response. Do NOT add explanations inside the tags.\n\
-4. You may use multiple ACTION_INSERT or ACTION_REPLACE blocks in a single response.\n\
-5. Do NOT wrap normal conversation in action tags — only content meant for the editor.\n\
-6. Action tags will be intercepted automatically; the user will NOT see them in chat.\n\
-7. If you need to know details about a character, location, or world setting that may exist in the lorebook, use:\n\
-   <ACTION_SEARCH>keyword</ACTION_SEARCH>\n\
-   The system will search the lorebook and return matching entries. Always search before inventing new details about named characters or settings.",
+Use the available tools to retrieve information about characters, settings, \
+and lore before inventing new details. Search the lorebook for named entities.",
         memory_context, truncated_context, paragraph, selected_text
     );
 
-    let mut messages: Vec<serde_json::Value> = vec![
-        serde_json::json!({"role": "system", "content": system_prompt}),
-        serde_json::json!({"role": "user", "content": message}),
-    ];
+    // Build provider
+    let provider = std::sync::Arc::new(OpenAiCompatProvider::new(
+        &api_base,
+        &api_key,
+        &model,
+    ));
 
-    let max_rounds = 3u32;
+    // Build tool registry + bridge
+    let registry = default_writing_tool_registry();
+    let bridge = tool_bridge::TauriToolBridge {
+        app: app.clone(),
+    };
 
-    for round in 0..max_rounds {
-        {
-            let mut s = lock_harness_state(&state)?;
-            *s = HarnessState::Thinking;
-        }
-
-        {
-            let mut s = lock_harness_state(&state)?;
-            *s = HarnessState::Streaming;
-        }
-
-        let mut raw_buffer = String::new();
-        let mut found_search = false;
-        let mut search_keyword = String::new();
-
-        let stream_result = llm_runtime::stream_chat(&settings, messages.clone(), 60, |content| {
-            raw_buffer.push_str(&content);
-
-            if let Some(keyword) = extract_action_search(&raw_buffer) {
-                found_search = true;
-                search_keyword = keyword;
-                return Ok(llm_runtime::StreamControl::Stop);
-            }
-
-            let _ = app.emit(events::AGENT_STREAM_CHUNK, StreamChunk { content });
-            Ok(llm_runtime::StreamControl::Continue)
-        })
-        .await;
-
-        if let Err(e) = stream_result {
-            emit_error(&app, &e, "stream");
-            {
-                let mut s = lock_harness_state(&state)?;
-                *s = HarnessState::Idle;
-            }
-            let _ = app.emit(
-                events::AGENT_STREAM_END,
-                StreamEnd {
-                    reason: "error".to_string(),
-                },
-            );
-            return Err(e);
-        }
-
-        if found_search {
-            let keyword = search_keyword;
-            let _ = app.emit(
-                events::AGENT_SEARCH_STATUS,
-                SearchStatus {
-                    keyword: keyword.clone(),
-                    round: round + 1,
-                },
-            );
-
-            messages.push(serde_json::json!({"role": "assistant", "content": raw_buffer.clone()}));
-
-            let entries = storage::load_lorebook(&app)?;
-            let results: Vec<&LoreEntry> = entries
-                .iter()
-                .filter(|e| {
-                    e.keyword.to_lowercase().contains(&keyword.to_lowercase())
-                        || keyword.to_lowercase().contains(&e.keyword.to_lowercase())
-                })
-                .collect();
-
-            let search_result = if results.is_empty() {
-                format!("No lorebook entries found for '{}'.", keyword)
-            } else {
-                results
-                    .iter()
-                    .map(|e| format!("[{}]: {}", e.keyword, e.content))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-
-            messages.push(serde_json::json!({"role": "user", "content": format!(
-                "SYSTEM SEARCH RESULT for '{}':\n{}\n\nContinue based on this information.",
-                keyword, search_result
-            )}));
-        }
-
-        if !found_search {
-            // Natural completion — no search needed
-            {
-                let mut s = lock_harness_state(&state)?;
-                *s = HarnessState::Idle;
-            }
-            {
-                // Log assistant response to Hermes memory
-                let state = app.state::<AppState>();
-                let db = lock_hermes(&state)?;
-                let _ = db.log_interaction("assistant", &raw_buffer);
-            }
-
-            // Trigger background skill extraction (Hermes pattern)
-            let app_clone = app.clone();
-            tokio::spawn(async move { extract_skills_from_recent(&app_clone).await });
-
-            let _ = app.emit(
-                events::AGENT_STREAM_END,
-                StreamEnd {
-                    reason: "complete".to_string(),
-                },
-            );
-            return Ok(());
-        }
-    }
-
-    // Max rounds exhausted
-    {
-        let mut s = lock_harness_state(&state)?;
-        *s = HarnessState::Idle;
-    }
-    let _ = app.emit(
-        events::AGENT_STREAM_END,
-        StreamEnd {
-            reason: "max_rounds".to_string(),
+    // Build agent loop
+    let mut agent = AgentLoop::new(
+        AgentLoopConfig {
+            max_rounds: 10,
+            system_prompt,
         },
+        provider,
+        registry,
+        bridge,
     );
 
-    Ok(())
-}
+    // Wire events to Tauri frontend
+    let app_handle = app.clone();
+    agent.set_event_callback(std::sync::Arc::new(move |event| {
+        match event {
+            AgentLoopEvent::Intent { intent } => {
+                let _ = app_handle.emit(
+                    events::AGENT_CHAIN_OF_THOUGHT,
+                    serde_json::json!({
+                        "step": 1,
+                        "total": 3,
+                        "description": format!("Intent: {}", intent),
+                        "status": "done",
+                    }),
+                );
+            }
+            AgentLoopEvent::TextChunk { content } => {
+                let _ = app_handle.emit(
+                    events::AGENT_STREAM_CHUNK,
+                    serde_json::json!({"content": content}),
+                );
+            }
+            AgentLoopEvent::Error { message } => {
+                let _ = app_handle.emit(
+                    events::AGENT_ERROR,
+                    serde_json::json!({"message": message, "source": "agent_loop"}),
+                );
+            }
+            AgentLoopEvent::Complete { .. } => {
+                let _ = app_handle.emit(
+                    events::AGENT_STREAM_END,
+                    serde_json::json!({"reason": "complete"}),
+                );
+            }
+            _ => {
+                let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
+            }
+        }
+    }));
 
+    // Log user message to Hermes memory
+    {
+        let db = lock_hermes(&state)?;
+        let _ = db.log_interaction("user", &message);
+    }
+
+    agent.add_user_message(message.clone());
+
+    // Run the agent loop
+    match agent.run(&message, has_lore, has_outline).await {
+        Ok(final_text) => {
+            // Log assistant response to Hermes memory
+            {
+                let db = lock_hermes(&state)?;
+                let _ = db.log_interaction("assistant", &final_text);
+            }
+
+            // Background skill extraction
+            let app_clone = app.clone();
+            tokio::spawn(async move {
+                extract_skills_from_recent(&app_clone).await;
+            });
+
+            {
+                let mut s = lock_harness_state(&state)?;
+                *s = HarnessState::Idle;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            {
+                let mut s = lock_harness_state(&state)?;
+                *s = HarnessState::Idle;
+            }
+            Err(e)
+        }
+    }
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
