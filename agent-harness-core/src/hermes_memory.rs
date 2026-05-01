@@ -2,6 +2,8 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+const HERMES_SCHEMA_VERSION: i64 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: i64,
@@ -103,8 +105,6 @@ impl HermesDB {
             WHERE id NOT IN (
                 SELECT MAX(id) FROM character_state GROUP BY name, chapter_id
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_char_name_chapter
-                ON character_state(name, chapter_id);
 
             CREATE TABLE IF NOT EXISTS plot_thread (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,7 +117,6 @@ impl HermesDB {
                     CHECK(status IN ('open','foreshadowed','developed','resolved')),
                 created_at TEXT DEFAULT (datetime('now'))
             );
-            CREATE INDEX IF NOT EXISTS idx_plot_status ON plot_thread(status);
 
             CREATE TABLE IF NOT EXISTS world_rule (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,8 +131,17 @@ impl HermesDB {
             INSERT INTO session_history_fts(rowid, content, role, created_at)
             SELECT id, content, role, created_at
             FROM session_history
-            WHERE id NOT IN (SELECT rowid FROM session_history_fts);",
-        )
+             WHERE id NOT IN (SELECT rowid FROM session_history_fts);",
+        )?;
+        migrate_hermes_schema(&self.conn)?;
+        self.conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_char_name_chapter
+                ON character_state(name, chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_plot_status ON plot_thread(status);",
+        )?;
+        self.conn
+            .pragma_update(None, "user_version", HERMES_SCHEMA_VERSION)?;
+        Ok(())
     }
 
     // ---- session_history ----
@@ -474,6 +482,174 @@ impl HermesDB {
     }
 }
 
+fn migrate_hermes_schema(conn: &Connection) -> SqlResult<()> {
+    ensure_column(
+        conn,
+        "session_history",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "session_history", "created_at")?;
+    ensure_column(
+        conn,
+        "user_drift_profile",
+        "confidence",
+        "confidence REAL DEFAULT 0.0",
+    )?;
+    ensure_column(
+        conn,
+        "user_drift_profile",
+        "source",
+        "source TEXT DEFAULT 'extracted'",
+    )?;
+    ensure_column(
+        conn,
+        "hierarchical_summaries",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "hierarchical_summaries", "created_at")?;
+    ensure_column(
+        conn,
+        "agent_skills",
+        "category",
+        "category TEXT DEFAULT 'general'",
+    )?;
+    ensure_column(conn, "agent_skills", "active", "active INTEGER DEFAULT 1")?;
+    ensure_column(
+        conn,
+        "agent_skills",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "agent_skills", "created_at")?;
+    ensure_column(
+        conn,
+        "character_state",
+        "state_json",
+        "state_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "character_state",
+        "status",
+        "status TEXT NOT NULL DEFAULT 'active'",
+    )?;
+    ensure_column(
+        conn,
+        "character_state",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "character_state", "updated_at")?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "description",
+        "description TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "introduced_chapter",
+        "introduced_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "resolved_chapter",
+        "resolved_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "priority",
+        "priority INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "status",
+        "status TEXT NOT NULL DEFAULT 'open'",
+    )?;
+    ensure_column(
+        conn,
+        "plot_thread",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "plot_thread", "created_at")?;
+    ensure_column(
+        conn,
+        "world_rule",
+        "category",
+        "category TEXT NOT NULL DEFAULT 'general'",
+    )?;
+    ensure_column(conn, "world_rule", "priority", "priority INTEGER DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "world_rule",
+        "source_chapter",
+        "source_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(conn, "world_rule", "active", "active INTEGER DEFAULT 1")?;
+    ensure_column(
+        conn,
+        "world_rule",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "world_rule", "created_at")?;
+    Ok(())
+}
+
+fn backfill_empty_timestamp(conn: &Connection, table: &str, column: &str) -> SqlResult<()> {
+    if !table_exists(conn, table)? || !table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "UPDATE {table} SET {column}=datetime('now') WHERE {column} IS NULL OR {column}=''"
+    ))?;
+    Ok(())
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_definition: &str,
+) -> SqlResult<()> {
+    if !table_exists(conn, table)? || table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column_definition}"
+    ))?;
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        params![table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,5 +685,53 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].role, "user");
         assert!(rows[0].content.contains("hidden door"));
+    }
+
+    #[test]
+    fn initialize_migrates_legacy_hermes_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE agent_skills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                skill TEXT NOT NULL
+            );
+            INSERT INTO agent_skills (skill) VALUES ('偏好克制对白');
+            CREATE TABLE character_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                chapter_id TEXT NOT NULL
+            );
+            INSERT INTO character_state (name, chapter_id) VALUES ('林墨', 'chapter-1');
+            CREATE TABLE plot_thread (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
+            INSERT INTO plot_thread (name) VALUES ('玉佩去向');
+            CREATE TABLE world_rule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO world_rule (rule) VALUES ('禁止复活');",
+        )
+        .unwrap();
+        let db = HermesDB { conn };
+
+        db.initialize().unwrap();
+
+        assert!(table_has_column(&db.conn, "agent_skills", "active").unwrap());
+        assert!(table_has_column(&db.conn, "character_state", "state_json").unwrap());
+        assert!(table_has_column(&db.conn, "plot_thread", "introduced_chapter").unwrap());
+        assert!(table_has_column(&db.conn, "world_rule", "active").unwrap());
+        let version: i64 = db
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, HERMES_SCHEMA_VERSION);
+
+        let skills = db.get_active_skills().unwrap();
+        assert_eq!(skills[0].skill, "偏好克制对白");
+        assert!(db.get_characters_for_chapter("chapter-1").unwrap()[0]
+            .1
+            .contains("{}"));
     }
 }

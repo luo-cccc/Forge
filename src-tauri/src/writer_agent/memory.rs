@@ -1,9 +1,11 @@
-//! WriterMemory — structured creative ledgers.
+//! WriterMemory - structured creative ledgers.
 //! Canon, promises, style preferences, creative decisions.
 //! Ported from the plan's Creative Ledgers specification.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Result as SqlResult};
 use serde::Serialize;
+
+const SCHEMA_VERSION: i64 = 1;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -17,8 +19,6 @@ CREATE TABLE IF NOT EXISTS canon_entities (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_canon_name ON canon_entities(name);
-CREATE INDEX IF NOT EXISTS idx_canon_kind ON canon_entities(kind);
 
 CREATE TABLE IF NOT EXISTS canon_facts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,8 +31,6 @@ CREATE TABLE IF NOT EXISTS canon_facts (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_canon_fact_entity ON canon_facts(entity_id);
-CREATE INDEX IF NOT EXISTS idx_canon_fact_key ON canon_facts(key);
 
 CREATE TABLE IF NOT EXISTS plot_promises (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +44,6 @@ CREATE TABLE IF NOT EXISTS plot_promises (
     priority INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_promise_status ON plot_promises(status);
 
 CREATE TABLE IF NOT EXISTS style_preferences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +75,6 @@ CREATE TABLE IF NOT EXISTS proposal_feedback (
     reason TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
 
 CREATE TABLE IF NOT EXISTS memory_audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +87,6 @@ CREATE TABLE IF NOT EXISTS memory_audit_events (
     reason TEXT DEFAULT '',
     created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
 
 CREATE TABLE IF NOT EXISTS writer_observation_trace (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,7 +96,6 @@ CREATE TABLE IF NOT EXISTS writer_observation_trace (
     chapter_title TEXT DEFAULT '',
     paragraph_snippet TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
 
 CREATE TABLE IF NOT EXISTS writer_proposal_trace (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,8 +109,6 @@ CREATE TABLE IF NOT EXISTS writer_proposal_trace (
     created_at INTEGER NOT NULL,
     expires_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
-CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
 
 CREATE TABLE IF NOT EXISTS writer_feedback_trace (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,6 +117,19 @@ CREATE TABLE IF NOT EXISTS writer_feedback_trace (
     reason TEXT DEFAULT '',
     created_at INTEGER NOT NULL
 );
+"#;
+
+const INDEX_SCHEMA: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_canon_name ON canon_entities(name);
+CREATE INDEX IF NOT EXISTS idx_canon_kind ON canon_entities(kind);
+CREATE INDEX IF NOT EXISTS idx_canon_fact_entity ON canon_facts(entity_id);
+CREATE INDEX IF NOT EXISTS idx_canon_fact_key ON canon_facts(key);
+CREATE INDEX IF NOT EXISTS idx_promise_status ON plot_promises(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
+CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
+CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_trace_created_at ON writer_feedback_trace(created_at);
 "#;
 
@@ -218,7 +223,7 @@ pub struct FeedbackTraceSummary {
 impl WriterMemory {
     pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch(SCHEMA)?;
+        initialize_schema(&conn)?;
         Ok(Self { conn })
     }
 
@@ -798,6 +803,262 @@ impl WriterMemory {
     }
 }
 
+fn initialize_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(SCHEMA)?;
+    migrate_writer_memory_schema(conn)?;
+    conn.execute_batch(INDEX_SCHEMA)?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    Ok(())
+}
+
+fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
+    ensure_column(
+        conn,
+        "canon_entities",
+        "aliases_json",
+        "aliases_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(conn, "canon_entities", "summary", "summary TEXT DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "canon_entities",
+        "attributes_json",
+        "attributes_json TEXT DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "canon_entities",
+        "confidence",
+        "confidence REAL DEFAULT 0.5",
+    )?;
+    ensure_column(
+        conn,
+        "canon_entities",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "canon_entities",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "canon_entities", "created_at")?;
+    backfill_empty_timestamp(conn, "canon_entities", "updated_at")?;
+
+    ensure_column(
+        conn,
+        "canon_facts",
+        "source_ref",
+        "source_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "canon_facts",
+        "confidence",
+        "confidence REAL DEFAULT 0.5",
+    )?;
+    ensure_column(
+        conn,
+        "canon_facts",
+        "status",
+        "status TEXT DEFAULT 'active'",
+    )?;
+    ensure_column(
+        conn,
+        "canon_facts",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "canon_facts",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "canon_facts", "created_at")?;
+    backfill_empty_timestamp(conn, "canon_facts", "updated_at")?;
+
+    ensure_column(
+        conn,
+        "plot_promises",
+        "description",
+        "description TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "introduced_chapter",
+        "introduced_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "introduced_ref",
+        "introduced_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "expected_payoff",
+        "expected_payoff TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "status",
+        "status TEXT DEFAULT 'open'",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "priority",
+        "priority INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "plot_promises", "created_at")?;
+
+    ensure_column(
+        conn,
+        "style_preferences",
+        "evidence_ref",
+        "evidence_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "style_preferences",
+        "confidence",
+        "confidence REAL DEFAULT 0.5",
+    )?;
+    ensure_column(
+        conn,
+        "style_preferences",
+        "accepted_count",
+        "accepted_count INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "style_preferences",
+        "rejected_count",
+        "rejected_count INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "style_preferences",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "style_preferences", "updated_at")?;
+
+    ensure_column(conn, "creative_decisions", "scope", "scope TEXT DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "creative_decisions",
+        "alternatives_json",
+        "alternatives_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "creative_decisions",
+        "rationale",
+        "rationale TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "creative_decisions",
+        "source_refs_json",
+        "source_refs_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "creative_decisions",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "creative_decisions", "created_at")?;
+
+    ensure_column(
+        conn,
+        "proposal_feedback",
+        "final_text",
+        "final_text TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "proposal_feedback",
+        "reason",
+        "reason TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "proposal_feedback",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "proposal_feedback", "created_at")?;
+
+    ensure_column(
+        conn,
+        "writer_proposal_trace",
+        "expires_at",
+        "expires_at INTEGER",
+    )?;
+
+    Ok(())
+}
+
+fn backfill_empty_timestamp(conn: &Connection, table: &str, column: &str) -> SqlResult<()> {
+    if !table_exists(conn, table)? || !table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "UPDATE {table} SET {column}=datetime('now') WHERE {column} IS NULL OR {column}=''"
+    ))?;
+    Ok(())
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_definition: &str,
+) -> SqlResult<()> {
+    if !table_exists(conn, table)? || table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column_definition}"
+    ))?;
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        rusqlite::params![table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -961,5 +1222,52 @@ mod tests {
         let decisions = m.list_recent_decisions(5).unwrap();
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].decision, "accepted");
+    }
+
+    #[test]
+    fn open_migrates_legacy_writer_memory_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE canon_entities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO canon_entities (kind, name) VALUES ('character', '林墨');
+            CREATE TABLE plot_promises (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL
+            );
+            INSERT INTO plot_promises (kind, title) VALUES ('clue', '玉佩');
+            CREATE TABLE writer_proposal_trace (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposal_id TEXT NOT NULL UNIQUE,
+                observation_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                state TEXT NOT NULL,
+                confidence REAL DEFAULT 0.0,
+                preview_snippet TEXT DEFAULT '',
+                created_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+
+        initialize_schema(&conn).unwrap();
+
+        assert!(table_has_column(&conn, "canon_entities", "attributes_json").unwrap());
+        assert!(table_has_column(&conn, "plot_promises", "expected_payoff").unwrap());
+        assert!(table_has_column(&conn, "writer_proposal_trace", "expires_at").unwrap());
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let m = WriterMemory { conn };
+        let entities = m.list_canon_entities().unwrap();
+        assert_eq!(entities[0].name, "林墨");
+        let promises = m.get_open_promise_summaries().unwrap();
+        assert_eq!(promises[0].title, "玉佩");
     }
 }
