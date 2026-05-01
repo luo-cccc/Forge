@@ -2384,7 +2384,24 @@ fn extract_weapon_from_lore(content: &str) -> Option<String> {
 }
 
 fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) -> String {
-    pack.sources
+    let budget = &pack.budget_report;
+    let source_report = if budget.source_reports.is_empty() {
+        "- no source budgets consumed".to_string()
+    } else {
+        budget
+            .source_reports
+            .iter()
+            .map(|report| {
+                format!(
+                    "- {}: requested {}, provided {}, truncated {}",
+                    report.source, report.requested, report.provided, report.truncated
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let rendered_sources = pack
+        .sources
         .iter()
         .map(|source| {
             format!(
@@ -2397,7 +2414,17 @@ fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) 
             )
         })
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+
+    format!(
+        "# ContextPack Budget\n\
+task: {:?}\n\
+used/budget: {}/{}\n\
+wasted: {}\n\
+sources:\n{}\n\n\
+# ContextPack Sources\n{}",
+        pack.task, budget.used, budget.total_budget, budget.wasted, source_report, rendered_sources
+    )
 }
 
 fn build_writer_observation_from_editor_state(
@@ -3432,6 +3459,88 @@ mod tests {
         assert!(!protocol.contains("ACTION_INSERT"));
         assert!(!protocol.contains("ACTION_REPLACE"));
         assert!(!protocol.contains("extractActions"));
+    }
+
+    fn test_context_pack() -> writer_agent::context::WritingContextPack {
+        writer_agent::context::WritingContextPack {
+            task: writer_agent::context::AgentTask::InlineRewrite,
+            total_chars: 18,
+            budget_limit: 32,
+            budget_report: writer_agent::context::ContextBudgetReport {
+                total_budget: 32,
+                used: 18,
+                wasted: 14,
+                source_reports: vec![
+                    writer_agent::context::SourceReport {
+                        source: "SelectedText".to_string(),
+                        requested: 20,
+                        provided: 12,
+                        truncated: false,
+                    },
+                    writer_agent::context::SourceReport {
+                        source: "CursorPrefix".to_string(),
+                        requested: 20,
+                        provided: 6,
+                        truncated: true,
+                    },
+                ],
+            },
+            sources: vec![
+                writer_agent::context::ContextExcerpt {
+                    source: writer_agent::context::ContextSource::SelectedText,
+                    content: "林墨握紧寒影刀。".to_string(),
+                    char_count: 8,
+                    truncated: false,
+                    priority: 10,
+                    evidence_ref: Some("selection".to_string()),
+                },
+                writer_agent::context::ContextExcerpt {
+                    source: writer_agent::context::ContextSource::CursorPrefix,
+                    content: "张三退后".to_string(),
+                    char_count: 4,
+                    truncated: true,
+                    priority: 9,
+                    evidence_ref: None,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn render_writer_context_pack_includes_budget_report() {
+        let rendered = render_writer_context_pack(&test_context_pack());
+
+        assert!(rendered.contains("# ContextPack Budget"));
+        assert!(rendered.contains("task: InlineRewrite"));
+        assert!(rendered.contains("used/budget: 18/32"));
+        assert!(rendered.contains("wasted: 14"));
+        assert!(rendered.contains("- CursorPrefix: requested 20, provided 6, truncated true"));
+        assert!(rendered.contains("# ContextPack Sources"));
+        assert!(rendered.contains("## SelectedText"));
+        assert!(rendered.contains("林墨握紧寒影刀。"));
+    }
+
+    #[test]
+    fn inline_operation_messages_include_context_budget_report() {
+        let observation = build_manual_writer_observation(
+            "改写得更紧张",
+            "林墨握紧寒影刀。张三退后。",
+            "林墨握紧寒影刀。",
+            "寒影刀",
+            None,
+            "novel-a",
+        );
+        let messages = writer_agent_inline_operation_messages(
+            "改写得更紧张",
+            &observation,
+            &test_context_pack(),
+        );
+        let user_content = messages[1]["content"].as_str().unwrap();
+
+        assert!(user_content.contains("ContextPack:"));
+        assert!(user_content.contains("# ContextPack Budget"));
+        assert!(user_content.contains("used/budget: 18/32"));
+        assert!(user_content.contains("truncated true"));
     }
 
     #[test]
