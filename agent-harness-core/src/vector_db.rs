@@ -1,4 +1,31 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+fn jieba() -> &'static jieba_rs::Jieba {
+    static JIEBA: OnceLock<jieba_rs::Jieba> = OnceLock::new();
+    JIEBA.get_or_init(|| jieba_rs::Jieba::new())
+}
+
+/// Tokenize text for BM25. Uses jieba for Chinese segmentation,
+/// whitespace as fallback. Min token length: 2 chars.
+fn tokenize(text: &str) -> Vec<String> {
+    let is_cjk = text.chars().any(|c| c as u32 > 0x2E80);
+    if is_cjk {
+        jieba()
+            .cut(text, true)
+            .into_iter()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| s.chars().count() >= 2)
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        text.split_whitespace()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| s.len() >= 2)
+            .map(|s| s.to_string())
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chunk {
@@ -34,7 +61,7 @@ impl VectorDB {
         } else {
             chunks
                 .iter()
-                .map(|c| c.text.split_whitespace().count() as f32)
+                .map(|c| tokenize(&c.text).len() as f32)
                 .sum::<f32>()
                 / chunks.len() as f32
         };
@@ -58,7 +85,7 @@ impl VectorDB {
         self.avg_text_len = self
             .chunks
             .iter()
-            .map(|c| c.text.split_whitespace().count() as f32)
+            .map(|c| tokenize(&c.text).len() as f32)
             .sum::<f32>()
             / self.chunks.len().max(1) as f32;
     }
@@ -70,7 +97,7 @@ impl VectorDB {
         } else {
             self.chunks
                 .iter()
-                .map(|c| c.text.split_whitespace().count() as f32)
+                .map(|c| tokenize(&c.text).len() as f32)
                 .sum::<f32>()
                 / self.chunks.len() as f32
         };
@@ -78,34 +105,24 @@ impl VectorDB {
 
     // ── BM25 lexical scoring ────────────────────────────────────────
     fn bm25_score(&self, query: &str, chunk: &Chunk) -> f32 {
-        let terms: Vec<&str> = query.split_whitespace().collect();
+        let query_terms = tokenize(query);
+        let doc_terms = tokenize(&chunk.text);
         let doc_count = self.chunks.len().max(1);
-        let doc_len = chunk.text.split_whitespace().count() as f32;
+        let doc_len = doc_terms.len() as f32;
         let k1 = 1.5;
         let b = 0.75;
 
-        terms
+        query_terms
             .iter()
             .map(|term| {
-                let term_lower = term.to_lowercase();
-                let tf = chunk
-                    .text
-                    .to_lowercase()
-                    .split_whitespace()
-                    .filter(|w| *w == term_lower)
-                    .count() as f32;
+                let tf = doc_terms.iter().filter(|t| *t == term).count() as f32;
                 if tf == 0.0 {
                     return 0.0;
                 }
                 let df = self
                     .chunks
                     .iter()
-                    .filter(|c| {
-                        c.text
-                            .to_lowercase()
-                            .split_whitespace()
-                            .any(|w| w == term_lower)
-                    })
+                    .filter(|c| tokenize(&c.text).iter().any(|t| t == term))
                     .count()
                     .max(1) as f32;
                 let idf = ((doc_count as f32 - df + 0.5) / (df + 0.5)).ln().max(0.0);
@@ -184,12 +201,13 @@ pub fn extract_keywords(text: &str) -> Vec<String> {
         "好", "自己", "这", "他", "她", "它", "们",
     ];
     let mut seen = std::collections::HashSet::new();
-    text.split_whitespace()
+    tokenize(text)
+        .into_iter()
         .map(|w| {
             w.trim_matches(|c: char| !c.is_alphanumeric())
                 .to_lowercase()
         })
-        .filter(|w| w.len() >= 4 && !stopwords.contains(&w.as_str()) && seen.insert(w.clone()))
+        .filter(|w| w.chars().count() >= 2 && !stopwords.contains(&w.as_str()) && seen.insert(w.clone()))
         .take(8)
         .collect()
 }

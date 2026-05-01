@@ -12,3 +12,5 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 async-trait = "0.1"
+jieba-rs = "0.7"
+chrono = { version = "0.4", features = ["serde"] }

@@ -27,7 +27,7 @@ pub use context_pack::{
     PackedContext,
 };
 pub use domain::{writing_domain_profile, AgentDomainProfile, ContextPriority, DomainCapability};
-pub use hermes_memory::HermesDB;
+pub use hermes_memory::{HermesDB, SessionSearchResult};
 pub use llm::LLMClient;
 pub use router::{classify_intent, Intent};
 pub use run_trace::{AgentRunEvent, AgentRunEventKind, AgentRunStatus, AgentRunTrace};
