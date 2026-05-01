@@ -203,12 +203,17 @@ fn migrate_legacy_db_if_needed(
     Ok(())
 }
 
-fn app_data_db_path(app: &tauri::AppHandle, filename: &str) -> Result<std::path::PathBuf, String> {
-    Ok(storage::app_data_dir(app)?.join(filename))
+fn active_project_db_path(
+    app: &tauri::AppHandle,
+    filename: &str,
+) -> Result<std::path::PathBuf, String> {
+    Ok(storage::active_project_data_dir(app)?.join(filename))
 }
 
 fn open_app_hermes_db(app: &tauri::AppHandle) -> Result<HermesDB, String> {
-    let path = app_data_db_path(app, HERMES_DB_FILENAME)?;
+    let path = active_project_db_path(app, HERMES_DB_FILENAME)?;
+    let app_data_legacy = storage::app_data_dir(app)?.join(HERMES_DB_FILENAME);
+    migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
     migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(HERMES_DB_FILENAME))?;
     HermesDB::open(&path).map_err(|e| {
         format!(
@@ -222,7 +227,10 @@ fn open_app_hermes_db(app: &tauri::AppHandle) -> Result<HermesDB, String> {
 fn open_app_writer_kernel(
     app: &tauri::AppHandle,
 ) -> Result<writer_agent::WriterAgentKernel, String> {
-    let path = app_data_db_path(app, WRITER_MEMORY_DB_FILENAME)?;
+    let project_id = storage::active_project_id(app)?;
+    let path = active_project_db_path(app, WRITER_MEMORY_DB_FILENAME)?;
+    let app_data_legacy = storage::app_data_dir(app)?.join(WRITER_MEMORY_DB_FILENAME);
+    migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
     migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(WRITER_MEMORY_DB_FILENAME))?;
     let memory = writer_agent::memory::WriterMemory::open(&path).map_err(|e| {
         format!(
@@ -231,7 +239,7 @@ fn open_app_writer_kernel(
             e
         )
     })?;
-    Ok(writer_agent::WriterAgentKernel::new("default", memory))
+    Ok(writer_agent::WriterAgentKernel::new(&project_id, memory))
 }
 
 fn startup_error(message: String) -> Box<dyn std::error::Error> {
@@ -319,6 +327,7 @@ fn observe_chapter_save(
     content: &str,
     revision: &str,
 ) -> Result<(), String> {
+    let project_id = storage::active_project_id(app)?;
     let text = html_to_plain_text(content);
     let paragraph = last_meaningful_paragraph(&text).unwrap_or_else(|| char_tail(&text, 400));
     let cursor = text.chars().count();
@@ -327,7 +336,7 @@ fn observe_chapter_save(
         created_at: agent_runtime::now_ms(),
         source: writer_agent::observation::ObservationSource::ChapterSave,
         reason: writer_agent::observation::ObservationReason::Save,
-        project_id: "default".to_string(),
+        project_id,
         chapter_title: Some(title.to_string()),
         chapter_revision: Some(revision.to_string()),
         cursor: Some(writer_agent::observation::TextRange {
@@ -1262,7 +1271,8 @@ async fn report_editor_state(
         });
     }
 
-    let observation = build_writer_observation_from_editor_state(&payload);
+    let project_id = storage::active_project_id(&app)?;
+    let observation = build_writer_observation_from_editor_state(&payload, &project_id);
     let (proposals, context_pack_for_llm) = {
         let state = app.state::<AppState>();
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
@@ -2035,6 +2045,7 @@ fn approve_writer_operation(
 
 fn to_writer_observation(
     observation: &AgentObservation,
+    project_id: &str,
 ) -> writer_agent::observation::WriterObservation {
     let reason = match observation.reason {
         agent_runtime::AgentObservationReason::UserTyped => {
@@ -2060,7 +2071,7 @@ fn to_writer_observation(
         created_at: observation.created_at,
         source: writer_agent::observation::ObservationSource::Editor,
         reason,
-        project_id: "default".to_string(),
+        project_id: project_id.to_string(),
         chapter_title: observation.chapter_title.clone(),
         chapter_revision: observation.chapter_revision.clone(),
         cursor: Some(writer_agent::observation::TextRange {
@@ -2163,6 +2174,7 @@ fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) 
 
 fn build_writer_observation_from_editor_state(
     payload: &EditorStatePayload,
+    project_id: &str,
 ) -> writer_agent::observation::WriterObservation {
     let cursor = payload
         .text_cursor_position
@@ -2178,7 +2190,7 @@ fn build_writer_observation_from_editor_state(
         created_at: agent_runtime::now_ms(),
         source: writer_agent::observation::ObservationSource::Editor,
         reason: writer_agent::observation::ObservationReason::Idle,
-        project_id: "default".to_string(),
+        project_id: project_id.to_string(),
         chapter_title: payload.chapter_title.clone(),
         chapter_revision: payload.chapter_revision.clone(),
         cursor: Some(writer_agent::observation::TextRange {
@@ -2349,6 +2361,7 @@ fn build_manual_writer_observation(
     paragraph: &str,
     selected_text: &str,
     payload: Option<&AskAgentContext>,
+    project_id: &str,
 ) -> writer_agent::observation::WriterObservation {
     let cursor_position = payload
         .and_then(|payload| payload.cursor_position)
@@ -2377,7 +2390,7 @@ fn build_manual_writer_observation(
         created_at: agent_runtime::now_ms(),
         source: writer_agent::observation::ObservationSource::ManualRequest,
         reason: writer_agent::observation::ObservationReason::Explicit,
-        project_id: "default".to_string(),
+        project_id: project_id.to_string(),
         chapter_title,
         chapter_revision,
         cursor: Some(writer_agent::observation::TextRange {
@@ -2558,7 +2571,8 @@ fn agent_observe(
 
     let mut emitted_proposal_id = None;
     if matches!(observation.mode, agent_runtime::AgentMode::Proactive) {
-        let writer_observation = to_writer_observation(&observation);
+        let project_id = storage::active_project_id(&app)?;
+        let writer_observation = to_writer_observation(&observation, &project_id);
         let writer_observation_for_llm = writer_observation.clone();
         let proposals = {
             let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
@@ -2708,12 +2722,14 @@ async fn ask_agent(
 
     let state = app.state::<AppState>();
     let truncated_context = truncate_context(&context, 2000);
+    let project_id = storage::active_project_id(&app)?;
     let manual_observation = build_manual_writer_observation(
         &message,
         &context,
         &paragraph,
         &selected_text,
         context_payload.as_ref(),
+        &project_id,
     );
     let (writer_context_pack, writer_context, ledger_context, source_refs) = {
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
@@ -2992,7 +3008,7 @@ mod tests {
     fn manual_observation_uses_char_cursor_and_selection_range() {
         let context = "林墨拔出寒影刀。\n张三后退一步。";
         let observation =
-            build_manual_writer_observation("这段有冲突吗", context, "", "寒影刀", None);
+            build_manual_writer_observation("这段有冲突吗", context, "", "寒影刀", None, "test");
 
         assert_eq!(
             observation.source,
@@ -3039,7 +3055,7 @@ mod tests {
     #[test]
     fn editor_state_observation_uses_text_cursor_for_kernel() {
         let payload = test_editor_state_payload("林墨拔出", "寒影刀", "林墨拔出", 99, Some(4));
-        let observation = build_writer_observation_from_editor_state(&payload);
+        let observation = build_writer_observation_from_editor_state(&payload, "test");
 
         assert_eq!(
             observation.cursor.unwrap().to,
@@ -3057,7 +3073,7 @@ mod tests {
     #[test]
     fn editor_state_observation_falls_back_to_prefix_char_count() {
         let payload = test_editor_state_payload("林墨拔出", "", "", 99, None);
-        let observation = build_writer_observation_from_editor_state(&payload);
+        let observation = build_writer_observation_from_editor_state(&payload, "test");
 
         assert_eq!(observation.cursor.unwrap().to, "林墨拔出".chars().count());
         assert!(observation.paragraph.contains("Current paragraph"));
