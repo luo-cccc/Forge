@@ -37,20 +37,7 @@ pub struct WriterAgentLedgerSnapshot {
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
     pub recent_decisions: Vec<super::memory::CreativeDecisionSummary>,
-    pub memory_audit: Vec<MemoryAuditEntry>,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MemoryAuditEntry {
-    pub proposal_id: String,
-    pub kind: String,
-    pub action: String,
-    pub title: String,
-    pub evidence: String,
-    pub rationale: String,
-    pub reason: Option<String>,
-    pub created_at: u64,
+    pub memory_audit: Vec<super::memory::MemoryAuditSummary>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -567,6 +554,7 @@ impl WriterAgentKernel {
         if feedback.is_positive() {
             if let Some(prop) = self.proposals.iter().find(|p| p.id == feedback.proposal_id) {
                 record_memory_candidate_feedback(&self.memory, prop, true);
+                record_memory_audit_event(&self.memory, prop, &feedback);
                 self.memory
                     .upsert_style_preference(
                         &format!("accepted_{:?}", prop.kind),
@@ -599,6 +587,7 @@ impl WriterAgentKernel {
             };
             if feedback.is_negative() || matches!(feedback.action, FeedbackAction::Edited) {
                 record_memory_candidate_feedback(&self.memory, prop, false);
+                record_memory_audit_event(&self.memory, prop, &feedback);
                 self.memory
                     .record_decision(
                         self.active_chapter.as_deref().unwrap_or("project"),
@@ -1155,42 +1144,8 @@ impl WriterAgentKernel {
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
             open_promises: self.memory.get_open_promise_summaries().unwrap_or_default(),
             recent_decisions: self.memory.list_recent_decisions(20).unwrap_or_default(),
-            memory_audit: self.memory_audit_snapshot(30),
+            memory_audit: self.memory.list_memory_audit(30).unwrap_or_default(),
         }
-    }
-
-    fn memory_audit_snapshot(&self, limit: usize) -> Vec<MemoryAuditEntry> {
-        let mut entries = Vec::new();
-        for feedback in self.feedback_events.iter().rev() {
-            if entries.len() >= limit {
-                break;
-            }
-            let Some(proposal) = self
-                .proposals
-                .iter()
-                .find(|proposal| proposal.id == feedback.proposal_id)
-            else {
-                continue;
-            };
-            if memory_operation_slot(proposal).is_none() {
-                continue;
-            }
-            entries.push(MemoryAuditEntry {
-                proposal_id: proposal.id.clone(),
-                kind: format!("{:?}", proposal.kind),
-                action: format!("{:?}", feedback.action),
-                title: memory_audit_title(proposal),
-                evidence: proposal
-                    .evidence
-                    .first()
-                    .map(|evidence| evidence.snippet.clone())
-                    .unwrap_or_default(),
-                rationale: proposal.rationale.clone(),
-                reason: feedback.reason.clone(),
-                created_at: feedback.created_at,
-            });
-        }
-        entries
     }
 
     pub fn trace_snapshot(&self, limit: usize) -> WriterAgentTraceSnapshot {
@@ -1612,6 +1567,31 @@ fn memory_audit_title(proposal: &AgentProposal) -> String {
         }
         _ => proposal.preview.clone(),
     }
+}
+
+fn record_memory_audit_event(
+    memory: &WriterMemory,
+    proposal: &AgentProposal,
+    feedback: &ProposalFeedback,
+) {
+    if memory_operation_slot(proposal).is_none() {
+        return;
+    }
+    let entry = super::memory::MemoryAuditSummary {
+        proposal_id: proposal.id.clone(),
+        kind: format!("{:?}", proposal.kind),
+        action: format!("{:?}", feedback.action),
+        title: memory_audit_title(proposal),
+        evidence: proposal
+            .evidence
+            .first()
+            .map(|evidence| evidence.snippet.clone())
+            .unwrap_or_default(),
+        rationale: proposal.rationale.clone(),
+        reason: feedback.reason.clone(),
+        created_at: feedback.created_at,
+    };
+    memory.record_memory_audit(&entry).ok();
 }
 
 fn memory_candidate_slot_for_canon(entity: &CanonEntityOp) -> String {
@@ -3224,6 +3204,51 @@ mod tests {
         assert_eq!(audit[0].action, "Accepted");
         assert!(audit[0].title.contains("沈照"));
         assert!(audit[0].evidence.contains("沈照"));
+        assert_eq!(audit[0].reason.as_deref(), Some("durable character"));
+    }
+
+    #[test]
+    fn memory_audit_survives_kernel_restart() {
+        let db_path = std::env::temp_dir().join(format!(
+            "forge-memory-audit-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        {
+            let memory = WriterMemory::open(&db_path).unwrap();
+            let mut kernel = WriterAgentKernel::new("default", memory);
+            let mut obs = observation("那个少年名叫沈照，袖中藏着一枚玉佩。");
+            obs.reason = ObservationReason::Save;
+            obs.source = ObservationSource::ChapterSave;
+
+            let proposal = kernel
+                .observe(obs)
+                .unwrap()
+                .into_iter()
+                .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+                .unwrap();
+            kernel
+                .apply_feedback(ProposalFeedback {
+                    proposal_id: proposal.id,
+                    action: FeedbackAction::Accepted,
+                    final_text: None,
+                    reason: Some("durable character".to_string()),
+                    created_at: 42,
+                })
+                .unwrap();
+        }
+
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let kernel = WriterAgentKernel::new("default", memory);
+        let audit = kernel.ledger_snapshot().memory_audit;
+        let _ = std::fs::remove_file(&db_path);
+
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].action, "Accepted");
+        assert!(audit[0].title.contains("沈照"));
         assert_eq!(audit[0].reason.as_deref(), Some("durable character"));
     }
 }

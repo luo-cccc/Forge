@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS proposal_feedback (
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
+
+CREATE TABLE IF NOT EXISTS memory_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    action TEXT NOT NULL,
+    title TEXT NOT NULL,
+    evidence TEXT DEFAULT '',
+    rationale TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
 "#;
 
 pub struct WriterMemory {
@@ -124,6 +137,19 @@ pub struct StylePreferenceSummary {
     pub value: String,
     pub accepted_count: i64,
     pub rejected_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryAuditSummary {
+    pub proposal_id: String,
+    pub kind: String,
+    pub action: String,
+    pub title: String,
+    pub evidence: String,
+    pub rationale: String,
+    pub reason: Option<String>,
+    pub created_at: u64,
 }
 
 impl WriterMemory {
@@ -492,6 +518,51 @@ impl WriterMemory {
         Ok(())
     }
 
+    pub fn record_memory_audit(&self, entry: &MemoryAuditSummary) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO memory_audit_events
+             (proposal_id, kind, action, title, evidence, rationale, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                entry.proposal_id,
+                entry.kind,
+                entry.action,
+                entry.title,
+                entry.evidence,
+                entry.rationale,
+                entry.reason.clone().unwrap_or_default(),
+                entry.created_at as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_memory_audit(&self, limit: usize) -> rusqlite::Result<Vec<MemoryAuditSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT proposal_id, kind, action, title, evidence, rationale, reason, created_at
+             FROM memory_audit_events ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let reason: String = row.get(6)?;
+            let created_at: i64 = row.get(7)?;
+            Ok(MemoryAuditSummary {
+                proposal_id: row.get(0)?,
+                kind: row.get(1)?,
+                action: row.get(2)?,
+                title: row.get(3)?,
+                evidence: row.get(4)?,
+                rationale: row.get(5)?,
+                reason: if reason.trim().is_empty() {
+                    None
+                } else {
+                    Some(reason)
+                },
+                created_at: created_at.max(0) as u64,
+            })
+        })?;
+        rows.collect()
+    }
+
     #[cfg(test)]
     pub fn feedback_stats(&self, proposal_id: &str) -> rusqlite::Result<(i64, i64)> {
         let mut stmt = self.conn.prepare(
@@ -593,6 +664,26 @@ mod tests {
         let (accepted, rejected) = m.feedback_stats("prop_1").unwrap();
         assert_eq!(accepted, 1);
         assert_eq!(rejected, 0);
+    }
+
+    #[test]
+    fn test_memory_audit_record() {
+        let m = memory();
+        m.record_memory_audit(&MemoryAuditSummary {
+            proposal_id: "prop_1".to_string(),
+            kind: "CanonUpdate".to_string(),
+            action: "Accepted".to_string(),
+            title: "沈照 [character]".to_string(),
+            evidence: "那个少年名叫沈照".to_string(),
+            rationale: "durable character".to_string(),
+            reason: Some("approved".to_string()),
+            created_at: 42,
+        })
+        .unwrap();
+        let audit = m.list_memory_audit(5).unwrap();
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].proposal_id, "prop_1");
+        assert_eq!(audit[0].reason.as_deref(), Some("approved"));
     }
 
     #[test]
