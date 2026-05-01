@@ -7,6 +7,7 @@ use agent_harness_core::{
 };
 
 mod agent_runtime;
+mod ambient_agents;
 mod brain_service;
 mod chapter_generation;
 mod llm_runtime;
@@ -1562,7 +1563,47 @@ pub fn run() {
         }
     };
 
+    // Shared context cache for ambient agents
+    let cache: std::sync::Arc<tokio::sync::Mutex<ambient_agents::context_fetcher::ContextCache>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(
+            ambient_agents::context_fetcher::ContextCache::default(),
+        ));
+
+    // Capture clones before the setup closure
+    let cache1 = cache.clone();
+    let cache2 = cache.clone();
+
     if let Err(e) = tauri::Builder::default()
+        .setup(move |app| {
+            let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
+            let ah = app.handle().clone();
+
+            event_bus.spawn(
+                std::sync::Arc::new(ambient_agents::context_fetcher::ContextFetcherAgent {
+                    app: ah.clone(),
+                    cache: cache1,
+                }),
+                std::sync::Arc::new(|_| {}),
+            );
+
+            let ah_clone = ah.clone();
+            event_bus.spawn(
+                std::sync::Arc::new(ambient_agents::co_writer::CoWriterAgent {
+                    app: ah.clone(),
+                    cache: cache2,
+                }),
+                std::sync::Arc::new(move |output| {
+                    if let agent_harness_core::AgentOutput::GhostText { text, position } = output {
+                        let _ = ah_clone.emit("editor-ghost-chunk", serde_json::json!({
+                            "content": text, "position": position,
+                        }));
+                    }
+                }),
+            );
+
+            app.manage(Mutex::new(event_bus));
+            Ok(())
+        })
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
