@@ -11,6 +11,7 @@ import type {
   ProposalFeedback,
   StoryMode,
   StoryDebtSnapshot,
+  StoryDebtEntry,
   StoryReviewQueueEntry,
   WriterOperation,
 } from "../protocol";
@@ -78,6 +79,10 @@ function primaryOperation(proposal: AgentProposal): WriterOperation | undefined 
 }
 
 function queuePrimaryOperation(entry: StoryReviewQueueEntry): WriterOperation | undefined {
+  return entry.operations[0];
+}
+
+function debtPrimaryOperation(entry: StoryDebtEntry): WriterOperation | undefined {
   return entry.operations[0];
 }
 
@@ -297,6 +302,48 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setOperationError(String(e));
     }
   }, [currentChapter, currentChapterRevision, refreshStatus]);
+
+  const handleApplyDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
+    setOperationError(null);
+    const operation = debtPrimaryOperation(entry);
+    if (!operation) return;
+
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision: currentChapterRevision ?? "",
+      });
+      if (!result.success) {
+        setOperationError(result.error?.message ?? "Could not apply this story debt action.");
+        return;
+      }
+
+      const applied = isEditorTextOperation(operation)
+        ? onApplyOperation?.(operation) ?? false
+        : true;
+      if (!applied) {
+        setOperationError("The editor could not apply this operation.");
+        return;
+      }
+
+      const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
+      if (proposalId) {
+        const finalText = isEditorTextOperation(operation) ? operation.text : entry.message;
+        await recordFeedback(proposalId, "accepted", finalText);
+      } else {
+        await refreshStatus();
+      }
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapterRevision, onApplyOperation, recordFeedback, refreshStatus]);
+
+  const handleIgnoreDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
+    const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
+    if (proposalId) {
+      await recordFeedback(proposalId, "rejected", undefined, "Ignored from story debt summary.");
+    }
+  }, [recordFeedback]);
 
   const pendingProposals = proposals.filter((p) => {
     return p.expiresAt === undefined || p.expiresAt === 0 || nowMs < p.expiresAt;
@@ -525,6 +572,26 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-text-muted">{entry.message}</p>
+                    {(entry.operations.length > 0 || entry.relatedReviewIds.length > 0) && (
+                      <div className="mt-2 flex gap-1">
+                        {entry.operations.length > 0 && (
+                          <button
+                            onClick={() => handleApplyDebtEntry(entry)}
+                            className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
+                          >
+                            Resolve
+                          </button>
+                        )}
+                        {entry.relatedReviewIds.length > 0 && (
+                          <button
+                            onClick={() => handleIgnoreDebtEntry(entry)}
+                            className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-muted border border-border-subtle hover:bg-bg-surface"
+                          >
+                            Ignore
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

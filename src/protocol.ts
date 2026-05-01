@@ -579,6 +579,7 @@ export interface StoryDebtEntry {
   message: string;
   evidence: EvidenceRef[];
   relatedReviewIds: string[];
+  operations: WriterOperation[];
   createdAt: number;
 }
 

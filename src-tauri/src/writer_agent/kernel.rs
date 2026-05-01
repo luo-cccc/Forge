@@ -112,6 +112,7 @@ pub struct StoryDebtEntry {
     pub message: String,
     pub evidence: Vec<EvidenceRef>,
     pub related_review_ids: Vec<String>,
+    pub operations: Vec<WriterOperation>,
     pub created_at: u64,
 }
 
@@ -1250,6 +1251,7 @@ fn story_debt_from_review_entry(
         message: entry.message.clone(),
         evidence: entry.evidence.clone(),
         related_review_ids: vec![entry.id.clone()],
+        operations: entry.operations.clone(),
         created_at: entry.created_at,
     }
 }
@@ -1283,6 +1285,12 @@ fn story_debt_from_open_promise(
             snippet: promise.description.clone(),
         }],
         related_review_ids: Vec::new(),
+        operations: vec![WriterOperation::PromiseResolve {
+            promise_id: promise.id.to_string(),
+            chapter: active_chapter
+                .clone()
+                .unwrap_or_else(|| promise.expected_payoff.clone()),
+        }],
         created_at: 0,
     }
 }

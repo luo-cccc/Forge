@@ -834,6 +834,15 @@ fn run_story_debt_snapshot_eval() -> EvalResult {
     {
         errors.push("missing open promise debt entry".to_string());
     }
+    if !debt.entries.iter().any(|entry| {
+        entry.title.contains("Open promise")
+            && entry
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::PromiseResolve { .. }))
+    }) {
+        errors.push("open promise debt is not executable".to_string());
+    }
 
     eval_result(
         "writer_agent:story_debt_snapshot_counts_foundation",
