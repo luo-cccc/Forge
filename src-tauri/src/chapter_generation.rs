@@ -704,7 +704,8 @@ pub fn build_chapter_context(
         }
     }
 
-    let lore_entries = storage::load_lorebook(app).unwrap_or_default();
+    let lore_entries = storage::load_lorebook(app)
+        .map_err(|e| ChapterGenerationError::new("lorebook_load_failed", e, true))?;
     let selected_lore =
         select_lore_entries(&lore_entries, &query, input.budget.lorebook_entry_count);
     let lore_text = if selected_lore.is_empty() {

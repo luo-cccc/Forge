@@ -49,25 +49,33 @@ impl AmbientAgent for ContextFetcherAgent {
                         }
                         continue;
                     }
-                    if let Ok(entries) = crate::storage::load_lorebook(&self.app) {
-                        let matches: Vec<String> = entries
-                            .iter()
-                            .filter(|e| e.keyword.contains(kw) || kw.contains(&e.keyword))
-                            .map(|e| e.content.clone())
-                            .collect();
-                        if first_card.is_none() {
-                            if let Some(content) = matches.first() {
-                                first_card = Some((kw.clone(), content.clone()));
+                    match crate::storage::load_lorebook(&self.app) {
+                        Ok(entries) => {
+                            let matches: Vec<String> = entries
+                                .iter()
+                                .filter(|e| e.keyword.contains(kw) || kw.contains(&e.keyword))
+                                .map(|e| e.content.clone())
+                                .collect();
+                            if first_card.is_none() {
+                                if let Some(content) = matches.first() {
+                                    first_card = Some((kw.clone(), content.clone()));
+                                }
                             }
+                            cache.lore_entries.insert(kw.clone(), matches);
                         }
-                        cache.lore_entries.insert(kw.clone(), matches);
+                        Err(e) => tracing::warn!("Context fetcher skipped lorebook: {}", e),
                     }
                 }
                 if let Entry::Vacant(entry) = cache.outline_map.entry(chapter.clone()) {
-                    if let Ok(nodes) = crate::storage::load_outline(&self.app) {
-                        if let Some(node) = nodes.iter().find(|n| n.chapter_title == *entry.key()) {
-                            entry.insert(node.summary.clone());
+                    match crate::storage::load_outline(&self.app) {
+                        Ok(nodes) => {
+                            if let Some(node) =
+                                nodes.iter().find(|n| n.chapter_title == *entry.key())
+                            {
+                                entry.insert(node.summary.clone());
+                            }
                         }
+                        Err(e) => tracing::warn!("Context fetcher skipped outline: {}", e),
                     }
                 }
                 cache.last_updated = std::time::SystemTime::now()
@@ -85,10 +93,15 @@ impl AmbientAgent for ContextFetcherAgent {
             EditorEvent::ChapterSwitched { to, .. } => {
                 let mut cache = self.cache.lock().await;
                 if let Entry::Vacant(entry) = cache.outline_map.entry(to) {
-                    if let Ok(nodes) = crate::storage::load_outline(&self.app) {
-                        if let Some(node) = nodes.iter().find(|n| n.chapter_title == *entry.key()) {
-                            entry.insert(node.summary.clone());
+                    match crate::storage::load_outline(&self.app) {
+                        Ok(nodes) => {
+                            if let Some(node) =
+                                nodes.iter().find(|n| n.chapter_title == *entry.key())
+                            {
+                                entry.insert(node.summary.clone());
+                            }
                         }
+                        Err(e) => tracing::warn!("Context fetcher skipped outline: {}", e),
                     }
                 }
             }

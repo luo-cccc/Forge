@@ -160,6 +160,15 @@ fn migrate_legacy_dir_if_needed(
     copy_dir_recursive(legacy, target)
 }
 
+fn parse_json_list<T: for<'de> Deserialize<'de>>(
+    data: &str,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<Vec<T>, String> {
+    serde_json::from_str(data)
+        .map_err(|e| format!("Failed to parse {} at '{}': {}", label, path.display(), e))
+}
+
 pub fn lorebook_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let target = active_project_data_dir(app)?.join("lorebook.json");
     let legacy = app_data_dir(app)?.join("lorebook.json");
@@ -173,7 +182,7 @@ pub fn load_lorebook(app: &tauri::AppHandle) -> Result<Vec<LoreEntry>, String> {
         return Ok(vec![]);
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
+    parse_json_list(&data, &path, "lorebook")
 }
 
 pub fn save_lorebook(app: &tauri::AppHandle, entries: &[LoreEntry]) -> Result<(), String> {
@@ -322,7 +331,7 @@ pub fn load_outline(app: &tauri::AppHandle) -> Result<Vec<OutlineNode>, String> 
         return Ok(vec![]);
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).unwrap_or_else(|_| Ok(vec![]))
+    parse_json_list(&data, &path, "outline")
 }
 
 pub fn save_outline(app: &tauri::AppHandle, nodes: &[OutlineNode]) -> Result<(), String> {
@@ -455,5 +464,28 @@ mod tests {
         assert!(!valid_project_id("../novel"));
         assert!(!valid_project_id("novel/one"));
         assert!(!valid_project_id("novel one"));
+    }
+
+    #[test]
+    fn parse_json_list_reports_corrupt_lorebook() {
+        let path = std::path::Path::new("lorebook.json");
+        let err = parse_json_list::<LoreEntry>("{not json", path, "lorebook").unwrap_err();
+
+        assert!(err.contains("Failed to parse lorebook"));
+        assert!(err.contains("lorebook.json"));
+    }
+
+    #[test]
+    fn parse_json_list_accepts_valid_outline() {
+        let path = std::path::Path::new("outline.json");
+        let nodes = parse_json_list::<OutlineNode>(
+            r#"[{"chapter_title":"第一章","summary":"开端","status":"draft"}]"#,
+            path,
+            "outline",
+        )
+        .unwrap();
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].chapter_title, "第一章");
     }
 }

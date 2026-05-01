@@ -1110,7 +1110,16 @@ fn find_semantic_lint(
         return Some(lint);
     }
 
-    let lore_entries = storage::load_lorebook(app).unwrap_or_default();
+    let lore_entries = match storage::load_lorebook(app) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                "Semantic lint skipped lorebook because it failed to load: {}",
+                e
+            );
+            Vec::new()
+        }
+    };
     for entry in lore_entries {
         if let Some((from, to, message)) =
             build_lore_conflict_hint(paragraph, &entry.keyword, &entry.content)
@@ -1850,24 +1859,33 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
 
     // 3. Chapters from file tree + outline
     let dir = storage::project_dir(&app)?;
-    if let Ok(outline_nodes) = storage::load_outline(&app) {
-        for node in outline_nodes {
-            // Count words in chapter file
-            let filename = format!("{}.md", node.chapter_title.replace(' ', "-").to_lowercase());
-            let path = dir.join(&filename);
-            let word_count = if path.exists() {
-                std::fs::read_to_string(&path)
-                    .map(|s| s.split_whitespace().count())
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            chapters.push(GraphChapter {
-                title: node.chapter_title.clone(),
-                summary: node.summary.clone(),
-                status: node.status.clone(),
-                word_count,
-            });
+    match storage::load_outline(&app) {
+        Ok(outline_nodes) => {
+            for node in outline_nodes {
+                // Count words in chapter file
+                let filename =
+                    format!("{}.md", node.chapter_title.replace(' ', "-").to_lowercase());
+                let path = dir.join(&filename);
+                let word_count = if path.exists() {
+                    std::fs::read_to_string(&path)
+                        .map(|s| s.split_whitespace().count())
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                chapters.push(GraphChapter {
+                    title: node.chapter_title.clone(),
+                    summary: node.summary.clone(),
+                    status: node.status.clone(),
+                    word_count,
+                });
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Project graph skipped outline because it failed to load: {}",
+                e
+            );
         }
     }
 
@@ -2097,8 +2115,12 @@ fn refresh_kernel_canon_from_lorebook(
     app: &tauri::AppHandle,
     kernel: &mut writer_agent::WriterAgentKernel,
 ) {
-    let Ok(entries) = storage::load_lorebook(app) else {
-        return;
+    let entries = match storage::load_lorebook(app) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("WriterAgent canon refresh skipped lorebook: {}", e);
+            return;
+        }
     };
 
     for entry in entries {
@@ -2623,20 +2645,28 @@ fn agent_observe(
     let outline_summary = observation
         .chapter_title
         .as_ref()
-        .and_then(|chapter_title| {
-            storage::load_outline(&app).ok().and_then(|nodes| {
-                nodes
-                    .into_iter()
-                    .find(|node| &node.chapter_title == chapter_title)
-                    .map(|node| node.summary)
-                    .filter(|summary| !summary.trim().is_empty())
-            })
+        .and_then(|chapter_title| match storage::load_outline(&app) {
+            Ok(nodes) => nodes
+                .into_iter()
+                .find(|node| &node.chapter_title == chapter_title)
+                .map(|node| node.summary)
+                .filter(|summary| !summary.trim().is_empty()),
+            Err(e) => {
+                tracing::warn!("Agent observe skipped outline summary: {}", e);
+                None
+            }
         });
 
     let paragraph_lower = observation.current_paragraph.to_lowercase();
     let nearby_lower = observation.nearby_text.to_lowercase();
-    let lore_hits = storage::load_lorebook(&app)
-        .unwrap_or_default()
+    let lore_entries = match storage::load_lorebook(&app) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("Agent observe skipped lore hits: {}", e);
+            Vec::new()
+        }
+    };
+    let lore_hits = lore_entries
         .into_iter()
         .filter(|entry| {
             let keyword = entry.keyword.to_lowercase();
