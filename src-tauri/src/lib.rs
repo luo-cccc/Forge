@@ -1,9 +1,11 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    ambient::EditorEvent, default_writing_tool_registry, hermes_memory::HermesDB,
-    provider::openai_compat::OpenAiCompatProvider, writing_domain_profile, AgentLoop,
-    AgentLoopConfig, AgentLoopEvent,
+    ambient::EditorEvent,
+    default_writing_tool_registry,
+    hermes_memory::HermesDB,
+    provider::{openai_compat::OpenAiCompatProvider, LlmMessage},
+    writing_domain_profile, AgentLoop, AgentLoopConfig, AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -21,6 +23,11 @@ use chapter_generation::{
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
 
 const KEYRING_SERVICE: &str = "agent-writer";
+const MANUAL_AGENT_HISTORY_MAX_TURNS: usize = 8;
+const MANUAL_AGENT_HISTORY_MAX_CHARS: usize = 12_000;
+const MANUAL_AGENT_HISTORY_MAX_STORED_TURNS: usize = 64;
+const MANUAL_AGENT_TURN_USER_CHARS: usize = 1_200;
+const MANUAL_AGENT_TURN_ASSISTANT_CHARS: usize = 2_400;
 mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
@@ -144,11 +151,82 @@ struct AppState {
     hermes_db: Mutex<HermesDB>,
     editor_prediction: Mutex<Option<EditorPredictionTask>>,
     writer_kernel: Mutex<writer_agent::WriterAgentKernel>,
+    manual_agent_history: Mutex<ManualAgentHistory>,
 }
 
 struct EditorPredictionTask {
     request_id: String,
     cancel: CancellationToken,
+}
+
+#[derive(Debug, Clone)]
+struct ManualAgentTurn {
+    project_id: String,
+    created_at: u64,
+    user: String,
+    assistant: String,
+    source_refs: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct ManualAgentHistory {
+    turns: Vec<ManualAgentTurn>,
+}
+
+impl ManualAgentHistory {
+    fn append(&mut self, turn: ManualAgentTurn) {
+        if turn.user.trim().is_empty() && turn.assistant.trim().is_empty() {
+            return;
+        }
+
+        self.turns.push(turn);
+        if self.turns.len() > MANUAL_AGENT_HISTORY_MAX_STORED_TURNS {
+            let excess = self.turns.len() - MANUAL_AGENT_HISTORY_MAX_STORED_TURNS;
+            self.turns.drain(0..excess);
+        }
+    }
+
+    fn recent_for_project(
+        &self,
+        project_id: &str,
+        max_turns: usize,
+        max_chars: usize,
+    ) -> Vec<ManualAgentTurn> {
+        if max_turns == 0 || max_chars == 0 {
+            return Vec::new();
+        }
+
+        let mut selected = Vec::new();
+        let mut consumed = 0usize;
+        for turn in self
+            .turns
+            .iter()
+            .rev()
+            .filter(|turn| turn.project_id == project_id)
+        {
+            if selected.len() >= max_turns {
+                break;
+            }
+
+            let clipped = ManualAgentTurn {
+                project_id: turn.project_id.clone(),
+                created_at: turn.created_at,
+                user: char_tail(&turn.user, MANUAL_AGENT_TURN_USER_CHARS),
+                assistant: char_tail(&turn.assistant, MANUAL_AGENT_TURN_ASSISTANT_CHARS),
+                source_refs: turn.source_refs.iter().take(12).cloned().collect(),
+            };
+            let cost = clipped.user.chars().count() + clipped.assistant.chars().count();
+            if !selected.is_empty() && consumed + cost > max_chars {
+                break;
+            }
+
+            consumed += cost;
+            selected.push(clipped);
+        }
+
+        selected.reverse();
+        selected
+    }
 }
 
 fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
@@ -172,6 +250,15 @@ fn lock_editor_prediction<'a>(
         .editor_prediction
         .lock()
         .map_err(|_| "Editor prediction lock poisoned".to_string())
+}
+
+fn lock_manual_agent_history<'a>(
+    state: &'a AppState,
+) -> Result<MutexGuard<'a, ManualAgentHistory>, String> {
+    state
+        .manual_agent_history
+        .lock()
+        .map_err(|_| "Manual agent history lock poisoned".to_string())
 }
 
 fn legacy_workspace_db_path(filename: &str) -> Option<std::path::PathBuf> {
@@ -2642,6 +2729,39 @@ fn render_manual_agent_system_prompt(
     )
 }
 
+fn manual_agent_history_messages(history: &[ManualAgentTurn]) -> Vec<LlmMessage> {
+    let mut messages = Vec::with_capacity(history.len() * 2);
+    for turn in history {
+        messages.push(LlmMessage {
+            role: "user".to_string(),
+            content: Some(format!(
+                "[Earlier manual request, project={}, at={}]\n{}",
+                turn.project_id, turn.created_at, turn.user
+            )),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        let source_note = if turn.source_refs.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\n[Context sources used: {}]",
+                turn.source_refs.join(", ")
+            )
+        };
+        messages.push(LlmMessage {
+            role: "assistant".to_string(),
+            content: Some(format!("{}{}", turn.assistant, source_note)),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
+    messages
+}
+
 fn writer_agent_memory_messages(
     observation: &writer_agent::observation::WriterObservation,
 ) -> Vec<serde_json::Value> {
@@ -2951,6 +3071,14 @@ async fn ask_agent(
     let state = app.state::<AppState>();
     let truncated_context = truncate_context(&context, 2000);
     let project_id = storage::active_project_id(&app)?;
+    let manual_history = {
+        let history = lock_manual_agent_history(&state)?;
+        history.recent_for_project(
+            &project_id,
+            MANUAL_AGENT_HISTORY_MAX_TURNS,
+            MANUAL_AGENT_HISTORY_MAX_CHARS,
+        )
+    };
     let manual_observation = build_manual_writer_observation(
         &message,
         &context,
@@ -3027,6 +3155,9 @@ async fn ask_agent(
         registry,
         bridge,
     );
+    agent
+        .messages
+        .extend(manual_agent_history_messages(&manual_history));
 
     // Wire events to Tauri frontend
     let app_handle = app.clone();
@@ -3090,6 +3221,16 @@ async fn ask_agent(
                     &source_refs,
                 );
             }
+            {
+                let mut history = lock_manual_agent_history(&state)?;
+                history.append(ManualAgentTurn {
+                    project_id,
+                    created_at: agent_runtime::now_ms(),
+                    user: message,
+                    assistant: final_text,
+                    source_refs,
+                });
+            }
 
             // Background skill extraction
             let app_clone = app.clone();
@@ -3151,6 +3292,7 @@ pub fn run() {
                 hermes_db: Mutex::new(hermes_db),
                 editor_prediction: Mutex::new(None),
                 writer_kernel: Mutex::new(writer_kernel),
+                manual_agent_history: Mutex::new(ManualAgentHistory::default()),
             });
             app.manage(cache_for_state);
             Ok(())
@@ -3259,6 +3401,87 @@ mod tests {
         assert_eq!(selection.to, 7);
         assert_eq!(selection.text, "寒影刀");
         assert_eq!(observation.paragraph, "寒影刀");
+    }
+
+    #[test]
+    fn manual_agent_history_keeps_only_matching_project_recent_first() {
+        let mut history = ManualAgentHistory::default();
+        history.append(ManualAgentTurn {
+            project_id: "novel-a".to_string(),
+            created_at: 1,
+            user: "第一问".to_string(),
+            assistant: "第一答".to_string(),
+            source_refs: vec!["Lorebook".to_string()],
+        });
+        history.append(ManualAgentTurn {
+            project_id: "novel-b".to_string(),
+            created_at: 2,
+            user: "另一项目".to_string(),
+            assistant: "不应出现".to_string(),
+            source_refs: Vec::new(),
+        });
+        history.append(ManualAgentTurn {
+            project_id: "novel-a".to_string(),
+            created_at: 3,
+            user: "第二问".to_string(),
+            assistant: "第二答".to_string(),
+            source_refs: vec!["Outline".to_string()],
+        });
+
+        let recent = history.recent_for_project("novel-a", 8, 12_000);
+
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].user, "第一问");
+        assert_eq!(recent[1].user, "第二问");
+        assert_eq!(recent[1].source_refs, vec!["Outline".to_string()]);
+    }
+
+    #[test]
+    fn manual_agent_history_applies_turn_and_char_budgets() {
+        let mut history = ManualAgentHistory::default();
+        for idx in 0..5 {
+            history.append(ManualAgentTurn {
+                project_id: "novel-a".to_string(),
+                created_at: idx,
+                user: format!("问题{}", idx),
+                assistant: "答复".repeat(80),
+                source_refs: Vec::new(),
+            });
+        }
+
+        let recent = history.recent_for_project("novel-a", 2, 12_000);
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].user, "问题3");
+        assert_eq!(recent[1].user, "问题4");
+
+        let budgeted = history.recent_for_project("novel-a", 8, 180);
+        assert_eq!(budgeted.len(), 1);
+        assert_eq!(budgeted[0].user, "问题4");
+    }
+
+    #[test]
+    fn manual_agent_history_messages_restore_dialog_roles() {
+        let messages = manual_agent_history_messages(&[ManualAgentTurn {
+            project_id: "novel-a".to_string(),
+            created_at: 42,
+            user: "上一轮怎么处理张三？".to_string(),
+            assistant: "先让张三隐瞒玉佩。".to_string(),
+            source_refs: vec!["PromiseLedger".to_string()],
+        }]);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("上一轮怎么处理张三"));
+        assert_eq!(messages[1].role, "assistant");
+        assert!(messages[1]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("PromiseLedger"));
     }
 
     #[test]

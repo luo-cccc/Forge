@@ -30,26 +30,36 @@ impl OpenAiCompatProvider {
         }
     }
 
-    fn build_api_messages(messages: &[LlmMessage]) -> Vec<serde_json::Value> {
-        messages
-            .iter()
-            .map(|m| {
-                let mut api = serde_json::json!({"role": m.role});
-                if let Some(ref c) = m.content {
-                    api["content"] = serde_json::json!(c);
-                }
-                if let Some(ref tc) = m.tool_calls {
-                    api["tool_calls"] = serde_json::json!(tc);
-                }
-                if let Some(ref cid) = m.tool_call_id {
-                    api["tool_call_id"] = serde_json::json!(cid);
-                }
-                if let Some(ref n) = m.name {
-                    api["name"] = serde_json::json!(n);
-                }
-                api
-            })
-            .collect()
+    pub(crate) fn build_api_messages(request: &LlmRequest) -> Vec<serde_json::Value> {
+        let mut api_messages = Vec::new();
+        if let Some(system) = request
+            .system
+            .as_ref()
+            .filter(|system| !system.trim().is_empty())
+        {
+            api_messages.push(serde_json::json!({
+                "role": "system",
+                "content": system,
+            }));
+        }
+
+        api_messages.extend(request.messages.iter().map(|m| {
+            let mut api = serde_json::json!({"role": m.role});
+            if let Some(ref c) = m.content {
+                api["content"] = serde_json::json!(c);
+            }
+            if let Some(ref tc) = m.tool_calls {
+                api["tool_calls"] = serde_json::json!(tc);
+            }
+            if let Some(ref cid) = m.tool_call_id {
+                api["tool_call_id"] = serde_json::json!(cid);
+            }
+            if let Some(ref n) = m.name {
+                api["name"] = serde_json::json!(n);
+            }
+            api
+        }));
+        api_messages
     }
 
     async fn parse_sse_stream(
@@ -211,7 +221,7 @@ impl Provider for OpenAiCompatProvider {
         request: LlmRequest,
         on_event: Box<dyn Fn(StreamEvent) + Send + Sync>,
     ) -> Result<LlmResponse, String> {
-        let messages = Self::build_api_messages(&request.messages);
+        let messages = Self::build_api_messages(&request);
 
         let mut body = serde_json::json!({
             "model": self.model,
@@ -317,5 +327,35 @@ impl Provider for OpenAiCompatProvider {
                 response.status()
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_messages_include_system_prompt_before_conversation() {
+        let request = LlmRequest {
+            messages: vec![LlmMessage {
+                role: "user".to_string(),
+                content: Some("继续写这一段".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            tools: None,
+            temperature: None,
+            max_tokens: None,
+            system: Some("你是 Forge 的写作 Agent".to_string()),
+            stream: true,
+        };
+
+        let messages = OpenAiCompatProvider::build_api_messages(&request);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "你是 Forge 的写作 Agent");
+        assert_eq!(messages[1]["role"], "user");
     }
 }
