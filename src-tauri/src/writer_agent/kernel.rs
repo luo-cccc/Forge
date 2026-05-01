@@ -225,6 +225,15 @@ impl WriterAgentKernel {
         let mut proposals = Vec::new();
         let obs_id = observation.id.clone();
         self.active_chapter = observation.chapter_title.clone();
+        self.memory
+            .record_observation_trace(
+                &observation.id,
+                observation.created_at,
+                &format!("{:?}", observation.reason),
+                observation.chapter_title.as_deref(),
+                &snippet(&observation.paragraph, 120),
+            )
+            .ok();
 
         let intent = self.intent.classify(
             &observation.paragraph,
@@ -621,6 +630,21 @@ impl WriterAgentKernel {
             self.suppress_slot_after_feedback(&prop, &feedback);
         }
 
+        self.memory
+            .record_feedback_trace(&super::memory::FeedbackTraceSummary {
+                proposal_id: feedback.proposal_id.clone(),
+                action: format!("{:?}", feedback.action),
+                reason: feedback.reason.clone(),
+                created_at: feedback.created_at,
+            })
+            .ok();
+        self.memory
+            .update_proposal_trace_state(
+                &feedback.proposal_id,
+                &format!("feedback:{:?}", feedback.action),
+            )
+            .ok();
+
         self.feedback_events.push(feedback);
         Ok(())
     }
@@ -716,6 +740,9 @@ impl WriterAgentKernel {
 
         if let Some(existing) = existing {
             if should_replace_proposal(&existing, &proposal) {
+                self.memory
+                    .update_proposal_trace_state(&existing.id, "superseded")
+                    .ok();
                 self.superseded_proposals.insert(existing.id);
             } else {
                 return None;
@@ -723,6 +750,15 @@ impl WriterAgentKernel {
         }
 
         self.proposals.push(proposal.clone());
+        let created_at = self
+            .observations
+            .iter()
+            .find(|observation| observation.id == proposal.observation_id)
+            .map(|observation| observation.created_at)
+            .unwrap_or_else(now_ms);
+        self.memory
+            .record_proposal_trace(&proposal_trace_summary(&proposal, "pending"), created_at)
+            .ok();
         Some(proposal)
     }
 
@@ -1150,47 +1186,91 @@ impl WriterAgentKernel {
 
     pub fn trace_snapshot(&self, limit: usize) -> WriterAgentTraceSnapshot {
         let now = now_ms();
+        let persisted_observations = self
+            .memory
+            .list_observation_traces(limit)
+            .unwrap_or_default();
+        let persisted_proposals = self.memory.list_proposal_traces(limit).unwrap_or_default();
+        let persisted_feedback = self.memory.list_feedback_traces(limit).unwrap_or_default();
+
         WriterAgentTraceSnapshot {
-            recent_observations: self
-                .observations
-                .iter()
-                .rev()
-                .take(limit)
-                .map(|observation| WriterObservationTrace {
-                    id: observation.id.clone(),
-                    created_at: observation.created_at,
-                    reason: format!("{:?}", observation.reason),
-                    chapter_title: observation.chapter_title.clone(),
-                    paragraph_snippet: snippet(&observation.paragraph, 120),
-                })
-                .collect(),
-            recent_proposals: self
-                .proposals
-                .iter()
-                .rev()
-                .take(limit)
-                .map(|proposal| WriterProposalTrace {
-                    id: proposal.id.clone(),
-                    observation_id: proposal.observation_id.clone(),
-                    kind: format!("{:?}", proposal.kind),
-                    priority: format!("{:?}", proposal.priority),
-                    state: self.proposal_state(proposal, now),
-                    confidence: proposal.confidence,
-                    preview_snippet: snippet(&proposal.preview, 120),
-                })
-                .collect(),
-            recent_feedback: self
-                .feedback_events
-                .iter()
-                .rev()
-                .take(limit)
-                .map(|feedback| WriterFeedbackTrace {
-                    proposal_id: feedback.proposal_id.clone(),
-                    action: format!("{:?}", feedback.action),
-                    reason: feedback.reason.clone(),
-                    created_at: feedback.created_at,
-                })
-                .collect(),
+            recent_observations: if persisted_observations.is_empty() {
+                self.observations
+                    .iter()
+                    .rev()
+                    .take(limit)
+                    .map(|observation| WriterObservationTrace {
+                        id: observation.id.clone(),
+                        created_at: observation.created_at,
+                        reason: format!("{:?}", observation.reason),
+                        chapter_title: observation.chapter_title.clone(),
+                        paragraph_snippet: snippet(&observation.paragraph, 120),
+                    })
+                    .collect()
+            } else {
+                persisted_observations
+                    .into_iter()
+                    .map(|observation| WriterObservationTrace {
+                        id: observation.id,
+                        created_at: observation.created_at,
+                        reason: observation.reason,
+                        chapter_title: observation.chapter_title,
+                        paragraph_snippet: observation.paragraph_snippet,
+                    })
+                    .collect()
+            },
+            recent_proposals: if persisted_proposals.is_empty() {
+                self.proposals
+                    .iter()
+                    .rev()
+                    .take(limit)
+                    .map(|proposal| WriterProposalTrace {
+                        id: proposal.id.clone(),
+                        observation_id: proposal.observation_id.clone(),
+                        kind: format!("{:?}", proposal.kind),
+                        priority: format!("{:?}", proposal.priority),
+                        state: self.proposal_state(proposal, now),
+                        confidence: proposal.confidence,
+                        preview_snippet: snippet(&proposal.preview, 120),
+                    })
+                    .collect()
+            } else {
+                persisted_proposals
+                    .into_iter()
+                    .map(|proposal| WriterProposalTrace {
+                        id: proposal.id,
+                        observation_id: proposal.observation_id,
+                        kind: proposal.kind,
+                        priority: proposal.priority,
+                        state: trace_state_with_expiry(&proposal.state, proposal.expires_at, now),
+                        confidence: proposal.confidence,
+                        preview_snippet: proposal.preview_snippet,
+                    })
+                    .collect()
+            },
+            recent_feedback: if persisted_feedback.is_empty() {
+                self.feedback_events
+                    .iter()
+                    .rev()
+                    .take(limit)
+                    .map(|feedback| WriterFeedbackTrace {
+                        proposal_id: feedback.proposal_id.clone(),
+                        action: format!("{:?}", feedback.action),
+                        reason: feedback.reason.clone(),
+                        created_at: feedback.created_at,
+                    })
+                    .collect()
+            } else {
+                persisted_feedback
+                    .into_iter()
+                    .map(|feedback| WriterFeedbackTrace {
+                        proposal_id: feedback.proposal_id,
+                        action: feedback.action,
+                        reason: feedback.reason,
+                        created_at: feedback.created_at,
+                    })
+                    .collect()
+            },
         }
     }
 
@@ -1240,6 +1320,30 @@ impl WriterAgentKernel {
 
 fn snippet(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
+}
+
+fn proposal_trace_summary(
+    proposal: &AgentProposal,
+    state: &str,
+) -> super::memory::ProposalTraceSummary {
+    super::memory::ProposalTraceSummary {
+        id: proposal.id.clone(),
+        observation_id: proposal.observation_id.clone(),
+        kind: format!("{:?}", proposal.kind),
+        priority: format!("{:?}", proposal.priority),
+        state: state.to_string(),
+        confidence: proposal.confidence,
+        preview_snippet: snippet(&proposal.preview, 120),
+        expires_at: proposal.expires_at,
+    }
+}
+
+fn trace_state_with_expiry(state: &str, expires_at: Option<u64>, now: u64) -> String {
+    if state == "pending" && expires_at.is_some_and(|expiry| expiry <= now) {
+        "expired".to_string()
+    } else {
+        state.to_string()
+    }
 }
 
 fn story_review_queue_entry(
@@ -2811,6 +2915,56 @@ mod tests {
             .recent_proposals
             .iter()
             .any(|proposal| proposal.id == llm.id && proposal.state == "pending"));
+    }
+
+    #[test]
+    fn trace_snapshot_survives_kernel_restart() {
+        let db_path = std::env::temp_dir().join(format!(
+            "forge-trace-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let ghost_id = {
+            let memory = WriterMemory::open(&db_path).unwrap();
+            let mut kernel = WriterAgentKernel::new("default", memory);
+            let obs = observation("林墨停在旧门前，风从裂开的门缝里钻出来，带着潮湿的冷意。他没有立刻推门，只把手按在刀柄上。");
+            let proposals = kernel.observe(obs).unwrap();
+            let ghost = proposals
+                .iter()
+                .find(|proposal| proposal.kind == ProposalKind::Ghost)
+                .unwrap()
+                .id
+                .clone();
+            kernel
+                .apply_feedback(ProposalFeedback {
+                    proposal_id: ghost.clone(),
+                    action: FeedbackAction::Rejected,
+                    final_text: None,
+                    reason: Some("too early".to_string()),
+                    created_at: 42,
+                })
+                .unwrap();
+            ghost
+        };
+
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let kernel = WriterAgentKernel::new("default", memory);
+        let trace = kernel.trace_snapshot(10);
+        let _ = std::fs::remove_file(&db_path);
+
+        assert_eq!(trace.recent_observations.len(), 1);
+        assert!(trace
+            .recent_proposals
+            .iter()
+            .any(|proposal| proposal.id == ghost_id && proposal.state == "feedback:Rejected"));
+        assert!(trace
+            .recent_feedback
+            .iter()
+            .any(|feedback| feedback.proposal_id == ghost_id
+                && feedback.action == "Rejected"
+                && feedback.reason.as_deref() == Some("too early")));
     }
 
     #[test]

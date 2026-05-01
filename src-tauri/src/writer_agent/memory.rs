@@ -92,6 +92,40 @@ CREATE TABLE IF NOT EXISTS memory_audit_events (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
+
+CREATE TABLE IF NOT EXISTS writer_observation_trace (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observation_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    chapter_title TEXT DEFAULT '',
+    paragraph_snippet TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
+
+CREATE TABLE IF NOT EXISTS writer_proposal_trace (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL UNIQUE,
+    observation_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    state TEXT NOT NULL,
+    confidence REAL DEFAULT 0.0,
+    preview_snippet TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
+CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
+
+CREATE TABLE IF NOT EXISTS writer_feedback_trace (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_trace_created_at ON writer_feedback_trace(created_at);
 "#;
 
 pub struct WriterMemory {
@@ -148,6 +182,35 @@ pub struct MemoryAuditSummary {
     pub title: String,
     pub evidence: String,
     pub rationale: String,
+    pub reason: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObservationTraceSummary {
+    pub id: String,
+    pub created_at: u64,
+    pub reason: String,
+    pub chapter_title: Option<String>,
+    pub paragraph_snippet: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProposalTraceSummary {
+    pub id: String,
+    pub observation_id: String,
+    pub kind: String,
+    pub priority: String,
+    pub state: String,
+    pub confidence: f64,
+    pub preview_snippet: String,
+    pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedbackTraceSummary {
+    pub proposal_id: String,
+    pub action: String,
     pub reason: Option<String>,
     pub created_at: u64,
 }
@@ -563,6 +626,165 @@ impl WriterMemory {
         rows.collect()
     }
 
+    // -- Writer Agent Trace --
+
+    pub fn record_observation_trace(
+        &self,
+        id: &str,
+        created_at: u64,
+        reason: &str,
+        chapter_title: Option<&str>,
+        paragraph_snippet: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO writer_observation_trace
+             (observation_id, created_at, reason, chapter_title, paragraph_snippet)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                id,
+                created_at as i64,
+                reason,
+                chapter_title.unwrap_or(""),
+                paragraph_snippet,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_proposal_trace(
+        &self,
+        proposal: &ProposalTraceSummary,
+        created_at: u64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO writer_proposal_trace
+             (proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(proposal_id) DO UPDATE SET
+                observation_id=excluded.observation_id,
+                kind=excluded.kind,
+                priority=excluded.priority,
+                state=excluded.state,
+                confidence=excluded.confidence,
+                preview_snippet=excluded.preview_snippet,
+                created_at=excluded.created_at,
+                expires_at=excluded.expires_at",
+            rusqlite::params![
+                proposal.id,
+                proposal.observation_id,
+                proposal.kind,
+                proposal.priority,
+                proposal.state,
+                proposal.confidence,
+                proposal.preview_snippet,
+                created_at as i64,
+                proposal.expires_at.map(|value| value as i64),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_proposal_trace_state(
+        &self,
+        proposal_id: &str,
+        state: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE writer_proposal_trace SET state=?1 WHERE proposal_id=?2",
+            rusqlite::params![state, proposal_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_feedback_trace(&self, feedback: &FeedbackTraceSummary) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO writer_feedback_trace (proposal_id, action, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                feedback.proposal_id,
+                feedback.action,
+                feedback.reason.clone().unwrap_or_default(),
+                feedback.created_at as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_observation_traces(
+        &self,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ObservationTraceSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT observation_id, created_at, reason, chapter_title, paragraph_snippet
+             FROM writer_observation_trace ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let chapter_title: String = row.get(3)?;
+            let created_at: i64 = row.get(1)?;
+            Ok(ObservationTraceSummary {
+                id: row.get(0)?,
+                created_at: created_at.max(0) as u64,
+                reason: row.get(2)?,
+                chapter_title: if chapter_title.trim().is_empty() {
+                    None
+                } else {
+                    Some(chapter_title)
+                },
+                paragraph_snippet: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_proposal_traces(
+        &self,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ProposalTraceSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, expires_at
+             FROM writer_proposal_trace ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let expires_at: Option<i64> = row.get(7)?;
+            Ok(ProposalTraceSummary {
+                id: row.get(0)?,
+                observation_id: row.get(1)?,
+                kind: row.get(2)?,
+                priority: row.get(3)?,
+                state: row.get(4)?,
+                confidence: row.get(5)?,
+                preview_snippet: row.get(6)?,
+                expires_at: expires_at.map(|value| value.max(0) as u64),
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_feedback_traces(
+        &self,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<FeedbackTraceSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT proposal_id, action, reason, created_at
+             FROM writer_feedback_trace ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let reason: String = row.get(2)?;
+            let created_at: i64 = row.get(3)?;
+            Ok(FeedbackTraceSummary {
+                proposal_id: row.get(0)?,
+                action: row.get(1)?,
+                reason: if reason.trim().is_empty() {
+                    None
+                } else {
+                    Some(reason)
+                },
+                created_at: created_at.max(0) as u64,
+            })
+        })?;
+        rows.collect()
+    }
+
     #[cfg(test)]
     pub fn feedback_stats(&self, proposal_id: &str) -> rusqlite::Result<(i64, i64)> {
         let mut stmt = self.conn.prepare(
@@ -684,6 +906,44 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].proposal_id, "prop_1");
         assert_eq!(audit[0].reason.as_deref(), Some("approved"));
+    }
+
+    #[test]
+    fn test_writer_trace_record() {
+        let m = memory();
+        m.record_observation_trace("obs_1", 10, "Idle", Some("Chapter-1"), "林墨停下脚步")
+            .unwrap();
+        m.record_proposal_trace(
+            &ProposalTraceSummary {
+                id: "prop_1".to_string(),
+                observation_id: "obs_1".to_string(),
+                kind: "Ghost".to_string(),
+                priority: "Ambient".to_string(),
+                state: "pending".to_string(),
+                confidence: 0.7,
+                preview_snippet: "他没有立刻回答".to_string(),
+                expires_at: Some(1000),
+            },
+            11,
+        )
+        .unwrap();
+        m.record_feedback_trace(&FeedbackTraceSummary {
+            proposal_id: "prop_1".to_string(),
+            action: "Accepted".to_string(),
+            reason: Some("fits".to_string()),
+            created_at: 12,
+        })
+        .unwrap();
+        m.update_proposal_trace_state("prop_1", "feedback:Accepted")
+            .unwrap();
+
+        assert_eq!(m.list_observation_traces(5).unwrap()[0].id, "obs_1");
+        let proposal = m.list_proposal_traces(5).unwrap().remove(0);
+        assert_eq!(proposal.state, "feedback:Accepted");
+        assert_eq!(
+            m.list_feedback_traces(5).unwrap()[0].reason.as_deref(),
+            Some("fits")
+        );
     }
 
     #[test]
