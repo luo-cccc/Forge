@@ -21,6 +21,7 @@ use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
 };
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
+use writer_agent::memory::ManualAgentTurnSummary;
 
 const KEYRING_SERVICE: &str = "agent-writer";
 const MANUAL_AGENT_HISTORY_MAX_TURNS: usize = 8;
@@ -28,6 +29,7 @@ const MANUAL_AGENT_HISTORY_MAX_CHARS: usize = 12_000;
 const MANUAL_AGENT_HISTORY_MAX_STORED_TURNS: usize = 64;
 const MANUAL_AGENT_TURN_USER_CHARS: usize = 1_200;
 const MANUAL_AGENT_TURN_ASSISTANT_CHARS: usize = 2_400;
+const MANUAL_AGENT_PERSISTED_HISTORY_LOOKBACK: usize = 32;
 mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
@@ -163,6 +165,8 @@ struct EditorPredictionTask {
 struct ManualAgentTurn {
     project_id: String,
     created_at: u64,
+    observation_id: String,
+    chapter_title: Option<String>,
     user: String,
     assistant: String,
     source_refs: Vec<String>,
@@ -211,6 +215,8 @@ impl ManualAgentHistory {
             let clipped = ManualAgentTurn {
                 project_id: turn.project_id.clone(),
                 created_at: turn.created_at,
+                observation_id: turn.observation_id.clone(),
+                chapter_title: turn.chapter_title.clone(),
                 user: char_tail(&turn.user, MANUAL_AGENT_TURN_USER_CHARS),
                 assistant: char_tail(&turn.assistant, MANUAL_AGENT_TURN_ASSISTANT_CHARS),
                 source_refs: turn.source_refs.iter().take(12).cloned().collect(),
@@ -227,6 +233,42 @@ impl ManualAgentHistory {
         selected.reverse();
         selected
     }
+}
+
+impl From<ManualAgentTurnSummary> for ManualAgentTurn {
+    fn from(turn: ManualAgentTurnSummary) -> Self {
+        Self {
+            project_id: turn.project_id,
+            created_at: turn.created_at,
+            observation_id: turn.observation_id,
+            chapter_title: turn.chapter_title,
+            user: turn.user,
+            assistant: turn.assistant,
+            source_refs: turn.source_refs,
+        }
+    }
+}
+
+fn merge_manual_agent_history(
+    project_id: &str,
+    persisted: Vec<ManualAgentTurn>,
+    runtime: Vec<ManualAgentTurn>,
+    max_turns: usize,
+    max_chars: usize,
+) -> Vec<ManualAgentTurn> {
+    let mut merged = persisted;
+    for turn in runtime {
+        let duplicate = merged.iter().any(|existing| {
+            !turn.observation_id.is_empty() && existing.observation_id == turn.observation_id
+        });
+        if !duplicate {
+            merged.push(turn);
+        }
+    }
+    merged.sort_by_key(|turn| turn.created_at);
+
+    let history = ManualAgentHistory { turns: merged };
+    history.recent_for_project(project_id, max_turns, max_chars)
 }
 
 fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
@@ -3071,7 +3113,7 @@ async fn ask_agent(
     let state = app.state::<AppState>();
     let truncated_context = truncate_context(&context, 2000);
     let project_id = storage::active_project_id(&app)?;
-    let manual_history = {
+    let runtime_manual_history = {
         let history = lock_manual_agent_history(&state)?;
         history.recent_for_project(
             &project_id,
@@ -3079,6 +3121,23 @@ async fn ask_agent(
             MANUAL_AGENT_HISTORY_MAX_CHARS,
         )
     };
+    let persisted_manual_history = {
+        let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        kernel
+            .memory
+            .list_manual_agent_turns(&project_id, MANUAL_AGENT_PERSISTED_HISTORY_LOOKBACK)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(ManualAgentTurn::from)
+            .collect::<Vec<_>>()
+    };
+    let manual_history = merge_manual_agent_history(
+        &project_id,
+        persisted_manual_history,
+        runtime_manual_history,
+        MANUAL_AGENT_HISTORY_MAX_TURNS,
+        MANUAL_AGENT_HISTORY_MAX_CHARS,
+    );
     let manual_observation = build_manual_writer_observation(
         &message,
         &context,
@@ -3219,13 +3278,15 @@ async fn ask_agent(
                     &message,
                     &final_text,
                     &source_refs,
-                );
+                )?;
             }
             {
                 let mut history = lock_manual_agent_history(&state)?;
                 history.append(ManualAgentTurn {
-                    project_id,
+                    project_id: project_id.clone(),
                     created_at: agent_runtime::now_ms(),
+                    observation_id: manual_observation.id.clone(),
+                    chapter_title: manual_observation.chapter_title.clone(),
                     user: message,
                     assistant: final_text,
                     source_refs,
@@ -3409,6 +3470,8 @@ mod tests {
         history.append(ManualAgentTurn {
             project_id: "novel-a".to_string(),
             created_at: 1,
+            observation_id: "obs-a-1".to_string(),
+            chapter_title: Some("第一章".to_string()),
             user: "第一问".to_string(),
             assistant: "第一答".to_string(),
             source_refs: vec!["Lorebook".to_string()],
@@ -3416,6 +3479,8 @@ mod tests {
         history.append(ManualAgentTurn {
             project_id: "novel-b".to_string(),
             created_at: 2,
+            observation_id: "obs-b-1".to_string(),
+            chapter_title: Some("第一章".to_string()),
             user: "另一项目".to_string(),
             assistant: "不应出现".to_string(),
             source_refs: Vec::new(),
@@ -3423,6 +3488,8 @@ mod tests {
         history.append(ManualAgentTurn {
             project_id: "novel-a".to_string(),
             created_at: 3,
+            observation_id: "obs-a-2".to_string(),
+            chapter_title: Some("第二章".to_string()),
             user: "第二问".to_string(),
             assistant: "第二答".to_string(),
             source_refs: vec!["Outline".to_string()],
@@ -3443,6 +3510,8 @@ mod tests {
             history.append(ManualAgentTurn {
                 project_id: "novel-a".to_string(),
                 created_at: idx,
+                observation_id: format!("obs-a-{}", idx),
+                chapter_title: None,
                 user: format!("问题{}", idx),
                 assistant: "答复".repeat(80),
                 source_refs: Vec::new(),
@@ -3464,6 +3533,8 @@ mod tests {
         let messages = manual_agent_history_messages(&[ManualAgentTurn {
             project_id: "novel-a".to_string(),
             created_at: 42,
+            observation_id: "obs-a-42".to_string(),
+            chapter_title: Some("第三章".to_string()),
             user: "上一轮怎么处理张三？".to_string(),
             assistant: "先让张三隐瞒玉佩。".to_string(),
             source_refs: vec!["PromiseLedger".to_string()],
@@ -3482,6 +3553,45 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("PromiseLedger"));
+    }
+
+    #[test]
+    fn merge_manual_agent_history_dedupes_persisted_and_runtime_turns() {
+        let persisted = vec![ManualAgentTurn {
+            project_id: "novel-a".to_string(),
+            created_at: 1,
+            observation_id: "obs-a-1".to_string(),
+            chapter_title: None,
+            user: "已持久化问题".to_string(),
+            assistant: "已持久化答复".to_string(),
+            source_refs: Vec::new(),
+        }];
+        let runtime = vec![
+            ManualAgentTurn {
+                project_id: "novel-a".to_string(),
+                created_at: 1,
+                observation_id: "obs-a-1".to_string(),
+                chapter_title: None,
+                user: "重复问题".to_string(),
+                assistant: "重复答复".to_string(),
+                source_refs: Vec::new(),
+            },
+            ManualAgentTurn {
+                project_id: "novel-a".to_string(),
+                created_at: 2,
+                observation_id: "obs-a-2".to_string(),
+                chapter_title: None,
+                user: "新问题".to_string(),
+                assistant: "新答复".to_string(),
+                source_refs: Vec::new(),
+            },
+        ];
+
+        let merged = merge_manual_agent_history("novel-a", persisted, runtime, 8, 12_000);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].user, "已持久化问题");
+        assert_eq!(merged[1].user, "新问题");
     }
 
     #[test]

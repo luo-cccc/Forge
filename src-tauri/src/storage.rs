@@ -25,6 +25,7 @@ const WRITER_MEMORY_DIAGNOSTIC_TABLES: &[&str] = &[
     "creative_decisions",
     "proposal_feedback",
     "memory_audit_events",
+    "manual_agent_turns",
     "writer_observation_trace",
     "writer_proposal_trace",
     "writer_feedback_trace",

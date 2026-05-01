@@ -5,7 +5,7 @@
 use rusqlite::{Connection, Result as SqlResult};
 use serde::Serialize;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -128,6 +128,17 @@ CREATE TABLE IF NOT EXISTS writer_feedback_trace (
     reason TEXT DEFAULT '',
     created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS manual_agent_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    observation_id TEXT DEFAULT '',
+    chapter_title TEXT DEFAULT '',
+    user_text TEXT NOT NULL,
+    assistant_text TEXT NOT NULL,
+    source_refs_json TEXT DEFAULT '[]',
+    created_at INTEGER NOT NULL
+);
 "#;
 
 const INDEX_SCHEMA: &str = r#"
@@ -144,6 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observatio
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_trace_created_at ON writer_feedback_trace(created_at);
+CREATE INDEX IF NOT EXISTS idx_manual_agent_turns_project_created_at ON manual_agent_turns(project_id, created_at);
 "#;
 
 pub struct WriterMemory {
@@ -239,6 +251,17 @@ pub struct FeedbackTraceSummary {
     pub proposal_id: String,
     pub action: String,
     pub reason: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManualAgentTurnSummary {
+    pub project_id: String,
+    pub observation_id: String,
+    pub chapter_title: Option<String>,
+    pub user: String,
+    pub assistant: String,
+    pub source_refs: Vec<String>,
     pub created_at: u64,
 }
 
@@ -634,6 +657,61 @@ impl WriterMemory {
             })
         })?;
         rows.collect()
+    }
+
+    pub fn record_manual_agent_turn(&self, turn: &ManualAgentTurnSummary) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO manual_agent_turns
+             (project_id, observation_id, chapter_title, user_text, assistant_text, source_refs_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                turn.project_id,
+                turn.observation_id,
+                turn.chapter_title.clone().unwrap_or_default(),
+                turn.user,
+                turn.assistant,
+                serde_json::to_string(&turn.source_refs).unwrap_or_else(|_| "[]".to_string()),
+                turn.created_at as i64,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_manual_agent_turns(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ManualAgentTurnSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project_id, observation_id, chapter_title, user_text, assistant_text, source_refs_json, created_at
+             FROM manual_agent_turns
+             WHERE project_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project_id, limit as i64], |row| {
+            let chapter_title: String = row.get(2)?;
+            let source_refs_json: String = row.get(5)?;
+            let source_refs =
+                serde_json::from_str::<Vec<String>>(&source_refs_json).unwrap_or_default();
+            let created_at: i64 = row.get(6)?;
+            Ok(ManualAgentTurnSummary {
+                project_id: row.get(0)?,
+                observation_id: row.get(1)?,
+                chapter_title: if chapter_title.trim().is_empty() {
+                    None
+                } else {
+                    Some(chapter_title)
+                },
+                user: row.get(3)?,
+                assistant: row.get(4)?,
+                source_refs,
+                created_at: created_at.max(0) as u64,
+            })
+        })?;
+        let mut turns = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        turns.reverse();
+        Ok(turns)
     }
 
     // -- Feedback --
@@ -1102,6 +1180,49 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "expires_at INTEGER",
     )?;
 
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "project_id",
+        "project_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "observation_id",
+        "observation_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "chapter_title",
+        "chapter_title TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "user_text",
+        "user_text TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "assistant_text",
+        "assistant_text TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "source_refs_json",
+        "source_refs_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "manual_agent_turns",
+        "created_at",
+        "created_at INTEGER DEFAULT 0",
+    )?;
+
     Ok(())
 }
 
@@ -1278,6 +1399,49 @@ mod tests {
     }
 
     #[test]
+    fn test_manual_agent_turns_persist_and_filter_by_project() {
+        let m = memory();
+        m.record_manual_agent_turn(&ManualAgentTurnSummary {
+            project_id: "novel-a".to_string(),
+            observation_id: "obs-a-1".to_string(),
+            chapter_title: Some("第一章".to_string()),
+            user: "上一轮怎么处理玉佩？".to_string(),
+            assistant: "让张三暂时隐瞒玉佩。".to_string(),
+            source_refs: vec!["PromiseLedger".to_string()],
+            created_at: 10,
+        })
+        .unwrap();
+        m.record_manual_agent_turn(&ManualAgentTurnSummary {
+            project_id: "novel-b".to_string(),
+            observation_id: "obs-b-1".to_string(),
+            chapter_title: None,
+            user: "另一个项目".to_string(),
+            assistant: "不应混入".to_string(),
+            source_refs: Vec::new(),
+            created_at: 11,
+        })
+        .unwrap();
+        m.record_manual_agent_turn(&ManualAgentTurnSummary {
+            project_id: "novel-a".to_string(),
+            observation_id: "obs-a-2".to_string(),
+            chapter_title: Some("第二章".to_string()),
+            user: "继续上一轮".to_string(),
+            assistant: "把玉佩变成下一章冲突。".to_string(),
+            source_refs: vec!["CreativeDecision".to_string()],
+            created_at: 12,
+        })
+        .unwrap();
+
+        let turns = m.list_manual_agent_turns("novel-a", 10).unwrap();
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].observation_id, "obs-a-1");
+        assert_eq!(turns[0].chapter_title.as_deref(), Some("第一章"));
+        assert_eq!(turns[0].source_refs, vec!["PromiseLedger".to_string()]);
+        assert_eq!(turns[1].user, "继续上一轮");
+    }
+
+    #[test]
     fn test_writer_trace_record() {
         let m = memory();
         m.record_observation_trace("obs_1", 10, "Idle", Some("Chapter-1"), "林墨停下脚步")
@@ -1367,6 +1531,8 @@ mod tests {
         assert!(table_has_column(&conn, "canon_entities", "attributes_json").unwrap());
         assert!(table_has_column(&conn, "plot_promises", "expected_payoff").unwrap());
         assert!(table_has_column(&conn, "writer_proposal_trace", "expires_at").unwrap());
+        assert!(table_exists(&conn, "manual_agent_turns").unwrap());
+        assert!(table_has_column(&conn, "manual_agent_turns", "source_refs_json").unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();

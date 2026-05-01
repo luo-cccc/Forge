@@ -10,7 +10,7 @@ use super::diagnostics::{
 };
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
-use super::memory::WriterMemory;
+use super::memory::{ManualAgentTurnSummary, WriterMemory};
 use super::observation::WriterObservation;
 use super::operation::{
     execute_text_operation, CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation,
@@ -415,7 +415,7 @@ impl WriterAgentKernel {
         message: &str,
         response: &str,
         source_refs: &[String],
-    ) {
+    ) -> Result<(), String> {
         let scope = observation
             .chapter_title
             .as_deref()
@@ -426,9 +426,21 @@ impl WriterAgentKernel {
             snippet(message, 160),
             snippet(response, 240)
         );
-        let _ =
-            self.memory
-                .record_decision(scope, &title, "answered", &[], &rationale, source_refs);
+        self.memory
+            .record_decision(scope, &title, "answered", &[], &rationale, source_refs)
+            .map_err(|e| e.to_string())?;
+        self.memory
+            .record_manual_agent_turn(&ManualAgentTurnSummary {
+                project_id: observation.project_id.clone(),
+                observation_id: observation.id.clone(),
+                chapter_title: observation.chapter_title.clone(),
+                user: message.to_string(),
+                assistant: response.to_string(),
+                source_refs: source_refs.to_vec(),
+                created_at: crate::agent_runtime::now_ms(),
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn create_llm_ghost_proposal(
