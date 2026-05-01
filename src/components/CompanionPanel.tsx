@@ -246,6 +246,10 @@ function buildSecondBrainItems(
   const openPromise = ledger?.openPromises[0];
   const canonRule = ledger?.canonRules[0];
   const storyContract = ledger?.storyContract;
+  const latestResult =
+    (currentChapter
+      ? ledger?.recentChapterResults.find((result) => result.chapterTitle === currentChapter)
+      : undefined) ?? ledger?.recentChapterResults[0];
   const chapterMission =
     ledger?.activeChapterMission ??
     ledger?.chapterMissions.find((mission) => mission.chapterTitle === currentChapter);
@@ -354,6 +358,21 @@ function buildSecondBrainItems(
     : currentChapter
       ? "Add or seed a mission so local suggestions know what this chapter must accomplish."
       : "Open a chapter to bind the agent to a concrete mission.";
+  const resultValue = latestResult
+    ? compactLine(latestResult.summary, "Saved chapter result", 72)
+    : "No saved result";
+  const resultDetail = latestResult
+    ? compactLine(
+        [
+          latestResult.newClues.length > 0 && `Clues: ${latestResult.newClues.join(", ")}`,
+          latestResult.newConflicts[0] && `Conflict: ${latestResult.newConflicts[0]}`,
+          latestResult.promiseUpdates[0] && `Promise: ${latestResult.promiseUpdates[0]}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        `From ${latestResult.chapterTitle}`,
+      )
+    : "Save a chapter to turn actual written outcomes into future context.";
 
   return [
     {
@@ -367,6 +386,12 @@ function buildSecondBrainItems(
       value: missionValue,
       detail: missionDetail,
       tone: chapterMission ? "success" : "accent",
+    },
+    {
+      label: "Last Result",
+      value: resultValue,
+      detail: resultDetail,
+      tone: latestResult ? "success" : "accent",
     },
     {
       label: "Scene Goal",

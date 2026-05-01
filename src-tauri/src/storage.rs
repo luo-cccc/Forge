@@ -19,6 +19,7 @@ const HERMES_DIAGNOSTIC_TABLES: &[&str] = &[
 const WRITER_MEMORY_DIAGNOSTIC_TABLES: &[&str] = &[
     "story_contracts",
     "chapter_missions",
+    "chapter_result_snapshots",
     "canon_entities",
     "canon_facts",
     "canon_rules",

@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -115,6 +115,22 @@ CREATE TABLE IF NOT EXISTS chapter_missions (
     UNIQUE(project_id, chapter_title)
 );
 
+CREATE TABLE IF NOT EXISTS chapter_result_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    chapter_title TEXT NOT NULL,
+    chapter_revision TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    state_changes_json TEXT DEFAULT '[]',
+    character_progress_json TEXT DEFAULT '[]',
+    new_conflicts_json TEXT DEFAULT '[]',
+    new_clues_json TEXT DEFAULT '[]',
+    promise_updates_json TEXT DEFAULT '[]',
+    canon_updates_json TEXT DEFAULT '[]',
+    source_ref TEXT DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory_audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proposal_id TEXT NOT NULL,
@@ -182,6 +198,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_i
 CREATE INDEX IF NOT EXISTS idx_story_contract_updated_at ON story_contracts(updated_at);
 CREATE INDEX IF NOT EXISTS idx_chapter_missions_project_chapter ON chapter_missions(project_id, chapter_title);
 CREATE INDEX IF NOT EXISTS idx_chapter_missions_status ON chapter_missions(status);
+CREATE INDEX IF NOT EXISTS idx_chapter_result_project_created ON chapter_result_snapshots(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chapter_result_project_chapter ON chapter_result_snapshots(project_id, chapter_title);
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
@@ -274,6 +292,24 @@ pub struct ChapterMissionSummary {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterResultSummary {
+    pub id: i64,
+    pub project_id: String,
+    pub chapter_title: String,
+    pub chapter_revision: String,
+    pub summary: String,
+    pub state_changes: Vec<String>,
+    pub character_progress: Vec<String>,
+    pub new_conflicts: Vec<String>,
+    pub new_clues: Vec<String>,
+    pub promise_updates: Vec<String>,
+    pub canon_updates: Vec<String>,
+    pub source_ref: String,
+    pub created_at: u64,
+}
+
 impl ChapterMissionSummary {
     pub fn is_empty(&self) -> bool {
         [
@@ -294,6 +330,32 @@ impl ChapterMissionSummary {
         push_contract_line(&mut lines, "禁止事项", &self.must_not);
         push_contract_line(&mut lines, "预期收束", &self.expected_ending);
         push_contract_line(&mut lines, "任务状态", &self.status);
+        lines.join("\n")
+    }
+}
+
+impl ChapterResultSummary {
+    pub fn is_empty(&self) -> bool {
+        self.summary.trim().is_empty()
+            && self.state_changes.is_empty()
+            && self.character_progress.is_empty()
+            && self.new_conflicts.is_empty()
+            && self.new_clues.is_empty()
+            && self.promise_updates.is_empty()
+            && self.canon_updates.is_empty()
+    }
+
+    pub fn render_for_context(&self) -> String {
+        let mut lines = Vec::new();
+        push_contract_line(&mut lines, "章节结果", &self.chapter_title);
+        push_contract_line(&mut lines, "结果摘要", &self.summary);
+        push_list_line(&mut lines, "状态变化", &self.state_changes);
+        push_list_line(&mut lines, "角色推进", &self.character_progress);
+        push_list_line(&mut lines, "新冲突", &self.new_conflicts);
+        push_list_line(&mut lines, "新线索", &self.new_clues);
+        push_list_line(&mut lines, "伏笔变化", &self.promise_updates);
+        push_list_line(&mut lines, "设定变化", &self.canon_updates);
+        push_contract_line(&mut lines, "来源", &self.source_ref);
         lines.join("\n")
     }
 }
@@ -332,6 +394,18 @@ fn push_contract_line(lines: &mut Vec<String>, label: &str, value: &str) {
     let value = value.trim();
     if !value.is_empty() {
         lines.push(format!("{}: {}", label, value));
+    }
+}
+
+fn push_list_line(lines: &mut Vec<String>, label: &str, values: &[String]) {
+    let values = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .take(5)
+        .collect::<Vec<_>>();
+    if !values.is_empty() {
+        lines.push(format!("{}: {}", label, values.join("；")));
     }
 }
 
@@ -951,6 +1025,96 @@ impl WriterMemory {
         };
         self.upsert_chapter_mission(&summary)?;
         Ok(true)
+    }
+
+    // -- Chapter Result Snapshots --
+
+    pub fn record_chapter_result(&self, result: &ChapterResultSummary) -> rusqlite::Result<i64> {
+        if !result.chapter_revision.trim().is_empty() {
+            if let Some(existing_id) = self
+                .conn
+                .query_row(
+                    "SELECT id FROM chapter_result_snapshots
+                     WHERE project_id=?1 AND chapter_title=?2 AND chapter_revision=?3
+                     ORDER BY created_at DESC, id DESC
+                     LIMIT 1",
+                    rusqlite::params![
+                        result.project_id,
+                        result.chapter_title,
+                        result.chapter_revision
+                    ],
+                    |row| row.get(0),
+                )
+                .optional()?
+            {
+                return Ok(existing_id);
+            }
+        }
+
+        self.conn.execute(
+            "INSERT INTO chapter_result_snapshots
+             (project_id, chapter_title, chapter_revision, summary, state_changes_json,
+              character_progress_json, new_conflicts_json, new_clues_json, promise_updates_json,
+              canon_updates_json, source_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                result.project_id,
+                result.chapter_title,
+                result.chapter_revision,
+                result.summary,
+                string_vec_json(&result.state_changes),
+                string_vec_json(&result.character_progress),
+                string_vec_json(&result.new_conflicts),
+                string_vec_json(&result.new_clues),
+                string_vec_json(&result.promise_updates),
+                string_vec_json(&result.canon_updates),
+                result.source_ref,
+                result.created_at as i64,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_recent_chapter_results(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ChapterResultSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, project_id, chapter_title, chapter_revision, summary,
+                    state_changes_json, character_progress_json, new_conflicts_json,
+                    new_clues_json, promise_updates_json, canon_updates_json,
+                    source_ref, created_at
+             FROM chapter_result_snapshots
+             WHERE project_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project_id, limit as i64], |row| {
+            chapter_result_from_row(row)
+        })?;
+        rows.collect()
+    }
+
+    pub fn latest_chapter_result(
+        &self,
+        project_id: &str,
+        chapter_title: &str,
+    ) -> rusqlite::Result<Option<ChapterResultSummary>> {
+        self.conn
+            .query_row(
+                "SELECT id, project_id, chapter_title, chapter_revision, summary,
+                        state_changes_json, character_progress_json, new_conflicts_json,
+                        new_clues_json, promise_updates_json, canon_updates_json,
+                        source_ref, created_at
+                 FROM chapter_result_snapshots
+                 WHERE project_id = ?1 AND chapter_title = ?2
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1",
+                rusqlite::params![project_id, chapter_title],
+                chapter_result_from_row,
+            )
+            .optional()
     }
 
     // -- Creative Decisions --
@@ -1693,6 +1857,79 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     backfill_empty_timestamp(conn, "chapter_missions", "created_at")?;
     backfill_empty_timestamp(conn, "chapter_missions", "updated_at")?;
 
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "project_id",
+        "project_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "chapter_title",
+        "chapter_title TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "chapter_revision",
+        "chapter_revision TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "summary",
+        "summary TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "state_changes_json",
+        "state_changes_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "character_progress_json",
+        "character_progress_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "new_conflicts_json",
+        "new_conflicts_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "new_clues_json",
+        "new_clues_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "promise_updates_json",
+        "promise_updates_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "canon_updates_json",
+        "canon_updates_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "source_ref",
+        "source_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_result_snapshots",
+        "created_at",
+        "created_at INTEGER DEFAULT 0",
+    )?;
+
     Ok(())
 }
 
@@ -1709,6 +1946,33 @@ fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chapter
         source_ref: row.get(8)?,
         updated_at: row.get(9)?,
     })
+}
+
+fn chapter_result_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterResultSummary> {
+    let created_at: i64 = row.get(12)?;
+    Ok(ChapterResultSummary {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        chapter_title: row.get(2)?,
+        chapter_revision: row.get(3)?,
+        summary: row.get(4)?,
+        state_changes: string_vec_from_json(row.get::<_, String>(5)?.as_str()),
+        character_progress: string_vec_from_json(row.get::<_, String>(6)?.as_str()),
+        new_conflicts: string_vec_from_json(row.get::<_, String>(7)?.as_str()),
+        new_clues: string_vec_from_json(row.get::<_, String>(8)?.as_str()),
+        promise_updates: string_vec_from_json(row.get::<_, String>(9)?.as_str()),
+        canon_updates: string_vec_from_json(row.get::<_, String>(10)?.as_str()),
+        source_ref: row.get(11)?,
+        created_at: created_at.max(0) as u64,
+    })
+}
+
+fn string_vec_json(values: &[String]) -> String {
+    serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn string_vec_from_json(value: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
 }
 
 fn backfill_empty_timestamp(conn: &Connection, table: &str, column: &str) -> SqlResult<()> {
@@ -2064,6 +2328,42 @@ mod tests {
     }
 
     #[test]
+    fn test_chapter_result_record_and_render() {
+        let m = memory();
+        let id = m
+            .record_chapter_result(&ChapterResultSummary {
+                id: 0,
+                project_id: "novel-a".to_string(),
+                chapter_title: "第一章".to_string(),
+                chapter_revision: "rev-1".to_string(),
+                summary: "林墨发现玉佩线索，张三隐瞒下落。".to_string(),
+                state_changes: vec!["林墨得知玉佩存在风险".to_string()],
+                character_progress: vec!["张三选择隐瞒".to_string()],
+                new_conflicts: vec!["林墨与张三信任受损".to_string()],
+                new_clues: vec!["玉佩".to_string()],
+                promise_updates: vec!["玉佩仍需后续解释".to_string()],
+                canon_updates: vec!["林墨惯用寒影刀".to_string()],
+                source_ref: "chapter_save:第一章:rev-1".to_string(),
+                created_at: 42,
+            })
+            .unwrap();
+        assert!(id > 0);
+
+        let recent = m.list_recent_chapter_results("novel-a", 5).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].chapter_title, "第一章");
+        assert_eq!(recent[0].new_clues, vec!["玉佩".to_string()]);
+        assert!(recent[0].render_for_context().contains("章节结果"));
+
+        let latest = m
+            .latest_chapter_result("novel-a", "第一章")
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.summary, "林墨发现玉佩线索，张三隐瞒下落。");
+        assert!(!latest.is_empty());
+    }
+
+    #[test]
     fn open_migrates_legacy_writer_memory_columns() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -2104,6 +2404,8 @@ mod tests {
         assert!(table_has_column(&conn, "story_contracts", "reader_promise").unwrap());
         assert!(table_exists(&conn, "chapter_missions").unwrap());
         assert!(table_has_column(&conn, "chapter_missions", "expected_ending").unwrap());
+        assert!(table_exists(&conn, "chapter_result_snapshots").unwrap());
+        assert!(table_has_column(&conn, "chapter_result_snapshots", "new_clues_json").unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();

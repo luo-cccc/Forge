@@ -743,6 +743,22 @@ export interface ChapterMissionSummary {
   updatedAt: string;
 }
 
+export interface ChapterResultSummary {
+  id: number;
+  projectId: string;
+  chapterTitle: string;
+  chapterRevision: string;
+  summary: string;
+  stateChanges: string[];
+  characterProgress: string[];
+  newConflicts: string[];
+  newClues: string[];
+  promiseUpdates: string[];
+  canonUpdates: string[];
+  sourceRef: string;
+  createdAt: number;
+}
+
 export interface MemoryAuditEntry {
   proposalId: string;
   kind: string;
@@ -758,6 +774,7 @@ export interface WriterAgentLedgerSnapshot {
   storyContract?: StoryContractSummary | null;
   activeChapterMission?: ChapterMissionSummary | null;
   chapterMissions: ChapterMissionSummary[];
+  recentChapterResults: ChapterResultSummary[];
   canonEntities: CanonEntitySummary[];
   canonRules: CanonRuleSummary[];
   openPromises: PlotPromiseSummary[];

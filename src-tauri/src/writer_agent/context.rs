@@ -22,6 +22,7 @@ pub enum ContextSource {
     SystemContract,
     ProjectBrief,
     ChapterMission,
+    ResultFeedback,
     AuthorStyle,
     CanonSlice,
     PromiseSlice,
@@ -66,6 +67,7 @@ impl AgentTask {
             AgentTask::GhostWriting => vec![
                 (ContextSource::CursorPrefix, 10, 800),
                 (ContextSource::ChapterMission, 10, 520),
+                (ContextSource::ResultFeedback, 9, 420),
                 (ContextSource::ProjectBrief, 9, 420),
                 (ContextSource::CursorSuffix, 9, 400),
                 (ContextSource::CanonSlice, 8, 600),
@@ -79,6 +81,7 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 10, 300),
                 (ContextSource::CanonSlice, 10, 800),
                 (ContextSource::ChapterMission, 9, 420),
+                (ContextSource::ResultFeedback, 9, 420),
                 (ContextSource::ProjectBrief, 9, 400),
                 (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::OutlineSlice, 9, 500),
@@ -87,6 +90,7 @@ impl AgentTask {
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 11, 1600),
                 (ContextSource::ChapterMission, 11, 2200),
+                (ContextSource::ResultFeedback, 10, 2200),
                 (ContextSource::OutlineSlice, 10, 6000),
                 (ContextSource::PreviousChapter, 9, 5000),
                 (ContextSource::PromiseSlice, 8, 4000),
@@ -102,6 +106,7 @@ impl AgentTask {
                 (ContextSource::CursorSuffix, 8, 500),
                 (ContextSource::ChapterMission, 8, 500),
                 (ContextSource::ProjectBrief, 8, 400),
+                (ContextSource::ResultFeedback, 7, 360),
                 (ContextSource::CanonSlice, 7, 400),
                 (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::AuthorStyle, 6, 300),
@@ -112,11 +117,13 @@ impl AgentTask {
                 (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::ChapterMission, 8, 360),
                 (ContextSource::ProjectBrief, 8, 300),
+                (ContextSource::ResultFeedback, 8, 260),
                 (ContextSource::AuthorStyle, 8, 300),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 10, 2000),
                 (ContextSource::PromiseSlice, 9, 1000),
+                (ContextSource::ResultFeedback, 9, 900),
                 (ContextSource::DecisionSlice, 9, 800),
                 (ContextSource::ChapterMission, 8, 800),
                 (ContextSource::ProjectBrief, 8, 600),
@@ -128,6 +135,7 @@ impl AgentTask {
                 (ContextSource::CursorSuffix, 8, 500),
                 (ContextSource::ChapterMission, 8, 700),
                 (ContextSource::ProjectBrief, 8, 600),
+                (ContextSource::ResultFeedback, 8, 700),
                 (ContextSource::CanonSlice, 8, 800),
                 (ContextSource::PromiseSlice, 7, 600),
                 (ContextSource::DecisionSlice, 7, 500),
@@ -143,6 +151,7 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 240),
                 (ContextSource::ChapterMission, 180),
                 (ContextSource::ProjectBrief, 160),
+                (ContextSource::ResultFeedback, 140),
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::PromiseSlice, 140),
             ],
@@ -151,10 +160,12 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 240),
                 (ContextSource::ChapterMission, 140),
                 (ContextSource::ProjectBrief, 120),
+                (ContextSource::ResultFeedback, 120),
             ],
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 500),
                 (ContextSource::ChapterMission, 700),
+                (ContextSource::ResultFeedback, 700),
                 (ContextSource::OutlineSlice, 1_000),
                 (ContextSource::PreviousChapter, 800),
                 (ContextSource::PromiseSlice, 600),
@@ -165,16 +176,19 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 160),
                 (ContextSource::ChapterMission, 160),
                 (ContextSource::ProjectBrief, 120),
+                (ContextSource::ResultFeedback, 120),
             ],
             AgentTask::ProposalEvaluation => vec![
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::DecisionSlice, 120),
                 (ContextSource::ChapterMission, 120),
                 (ContextSource::ProjectBrief, 120),
+                (ContextSource::ResultFeedback, 120),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 600),
                 (ContextSource::PromiseSlice, 240),
+                (ContextSource::ResultFeedback, 240),
                 (ContextSource::ChapterMission, 240),
                 (ContextSource::ProjectBrief, 180),
             ],
@@ -183,6 +197,7 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 300),
                 (ContextSource::ChapterMission, 220),
                 (ContextSource::ProjectBrief, 180),
+                (ContextSource::ResultFeedback, 180),
                 (ContextSource::CanonSlice, 220),
                 (ContextSource::PromiseSlice, 180),
             ],
@@ -392,6 +407,7 @@ pub fn assemble_observation_context(
 ) -> WritingContextPack {
     let project_brief = build_project_brief(&observation.project_id, memory);
     let chapter_mission = build_chapter_mission(&observation.project_id, observation, memory);
+    let result_feedback = build_result_feedback(&observation.project_id, observation, memory);
     let canon_slice = build_canon_slice(&observation.paragraph, memory);
     let promise_slice = build_promise_slice(memory);
     let decision_slice = build_decision_slice(memory);
@@ -412,6 +428,7 @@ pub fn assemble_observation_context(
             ContextSource::SelectedText => non_empty(selected_text.clone()),
             ContextSource::ProjectBrief => non_empty(project_brief.clone()),
             ContextSource::ChapterMission => non_empty(chapter_mission.clone()),
+            ContextSource::ResultFeedback => non_empty(result_feedback.clone()),
             ContextSource::CanonSlice => non_empty(canon_slice.clone()),
             ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
             ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
@@ -439,6 +456,33 @@ fn build_chapter_mission(
         .filter(|mission| !mission.is_empty())
         .map(|mission| mission.render_for_context())
         .unwrap_or_default()
+}
+
+fn build_result_feedback(
+    project_id: &str,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+) -> String {
+    let mut results = memory
+        .list_recent_chapter_results(project_id, 4)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|result| !result.is_empty())
+        .collect::<Vec<_>>();
+
+    if let Some(current_chapter) = observation.chapter_title.as_deref() {
+        results.retain(|result| {
+            result.chapter_title != current_chapter
+                || observation.reason == crate::writer_agent::observation::ObservationReason::Save
+        });
+    }
+
+    results
+        .into_iter()
+        .take(3)
+        .map(|result| result.render_for_context())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
@@ -796,6 +840,9 @@ mod tests {
     fn test_ghost_writing_priorities() {
         let p = AgentTask::GhostWriting.source_priorities();
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::CursorPrefix));
+        assert!(p
+            .iter()
+            .any(|(s, _, _)| *s == ContextSource::ResultFeedback));
         assert!(p[0].0 == ContextSource::CursorPrefix); // highest priority
     }
 
@@ -805,6 +852,9 @@ mod tests {
         assert!(p
             .iter()
             .any(|(s, _, _)| *s == ContextSource::PreviousChapter));
+        assert!(p
+            .iter()
+            .any(|(s, _, _)| *s == ContextSource::ResultFeedback));
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::PromiseSlice));
     }
 
@@ -946,6 +996,23 @@ mod tests {
                 &[],
             )
             .unwrap();
+        memory
+            .record_chapter_result(&crate::writer_agent::memory::ChapterResultSummary {
+                id: 0,
+                project_id: "default".into(),
+                chapter_title: "Chapter-0".into(),
+                chapter_revision: "rev-0".into(),
+                summary: "上一章林墨确认玉佩仍在张三手里。".into(),
+                state_changes: vec!["林墨开始怀疑张三".into()],
+                character_progress: vec![],
+                new_conflicts: vec!["林墨与张三信任受损".into()],
+                new_clues: vec!["玉佩".into()],
+                promise_updates: vec![],
+                canon_updates: vec![],
+                source_ref: "test".into(),
+                created_at: 2,
+            })
+            .unwrap();
 
         let observation = WriterObservation {
             id: "obs".into(),
@@ -982,6 +1049,10 @@ mod tests {
             .sources
             .iter()
             .any(|s| s.source == ContextSource::ChapterMission));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::ResultFeedback));
         assert!(pack
             .sources
             .iter()

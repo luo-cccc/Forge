@@ -14,8 +14,8 @@ use super::diagnostics::{
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
-    ChapterMissionSummary, ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary,
-    StoryContractSummary, WriterMemory,
+    ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextSourceBudgetTrace,
+    ManualAgentTurnSummary, StoryContractSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -43,6 +43,7 @@ pub struct WriterAgentLedgerSnapshot {
     pub story_contract: Option<super::memory::StoryContractSummary>,
     pub active_chapter_mission: Option<super::memory::ChapterMissionSummary>,
     pub chapter_missions: Vec<super::memory::ChapterMissionSummary>,
+    pub recent_chapter_results: Vec<super::memory::ChapterResultSummary>,
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
     pub canon_rules: Vec<super::memory::CanonRuleSummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
@@ -254,6 +255,13 @@ impl WriterAgentKernel {
             observation.has_selection(),
             observation.reason == super::observation::ObservationReason::ChapterSwitch,
         );
+
+        if observation.reason == super::observation::ObservationReason::Save {
+            let result = chapter_result_from_observation(&observation, &self.memory);
+            if !result.is_empty() {
+                self.memory.record_chapter_result(&result).ok();
+            }
+        }
 
         if let Ok(promises) = self.memory.get_open_promises() {
             for (_kind, title, desc, chapter) in &promises {
@@ -1492,6 +1500,10 @@ impl WriterAgentKernel {
                 .memory
                 .list_chapter_missions(&self.project_id, 50)
                 .unwrap_or_default(),
+            recent_chapter_results: self
+                .memory
+                .list_recent_chapter_results(&self.project_id, 20)
+                .unwrap_or_default(),
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
             canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
             open_promises: self.memory.get_open_promise_summaries().unwrap_or_default(),
@@ -1642,6 +1654,188 @@ fn snippet(text: &str, limit: usize) -> String {
 
 fn proposal_id(session_id: &str, counter: u64) -> String {
     format!("prop_{}_{}", session_id, counter)
+}
+
+fn chapter_result_from_observation(
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+) -> ChapterResultSummary {
+    let text = if observation.prefix.trim().is_empty() {
+        observation.paragraph.as_str()
+    } else {
+        observation.prefix.as_str()
+    };
+    let sentences = split_sentences(text);
+    let summary = chapter_result_summary(&sentences, text);
+    let known_names = memory.get_canon_entity_names().unwrap_or_default();
+    let known_entities = memory.list_canon_entities().unwrap_or_default();
+    let open_promises = memory.get_open_promise_summaries().unwrap_or_default();
+    let canon_candidates = extract_new_canon_entities(text, &known_names);
+    let promise_candidates = extract_plot_promises(text, observation);
+    let character_cues = chapter_result_character_cues(&known_entities);
+    let clue_markers = chapter_result_clue_markers(&known_entities, &open_promises);
+
+    let chapter_title = observation
+        .chapter_title
+        .clone()
+        .unwrap_or_else(|| "current chapter".to_string());
+    let chapter_revision = observation
+        .chapter_revision
+        .clone()
+        .or_else(|| observation.full_text_digest.clone())
+        .unwrap_or_default();
+
+    ChapterResultSummary {
+        id: 0,
+        project_id: observation.project_id.clone(),
+        chapter_title: chapter_title.clone(),
+        chapter_revision: chapter_revision.clone(),
+        summary,
+        state_changes: extract_result_lines(
+            &sentences,
+            &[
+                "决定", "选择", "发现", "得知", "确认", "失去", "拿走", "交给", "离开",
+            ],
+            4,
+        ),
+        character_progress: extract_result_lines_owned(&sentences, &character_cues, 4),
+        new_conflicts: extract_result_lines(
+            &sentences,
+            &["冲突", "对抗", "争执", "怀疑", "背叛", "危机", "敌", "杀意"],
+            4,
+        ),
+        new_clues: extract_unique_marker_values(text, &clue_markers),
+        promise_updates: promise_candidates
+            .into_iter()
+            .take(4)
+            .map(|promise| format!("{}: {}", promise.title, promise.description))
+            .collect(),
+        canon_updates: canon_candidates
+            .into_iter()
+            .take(4)
+            .map(|entity| format!("{} [{}]: {}", entity.name, entity.kind, entity.summary))
+            .collect(),
+        source_ref: format!("chapter_save:{}:{}", chapter_title, chapter_revision),
+        created_at: observation.created_at,
+    }
+}
+
+fn chapter_result_character_cues(entities: &[super::memory::CanonEntitySummary]) -> Vec<String> {
+    let mut cues = entities
+        .iter()
+        .filter(|entity| {
+            let kind = entity.kind.to_ascii_lowercase();
+            kind.contains("character") || kind.contains("person") || kind.contains("角色")
+        })
+        .map(|entity| entity.name.clone())
+        .filter(|name| !name.trim().is_empty())
+        .collect::<Vec<_>>();
+    if cues.is_empty() {
+        cues.extend(
+            ["主角", "少年", "少女", "师父"]
+                .into_iter()
+                .map(String::from),
+        );
+    }
+    cues
+}
+
+fn chapter_result_clue_markers(
+    entities: &[super::memory::CanonEntitySummary],
+    promises: &[super::memory::PlotPromiseSummary],
+) -> Vec<String> {
+    let mut markers = [
+        "玉佩",
+        "寒影刀",
+        "密信",
+        "钥匙",
+        "令牌",
+        "真相",
+        "秘密",
+        "线索",
+        "下落",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
+    markers.extend(
+        entities
+            .iter()
+            .filter(|entity| {
+                let kind = entity.kind.to_ascii_lowercase();
+                kind.contains("object")
+                    || kind.contains("place")
+                    || kind.contains("rule")
+                    || kind.contains("物")
+                    || kind.contains("地点")
+            })
+            .map(|entity| entity.name.clone()),
+    );
+    markers.extend(promises.iter().map(|promise| promise.title.clone()));
+    markers
+        .into_iter()
+        .map(|marker| marker.trim().to_string())
+        .filter(|marker| !marker.is_empty())
+        .collect()
+}
+
+fn chapter_result_summary(sentences: &[String], text: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(first) = sentences.first() {
+        parts.push(sentence_snippet(first, 120));
+    }
+    if let Some(last) = sentences.last() {
+        let last = sentence_snippet(last, 120);
+        if parts.first().map(|first| first != &last).unwrap_or(true) {
+            parts.push(last);
+        }
+    }
+    if parts.is_empty() {
+        sentence_snippet(text, 180)
+    } else {
+        parts.join(" / ")
+    }
+}
+
+fn extract_result_lines(sentences: &[String], cues: &[&str], limit: usize) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut lines = Vec::new();
+    for sentence in sentences {
+        if !contains_any(sentence, cues) {
+            continue;
+        }
+        let line = sentence_snippet(sentence, 120);
+        if seen.insert(line.clone()) {
+            lines.push(line);
+        }
+        if lines.len() >= limit {
+            break;
+        }
+    }
+    lines
+}
+
+fn extract_result_lines_owned(sentences: &[String], cues: &[String], limit: usize) -> Vec<String> {
+    let refs = cues.iter().map(String::as_str).collect::<Vec<_>>();
+    extract_result_lines(sentences, &refs, limit)
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn extract_unique_marker_values(text: &str, markers: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut values = Vec::new();
+    for marker in markers {
+        if text.contains(marker) && seen.insert(marker.clone()) {
+            values.push(marker.clone());
+        }
+        if values.len() >= 8 {
+            break;
+        }
+    }
+    values
 }
 
 fn proposal_trace_summary(
@@ -2942,6 +3136,7 @@ fn context_pack_evidence(
             ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
             ContextSource::OutlineSlice | ContextSource::ChapterMission => EvidenceSource::Outline,
+            ContextSource::ResultFeedback => EvidenceSource::ChapterText,
             _ => EvidenceSource::ChapterText,
         };
         evidence.push(EvidenceRef {
@@ -3668,6 +3863,38 @@ mod tests {
         let ledger = kernel.ledger_snapshot();
         assert!(ledger.canon_entities.is_empty());
         assert!(ledger.open_promises.is_empty());
+        assert_eq!(ledger.recent_chapter_results.len(), 1);
+        assert!(ledger.recent_chapter_results[0].summary.contains("沈照"));
+        assert!(ledger.recent_chapter_results[0]
+            .new_clues
+            .contains(&"玉佩".to_string()));
+    }
+
+    #[test]
+    fn save_observation_records_chapter_result_feedback() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs =
+            observation("林墨发现玉佩的下落，却开始怀疑张三。张三选择隐瞒真相，新的冲突就此埋下。");
+        obs.reason = ObservationReason::Save;
+        obs.source = ObservationSource::ChapterSave;
+        obs.chapter_title = Some("第一章".to_string());
+        obs.chapter_revision = Some("rev-1".to_string());
+        obs.prefix = obs.paragraph.clone();
+
+        kernel.observe(obs).unwrap();
+
+        let ledger = kernel.ledger_snapshot();
+        let result = ledger.recent_chapter_results.first().unwrap();
+        assert_eq!(result.chapter_title, "第一章");
+        assert_eq!(result.chapter_revision, "rev-1");
+        assert!(result.summary.contains("玉佩"));
+        assert!(result
+            .new_conflicts
+            .iter()
+            .any(|line| line.contains("冲突")));
+        assert!(result.new_clues.contains(&"玉佩".to_string()));
+        assert!(result.source_ref.contains("chapter_save:第一章:rev-1"));
     }
 
     #[test]
