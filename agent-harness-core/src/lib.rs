@@ -1,16 +1,21 @@
 pub mod actions;
+pub mod agent_loop;
 pub mod config;
 pub mod context_pack;
 pub mod domain;
 pub mod hermes_memory;
 pub mod llm;
 pub mod planner;
+pub mod provider;
+pub mod retry;
 pub mod router;
 pub mod run_trace;
+pub mod tool_executor;
 pub mod tool_registry;
 pub mod vector_db;
 
 pub use actions::{parse_actions, Action};
+pub use agent_loop::{AgentLoop, AgentLoopConfig, AgentLoopEvent};
 pub use config::HarnessConfig;
 pub use context_pack::{
     char_count, truncate_text_report, ContextBudgetReport, ContextPacker, ContextSourceReport,
@@ -25,6 +30,7 @@ pub use tool_registry::{
     default_writing_tool_registry, ToolDescriptor, ToolFilter, ToolRegistry, ToolRegistryError,
     ToolSideEffectLevel, ToolStage,
 };
+pub use tool_executor::{DoomLoopDetector, ToolExecution, ToolExecutor, ToolHandler};
 pub use vector_db::{chunk_text, cosine_similarity, extract_keywords, Chunk, VectorDB};
 
 /// 通用文本截断 — 取最后 max_chars 字符，从词边界断开

@@ -103,6 +103,20 @@ impl ToolDescriptor {
     pub fn supports_intent(&self, intent: &Intent) -> bool {
         self.supported_intents.is_empty() || self.supported_intents.contains(intent)
     }
+
+    /// Convert to OpenAI function calling schema.
+    /// Returns None if input_schema is absent (not all tools are LLM-callable).
+    pub fn to_openai_tool(&self) -> Option<serde_json::Value> {
+        let schema = self.input_schema.as_ref()?;
+        Some(serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": schema
+            }
+        }))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,6 +212,14 @@ impl ToolRegistry {
                     .all(|tag| tool.tags.iter().any(|candidate| candidate == tag))
             })
             .cloned()
+            .collect()
+    }
+
+    /// Export all tools matching the filter as OpenAI function calling schemas.
+    pub fn to_openai_tools(&self, filter: &ToolFilter) -> Vec<serde_json::Value> {
+        self.filter(filter)
+            .iter()
+            .filter_map(|d| d.to_openai_tool())
             .collect()
     }
 }
