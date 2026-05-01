@@ -6,11 +6,14 @@ pub mod context_pack;
 pub mod domain;
 pub mod hermes_memory;
 pub mod llm;
+pub mod permission;
 pub mod planner;
 pub mod provider;
+pub mod ptc;
 pub mod retry;
 pub mod router;
 pub mod run_trace;
+pub mod skill_lifecycle;
 pub mod tool_executor;
 pub mod tool_registry;
 pub mod vector_db;
@@ -29,6 +32,9 @@ pub use context_pack::{
 pub use domain::{writing_domain_profile, AgentDomainProfile, ContextPriority, DomainCapability};
 pub use hermes_memory::{HermesDB, SessionSearchResult};
 pub use llm::LLMClient;
+pub use permission::{PermissionDecision, PermissionMode, PermissionPolicy, PermissionRule};
+pub use ptc::{build_ptc_prompt, parse_ptc_output, PtcConfig, PtcResult, PtcScript};
+pub use skill_lifecycle::{CurationReport, CuratorConfig, Skill, SkillCategory, SkillCurator};
 pub use router::{classify_intent, Intent};
 pub use run_trace::{AgentRunEvent, AgentRunEventKind, AgentRunStatus, AgentRunTrace};
 pub use tool_registry::{
