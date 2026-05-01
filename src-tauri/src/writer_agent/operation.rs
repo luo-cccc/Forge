@@ -48,6 +48,21 @@ pub enum WriterOperation {
         promise_id: String,
         chapter: String,
     },
+    #[serde(rename = "promise.defer")]
+    PromiseDefer {
+        #[serde(rename = "promiseId")]
+        promise_id: String,
+        chapter: String,
+        #[serde(rename = "expectedPayoff")]
+        expected_payoff: String,
+    },
+    #[serde(rename = "promise.abandon")]
+    PromiseAbandon {
+        #[serde(rename = "promiseId")]
+        promise_id: String,
+        chapter: String,
+        reason: String,
+    },
     #[serde(rename = "style.update_preference")]
     StyleUpdatePreference { key: String, value: String },
     #[serde(rename = "outline.update")]

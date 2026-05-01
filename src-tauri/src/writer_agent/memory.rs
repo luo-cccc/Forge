@@ -372,6 +372,22 @@ impl WriterMemory {
         Ok(changed > 0)
     }
 
+    pub fn defer_promise(&self, promise_id: i64, expected_payoff: &str) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE plot_promises SET expected_payoff=?1 WHERE id=?2 AND status='open'",
+            rusqlite::params![expected_payoff, promise_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn abandon_promise(&self, promise_id: i64) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE plot_promises SET status='abandoned' WHERE id=?1 AND status='open'",
+            rusqlite::params![promise_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     // -- Style Preferences --
 
     pub fn upsert_style_preference(
@@ -531,6 +547,29 @@ mod tests {
         assert!(m.resolve_promise(id, "ch8").unwrap());
         let open2 = m.get_open_promises().unwrap();
         assert_eq!(open2.len(), 0);
+    }
+
+    #[test]
+    fn test_promise_defer_and_abandon() {
+        let m = memory();
+        let deferred_id = m
+            .add_promise("clue", "密道", "第2章破庙有密道", "ch2", "ch8", 5)
+            .unwrap();
+        assert!(m.defer_promise(deferred_id, "ch10").unwrap());
+        let summaries = m.get_open_promise_summaries().unwrap();
+        assert_eq!(summaries[0].expected_payoff, "ch10");
+
+        let abandoned_id = m
+            .add_promise("clue", "铜铃", "铜铃声需要解释", "ch2", "ch6", 5)
+            .unwrap();
+        assert!(m.abandon_promise(abandoned_id).unwrap());
+        let open_titles = m
+            .get_open_promise_summaries()
+            .unwrap()
+            .into_iter()
+            .map(|promise| promise.title)
+            .collect::<Vec<_>>();
+        assert!(!open_titles.contains(&"铜铃".to_string()));
     }
 
     #[test]

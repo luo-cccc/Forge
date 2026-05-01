@@ -90,6 +90,21 @@ function canonUpdateOperation(operations: WriterOperation[]): WriterOperation | 
   return operations.find((operation) => operation.kind === "canon.update_attribute");
 }
 
+function operationLabel(operation: WriterOperation): string {
+  if (operation.kind === "promise.resolve") return "Resolve";
+  if (operation.kind === "promise.defer") return "Defer";
+  if (operation.kind === "promise.abandon") return "Abandon";
+  if (operation.kind === "canon.update_attribute") return "Update Canon";
+  if (operation.kind === "text.replace") return "Apply Fix";
+  if (operation.kind === "text.insert") return "Insert";
+  return "Apply";
+}
+
+function nextChapterLabel(chapter?: string | null): string {
+  const match = chapter?.match(/(\d+)(?!.*\d)/);
+  return match ? `Chapter-${Number(match[1]) + 1}` : "later chapter";
+}
+
 function severityClass(severity: StoryReviewQueueEntry["severity"]): string {
   if (severity === "error") return "border-danger/40 bg-danger/10";
   if (severity === "warning") return "border-accent/30 bg-accent-subtle/20";
@@ -315,63 +330,22 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     }
   }, [currentChapterRevision, onApplyOperation, recordFeedback]);
 
-  const handleResolvePromise = useCallback(async (promiseId: number) => {
+  const handlePromiseLedgerOperation = useCallback(async (operation: WriterOperation) => {
     setOperationError(null);
-    const operation: WriterOperation = {
-      kind: "promise.resolve",
-      promiseId: String(promiseId),
-      chapter: currentChapter ?? "current chapter",
-    };
-
     try {
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
       });
       if (!result.success) {
-        setOperationError(result.error?.message ?? "Could not resolve this promise.");
+        setOperationError(result.error?.message ?? "Could not update this promise.");
         return;
       }
       await refreshStatus();
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapter, currentChapterRevision, refreshStatus]);
-
-  const handleApplyDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
-    setOperationError(null);
-    const operation = debtPrimaryOperation(entry);
-    if (!operation) return;
-
-    try {
-      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
-        operation,
-        currentRevision: currentChapterRevision ?? "",
-      });
-      if (!result.success) {
-        setOperationError(result.error?.message ?? "Could not apply this story debt action.");
-        return;
-      }
-
-      const applied = isEditorTextOperation(operation)
-        ? onApplyOperation?.(operation) ?? false
-        : true;
-      if (!applied) {
-        setOperationError("The editor could not apply this operation.");
-        return;
-      }
-
-      const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
-      if (proposalId) {
-        const finalText = isEditorTextOperation(operation) ? operation.text : entry.message;
-        await recordFeedback(proposalId, "accepted", finalText);
-      } else {
-        await refreshStatus();
-      }
-    } catch (e) {
-      setOperationError(String(e));
-    }
-  }, [currentChapterRevision, onApplyOperation, recordFeedback, refreshStatus]);
+  }, [currentChapterRevision, refreshStatus]);
 
   const handleApplyDebtOperation = useCallback(async (
     entry: StoryDebtEntry,
@@ -636,7 +610,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   </div>
                 </div>
                 {storyDebt.entries.slice(0, 3).map((entry) => {
+                  const primaryDebtOperation = debtPrimaryOperation(entry);
                   const canonOperation = canonUpdateOperation(entry.operations);
+                  const secondaryOperations = entry.operations.filter((operation) =>
+                    operation !== primaryDebtOperation && operation !== canonOperation
+                  );
                   return (
                     <div key={entry.id} className="mt-2 border-t border-border-subtle pt-2">
                       <div className="flex items-center justify-between gap-2">
@@ -648,12 +626,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       <p className="mt-1 line-clamp-2 text-text-muted">{entry.message}</p>
                       {(entry.operations.length > 0 || entry.relatedReviewIds.length > 0) && (
                         <div className="mt-2 flex flex-wrap gap-1">
-                          {entry.operations.length > 0 && (
+                          {primaryDebtOperation && (
                             <button
-                              onClick={() => handleApplyDebtEntry(entry)}
+                              onClick={() => handleApplyDebtOperation(entry, primaryDebtOperation, `${operationLabel(primaryDebtOperation)} from story debt summary.`)}
                               className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
                             >
-                              Resolve
+                              {operationLabel(primaryDebtOperation)}
                             </button>
                           )}
                           {canonOperation && (
@@ -664,6 +642,15 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                               Update Canon
                             </button>
                           )}
+                          {secondaryOperations.map((operation) => (
+                            <button
+                              key={`${entry.id}-${operation.kind}`}
+                              onClick={() => handleApplyDebtOperation(entry, operation, `${operationLabel(operation)} from story debt summary.`)}
+                              className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                            >
+                              {operationLabel(operation)}
+                            </button>
+                          ))}
                           {entry.relatedReviewIds.length > 0 && (
                             <button
                               onClick={() => handleIgnoreDebtEntry(entry)}
@@ -687,6 +674,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {visibleReviewQueue.map((entry) => {
               const operation = queuePrimaryOperation(entry);
               const canonOperation = canonUpdateOperation(entry.operations);
+              const secondaryOperations = entry.operations.filter((item) =>
+                item !== operation && item !== canonOperation
+              );
               return (
                 <div key={entry.id} className={`rounded border p-2 ${severityClass(entry.severity)}`}>
                   <div className="flex items-start justify-between gap-2">
@@ -719,7 +709,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       onClick={() => handleApplyQueueEntry(entry)}
                       className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
                     >
-                      Apply
+                      {operation ? operationLabel(operation) : "Apply"}
                     </button>
                     <button
                       onClick={() => handleFeedback(entry.proposalId, "rejected")}
@@ -741,6 +731,15 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                         Update Canon
                       </button>
                     )}
+                    {secondaryOperations.map((item) => (
+                      <button
+                        key={`${entry.id}-${item.kind}`}
+                        onClick={() => handleApplyQueueOperation(entry, item, `${operationLabel(item)} from review queue.`)}
+                        className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                      >
+                        {operationLabel(item)}
+                      </button>
+                    ))}
                   </div>
                 </div>
               );
@@ -753,26 +752,47 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(ledger?.openPromises.length ?? 0) === 0 && (
               <p className="text-text-muted">No open plot promises recorded yet.</p>
             )}
-            {ledger?.openPromises.map((promise) => (
-              <div key={promise.id} className="rounded bg-bg-raised border border-border-subtle p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">{promise.title}</span>
-                  <span className="text-[10px] text-text-muted">{promise.kind}</span>
-                </div>
-                <p className="mt-1 text-text-secondary">{promise.description}</p>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="text-[10px] text-text-muted">
+            {ledger?.openPromises.map((promise) => {
+              const chapter = currentChapter ?? (promise.expectedPayoff || "current chapter");
+              const operations: WriterOperation[] = [
+                { kind: "promise.resolve", promiseId: String(promise.id), chapter },
+                {
+                  kind: "promise.defer",
+                  promiseId: String(promise.id),
+                  chapter,
+                  expectedPayoff: nextChapterLabel(chapter),
+                },
+                {
+                  kind: "promise.abandon",
+                  promiseId: String(promise.id),
+                  chapter,
+                  reason: `Author decided '${promise.title}' no longer needs payoff in the current story shape.`,
+                },
+              ];
+              return (
+                <div key={promise.id} className="rounded bg-bg-raised border border-border-subtle p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-text-primary">{promise.title}</span>
+                    <span className="text-[10px] text-text-muted">{promise.kind}</span>
+                  </div>
+                  <p className="mt-1 text-text-secondary">{promise.description}</p>
+                  <div className="mt-2 text-[10px] text-text-muted">
                     {promise.introducedChapter || "unknown"} {"->"} {promise.expectedPayoff || "unset"}
                   </div>
-                  <button
-                    onClick={() => handleResolvePromise(promise.id)}
-                    className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
-                  >
-                    Resolve
-                  </button>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {operations.map((operation) => (
+                      <button
+                        key={`${promise.id}-${operation.kind}`}
+                        onClick={() => handlePromiseLedgerOperation(operation)}
+                        className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                      >
+                        {operationLabel(operation)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

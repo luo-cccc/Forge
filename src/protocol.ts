@@ -592,6 +592,8 @@ export type WriterOperation =
   | { kind: "canon.upsert_rule"; rule: unknown }
   | { kind: "promise.add"; promise: unknown }
   | { kind: "promise.resolve"; promiseId: string; chapter: string }
+  | { kind: "promise.defer"; promiseId: string; chapter: string; expectedPayoff: string }
+  | { kind: "promise.abandon"; promiseId: string; chapter: string; reason: string }
   | { kind: "style.update_preference"; key: string; value: string }
   | { kind: "outline.update"; nodeId: string; patch: unknown };
 

@@ -180,10 +180,7 @@ impl DiagnosticsEngine {
                             "确认这里是否要回收伏笔：{}",
                             promise.expected_payoff
                         )),
-                        operations: vec![WriterOperation::PromiseResolve {
-                            promise_id: promise.id.to_string(),
-                            chapter: chapter_id.to_string(),
-                        }],
+                        operations: promise_decision_operations(promise, chapter_id),
                     });
                     continue;
                 }
@@ -216,7 +213,7 @@ impl DiagnosticsEngine {
                             snippet: promise.description.clone(),
                         }],
                         fix_suggestion: Some("决定回收、延后，或标记为废弃。".into()),
-                        operations: Vec::new(),
+                        operations: promise_decision_operations(promise, chapter_id),
                     });
                 }
             }
@@ -620,6 +617,37 @@ fn is_stale_promise(current: &str, introduced: &str, expected_payoff: &str) -> b
         (Some(current_number), Some(introduced_number)) => current_number - introduced_number >= 3,
         _ => false,
     }
+}
+
+fn promise_decision_operations(
+    promise: &super::memory::PlotPromiseSummary,
+    chapter_id: &str,
+) -> Vec<WriterOperation> {
+    vec![
+        WriterOperation::PromiseResolve {
+            promise_id: promise.id.to_string(),
+            chapter: chapter_id.to_string(),
+        },
+        WriterOperation::PromiseDefer {
+            promise_id: promise.id.to_string(),
+            chapter: chapter_id.to_string(),
+            expected_payoff: next_chapter_label(chapter_id),
+        },
+        WriterOperation::PromiseAbandon {
+            promise_id: promise.id.to_string(),
+            chapter: chapter_id.to_string(),
+            reason: format!(
+                "Author decided '{}' no longer needs payoff in the current story shape.",
+                promise.title
+            ),
+        },
+    ]
+}
+
+fn next_chapter_label(chapter_id: &str) -> String {
+    chapter_number(chapter_id)
+        .map(|number| format!("Chapter-{}", number + 1))
+        .unwrap_or_else(|| "later chapter".to_string())
 }
 
 fn chapter_number(chapter: &str) -> Option<i64> {

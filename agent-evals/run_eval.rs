@@ -730,10 +730,147 @@ fn run_promise_stale_eval() -> EvalResult {
     }) {
         errors.push("stale promise warning priority too low".to_string());
     }
+    if !stale.is_some_and(|proposal| {
+        proposal
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, WriterOperation::PromiseResolve { .. }))
+            && proposal
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::PromiseDefer { .. }))
+            && proposal
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::PromiseAbandon { .. }))
+    }) {
+        errors.push("stale promise warning lacks resolve/defer/abandon choices".to_string());
+    }
 
     eval_result(
         "writer_agent:stale_promise_at_payoff_chapter",
         format!("proposals={}", proposals.len()),
+        errors,
+    )
+}
+
+fn run_promise_defer_operation_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let promise_id = memory
+        .add_promise(
+            "mystery",
+            "破庙密道",
+            "破庙里有密道，需要说明用途。",
+            "Chapter-1",
+            "Chapter-3",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let result = kernel
+        .approve_editor_operation(
+            WriterOperation::PromiseDefer {
+                promise_id: promise_id.to_string(),
+                chapter: "Chapter-3".to_string(),
+                expected_payoff: "Chapter-5".to_string(),
+            },
+            "",
+        )
+        .unwrap();
+
+    let mut errors = Vec::new();
+    if !result.success {
+        errors.push(format!(
+            "defer operation failed: {}",
+            result
+                .error
+                .as_ref()
+                .map(|error| error.message.as_str())
+                .unwrap_or("unknown")
+        ));
+    }
+    let open = kernel.ledger_snapshot().open_promises;
+    if open.len() != 1 || open[0].expected_payoff != "Chapter-5" {
+        errors.push("promise payoff chapter was not updated while staying open".to_string());
+    }
+    if !kernel
+        .ledger_snapshot()
+        .recent_decisions
+        .iter()
+        .any(|decision| decision.decision == "deferred_promise")
+    {
+        errors.push("promise defer did not record a creative decision".to_string());
+    }
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨把窗关上，屋外的雨声立刻远了。",
+            "Chapter-3",
+        ))
+        .unwrap();
+    if proposals.iter().any(|proposal| {
+        proposal.kind == ProposalKind::PlotPromise && proposal.preview.contains("仍未回收")
+    }) {
+        errors.push("deferred promise still warns at the old payoff chapter".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_defer_updates_expected_payoff",
+        format!("success={} open={}", result.success, open.len()),
+        errors,
+    )
+}
+
+fn run_promise_abandon_operation_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let promise_id = memory
+        .add_promise(
+            "mystery",
+            "破庙密道",
+            "破庙里有密道，需要说明用途。",
+            "Chapter-1",
+            "Chapter-3",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let result = kernel
+        .approve_editor_operation(
+            WriterOperation::PromiseAbandon {
+                promise_id: promise_id.to_string(),
+                chapter: "Chapter-3".to_string(),
+                reason: "Author cut this thread during restructuring.".to_string(),
+            },
+            "",
+        )
+        .unwrap();
+
+    let mut errors = Vec::new();
+    if !result.success {
+        errors.push(format!(
+            "abandon operation failed: {}",
+            result
+                .error
+                .as_ref()
+                .map(|error| error.message.as_str())
+                .unwrap_or("unknown")
+        ));
+    }
+    let open = kernel.ledger_snapshot().open_promises;
+    if !open.is_empty() {
+        errors.push(format!("abandoned promise still open: {}", open.len()));
+    }
+    if !kernel
+        .ledger_snapshot()
+        .recent_decisions
+        .iter()
+        .any(|decision| decision.decision == "abandoned_promise")
+    {
+        errors.push("promise abandon did not record a creative decision".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_abandon_closes_with_decision",
+        format!("success={} open={}", result.success, open.len()),
         errors,
     )
 }
@@ -948,6 +1085,8 @@ fn main() {
     results.push(run_promise_opportunity_eval());
     results.push(run_promise_opportunity_apply_eval());
     results.push(run_promise_stale_eval());
+    results.push(run_promise_defer_operation_eval());
+    results.push(run_promise_abandon_operation_eval());
     results.push(run_promise_resolve_operation_eval());
     results.push(run_story_review_queue_promise_eval());
     results.push(run_story_debt_snapshot_eval());

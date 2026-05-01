@@ -888,6 +888,83 @@ impl WriterAgentKernel {
                     revision_after: None,
                 })
             }
+            WriterOperation::PromiseDefer {
+                promise_id,
+                chapter,
+                expected_payoff,
+            } => {
+                let id = promise_id
+                    .parse::<i64>()
+                    .map_err(|_| format!("promise: invalid promise id '{}'", promise_id))?;
+                let deferred = self
+                    .memory
+                    .defer_promise(id, expected_payoff)
+                    .map_err(|e| format!("promise: {}", e))?;
+                if deferred {
+                    self.memory
+                        .record_decision(
+                            chapter,
+                            &format!("Defer promise {}", promise_id),
+                            "deferred_promise",
+                            &[],
+                            &format!(
+                                "Author deferred promise {} to {}",
+                                promise_id, expected_payoff
+                            ),
+                            &[format!("promise:{}", promise_id)],
+                        )
+                        .ok();
+                }
+                Ok(OperationResult {
+                    success: deferred,
+                    operation,
+                    error: if deferred {
+                        None
+                    } else {
+                        Some(super::operation::OperationError::invalid(
+                            "Promise is already closed or does not exist",
+                        ))
+                    },
+                    revision_after: None,
+                })
+            }
+            WriterOperation::PromiseAbandon {
+                promise_id,
+                chapter,
+                reason,
+            } => {
+                let id = promise_id
+                    .parse::<i64>()
+                    .map_err(|_| format!("promise: invalid promise id '{}'", promise_id))?;
+                let abandoned = self
+                    .memory
+                    .abandon_promise(id)
+                    .map_err(|e| format!("promise: {}", e))?;
+                if abandoned {
+                    self.memory
+                        .record_decision(
+                            chapter,
+                            &format!("Abandon promise {}", promise_id),
+                            "abandoned_promise",
+                            &["resolve".to_string(), "defer".to_string()],
+                            reason,
+                            &[format!("promise:{}", promise_id)],
+                        )
+                        .ok();
+                }
+                Ok(OperationResult {
+                    success: abandoned,
+                    operation,
+                    error: if abandoned {
+                        None
+                    } else {
+                        Some(super::operation::OperationError::invalid(
+                            "Promise is already closed or does not exist",
+                        ))
+                    },
+                    revision_after: None,
+                })
+            }
             _ => Ok(OperationResult {
                 success: false,
                 operation,
@@ -1315,14 +1392,61 @@ fn story_debt_from_open_promise(
             snippet: promise.description.clone(),
         }],
         related_review_ids: Vec::new(),
-        operations: vec![WriterOperation::PromiseResolve {
-            promise_id: promise.id.to_string(),
-            chapter: active_chapter
-                .clone()
-                .unwrap_or_else(|| promise.expected_payoff.clone()),
-        }],
+        operations: story_debt_promise_operations(promise, active_chapter),
         created_at: 0,
     }
+}
+
+fn story_debt_promise_operations(
+    promise: &super::memory::PlotPromiseSummary,
+    active_chapter: &Option<String>,
+) -> Vec<WriterOperation> {
+    let chapter = active_chapter
+        .clone()
+        .unwrap_or_else(|| promise.expected_payoff.clone());
+    vec![
+        WriterOperation::PromiseResolve {
+            promise_id: promise.id.to_string(),
+            chapter: chapter.clone(),
+        },
+        WriterOperation::PromiseDefer {
+            promise_id: promise.id.to_string(),
+            chapter: chapter.clone(),
+            expected_payoff: next_story_debt_payoff(&chapter),
+        },
+        WriterOperation::PromiseAbandon {
+            promise_id: promise.id.to_string(),
+            chapter,
+            reason: format!(
+                "Author decided '{}' no longer needs payoff in the current story shape.",
+                promise.title
+            ),
+        },
+    ]
+}
+
+fn next_story_debt_payoff(chapter: &str) -> String {
+    let mut numbers = Vec::new();
+    let mut current = String::new();
+    for ch in chapter.chars() {
+        if ch.is_ascii_digit() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            if let Ok(number) = current.parse::<i64>() {
+                numbers.push(number);
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        if let Ok(number) = current.parse::<i64>() {
+            numbers.push(number);
+        }
+    }
+    numbers
+        .last()
+        .map(|number| format!("Chapter-{}", number + 1))
+        .unwrap_or_else(|| "later chapter".to_string())
 }
 
 fn story_debt_category_for_review(entry: &StoryReviewQueueEntry) -> StoryDebtCategory {
@@ -1352,7 +1476,9 @@ fn chapter_from_operations(operations: &[WriterOperation]) -> Option<String> {
         WriterOperation::TextInsert { chapter, .. }
         | WriterOperation::TextReplace { chapter, .. }
         | WriterOperation::TextAnnotate { chapter, .. }
-        | WriterOperation::PromiseResolve { chapter, .. } => Some(chapter.clone()),
+        | WriterOperation::PromiseResolve { chapter, .. }
+        | WriterOperation::PromiseDefer { chapter, .. }
+        | WriterOperation::PromiseAbandon { chapter, .. } => Some(chapter.clone()),
         _ => None,
     })
 }
