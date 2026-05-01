@@ -146,6 +146,152 @@ function mergeProposal(prev: AgentProposal[], incoming: AgentProposal): AgentPro
   return [incoming, ...next].slice(0, 20);
 }
 
+type SecondBrainTone = "neutral" | "accent" | "danger" | "success";
+
+interface SecondBrainItem {
+  label: string;
+  value: string;
+  detail?: string;
+  tone: SecondBrainTone;
+}
+
+function compactLine(text: string | undefined, fallback: string, max = 96): string {
+  const cleaned = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return fallback;
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}...` : cleaned;
+}
+
+function firstDebt(
+  storyDebt: StoryDebtSnapshot | null,
+  categories: StoryDebtEntry["category"][],
+): StoryDebtEntry | undefined {
+  return storyDebt?.entries.find((entry) =>
+    entry.status === "open" && categories.includes(entry.category)
+  );
+}
+
+function scopedDecision(ledger: WriterAgentLedgerSnapshot | null, currentChapter: string) {
+  return ledger?.recentDecisions.find((decision) =>
+    currentChapter
+      ? decision.scope === currentChapter || decision.scope === "manual request"
+      : decision.scope === "manual request"
+  );
+}
+
+function proposalForArc(proposals: AgentProposal[]): AgentProposal | undefined {
+  return proposals.find((proposal) =>
+    proposal.kind === "style_note" || proposal.kind === "chapter_structure"
+  );
+}
+
+function secondBrainToneClass(tone: SecondBrainTone): string {
+  if (tone === "danger") return "border-danger/40 bg-danger/10";
+  if (tone === "accent") return "border-accent/30 bg-accent-subtle/20";
+  if (tone === "success") return "border-success/30 bg-success/10";
+  return "border-border-subtle bg-bg-raised";
+}
+
+function secondBrainValueClass(tone: SecondBrainTone): string {
+  if (tone === "danger") return "text-danger";
+  if (tone === "accent") return "text-accent";
+  if (tone === "success") return "text-success";
+  return "text-text-primary";
+}
+
+function buildSecondBrainItems(
+  ledger: WriterAgentLedgerSnapshot | null,
+  storyDebt: StoryDebtSnapshot | null,
+  proposals: AgentProposal[],
+  currentChapter: string,
+): SecondBrainItem[] {
+  const canonRisk = firstDebt(storyDebt, ["canon_risk", "timeline_risk"]);
+  const promiseDebt = firstDebt(storyDebt, ["promise"]);
+  const pacingDebt = firstDebt(storyDebt, ["pacing"]);
+  const decision = scopedDecision(ledger, currentChapter);
+  const arcProposal = proposalForArc(proposals);
+  const openPromise = ledger?.openPromises[0];
+  const canonRule = ledger?.canonRules[0];
+
+  const sceneGoal = canonRisk ?? promiseDebt ?? pacingDebt;
+  const sceneValue = sceneGoal
+    ? compactLine(sceneGoal.title, "Resolve current story debt", 72)
+    : decision
+      ? compactLine(decision.title, "Continue current decision", 72)
+      : currentChapter
+        ? `Advance ${currentChapter}`
+        : "No chapter loaded";
+  const sceneDetail = sceneGoal
+    ? compactLine(sceneGoal.message, "Review the active story issue")
+    : decision
+      ? compactLine(decision.rationale || decision.scope, "Follow the latest creative decision")
+      : "Keep drafting while preserving canon and unresolved promises.";
+
+  const promiseValue = openPromise
+    ? compactLine(openPromise.title, "Open promise", 72)
+    : promiseDebt
+      ? compactLine(promiseDebt.title, "Open promise", 72)
+      : "No open promise";
+  const promiseDetail = openPromise
+    ? compactLine(
+        openPromise.expectedPayoff
+          ? `${openPromise.description} -> ${openPromise.expectedPayoff}`
+          : openPromise.description,
+        "Payoff not set",
+      )
+    : promiseDebt
+      ? compactLine(promiseDebt.message, "Resolve or defer")
+      : "Ledger has no unresolved promise.";
+
+  const canonValue = canonRisk
+    ? compactLine(canonRisk.title, "Canon risk", 72)
+    : canonRule
+      ? compactLine(canonRule.category, "Canon rule", 72)
+      : "No canon risk";
+  const canonDetail = canonRisk
+    ? compactLine(canonRisk.message, "Resolve before accepting new text")
+    : canonRule
+      ? compactLine(canonRule.rule, "Respect active canon rule")
+      : "No active conflict flagged.";
+
+  const arcValue = pacingDebt
+    ? compactLine(pacingDebt.title, "Pacing issue", 72)
+    : arcProposal
+      ? compactLine(arcProposal.kind.replace("_", " "), "Arc note", 72)
+      : "No pacing debt";
+  const arcDetail = pacingDebt
+    ? compactLine(pacingDebt.message, "Adjust beat or structure")
+    : arcProposal
+      ? compactLine(arcProposal.preview, arcProposal.rationale || "Review current scene movement")
+      : "Current arc has no flagged drag or missing beat.";
+
+  return [
+    {
+      label: "Scene Goal",
+      value: sceneValue,
+      detail: sceneDetail,
+      tone: sceneGoal ? "accent" : "neutral",
+    },
+    {
+      label: "Open Promise",
+      value: promiseValue,
+      detail: promiseDetail,
+      tone: openPromise || promiseDebt ? "accent" : "success",
+    },
+    {
+      label: "Canon Risk",
+      value: canonValue,
+      detail: canonDetail,
+      tone: canonRisk ? "danger" : "success",
+    },
+    {
+      label: "Arc / Pacing",
+      value: arcValue,
+      detail: arcDetail,
+      tone: pacingDebt || arcProposal ? "accent" : "success",
+    },
+  ];
+}
+
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
@@ -451,6 +597,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     mode === "write"
       ? pendingProposals.filter((proposal) => proposal.priority === "urgent").slice(0, 3)
       : pendingProposals;
+  const secondBrainItems = buildSecondBrainItems(
+    ledger,
+    storyDebt,
+    pendingProposals,
+    currentChapter,
+  );
   const availableTabs =
     mode === "write"
       ? (["status", "promises", "canon"] as const)
@@ -546,6 +698,34 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 {operationError}
               </div>
             )}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-medium text-text-secondary">Second Brain</span>
+                <span className="text-[10px] text-text-muted">
+                  {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {secondBrainItems.map((item) => (
+                  <div
+                    key={item.label}
+                    className={`min-w-0 rounded border p-2 text-xs ${secondBrainToneClass(item.tone)}`}
+                  >
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-text-muted">
+                      {item.label}
+                    </div>
+                    <div className={`truncate font-medium ${secondBrainValueClass(item.tone)}`} title={item.value}>
+                      {item.value}
+                    </div>
+                    {item.detail && (
+                      <div className="mt-1 line-clamp-2 text-[10px] leading-snug text-text-secondary" title={item.detail}>
+                        {item.detail}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="text-xs text-text-muted">
               <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
               <div className="p-2 rounded bg-bg-raised border border-border-subtle">
