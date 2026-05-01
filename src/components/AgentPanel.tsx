@@ -8,6 +8,7 @@ import {
   Events,
   extractActions,
   type AgentError,
+  type AgentLoopEventPayload,
   type ChapterGenerationEvent,
   type ChapterGenerationStart,
   type ChainOfThoughtStep,
@@ -102,8 +103,32 @@ export default function AgentPanel({
     let unlistenEpiphany: UnlistenFn;
     let unlistenCot: UnlistenFn;
     let unlistenChapter: UnlistenFn;
+    let unlistenLoop: UnlistenFn;
 
     const setup = async () => {
+      // Listen for new agent-loop-event (replaces legacy chunk/error/end events)
+      unlistenLoop = await listen<AgentLoopEventPayload>("agent-loop-event", (event) => {
+        const p = event.payload;
+        switch (p.kind) {
+          case "text_chunk":
+            if (!isInlineRequest) {
+              rawBufferRef.current += p.content ?? "";
+              setStreaming((prev) => prev + (p.content ?? ""));
+            }
+            break;
+          case "error":
+            setAgentError(p.message ?? "Agent error");
+            setIsStreaming(false);
+            setIsAgentThinking(false);
+            break;
+          case "complete":
+            finalizeResponse(rawBufferRef.current);
+            break;
+          case "compaction":
+            // Context was compacted — transparent to user
+            break;
+        }
+      });
       unlistenChunk = await listen<StreamChunk>(Events.agentStreamChunk, (event) => {
         if (isInlineRequest) return;
         setSearchStatus((prev) => (prev ? null : prev));
@@ -214,6 +239,7 @@ export default function AgentPanel({
       if (unlistenSearch) unlistenSearch();
       if (unlistenError) unlistenError();
       if (unlistenEpiphany) unlistenEpiphany();
+      if (unlistenLoop) unlistenLoop();
       if (unlistenCot) unlistenCot();
       if (unlistenChapter) unlistenChapter();
     };

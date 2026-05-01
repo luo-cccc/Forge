@@ -3,6 +3,9 @@ import type {
   AgentMode,
   AgentObservation,
   AgentSuggestion,
+  PatchSet,
+  PatchStatus,
+  TextPatch,
 } from "./protocol";
 
 interface OutlineNode {
@@ -40,6 +43,14 @@ interface AppState {
   dismissSuggestion: (id: string) => void;
   snoozeSuggestions: (durationMs: number) => void;
   clearExpiredSnooze: (now: number) => void;
+  activePatchSet: PatchSet | null;
+  patchStatuses: Record<string, PatchStatus>;
+  setPatchSet: (ps: PatchSet) => void;
+  acceptPatch: (patchId: string) => void;
+  rejectPatch: (patchId: string) => void;
+  acceptAllPatches: () => void;
+  rejectAllPatches: () => void;
+  clearPatches: () => void;
 }
 
 function isSameSuggestionAnchor(a: AgentSuggestion, b: AgentSuggestion): boolean {
@@ -123,4 +134,33 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   clearExpiredSnooze: (now) =>
     set((s) => (s.snoozedUntil && s.snoozedUntil <= now ? { snoozedUntil: null } : {})),
+
+  activePatchSet: null,
+  patchStatuses: {},
+  setPatchSet: (ps) =>
+    set({
+      activePatchSet: ps,
+      patchStatuses: Object.fromEntries(ps.patches.map((p) => [p.id, "pending" as PatchStatus])),
+    }),
+  acceptPatch: (id) =>
+    set((s) => ({
+      patchStatuses: { ...s.patchStatuses, [id]: "accepted" as PatchStatus },
+    })),
+  rejectPatch: (id) =>
+    set((s) => ({
+      patchStatuses: { ...s.patchStatuses, [id]: "rejected" as PatchStatus },
+    })),
+  acceptAllPatches: () =>
+    set((s) => ({
+      patchStatuses: Object.fromEntries(
+        Object.keys(s.patchStatuses).map((k) => [k, "accepted" as PatchStatus]),
+      ),
+    })),
+  rejectAllPatches: () =>
+    set((s) => ({
+      patchStatuses: Object.fromEntries(
+        Object.keys(s.patchStatuses).map((k) => [k, "rejected" as PatchStatus]),
+      ),
+    })),
+  clearPatches: () => set({ activePatchSet: null, patchStatuses: {} }),
 }));

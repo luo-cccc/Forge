@@ -27,6 +27,9 @@ import SemanticLint from "../extensions/SemanticLint";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
 import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
+import { PatchReviewOverlay } from "./PatchReviewOverlay";
+import { CoWriterStatusBar } from "./CoWriterStatusBar";
+import PatchMark from "../extensions/PatchMark";
 
 interface SelectionState {
   from: number;
