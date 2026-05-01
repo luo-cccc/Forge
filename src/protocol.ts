@@ -29,7 +29,6 @@ export const Commands = {
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
   getProjectGraphData: "get_project_graph_data",
-  harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   listFileBackups: "list_file_backups",
   readProjectDir: "read_project_dir",

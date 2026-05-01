@@ -411,11 +411,6 @@ struct InlineWriterOperationEvent {
 use agent_harness_core::truncate_context;
 
 #[tauri::command]
-fn harness_echo(message: String) -> String {
-    format!("Harness Received: {}", message)
-}
-
-#[tauri::command]
 fn get_lorebook(app: tauri::AppHandle) -> Result<Vec<LoreEntry>, String> {
     storage::load_lorebook(&app)
 }
@@ -3360,7 +3355,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             abort_editor_prediction,
-            harness_echo,
             report_editor_state,
             report_semantic_lint_state,
             ask_agent,
@@ -3428,6 +3422,13 @@ mod tests {
         assert!(drafts[0].text.contains("把刀压低"));
         assert_eq!(drafts[1].label, "B 冲突加压");
         assert_eq!(drafts[2].id, "c");
+    }
+
+    #[test]
+    fn frontend_protocol_does_not_expose_harness_echo() {
+        let protocol = include_str!("../../src/protocol.ts");
+        assert!(!protocol.contains("harness_echo"));
+        assert!(!protocol.contains("harnessEcho"));
     }
 
     #[test]
