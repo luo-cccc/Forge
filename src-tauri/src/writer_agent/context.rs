@@ -21,6 +21,7 @@ pub struct ContextExcerpt {
 pub enum ContextSource {
     SystemContract,
     ProjectBrief,
+    ChapterMission,
     AuthorStyle,
     CanonSlice,
     PromiseSlice,
@@ -64,6 +65,7 @@ impl AgentTask {
         match self {
             AgentTask::GhostWriting => vec![
                 (ContextSource::CursorPrefix, 10, 800),
+                (ContextSource::ChapterMission, 10, 520),
                 (ContextSource::ProjectBrief, 9, 420),
                 (ContextSource::CursorSuffix, 9, 400),
                 (ContextSource::CanonSlice, 8, 600),
@@ -76,6 +78,7 @@ impl AgentTask {
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 10, 300),
                 (ContextSource::CanonSlice, 10, 800),
+                (ContextSource::ChapterMission, 9, 420),
                 (ContextSource::ProjectBrief, 9, 400),
                 (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::OutlineSlice, 9, 500),
@@ -83,6 +86,7 @@ impl AgentTask {
             ],
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 11, 1600),
+                (ContextSource::ChapterMission, 11, 2200),
                 (ContextSource::OutlineSlice, 10, 6000),
                 (ContextSource::PreviousChapter, 9, 5000),
                 (ContextSource::PromiseSlice, 8, 4000),
@@ -96,6 +100,7 @@ impl AgentTask {
                 (ContextSource::SelectedText, 10, 2000),
                 (ContextSource::CursorPrefix, 9, 500),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::ChapterMission, 8, 500),
                 (ContextSource::ProjectBrief, 8, 400),
                 (ContextSource::CanonSlice, 7, 400),
                 (ContextSource::DecisionSlice, 7, 300),
@@ -105,6 +110,7 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 10, 500),
                 (ContextSource::PromiseSlice, 9, 300),
                 (ContextSource::DecisionSlice, 9, 300),
+                (ContextSource::ChapterMission, 8, 360),
                 (ContextSource::ProjectBrief, 8, 300),
                 (ContextSource::AuthorStyle, 8, 300),
             ],
@@ -112,6 +118,7 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 10, 2000),
                 (ContextSource::PromiseSlice, 9, 1000),
                 (ContextSource::DecisionSlice, 9, 800),
+                (ContextSource::ChapterMission, 8, 800),
                 (ContextSource::ProjectBrief, 8, 600),
                 (ContextSource::OutlineSlice, 8, 1000),
             ],
@@ -119,6 +126,7 @@ impl AgentTask {
                 (ContextSource::SelectedText, 10, 1200),
                 (ContextSource::CursorPrefix, 9, 1400),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::ChapterMission, 8, 700),
                 (ContextSource::ProjectBrief, 8, 600),
                 (ContextSource::CanonSlice, 8, 800),
                 (ContextSource::PromiseSlice, 7, 600),
@@ -133,6 +141,7 @@ impl AgentTask {
         match self {
             AgentTask::GhostWriting => vec![
                 (ContextSource::CursorPrefix, 240),
+                (ContextSource::ChapterMission, 180),
                 (ContextSource::ProjectBrief, 160),
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::PromiseSlice, 140),
@@ -140,10 +149,12 @@ impl AgentTask {
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 160),
                 (ContextSource::CanonSlice, 240),
+                (ContextSource::ChapterMission, 140),
                 (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 500),
+                (ContextSource::ChapterMission, 700),
                 (ContextSource::OutlineSlice, 1_000),
                 (ContextSource::PreviousChapter, 800),
                 (ContextSource::PromiseSlice, 600),
@@ -152,21 +163,25 @@ impl AgentTask {
             AgentTask::InlineRewrite => vec![
                 (ContextSource::SelectedText, 400),
                 (ContextSource::CursorPrefix, 160),
+                (ContextSource::ChapterMission, 160),
                 (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::ProposalEvaluation => vec![
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::DecisionSlice, 120),
+                (ContextSource::ChapterMission, 120),
                 (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 600),
                 (ContextSource::PromiseSlice, 240),
+                (ContextSource::ChapterMission, 240),
                 (ContextSource::ProjectBrief, 180),
             ],
             AgentTask::ManualRequest => vec![
                 (ContextSource::SelectedText, 300),
                 (ContextSource::CursorPrefix, 300),
+                (ContextSource::ChapterMission, 220),
                 (ContextSource::ProjectBrief, 180),
                 (ContextSource::CanonSlice, 220),
                 (ContextSource::PromiseSlice, 180),
@@ -376,6 +391,7 @@ pub fn assemble_observation_context(
     total_budget: usize,
 ) -> WritingContextPack {
     let project_brief = build_project_brief(&observation.project_id, memory);
+    let chapter_mission = build_chapter_mission(&observation.project_id, observation, memory);
     let canon_slice = build_canon_slice(&observation.paragraph, memory);
     let promise_slice = build_promise_slice(memory);
     let decision_slice = build_decision_slice(memory);
@@ -395,6 +411,7 @@ pub fn assemble_observation_context(
             ContextSource::CursorSuffix => non_empty(cursor_suffix.clone()),
             ContextSource::SelectedText => non_empty(selected_text.clone()),
             ContextSource::ProjectBrief => non_empty(project_brief.clone()),
+            ContextSource::ChapterMission => non_empty(chapter_mission.clone()),
             ContextSource::CanonSlice => non_empty(canon_slice.clone()),
             ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
             ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
@@ -405,6 +422,25 @@ pub fn assemble_observation_context(
     )
 }
 
+fn build_chapter_mission(
+    project_id: &str,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+) -> String {
+    observation
+        .chapter_title
+        .as_deref()
+        .and_then(|chapter| {
+            memory
+                .get_chapter_mission(project_id, chapter)
+                .ok()
+                .flatten()
+        })
+        .filter(|mission| !mission.is_empty())
+        .map(|mission| mission.render_for_context())
+        .unwrap_or_default()
+}
+
 fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
     memory
         .get_story_contract(project_id)
@@ -413,6 +449,91 @@ fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
         .filter(|contract| !contract.is_empty())
         .map(|contract| contract.render_for_context())
         .unwrap_or_default()
+}
+
+pub fn seed_chapter_missions_from_outline(
+    project_id: &str,
+    outline: &[crate::storage::OutlineNode],
+    memory: &WriterMemory,
+) -> Result<usize, String> {
+    let mut seeded = 0usize;
+    for node in outline
+        .iter()
+        .filter(|node| !node.chapter_title.trim().is_empty())
+    {
+        let summary = compact_context_line(&node.summary, 180);
+        let mission = if summary.is_empty() {
+            format!(
+                "推进 {} 的章节目标，并保持与书级合同一致。",
+                node.chapter_title
+            )
+        } else {
+            summary.clone()
+        };
+        let must_include = infer_mission_must_include(&node.summary);
+        let must_not = infer_mission_must_not(&node.summary);
+        let expected_ending = infer_mission_expected_ending(&node.summary);
+        let did_seed = memory
+            .ensure_chapter_mission_seed(
+                project_id,
+                &node.chapter_title,
+                &mission,
+                &must_include,
+                &must_not,
+                &expected_ending,
+                "outline.seed",
+            )
+            .map_err(|e| e.to_string())?;
+        if did_seed {
+            seeded += 1;
+        }
+    }
+    Ok(seeded)
+}
+
+fn infer_mission_must_include(summary: &str) -> String {
+    let mut items = Vec::new();
+    if contains_any(summary, &["伏笔", "线索", "玉佩", "密道", "钥匙"]) {
+        items.push("保留并推进关键线索");
+    }
+    if contains_any(summary, &["冲突", "对抗", "危机", "敌"]) {
+        items.push("让冲突产生可见后果");
+    }
+    if contains_any(summary, &["关系", "信任", "背叛", "误会"]) {
+        items.push("推进角色关系状态变化");
+    }
+    if items.is_empty() {
+        "保持本章目标与大纲摘要一致".to_string()
+    } else {
+        items.join("；")
+    }
+}
+
+fn infer_mission_must_not(summary: &str) -> String {
+    let mut items = Vec::new();
+    if contains_any(summary, &["谜", "真相", "秘密", "身份"]) {
+        items.push("不要过早揭开核心谜底");
+    }
+    if contains_any(summary, &["试探", "怀疑", "误会"]) {
+        items.push("不要让角色过早达成完全信任");
+    }
+    if items.is_empty() {
+        "不要跳过因果铺垫或改写已确认设定".to_string()
+    } else {
+        items.join("；")
+    }
+}
+
+fn infer_mission_expected_ending(summary: &str) -> String {
+    if contains_any(summary, &["危机", "追杀", "敌", "对抗"]) {
+        "以新的压力、危险或选择收束。".to_string()
+    } else if contains_any(summary, &["线索", "发现", "秘密", "谜"]) {
+        "以新的线索或疑问收束。".to_string()
+    } else if contains_any(summary, &["关系", "信任", "背叛", "误会"]) {
+        "以角色关系状态变化收束。".to_string()
+    } else {
+        "以明确的状态变化或下一步钩子收束。".to_string()
+    }
 }
 
 pub fn seed_story_contract_from_project_assets(
@@ -789,6 +910,17 @@ mod tests {
             )
             .unwrap();
         memory
+            .ensure_chapter_mission_seed(
+                "default",
+                "Chapter-1",
+                "林墨在旧门前试探屋内人的真实立场。",
+                "保留玉佩线索",
+                "不要提前揭开玉佩来源",
+                "以新的疑问收束。",
+                "test",
+            )
+            .unwrap();
+        memory
             .upsert_canon_entity(
                 "character",
                 "林墨",
@@ -849,6 +981,10 @@ mod tests {
         assert!(pack
             .sources
             .iter()
+            .any(|s| s.source == ContextSource::ChapterMission));
+        assert!(pack
+            .sources
+            .iter()
             .any(|s| s.source == ContextSource::CanonSlice));
         assert!(pack
             .sources
@@ -898,5 +1034,36 @@ mod tests {
             memory.get_story_contract("novel-a").unwrap().unwrap().title,
             "寒影录"
         );
+    }
+
+    #[test]
+    fn test_seed_chapter_missions_from_outline() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let outline = vec![
+            crate::storage::OutlineNode {
+                chapter_title: "第一章".to_string(),
+                summary: "林墨发现玉佩线索，引出宗门危机。".to_string(),
+                status: "draft".to_string(),
+            },
+            crate::storage::OutlineNode {
+                chapter_title: "第二章".to_string(),
+                summary: "林墨与张三产生误会，关系开始紧张。".to_string(),
+                status: "draft".to_string(),
+            },
+        ];
+
+        let seeded = seed_chapter_missions_from_outline("novel-a", &outline, &memory).unwrap();
+
+        assert_eq!(seeded, 2);
+        let mission = memory
+            .get_chapter_mission("novel-a", "第一章")
+            .unwrap()
+            .unwrap();
+        assert!(mission.mission.contains("玉佩"));
+        assert!(mission.must_include.contains("线索"));
+
+        let seeded_again =
+            seed_chapter_missions_from_outline("novel-a", &outline, &memory).unwrap();
+        assert_eq!(seeded_again, 0);
     }
 }

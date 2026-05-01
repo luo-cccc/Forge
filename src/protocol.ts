@@ -597,6 +597,7 @@ export type WriterOperation =
   | { kind: "promise.abandon"; promiseId: string; chapter: string; reason: string }
   | { kind: "style.update_preference"; key: string; value: string }
   | { kind: "story_contract.upsert"; contract: StoryContractSummary }
+  | { kind: "chapter_mission.upsert"; mission: ChapterMissionSummary }
   | { kind: "outline.update"; nodeId: string; patch: unknown };
 
 export interface OperationError {
@@ -729,6 +730,19 @@ export interface StoryContractSummary {
   updatedAt: string;
 }
 
+export interface ChapterMissionSummary {
+  id: number;
+  projectId: string;
+  chapterTitle: string;
+  mission: string;
+  mustInclude: string;
+  mustNot: string;
+  expectedEnding: string;
+  status: string;
+  sourceRef: string;
+  updatedAt: string;
+}
+
 export interface MemoryAuditEntry {
   proposalId: string;
   kind: string;
@@ -742,6 +756,8 @@ export interface MemoryAuditEntry {
 
 export interface WriterAgentLedgerSnapshot {
   storyContract?: StoryContractSummary | null;
+  activeChapterMission?: ChapterMissionSummary | null;
+  chapterMissions: ChapterMissionSummary[];
   canonEntities: CanonEntitySummary[];
   canonRules: CanonRuleSummary[];
   openPromises: PlotPromiseSummary[];

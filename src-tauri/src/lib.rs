@@ -382,11 +382,11 @@ fn open_app_writer_kernel(
             e
         )
     })?;
-    seed_story_contract_if_empty(app, &project_id, &memory);
+    seed_story_model_if_empty(app, &project_id, &memory);
     Ok(writer_agent::WriterAgentKernel::new(&project_id, memory))
 }
 
-fn seed_story_contract_if_empty(
+fn seed_story_model_if_empty(
     app: &tauri::AppHandle,
     project_id: &str,
     memory: &writer_agent::memory::WriterMemory,
@@ -406,6 +406,17 @@ fn seed_story_contract_if_empty(
         Ok(true) => tracing::info!("Seeded initial story contract for project {}", project_id),
         Ok(false) => {}
         Err(e) => tracing::warn!("Story contract seed skipped: {}", e),
+    }
+    match writer_agent::context::seed_chapter_missions_from_outline(project_id, &outline, memory) {
+        Ok(count) if count > 0 => {
+            tracing::info!(
+                "Seeded {} chapter missions for project {}",
+                count,
+                project_id
+            )
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Chapter mission seed skipped: {}", e),
     }
 }
 

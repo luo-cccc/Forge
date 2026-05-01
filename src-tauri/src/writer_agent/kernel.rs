@@ -14,8 +14,8 @@ use super::diagnostics::{
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
-    ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary, StoryContractSummary,
-    WriterMemory,
+    ChapterMissionSummary, ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary,
+    StoryContractSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -41,6 +41,8 @@ pub struct WriterAgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct WriterAgentLedgerSnapshot {
     pub story_contract: Option<super::memory::StoryContractSummary>,
+    pub active_chapter_mission: Option<super::memory::ChapterMissionSummary>,
+    pub chapter_missions: Vec<super::memory::ChapterMissionSummary>,
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
     pub canon_rules: Vec<super::memory::CanonRuleSummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
@@ -1251,6 +1253,42 @@ impl WriterAgentKernel {
                     revision_after: None,
                 })
             }
+            WriterOperation::ChapterMissionUpsert { mission } => {
+                let summary = ChapterMissionSummary {
+                    id: 0,
+                    project_id: mission.project_id.clone(),
+                    chapter_title: mission.chapter_title.clone(),
+                    mission: mission.mission.clone(),
+                    must_include: mission.must_include.clone(),
+                    must_not: mission.must_not.clone(),
+                    expected_ending: mission.expected_ending.clone(),
+                    status: mission.status.clone(),
+                    source_ref: mission.source_ref.clone(),
+                    updated_at: String::new(),
+                };
+                self.memory
+                    .upsert_chapter_mission(&summary)
+                    .map_err(|e| format!("chapter mission: {}", e))?;
+                self.memory
+                    .record_decision(
+                        &summary.chapter_title,
+                        "Chapter mission",
+                        "updated_chapter_mission",
+                        &[],
+                        &summary.render_for_context(),
+                        &[format!(
+                            "chapter_mission:{}:{}",
+                            summary.project_id, summary.chapter_title
+                        )],
+                    )
+                    .ok();
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
             WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
                 success: false,
                 operation,
@@ -1443,6 +1481,16 @@ impl WriterAgentKernel {
             story_contract: self
                 .memory
                 .get_story_contract(&self.project_id)
+                .unwrap_or_default(),
+            active_chapter_mission: self.active_chapter.as_deref().and_then(|chapter| {
+                self.memory
+                    .get_chapter_mission(&self.project_id, chapter)
+                    .ok()
+                    .flatten()
+            }),
+            chapter_missions: self
+                .memory
+                .list_chapter_missions(&self.project_id, 50)
                 .unwrap_or_default(),
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
             canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
@@ -2893,7 +2941,7 @@ fn context_pack_evidence(
             ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
             ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
-            ContextSource::OutlineSlice => EvidenceSource::Outline,
+            ContextSource::OutlineSlice | ContextSource::ChapterMission => EvidenceSource::Outline,
             _ => EvidenceSource::ChapterText,
         };
         evidence.push(EvidenceRef {
@@ -3704,6 +3752,38 @@ mod tests {
         let contract = ledger.story_contract.unwrap();
         assert_eq!(contract.title, "寒影录");
         assert!(contract.render_for_context().contains("前30章承诺"));
+    }
+
+    #[test]
+    fn chapter_mission_operation_updates_ledger_snapshot() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("novel-a", memory);
+        kernel.active_chapter = Some("第一章".to_string());
+        let result = kernel
+            .approve_editor_operation(
+                WriterOperation::ChapterMissionUpsert {
+                    mission: crate::writer_agent::operation::ChapterMissionOp {
+                        project_id: "novel-a".to_string(),
+                        chapter_title: "第一章".to_string(),
+                        mission: "林墨发现玉佩线索。".to_string(),
+                        must_include: "推进玉佩线索".to_string(),
+                        must_not: "不要提前揭开真相".to_string(),
+                        expected_ending: "以新的疑问收束。".to_string(),
+                        status: "active".to_string(),
+                        source_ref: "test".to_string(),
+                    },
+                },
+                "",
+            )
+            .unwrap();
+
+        assert!(result.success);
+        let ledger = kernel.ledger_snapshot();
+        assert_eq!(ledger.chapter_missions.len(), 1);
+        assert_eq!(
+            ledger.active_chapter_mission.unwrap().mission,
+            "林墨发现玉佩线索。"
+        );
     }
 
     #[test]

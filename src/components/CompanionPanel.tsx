@@ -246,6 +246,9 @@ function buildSecondBrainItems(
   const openPromise = ledger?.openPromises[0];
   const canonRule = ledger?.canonRules[0];
   const storyContract = ledger?.storyContract;
+  const chapterMission =
+    ledger?.activeChapterMission ??
+    ledger?.chapterMissions.find((mission) => mission.chapterTitle === currentChapter);
   const hasStoryContract = Boolean(storyContract && (
     storyContract.readerPromise ||
     storyContract.first30ChapterPromise ||
@@ -332,6 +335,25 @@ function buildSecondBrainItems(
         "Book-level promise is active.",
       )
     : "Set the book-level promise so the agent can judge local choices against the whole novel.";
+  const missionValue = chapterMission
+    ? compactLine(chapterMission.mission || chapterMission.expectedEnding, "Current chapter mission", 72)
+    : currentChapter
+      ? "No chapter mission"
+      : "No chapter loaded";
+  const missionDetail = chapterMission
+    ? compactLine(
+        [
+          chapterMission.mustInclude && `Must: ${chapterMission.mustInclude}`,
+          chapterMission.mustNot && `Avoid: ${chapterMission.mustNot}`,
+          chapterMission.expectedEnding && `End: ${chapterMission.expectedEnding}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        "Mission is active for the current chapter.",
+      )
+    : currentChapter
+      ? "Add or seed a mission so local suggestions know what this chapter must accomplish."
+      : "Open a chapter to bind the agent to a concrete mission.";
 
   return [
     {
@@ -339,6 +361,12 @@ function buildSecondBrainItems(
       value: contractValue,
       detail: contractDetail,
       tone: hasStoryContract && !contractNeedsReview ? "success" : "accent",
+    },
+    {
+      label: "Chapter Mission",
+      value: missionValue,
+      detail: missionDetail,
+      tone: chapterMission ? "success" : "accent",
     },
     {
       label: "Scene Goal",

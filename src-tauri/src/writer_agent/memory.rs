@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -100,6 +100,21 @@ CREATE TABLE IF NOT EXISTS story_contracts (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS chapter_missions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    chapter_title TEXT NOT NULL,
+    mission TEXT DEFAULT '',
+    must_include TEXT DEFAULT '',
+    must_not TEXT DEFAULT '',
+    expected_ending TEXT DEFAULT '',
+    status TEXT DEFAULT 'draft',
+    source_ref TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(project_id, chapter_title)
+);
+
 CREATE TABLE IF NOT EXISTS memory_audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proposal_id TEXT NOT NULL,
@@ -165,6 +180,8 @@ CREATE INDEX IF NOT EXISTS idx_canon_rule_status ON canon_rules(status);
 CREATE INDEX IF NOT EXISTS idx_promise_status ON plot_promises(status);
 CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
 CREATE INDEX IF NOT EXISTS idx_story_contract_updated_at ON story_contracts(updated_at);
+CREATE INDEX IF NOT EXISTS idx_chapter_missions_project_chapter ON chapter_missions(project_id, chapter_title);
+CREATE INDEX IF NOT EXISTS idx_chapter_missions_status ON chapter_missions(status);
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
@@ -240,6 +257,45 @@ pub struct StoryContractSummary {
     pub structural_boundary: String,
     pub tone_contract: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterMissionSummary {
+    pub id: i64,
+    pub project_id: String,
+    pub chapter_title: String,
+    pub mission: String,
+    pub must_include: String,
+    pub must_not: String,
+    pub expected_ending: String,
+    pub status: String,
+    pub source_ref: String,
+    pub updated_at: String,
+}
+
+impl ChapterMissionSummary {
+    pub fn is_empty(&self) -> bool {
+        [
+            &self.mission,
+            &self.must_include,
+            &self.must_not,
+            &self.expected_ending,
+        ]
+        .iter()
+        .all(|value| value.trim().is_empty())
+    }
+
+    pub fn render_for_context(&self) -> String {
+        let mut lines = Vec::new();
+        push_contract_line(&mut lines, "章节", &self.chapter_title);
+        push_contract_line(&mut lines, "本章任务", &self.mission);
+        push_contract_line(&mut lines, "必保事项", &self.must_include);
+        push_contract_line(&mut lines, "禁止事项", &self.must_not);
+        push_contract_line(&mut lines, "预期收束", &self.expected_ending);
+        push_contract_line(&mut lines, "任务状态", &self.status);
+        lines.join("\n")
+    }
 }
 
 impl StoryContractSummary {
@@ -793,6 +849,107 @@ impl WriterMemory {
             updated_at: String::new(),
         };
         self.upsert_story_contract(&contract)?;
+        Ok(true)
+    }
+
+    // -- Chapter Mission --
+
+    pub fn upsert_chapter_mission(&self, mission: &ChapterMissionSummary) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO chapter_missions
+             (project_id, chapter_title, mission, must_include, must_not, expected_ending,
+              status, source_ref, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+             ON CONFLICT(project_id, chapter_title) DO UPDATE SET
+                mission=excluded.mission,
+                must_include=excluded.must_include,
+                must_not=excluded.must_not,
+                expected_ending=excluded.expected_ending,
+                status=excluded.status,
+                source_ref=excluded.source_ref,
+                updated_at=datetime('now')",
+            rusqlite::params![
+                mission.project_id,
+                mission.chapter_title,
+                mission.mission,
+                mission.must_include,
+                mission.must_not,
+                mission.expected_ending,
+                mission.status,
+                mission.source_ref,
+            ],
+        )?;
+        self.conn.query_row(
+            "SELECT id FROM chapter_missions WHERE project_id=?1 AND chapter_title=?2",
+            rusqlite::params![mission.project_id, mission.chapter_title],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn get_chapter_mission(
+        &self,
+        project_id: &str,
+        chapter_title: &str,
+    ) -> rusqlite::Result<Option<ChapterMissionSummary>> {
+        self.conn
+            .query_row(
+                "SELECT id, project_id, chapter_title, mission, must_include, must_not,
+                        expected_ending, status, source_ref, updated_at
+                 FROM chapter_missions WHERE project_id=?1 AND chapter_title=?2",
+                rusqlite::params![project_id, chapter_title],
+                chapter_mission_from_row,
+            )
+            .optional()
+    }
+
+    pub fn list_chapter_missions(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ChapterMissionSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, project_id, chapter_title, mission, must_include, must_not,
+                    expected_ending, status, source_ref, updated_at
+             FROM chapter_missions
+             WHERE project_id=?1
+             ORDER BY id ASC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project_id, limit as i64], |row| {
+            chapter_mission_from_row(row)
+        })?;
+        rows.collect()
+    }
+
+    pub fn ensure_chapter_mission_seed(
+        &self,
+        project_id: &str,
+        chapter_title: &str,
+        mission: &str,
+        must_include: &str,
+        must_not: &str,
+        expected_ending: &str,
+        source_ref: &str,
+    ) -> rusqlite::Result<bool> {
+        if self
+            .get_chapter_mission(project_id, chapter_title)?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        let summary = ChapterMissionSummary {
+            id: 0,
+            project_id: project_id.to_string(),
+            chapter_title: chapter_title.to_string(),
+            mission: mission.to_string(),
+            must_include: must_include.to_string(),
+            must_not: must_not.to_string(),
+            expected_ending: expected_ending.to_string(),
+            status: "draft".to_string(),
+            source_ref: source_ref.to_string(),
+            updated_at: String::new(),
+        };
+        self.upsert_chapter_mission(&summary)?;
         Ok(true)
     }
 
@@ -1473,7 +1630,85 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     )?;
     backfill_empty_timestamp(conn, "story_contracts", "updated_at")?;
 
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "project_id",
+        "project_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "chapter_title",
+        "chapter_title TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "mission",
+        "mission TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "must_include",
+        "must_include TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "must_not",
+        "must_not TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "expected_ending",
+        "expected_ending TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "status",
+        "status TEXT DEFAULT 'draft'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "source_ref",
+        "source_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "chapter_missions", "created_at")?;
+    backfill_empty_timestamp(conn, "chapter_missions", "updated_at")?;
+
     Ok(())
+}
+
+fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterMissionSummary> {
+    Ok(ChapterMissionSummary {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        chapter_title: row.get(2)?,
+        mission: row.get(3)?,
+        must_include: row.get(4)?,
+        must_not: row.get(5)?,
+        expected_ending: row.get(6)?,
+        status: row.get(7)?,
+        source_ref: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
 }
 
 fn backfill_empty_timestamp(conn: &Connection, table: &str, column: &str) -> SqlResult<()> {
@@ -1798,6 +2033,37 @@ mod tests {
     }
 
     #[test]
+    fn test_chapter_mission_upsert_list_and_seed() {
+        let m = memory();
+        assert!(m
+            .ensure_chapter_mission_seed(
+                "novel-a",
+                "第一章",
+                "林墨发现玉佩线索。",
+                "推进玉佩线索",
+                "不要提前揭开真相",
+                "以新的疑问收束。",
+                "test",
+            )
+            .unwrap());
+        assert!(!m
+            .ensure_chapter_mission_seed("novel-a", "第一章", "不覆盖", "", "", "", "test")
+            .unwrap());
+
+        let mut mission = m.get_chapter_mission("novel-a", "第一章").unwrap().unwrap();
+        assert_eq!(mission.mission, "林墨发现玉佩线索。");
+        assert!(mission.render_for_context().contains("本章任务"));
+
+        mission.expected_ending = "以冲突升级收束。".to_string();
+        m.upsert_chapter_mission(&mission).unwrap();
+
+        let missions = m.list_chapter_missions("novel-a", 10).unwrap();
+        assert_eq!(missions.len(), 1);
+        assert_eq!(missions[0].expected_ending, "以冲突升级收束。");
+        assert!(!missions[0].is_empty());
+    }
+
+    #[test]
     fn open_migrates_legacy_writer_memory_columns() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -1836,6 +2102,8 @@ mod tests {
         assert!(table_has_column(&conn, "manual_agent_turns", "source_refs_json").unwrap());
         assert!(table_exists(&conn, "story_contracts").unwrap());
         assert!(table_has_column(&conn, "story_contracts", "reader_promise").unwrap());
+        assert!(table_exists(&conn, "chapter_missions").unwrap());
+        assert!(table_has_column(&conn, "chapter_missions", "expected_ending").unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
