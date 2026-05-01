@@ -61,7 +61,7 @@ fn load_api_key_from_keychain() -> Option<String> {
 }
 
 #[tauri::command]
-fn export_diagnostic_logs() -> Result<String, String> {
+fn export_diagnostic_logs(app: tauri::AppHandle) -> Result<String, String> {
     use std::io::Write;
 
     let log_dir = log_dir()?;
@@ -83,6 +83,19 @@ fn export_diagnostic_logs() -> Result<String, String> {
             }
         }
     }
+
+    let storage_snapshot = match storage::project_storage_diagnostics(&app) {
+        Ok(snapshot) => serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?,
+        Err(e) => serde_json::json!({
+            "healthy": false,
+            "error": e,
+        })
+        .to_string(),
+    };
+    zip.start_file("project-storage-diagnostics.json", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(storage_snapshot.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     zip.finish().map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
