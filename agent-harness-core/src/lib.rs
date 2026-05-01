@@ -1,4 +1,3 @@
-pub mod actions;
 pub mod agent_loop;
 pub mod ambient;
 pub mod compaction;
@@ -22,7 +21,6 @@ pub mod tool_executor;
 pub mod tool_registry;
 pub mod vector_db;
 
-pub use actions::{parse_actions, Action};
 pub use agent_loop::{AgentLoop, AgentLoopConfig, AgentLoopEvent};
 pub use ambient::{AgentOutput, AmbientAgent, AmbientEventBus, EditorEvent};
 pub use compaction::{

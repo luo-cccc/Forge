@@ -3,10 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
 import {
-  ACTION_RE,
   Commands,
   Events,
-  extractActions,
   type AgentError,
   type AgentLoopEventPayload,
   type ChapterGenerationEvent,
@@ -32,8 +30,6 @@ interface Message {
 interface AgentPanelProps {
   mode: StoryMode;
   getContext: () => { full: string; paragraph: string; selected: string; cursorPosition: number };
-  onActionInsert: (text: string) => void;
-  onActionReplace: (text: string) => void;
 }
 
 function buildAskAgentContext(
@@ -87,8 +83,6 @@ function parseChineseChapterNumber(raw: string): number | null {
 export default function AgentPanel({
   mode,
   getContext,
-  onActionInsert,
-  onActionReplace,
 }: AgentPanelProps) {
   const isInlineRequest = useAppStore((s) => s.isInlineRequest);
   const currentChapter = useAppStore((s) => s.currentChapter);
@@ -157,7 +151,7 @@ export default function AgentPanel({
             setIsAgentThinking(false);
             setSearchStatus(null);
             if (rawBufferRef.current) {
-              const clean = rawBufferRef.current.replace(ACTION_RE, "");
+              const clean = rawBufferRef.current;
               rawBufferRef.current = "";
               if (clean) {
                 setMessages((prev) => [...prev, { role: "agent", content: clean }]);
@@ -174,16 +168,6 @@ export default function AgentPanel({
         if (isInlineRequest) return;
         setSearchStatus((prev) => (prev ? null : prev));
         rawBufferRef.current += event.payload.content;
-
-        const { actions, cleanText } = extractActions(rawBufferRef.current);
-        for (const action of actions) {
-          if (action.kind === "replace") {
-            onActionReplace(action.content);
-          } else {
-            onActionInsert(action.content);
-          }
-        }
-        rawBufferRef.current = cleanText;
         setStreaming(rawBufferRef.current);
       });
 
@@ -268,7 +252,7 @@ export default function AgentPanel({
 
       unlistenEnd = await listen<StreamEnd>(Events.agentStreamEnd, () => {
         if (isInlineRequest) return;
-        const finalText = rawBufferRef.current.replace(ACTION_RE, "");
+        const finalText = rawBufferRef.current;
         rawBufferRef.current = "";
 
         if (finalText) {
@@ -298,8 +282,6 @@ export default function AgentPanel({
       if (unlistenMarker) unlistenMarker();
     };
   }, [
-    onActionInsert,
-    onActionReplace,
     isInlineRequest,
     setIsAgentThinking,
     incrementActionEpoch,

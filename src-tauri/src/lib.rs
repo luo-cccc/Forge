@@ -3425,10 +3425,13 @@ mod tests {
     }
 
     #[test]
-    fn frontend_protocol_does_not_expose_harness_echo() {
+    fn frontend_protocol_does_not_expose_legacy_commands_or_xml_actions() {
         let protocol = include_str!("../../src/protocol.ts");
         assert!(!protocol.contains("harness_echo"));
         assert!(!protocol.contains("harnessEcho"));
+        assert!(!protocol.contains("ACTION_INSERT"));
+        assert!(!protocol.contains("ACTION_REPLACE"));
+        assert!(!protocol.contains("extractActions"));
     }
 
     #[test]

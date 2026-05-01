@@ -109,22 +109,6 @@ function App() {
     [currentChapter, setCurrentChapter, setCurrentChapterRevision, setIsEditorDirty],
   );
 
-  const handleActionInsert = useCallback((text: string) => {
-    const editor = editorRef.current;
-    if (editor) editor.commands.insertContent(text);
-  }, []);
-
-  const handleActionReplace = useCallback((text: string) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const { from, to } = selectionRef.current;
-    if (from < to) {
-      editor.commands.insertContentAt({ from, to }, text);
-    } else {
-      editor.commands.insertContent(text);
-    }
-  }, []);
-
   const handleApplyFix = useCallback((quote: string, suggestion: string) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -260,8 +244,6 @@ function App() {
           <AgentPanel
             mode={storyMode}
             getContext={getContext}
-            onActionInsert={handleActionInsert}
-            onActionReplace={handleActionReplace}
           />
           </div>
         )}

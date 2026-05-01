@@ -432,25 +432,6 @@ export interface ChapterGenerationStart {
   requestId: string;
 }
 
-export interface ParsedAction {
-  kind: "insert" | "replace";
-  content: string;
-}
-
-export const ACTION_RE = /<ACTION_(INSERT|REPLACE)>(.*?)<\/ACTION_\1>/gs;
-
-export function extractActions(buffer: string): {
-  actions: ParsedAction[];
-  cleanText: string;
-} {
-  const actions: ParsedAction[] = [];
-  const cleanText = buffer.replace(ACTION_RE, (_, kind: string, content: string) => {
-    actions.push({ kind: kind.toLowerCase() as ParsedAction["kind"], content });
-    return "";
-  });
-  return { actions, cleanText };
-}
-
 // === Patch Review System (OpenCode apply_patch pattern) ===
 
 export interface TextPatch {
