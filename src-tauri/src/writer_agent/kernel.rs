@@ -260,6 +260,7 @@ impl WriterAgentKernel {
             let result = chapter_result_from_observation(&observation, &self.memory);
             if !result.is_empty() {
                 self.memory.record_chapter_result(&result).ok();
+                self.calibrate_chapter_mission(&observation, &result).ok();
             }
         }
 
@@ -1646,6 +1647,45 @@ impl WriterAgentKernel {
         }
         StoryReviewQueueStatus::Pending
     }
+
+    fn calibrate_chapter_mission(
+        &self,
+        observation: &WriterObservation,
+        result: &ChapterResultSummary,
+    ) -> Result<(), String> {
+        let Some(chapter_title) = observation.chapter_title.as_deref() else {
+            return Ok(());
+        };
+        let Some(mut mission) = self
+            .memory
+            .get_chapter_mission(&self.project_id, chapter_title)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(());
+        };
+
+        let status = calibrated_mission_status(&mission, result);
+        if mission.status == status {
+            return Ok(());
+        }
+
+        mission.status = status;
+        mission.source_ref = format!("result_feedback:{}", result.source_ref);
+        self.memory
+            .upsert_chapter_mission(&mission)
+            .map_err(|e| e.to_string())?;
+        self.memory
+            .record_decision(
+                chapter_title,
+                "Chapter mission calibration",
+                &format!("mission_status:{}", mission.status),
+                &[],
+                &mission.render_for_context(),
+                &[result.source_ref.clone()],
+            )
+            .ok();
+        Ok(())
+    }
 }
 
 fn snippet(text: &str, limit: usize) -> String {
@@ -1717,6 +1757,99 @@ fn chapter_result_from_observation(
             .collect(),
         source_ref: format!("chapter_save:{}:{}", chapter_title, chapter_revision),
         created_at: observation.created_at,
+    }
+}
+
+fn calibrated_mission_status(
+    mission: &ChapterMissionSummary,
+    result: &ChapterResultSummary,
+) -> String {
+    let haystack = mission_result_haystack(result);
+    let must_not_hit = cue_hit_score(&mission.must_not, &haystack) > 0;
+    if must_not_hit {
+        return "drifted".to_string();
+    }
+
+    let must_include_score = cue_hit_score(&mission.must_include, &haystack);
+    let expected_ending_score = cue_hit_score(&mission.expected_ending, &haystack);
+    let mission_score = cue_hit_score(&mission.mission, &haystack);
+
+    if must_include_score > 0 && expected_ending_score > 0 {
+        "completed".to_string()
+    } else if must_include_score > 0 || expected_ending_score > 0 || mission_score > 1 {
+        "in_progress".to_string()
+    } else {
+        "needs_review".to_string()
+    }
+}
+
+fn mission_result_haystack(result: &ChapterResultSummary) -> String {
+    [
+        vec![result.summary.clone()],
+        result.state_changes.clone(),
+        result.character_progress.clone(),
+        result.new_conflicts.clone(),
+        result.new_clues.clone(),
+        result.promise_updates.clone(),
+        result.canon_updates.clone(),
+    ]
+    .concat()
+    .join("\n")
+}
+
+fn cue_hit_score(cues: &str, haystack: &str) -> usize {
+    mission_keywords(cues)
+        .into_iter()
+        .filter(|cue| haystack.contains(cue))
+        .count()
+}
+
+fn mission_keywords(text: &str) -> Vec<String> {
+    let stopwords = [
+        "保持", "推进", "不要", "不得", "本章", "当前", "目标", "任务", "需要", "后续", "解释",
+        "收束", "新的", "明确", "状态", "变化", "线索", "冲突", "角色",
+    ];
+    let mut keywords = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+            current.push(ch);
+        } else {
+            push_mission_keyword(&mut keywords, &current, &stopwords);
+            current.clear();
+        }
+    }
+    push_mission_keyword(&mut keywords, &current, &stopwords);
+    keywords.sort();
+    keywords.dedup();
+    keywords
+}
+
+fn push_mission_keyword(keywords: &mut Vec<String>, raw: &str, stopwords: &[&str]) {
+    let raw = raw.trim();
+    if raw.chars().count() < 2 || stopwords.iter().any(|word| raw == *word) {
+        return;
+    }
+    if raw.chars().count() <= 6 {
+        keywords.push(raw.to_string());
+        return;
+    }
+
+    for marker in [
+        "玉佩",
+        "寒影刀",
+        "密信",
+        "钥匙",
+        "令牌",
+        "真相",
+        "秘密",
+        "下落",
+        "信任",
+        "怀疑",
+    ] {
+        if raw.contains(marker) {
+            keywords.push(marker.to_string());
+        }
     }
 }
 
@@ -3895,6 +4028,68 @@ mod tests {
             .any(|line| line.contains("冲突")));
         assert!(result.new_clues.contains(&"玉佩".to_string()));
         assert!(result.source_ref.contains("chapter_save:第一章:rev-1"));
+    }
+
+    #[test]
+    fn save_observation_calibrates_completed_chapter_mission() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        memory
+            .ensure_chapter_mission_seed(
+                "default",
+                "Chapter-1",
+                "林墨追查玉佩下落。",
+                "玉佩",
+                "提前揭开真相",
+                "下落",
+                "test",
+            )
+            .unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs = observation("林墨发现玉佩的下落，但张三仍没有说出真相。");
+        obs.reason = ObservationReason::Save;
+        obs.source = ObservationSource::ChapterSave;
+
+        kernel.observe(obs).unwrap();
+
+        let mission = kernel
+            .ledger_snapshot()
+            .active_chapter_mission
+            .expect("mission should stay active");
+        assert_eq!(mission.status, "completed");
+        assert!(mission.source_ref.contains("result_feedback:chapter_save"));
+    }
+
+    #[test]
+    fn save_observation_marks_chapter_mission_drifted_on_must_not_hit() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        memory
+            .ensure_chapter_mission_seed(
+                "default",
+                "Chapter-1",
+                "林墨追查玉佩下落。",
+                "玉佩",
+                "真相",
+                "下落",
+                "test",
+            )
+            .unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs = observation("林墨发现玉佩的下落，并当场揭开真相。");
+        obs.reason = ObservationReason::Save;
+        obs.source = ObservationSource::ChapterSave;
+
+        kernel.observe(obs).unwrap();
+
+        let mission = kernel
+            .ledger_snapshot()
+            .active_chapter_mission
+            .expect("mission should stay active");
+        assert_eq!(mission.status, "drifted");
+        assert!(kernel
+            .ledger_snapshot()
+            .recent_decisions
+            .iter()
+            .any(|decision| decision.decision == "mission_status:drifted"));
     }
 
     #[test]

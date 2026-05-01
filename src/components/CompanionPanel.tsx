@@ -228,6 +228,21 @@ function formatContextBudgetDetail(proposal: WriterProposalTrace | undefined): s
   return `${budget.task} · ${budget.sourceReports.length} sources · ${pct}% used · ${truncated} truncated`;
 }
 
+function missionStatusLabel(status: string | undefined): string {
+  if (status === "completed") return "Done";
+  if (status === "drifted") return "Drift";
+  if (status === "needs_review") return "Review";
+  if (status === "in_progress") return "Active";
+  return status || "Draft";
+}
+
+function missionStatusTone(status: string | undefined): SecondBrainTone {
+  if (status === "completed") return "success";
+  if (status === "drifted" || status === "needs_review") return "danger";
+  if (status === "in_progress") return "accent";
+  return "accent";
+}
+
 function sourceBudgetClass(truncated: boolean): string {
   return truncated ? "text-accent" : "text-text-muted";
 }
@@ -340,7 +355,11 @@ function buildSecondBrainItems(
       )
     : "Set the book-level promise so the agent can judge local choices against the whole novel.";
   const missionValue = chapterMission
-    ? compactLine(chapterMission.mission || chapterMission.expectedEnding, "Current chapter mission", 72)
+    ? compactLine(
+        `${missionStatusLabel(chapterMission.status)} · ${chapterMission.mission || chapterMission.expectedEnding}`,
+        "Current chapter mission",
+        72,
+      )
     : currentChapter
       ? "No chapter mission"
       : "No chapter loaded";
@@ -385,7 +404,7 @@ function buildSecondBrainItems(
       label: "Chapter Mission",
       value: missionValue,
       detail: missionDetail,
-      tone: chapterMission ? "success" : "accent",
+      tone: chapterMission ? missionStatusTone(chapterMission.status) : "accent",
     },
     {
       label: "Last Result",
