@@ -533,6 +533,64 @@ fn run_context_budget_eval() -> EvalResult {
     )
 }
 
+fn run_context_budget_trace_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation(
+        "林墨深吸一口气，说道：“这件事我本来不该告诉你，可你已经走到这里，就没有回头路了。",
+    );
+    let proposals = kernel.observe(obs).unwrap();
+    let ghost = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::Ghost);
+    let trace = kernel.trace_snapshot(10);
+    let trace_budget = ghost.and_then(|proposal| {
+        trace
+            .recent_proposals
+            .iter()
+            .find(|entry| entry.id == proposal.id)
+            .and_then(|entry| entry.context_budget.as_ref())
+    });
+
+    let mut errors = Vec::new();
+    let actual = if let Some(budget) = trace_budget {
+        if budget.task != "GhostWriting" {
+            errors.push(format!("unexpected task {}", budget.task));
+        }
+        if budget.used > budget.total_budget {
+            errors.push(format!(
+                "trace budget exceeded: used {} > {}",
+                budget.used, budget.total_budget
+            ));
+        }
+        if budget.source_reports.is_empty() {
+            errors.push("trace missing source budget reports".to_string());
+        }
+        format!(
+            "task={} used={} total={} sources={}",
+            budget.task,
+            budget.used,
+            budget.total_budget,
+            budget.source_reports.len()
+        )
+    } else {
+        errors.push("missing context budget trace for ghost proposal".to_string());
+        "missing".to_string()
+    };
+
+    eval_result("writer_agent:context_budget_trace", actual, errors)
+}
+
 fn run_context_decision_slice_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1118,6 +1176,7 @@ fn main() {
     results.push(run_multi_ghost_eval());
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
+    results.push(run_context_budget_trace_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());

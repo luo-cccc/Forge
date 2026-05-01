@@ -756,6 +756,22 @@ export interface WriterProposalTrace {
   state: string;
   confidence: number;
   previewSnippet: string;
+  contextBudget?: ContextBudgetTrace;
+}
+
+export interface ContextBudgetTrace {
+  task: string;
+  used: number;
+  totalBudget: number;
+  wasted: number;
+  sourceReports: ContextSourceBudgetTrace[];
+}
+
+export interface ContextSourceBudgetTrace {
+  source: string;
+  requested: number;
+  provided: number;
+  truncated: boolean;
 }
 
 export interface WriterFeedbackTrace {

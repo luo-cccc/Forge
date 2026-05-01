@@ -1,7 +1,7 @@
 //! WriterAgentKernel — persistent project agent that owns observations,
 //! proposals, memory, canon, and feedback.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::canon::CanonEngine;
 use super::context::{assemble_observation_context, AgentTask, ContextSource, WritingContextPack};
@@ -10,7 +10,9 @@ use super::diagnostics::{
 };
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
-use super::memory::{ManualAgentTurnSummary, WriterMemory};
+use super::memory::{
+    ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary, WriterMemory,
+};
 use super::observation::WriterObservation;
 use super::operation::{
     execute_text_operation, CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation,
@@ -151,6 +153,7 @@ pub struct WriterProposalTrace {
     pub state: String,
     pub confidence: f64,
     pub preview_snippet: String,
+    pub context_budget: Option<ContextBudgetTrace>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -171,6 +174,7 @@ pub struct WriterAgentKernel {
     intent: IntentEngine,
     observations: Vec<WriterObservation>,
     proposals: Vec<AgentProposal>,
+    proposal_context_budgets: HashMap<String, ContextBudgetTrace>,
     feedback_events: Vec<ProposalFeedback>,
     superseded_proposals: HashSet<String>,
     suppressed_slots: Vec<SuppressedProposalSlot>,
@@ -208,6 +212,7 @@ impl WriterAgentKernel {
             intent: IntentEngine::new(),
             observations: Vec::new(),
             proposals: Vec::new(),
+            proposal_context_budgets: HashMap::new(),
             feedback_events: Vec::new(),
             superseded_proposals: HashSet::new(),
             suppressed_slots: Vec::new(),
@@ -224,6 +229,7 @@ impl WriterAgentKernel {
     ) -> Result<Vec<AgentProposal>, String> {
         self.observation_counter += 1;
         let mut proposals = Vec::new();
+        let mut proposal_context_budgets = HashMap::new();
         let obs_id = observation.id.clone();
         self.active_chapter = observation.chapter_title.clone();
         self.memory
@@ -356,8 +362,13 @@ impl WriterAgentKernel {
                 &revision,
             );
 
+            let proposal_id_value = proposal_id(&self.session_id, self.proposal_counter);
+            proposal_context_budgets.insert(
+                proposal_id_value.clone(),
+                context_budget_trace(&context_pack),
+            );
             proposals.push(AgentProposal {
-                id: proposal_id(&self.session_id, self.proposal_counter),
+                id: proposal_id_value,
                 observation_id: obs_id.clone(),
                 kind: ProposalKind::Ghost,
                 priority: ProposalPriority::Ambient,
@@ -393,7 +404,7 @@ impl WriterAgentKernel {
         }
 
         self.observations.push(observation);
-        Ok(self.register_proposals(proposals))
+        Ok(self.register_proposals(proposals, &proposal_context_budgets))
     }
 
     pub fn ghost_context_pack(&self, observation: &WriterObservation) -> WritingContextPack {
@@ -507,7 +518,7 @@ impl WriterAgentKernel {
         };
 
         self.proposal_counter += 1;
-        self.register_proposal(proposal)
+        self.register_proposal(proposal, Some(context_budget_trace(&context_pack)))
             .ok_or_else(|| "duplicate LLM continuation suppressed".to_string())
     }
 
@@ -603,7 +614,7 @@ impl WriterAgentKernel {
         };
 
         self.proposal_counter += 1;
-        self.register_proposal(proposal)
+        self.register_proposal(proposal, Some(context_budget_trace(&context_pack)))
             .ok_or_else(|| "duplicate inline operation suppressed".to_string())
     }
 
@@ -639,7 +650,7 @@ impl WriterAgentKernel {
                 ),
             };
 
-            if let Some(registered) = self.register_proposal(proposal) {
+            if let Some(registered) = self.register_proposal(proposal, None) {
                 proposals.push(registered);
             }
         }
@@ -827,14 +838,25 @@ impl WriterAgentKernel {
             .retain(|entry| now.saturating_sub(entry.last_seen) <= 10 * 60 * 1_000);
     }
 
-    fn register_proposals(&mut self, proposals: Vec<AgentProposal>) -> Vec<AgentProposal> {
+    fn register_proposals(
+        &mut self,
+        proposals: Vec<AgentProposal>,
+        context_budgets: &HashMap<String, ContextBudgetTrace>,
+    ) -> Vec<AgentProposal> {
         proposals
             .into_iter()
-            .filter_map(|proposal| self.register_proposal(proposal))
+            .filter_map(|proposal| {
+                let context_budget = context_budgets.get(&proposal.id).cloned();
+                self.register_proposal(proposal, context_budget)
+            })
             .collect()
     }
 
-    fn register_proposal(&mut self, proposal: AgentProposal) -> Option<AgentProposal> {
+    fn register_proposal(
+        &mut self,
+        proposal: AgentProposal,
+        context_budget: Option<ContextBudgetTrace>,
+    ) -> Option<AgentProposal> {
         self.prune_suppressed_slots(now_ms());
         if self.is_slot_suppressed(&proposal) {
             return None;
@@ -861,6 +883,10 @@ impl WriterAgentKernel {
             }
         }
 
+        if let Some(context_budget) = context_budget.clone() {
+            self.proposal_context_budgets
+                .insert(proposal.id.clone(), context_budget);
+        }
         self.proposals.push(proposal.clone());
         let created_at = self
             .observations
@@ -869,7 +895,10 @@ impl WriterAgentKernel {
             .map(|observation| observation.created_at)
             .unwrap_or_else(now_ms);
         self.memory
-            .record_proposal_trace(&proposal_trace_summary(&proposal, "pending"), created_at)
+            .record_proposal_trace(
+                &proposal_trace_summary(&proposal, "pending", context_budget),
+                created_at,
+            )
             .ok();
         Some(proposal)
     }
@@ -1419,6 +1448,7 @@ impl WriterAgentKernel {
                         state: self.proposal_state(proposal, now),
                         confidence: proposal.confidence,
                         preview_snippet: snippet(&proposal.preview, 120),
+                        context_budget: self.proposal_context_budgets.get(&proposal.id).cloned(),
                     })
                     .collect()
             } else {
@@ -1432,6 +1462,7 @@ impl WriterAgentKernel {
                         state: trace_state_with_expiry(&proposal.state, proposal.expires_at, now),
                         confidence: proposal.confidence,
                         preview_snippet: proposal.preview_snippet,
+                        context_budget: proposal.context_budget,
                     })
                     .collect()
             },
@@ -1516,6 +1547,7 @@ fn proposal_id(session_id: &str, counter: u64) -> String {
 fn proposal_trace_summary(
     proposal: &AgentProposal,
     state: &str,
+    context_budget: Option<ContextBudgetTrace>,
 ) -> super::memory::ProposalTraceSummary {
     super::memory::ProposalTraceSummary {
         id: proposal.id.clone(),
@@ -1525,7 +1557,28 @@ fn proposal_trace_summary(
         state: state.to_string(),
         confidence: proposal.confidence,
         preview_snippet: snippet(&proposal.preview, 120),
+        context_budget,
         expires_at: proposal.expires_at,
+    }
+}
+
+fn context_budget_trace(pack: &WritingContextPack) -> ContextBudgetTrace {
+    ContextBudgetTrace {
+        task: format!("{:?}", pack.task),
+        used: pack.budget_report.used,
+        total_budget: pack.budget_report.total_budget,
+        wasted: pack.budget_report.wasted,
+        source_reports: pack
+            .budget_report
+            .source_reports
+            .iter()
+            .map(|source| ContextSourceBudgetTrace {
+                source: source.source.clone(),
+                requested: source.requested,
+                provided: source.provided,
+                truncated: source.truncated,
+            })
+            .collect(),
     }
 }
 
@@ -3246,10 +3299,18 @@ mod tests {
             .recent_proposals
             .iter()
             .any(|proposal| proposal.id == local_id && proposal.state == "superseded"));
-        assert!(trace
+        let llm_trace = trace
             .recent_proposals
             .iter()
-            .any(|proposal| proposal.id == llm.id && proposal.state == "pending"));
+            .find(|proposal| proposal.id == llm.id && proposal.state == "pending")
+            .expect("llm proposal trace should exist");
+        let budget = llm_trace
+            .context_budget
+            .as_ref()
+            .expect("context budget should be recorded for LLM proposal");
+        assert_eq!(budget.task, "GhostWriting");
+        assert!(budget.used <= budget.total_budget);
+        assert!(!budget.source_reports.is_empty());
     }
 
     #[test]
@@ -3290,10 +3351,12 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
 
         assert_eq!(trace.recent_observations.len(), 1);
-        assert!(trace
+        let ghost_trace = trace
             .recent_proposals
             .iter()
-            .any(|proposal| proposal.id == ghost_id && proposal.state == "feedback:Rejected"));
+            .find(|proposal| proposal.id == ghost_id && proposal.state == "feedback:Rejected")
+            .expect("persisted ghost trace should exist");
+        assert!(ghost_trace.context_budget.is_some());
         assert!(trace
             .recent_feedback
             .iter()

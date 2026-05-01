@@ -3,9 +3,9 @@
 //! Ported from the plan's Creative Ledgers specification.
 
 use rusqlite::{Connection, Result as SqlResult};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS writer_proposal_trace (
     state TEXT NOT NULL,
     confidence REAL DEFAULT 0.0,
     preview_snippet TEXT DEFAULT '',
+    context_budget_json TEXT DEFAULT '',
     created_at INTEGER NOT NULL,
     expires_at INTEGER
 );
@@ -243,7 +244,27 @@ pub struct ProposalTraceSummary {
     pub state: String,
     pub confidence: f64,
     pub preview_snippet: String,
+    pub context_budget: Option<ContextBudgetTrace>,
     pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextBudgetTrace {
+    pub task: String,
+    pub used: usize,
+    pub total_budget: usize,
+    pub wasted: usize,
+    pub source_reports: Vec<ContextSourceBudgetTrace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextSourceBudgetTrace {
+    pub source: String,
+    pub requested: usize,
+    pub provided: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -807,8 +828,8 @@ impl WriterMemory {
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO writer_proposal_trace
-             (proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, created_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             (proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, context_budget_json, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(proposal_id) DO UPDATE SET
                 observation_id=excluded.observation_id,
                 kind=excluded.kind,
@@ -816,6 +837,7 @@ impl WriterMemory {
                 state=excluded.state,
                 confidence=excluded.confidence,
                 preview_snippet=excluded.preview_snippet,
+                context_budget_json=excluded.context_budget_json,
                 created_at=excluded.created_at,
                 expires_at=excluded.expires_at",
             rusqlite::params![
@@ -826,6 +848,11 @@ impl WriterMemory {
                 proposal.state,
                 proposal.confidence,
                 proposal.preview_snippet,
+                proposal
+                    .context_budget
+                    .as_ref()
+                    .and_then(|budget| serde_json::to_string(budget).ok())
+                    .unwrap_or_default(),
                 created_at as i64,
                 proposal.expires_at.map(|value| value as i64),
             ],
@@ -890,11 +917,17 @@ impl WriterMemory {
         limit: usize,
     ) -> rusqlite::Result<Vec<ProposalTraceSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, expires_at
+            "SELECT proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, context_budget_json, expires_at
              FROM writer_proposal_trace ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
-            let expires_at: Option<i64> = row.get(7)?;
+            let context_budget_json: String = row.get(7)?;
+            let context_budget = if context_budget_json.trim().is_empty() {
+                None
+            } else {
+                serde_json::from_str::<ContextBudgetTrace>(&context_budget_json).ok()
+            };
+            let expires_at: Option<i64> = row.get(8)?;
             Ok(ProposalTraceSummary {
                 id: row.get(0)?,
                 observation_id: row.get(1)?,
@@ -903,6 +936,7 @@ impl WriterMemory {
                 state: row.get(4)?,
                 confidence: row.get(5)?,
                 preview_snippet: row.get(6)?,
+                context_budget,
                 expires_at: expires_at.map(|value| value.max(0) as u64),
             })
         })?;
@@ -1173,6 +1207,12 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     )?;
     backfill_empty_timestamp(conn, "proposal_feedback", "created_at")?;
 
+    ensure_column(
+        conn,
+        "writer_proposal_trace",
+        "context_budget_json",
+        "context_budget_json TEXT DEFAULT ''",
+    )?;
     ensure_column(
         conn,
         "writer_proposal_trace",
@@ -1455,6 +1495,18 @@ mod tests {
                 state: "pending".to_string(),
                 confidence: 0.7,
                 preview_snippet: "他没有立刻回答".to_string(),
+                context_budget: Some(ContextBudgetTrace {
+                    task: "GhostWriting".to_string(),
+                    used: 40,
+                    total_budget: 100,
+                    wasted: 60,
+                    source_reports: vec![ContextSourceBudgetTrace {
+                        source: "CursorPrefix".to_string(),
+                        requested: 80,
+                        provided: 40,
+                        truncated: true,
+                    }],
+                }),
                 expires_at: Some(1000),
             },
             11,
@@ -1473,6 +1525,10 @@ mod tests {
         assert_eq!(m.list_observation_traces(5).unwrap()[0].id, "obs_1");
         let proposal = m.list_proposal_traces(5).unwrap().remove(0);
         assert_eq!(proposal.state, "feedback:Accepted");
+        let budget = proposal.context_budget.unwrap();
+        assert_eq!(budget.task, "GhostWriting");
+        assert_eq!(budget.used, 40);
+        assert!(budget.source_reports[0].truncated);
         assert_eq!(
             m.list_feedback_traces(5).unwrap()[0].reason.as_deref(),
             Some("fits")
