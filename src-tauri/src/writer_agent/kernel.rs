@@ -4,7 +4,10 @@
 use std::collections::{HashMap, HashSet};
 
 use super::canon::CanonEngine;
-use super::context::{assemble_observation_context, AgentTask, ContextSource, WritingContextPack};
+use super::context::{
+    assemble_observation_context, assemble_observation_context_with_default_budget, AgentTask,
+    ContextSource, WritingContextPack,
+};
 use super::diagnostics::{
     DiagnosticCategory, DiagnosticResult, DiagnosticSeverity, DiagnosticsEngine,
 };
@@ -336,11 +339,10 @@ impl WriterAgentKernel {
                     | super::observation::ObservationReason::Typed
             )
         {
-            let context_pack = assemble_observation_context(
+            let context_pack = assemble_observation_context_with_default_budget(
                 AgentTask::GhostWriting,
                 &observation,
                 &self.memory,
-                3_000,
             );
             let continuation = draft_continuation(&intent.primary, &observation, &context_pack);
             let insert_at = observation.cursor.as_ref().map(|c| c.to).unwrap_or(0);
@@ -408,7 +410,11 @@ impl WriterAgentKernel {
     }
 
     pub fn ghost_context_pack(&self, observation: &WriterObservation) -> WritingContextPack {
-        assemble_observation_context(AgentTask::GhostWriting, observation, &self.memory, 3_000)
+        assemble_observation_context_with_default_budget(
+            AgentTask::GhostWriting,
+            observation,
+            &self.memory,
+        )
     }
 
     pub fn context_pack_for(
@@ -418,6 +424,14 @@ impl WriterAgentKernel {
         total_budget: usize,
     ) -> WritingContextPack {
         assemble_observation_context(task, observation, &self.memory, total_budget)
+    }
+
+    pub fn context_pack_for_default(
+        &self,
+        task: AgentTask,
+        observation: &WriterObservation,
+    ) -> WritingContextPack {
+        assemble_observation_context_with_default_budget(task, observation, &self.memory)
     }
 
     pub fn record_manual_exchange(
@@ -534,11 +548,10 @@ impl WriterAgentKernel {
             return Err("empty inline operation draft".to_string());
         }
 
-        let context_pack = assemble_observation_context(
+        let context_pack = assemble_observation_context_with_default_budget(
             AgentTask::InlineRewrite,
             &observation,
             &self.memory,
-            4_500,
         );
         let chapter = observation
             .chapter_title

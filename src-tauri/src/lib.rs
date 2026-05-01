@@ -2576,10 +2576,9 @@ async fn run_inline_writer_operation(
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
         refresh_kernel_canon_from_lorebook(&app, &mut kernel);
         let local_proposals = kernel.observe(observation.clone())?;
-        let context_pack = kernel.context_pack_for(
+        let context_pack = kernel.context_pack_for_default(
             writer_agent::context::AgentTask::InlineRewrite,
             &observation,
-            4_500,
         );
         (context_pack, local_proposals)
     };
@@ -3177,10 +3176,9 @@ async fn ask_agent(
                 .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
         }
 
-        let writer_context_pack = kernel.context_pack_for(
+        let writer_context_pack = kernel.context_pack_for_default(
             writer_agent::context::AgentTask::ManualRequest,
             &manual_observation,
-            4_500,
         );
         let writer_context = render_writer_context_pack(&writer_context_pack);
         let ledger_context = render_writer_ledger_snapshot(&kernel.ledger_snapshot());

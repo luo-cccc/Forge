@@ -48,6 +48,18 @@ pub enum AgentTask {
 }
 
 impl AgentTask {
+    pub fn default_budget(&self) -> usize {
+        match self {
+            AgentTask::GhostWriting => 3_000,
+            AgentTask::ContinuityDiagnostic => 2_500,
+            AgentTask::ChapterGeneration => 20_000,
+            AgentTask::InlineRewrite => 4_500,
+            AgentTask::ProposalEvaluation => 1_400,
+            AgentTask::CanonMaintenance => 4_500,
+            AgentTask::ManualRequest => 4_500,
+        }
+    }
+
     pub fn source_priorities(&self) -> Vec<(ContextSource, u8, usize)> {
         match self {
             AgentTask::GhostWriting => vec![
@@ -226,6 +238,15 @@ pub fn assemble_observation_context(
     )
 }
 
+pub fn assemble_observation_context_with_default_budget(
+    task: AgentTask,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+) -> WritingContextPack {
+    let total_budget = task.default_budget();
+    assemble_observation_context(task, observation, memory, total_budget)
+}
+
 fn non_empty(text: String) -> Option<String> {
     if text.trim().is_empty() {
         None
@@ -387,6 +408,17 @@ mod tests {
     }
 
     #[test]
+    fn test_default_task_budgets_match_agent_paths() {
+        assert_eq!(AgentTask::GhostWriting.default_budget(), 3_000);
+        assert_eq!(AgentTask::InlineRewrite.default_budget(), 4_500);
+        assert_eq!(AgentTask::ManualRequest.default_budget(), 4_500);
+        assert!(
+            AgentTask::ChapterGeneration.default_budget()
+                > AgentTask::GhostWriting.default_budget()
+        );
+    }
+
+    #[test]
     fn test_manual_request_prioritizes_selection_and_ledgers() {
         let p = AgentTask::ManualRequest.source_priorities();
         assert_eq!(p[0].0, ContextSource::SelectedText);
@@ -442,13 +474,17 @@ mod tests {
             full_text_digest: None,
             editor_dirty: true,
         };
-        let pack =
-            assemble_observation_context(AgentTask::GhostWriting, &observation, &memory, 2_000);
+        let pack = assemble_observation_context_with_default_budget(
+            AgentTask::GhostWriting,
+            &observation,
+            &memory,
+        );
 
         assert!(pack
             .sources
             .iter()
             .any(|s| s.source == ContextSource::CursorPrefix));
+        assert_eq!(pack.budget_limit, AgentTask::GhostWriting.default_budget());
         assert!(pack
             .sources
             .iter()
