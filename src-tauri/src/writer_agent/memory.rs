@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS plot_promises (
     description TEXT DEFAULT '',
     introduced_chapter TEXT DEFAULT '',
     introduced_ref TEXT DEFAULT '',
+    last_seen_chapter TEXT DEFAULT '',
+    last_seen_ref TEXT DEFAULT '',
     expected_payoff TEXT DEFAULT '',
     status TEXT DEFAULT 'open',
     priority INTEGER DEFAULT 0,
@@ -161,6 +163,7 @@ CREATE TABLE IF NOT EXISTS writer_proposal_trace (
     state TEXT NOT NULL,
     confidence REAL DEFAULT 0.0,
     preview_snippet TEXT DEFAULT '',
+    evidence_json TEXT DEFAULT '[]',
     context_budget_json TEXT DEFAULT '',
     created_at INTEGER NOT NULL,
     expires_at INTEGER
@@ -239,6 +242,8 @@ pub struct PlotPromiseSummary {
     pub title: String,
     pub description: String,
     pub introduced_chapter: String,
+    pub last_seen_chapter: String,
+    pub last_seen_ref: String,
     pub expected_payoff: String,
     pub priority: i32,
 }
@@ -466,6 +471,7 @@ pub struct ProposalTraceSummary {
     pub state: String,
     pub confidence: f64,
     pub preview_snippet: String,
+    pub evidence: Vec<super::proposal::EvidenceRef>,
     pub context_budget: Option<ContextBudgetTrace>,
     pub expires_at: Option<u64>,
 }
@@ -755,8 +761,10 @@ impl WriterMemory {
         priority: i32,
     ) -> rusqlite::Result<i64> {
         self.conn.execute(
-            "INSERT INTO plot_promises (kind, title, description, introduced_chapter, expected_payoff, priority)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO plot_promises
+             (kind, title, description, introduced_chapter, introduced_ref, last_seen_chapter,
+              last_seen_ref, expected_payoff, priority)
+             VALUES (?1, ?2, ?3, ?4, '', ?4, '', ?5, ?6)",
             rusqlite::params![kind, title, description, chapter, payoff, priority],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -775,7 +783,8 @@ impl WriterMemory {
 
     pub fn get_open_promise_summaries(&self) -> rusqlite::Result<Vec<PlotPromiseSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, title, description, introduced_chapter, expected_payoff, priority
+            "SELECT id, kind, title, description, introduced_chapter,
+                    last_seen_chapter, last_seen_ref, expected_payoff, priority
              FROM plot_promises WHERE status = 'open' ORDER BY priority DESC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -785,11 +794,28 @@ impl WriterMemory {
                 title: row.get(2)?,
                 description: row.get(3)?,
                 introduced_chapter: row.get(4)?,
-                expected_payoff: row.get(5)?,
-                priority: row.get(6)?,
+                last_seen_chapter: row.get(5)?,
+                last_seen_ref: row.get(6)?,
+                expected_payoff: row.get(7)?,
+                priority: row.get(8)?,
             })
         })?;
         rows.collect()
+    }
+
+    pub fn touch_promise_last_seen(
+        &self,
+        promise_id: i64,
+        chapter: &str,
+        source_ref: &str,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE plot_promises
+             SET last_seen_chapter=?1, last_seen_ref=?2
+             WHERE id=?3 AND status='open'",
+            rusqlite::params![chapter, source_ref, promise_id],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn resolve_promise(&self, promise_id: i64, _chapter: &str) -> rusqlite::Result<bool> {
@@ -1333,8 +1359,8 @@ impl WriterMemory {
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO writer_proposal_trace
-             (proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, context_budget_json, created_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             (proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, evidence_json, context_budget_json, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(proposal_id) DO UPDATE SET
                 observation_id=excluded.observation_id,
                 kind=excluded.kind,
@@ -1342,6 +1368,7 @@ impl WriterMemory {
                 state=excluded.state,
                 confidence=excluded.confidence,
                 preview_snippet=excluded.preview_snippet,
+                evidence_json=excluded.evidence_json,
                 context_budget_json=excluded.context_budget_json,
                 created_at=excluded.created_at,
                 expires_at=excluded.expires_at",
@@ -1353,6 +1380,7 @@ impl WriterMemory {
                 proposal.state,
                 proposal.confidence,
                 proposal.preview_snippet,
+                serde_json::to_string(&proposal.evidence).unwrap_or_else(|_| "[]".to_string()),
                 proposal
                     .context_budget
                     .as_ref()
@@ -1422,17 +1450,18 @@ impl WriterMemory {
         limit: usize,
     ) -> rusqlite::Result<Vec<ProposalTraceSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, context_budget_json, expires_at
+            "SELECT proposal_id, observation_id, kind, priority, state, confidence, preview_snippet, evidence_json, context_budget_json, expires_at
              FROM writer_proposal_trace ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
-            let context_budget_json: String = row.get(7)?;
+            let evidence_json: String = row.get(7)?;
+            let context_budget_json: String = row.get(8)?;
             let context_budget = if context_budget_json.trim().is_empty() {
                 None
             } else {
                 serde_json::from_str::<ContextBudgetTrace>(&context_budget_json).ok()
             };
-            let expires_at: Option<i64> = row.get(8)?;
+            let expires_at: Option<i64> = row.get(9)?;
             Ok(ProposalTraceSummary {
                 id: row.get(0)?,
                 observation_id: row.get(1)?,
@@ -1441,6 +1470,8 @@ impl WriterMemory {
                 state: row.get(4)?,
                 confidence: row.get(5)?,
                 preview_snippet: row.get(6)?,
+                evidence: serde_json::from_str::<Vec<super::proposal::EvidenceRef>>(&evidence_json)
+                    .unwrap_or_default(),
                 context_budget,
                 expires_at: expires_at.map(|value| value.max(0) as u64),
             })
@@ -1610,6 +1641,26 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column(
         conn,
         "plot_promises",
+        "last_seen_chapter",
+        "last_seen_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "last_seen_ref",
+        "last_seen_ref TEXT DEFAULT ''",
+    )?;
+    conn.execute_batch(
+        "UPDATE plot_promises
+         SET last_seen_chapter=introduced_chapter
+         WHERE last_seen_chapter IS NULL OR last_seen_chapter='';
+         UPDATE plot_promises
+         SET last_seen_ref=introduced_ref
+         WHERE last_seen_ref IS NULL OR last_seen_ref='';",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
         "expected_payoff",
         "expected_payoff TEXT DEFAULT ''",
     )?;
@@ -1712,6 +1763,12 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     )?;
     backfill_empty_timestamp(conn, "proposal_feedback", "created_at")?;
 
+    ensure_column(
+        conn,
+        "writer_proposal_trace",
+        "evidence_json",
+        "evidence_json TEXT DEFAULT '[]'",
+    )?;
     ensure_column(
         conn,
         "writer_proposal_trace",
@@ -2230,6 +2287,11 @@ mod tests {
                 state: "pending".to_string(),
                 confidence: 0.7,
                 preview_snippet: "他没有立刻回答".to_string(),
+                evidence: vec![crate::writer_agent::proposal::EvidenceRef {
+                    source: crate::writer_agent::proposal::EvidenceSource::ChapterMission,
+                    reference: "Chapter-1:mission".to_string(),
+                    snippet: "本章任务".to_string(),
+                }],
                 context_budget: Some(ContextBudgetTrace {
                     task: "GhostWriting".to_string(),
                     used: 40,
@@ -2267,6 +2329,11 @@ mod tests {
         assert_eq!(m.list_observation_traces(5).unwrap()[0].id, "obs_1");
         let proposal = m.list_proposal_traces(5).unwrap().remove(0);
         assert_eq!(proposal.state, "feedback:Accepted");
+        assert_eq!(proposal.evidence.len(), 1);
+        assert_eq!(
+            proposal.evidence[0].source,
+            crate::writer_agent::proposal::EvidenceSource::ChapterMission
+        );
         let budget = proposal.context_budget.unwrap();
         assert_eq!(budget.task, "GhostWriting");
         assert_eq!(budget.used, 40);
@@ -2423,6 +2490,8 @@ mod tests {
 
         assert!(table_has_column(&conn, "canon_entities", "attributes_json").unwrap());
         assert!(table_has_column(&conn, "plot_promises", "expected_payoff").unwrap());
+        assert!(table_has_column(&conn, "plot_promises", "last_seen_chapter").unwrap());
+        assert!(table_has_column(&conn, "writer_proposal_trace", "evidence_json").unwrap());
         assert!(table_has_column(&conn, "writer_proposal_trace", "expires_at").unwrap());
         assert!(table_exists(&conn, "manual_agent_turns").unwrap());
         assert!(table_has_column(&conn, "manual_agent_turns", "source_refs_json").unwrap());
@@ -2442,5 +2511,6 @@ mod tests {
         assert_eq!(entities[0].name, "林墨");
         let promises = m.get_open_promise_summaries().unwrap();
         assert_eq!(promises[0].title, "玉佩");
+        assert_eq!(promises[0].last_seen_chapter, "");
     }
 }

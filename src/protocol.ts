@@ -707,6 +707,8 @@ export interface PlotPromiseSummary {
   title: string;
   description: string;
   introducedChapter: string;
+  lastSeenChapter: string;
+  lastSeenRef: string;
   expectedPayoff: string;
   priority: number;
 }
@@ -815,6 +817,7 @@ export interface WriterProposalTrace {
   state: string;
   confidence: number;
   previewSnippet: string;
+  evidence: EvidenceRef[];
   contextBudget?: ContextBudgetTrace;
 }
 

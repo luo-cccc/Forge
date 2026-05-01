@@ -818,10 +818,14 @@ fn build_promise_slice(memory: &WriterMemory) -> String {
         .into_iter()
         .take(6)
         .map(|promise| {
-            format!(
+            let mut line = format!(
                 "{} [{}]: {} -> {}",
                 promise.title, promise.kind, promise.description, promise.expected_payoff
-            )
+            );
+            if !promise.last_seen_chapter.trim().is_empty() {
+                line.push_str(&format!(" | last seen: {}", promise.last_seen_chapter));
+            }
+            line
         })
         .collect::<Vec<_>>()
         .join("\n")

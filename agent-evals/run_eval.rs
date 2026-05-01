@@ -591,6 +591,66 @@ fn run_context_budget_trace_eval() -> EvalResult {
     eval_result("writer_agent:context_budget_trace", actual, errors)
 }
 
+fn run_result_feedback_tight_budget_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "玉佩线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-3",
+            "承接上一章玉佩线索。",
+            "玉佩",
+            "提前揭开真相",
+            "以新的选择收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter(
+        "林墨发现玉佩仍在张三手里，新的冲突让两人信任受损。",
+        "Chapter-2",
+    );
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    kernel.observe(save).unwrap();
+
+    let obs = observation_in_chapter("林墨站在门外，想起上一章的争执。", "Chapter-3");
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &obs, 1_050);
+    let result_source = pack
+        .sources
+        .iter()
+        .find(|source| source.source == ContextSource::ResultFeedback);
+
+    let mut errors = Vec::new();
+    if result_source.is_none() {
+        errors.push("tight budget dropped ResultFeedback source".to_string());
+    }
+    if !result_source.is_some_and(|source| source.content.contains("章节结果")) {
+        errors.push("ResultFeedback source lacks rendered chapter result".to_string());
+    }
+    if pack.total_chars > pack.budget_limit {
+        errors.push(format!(
+            "context exceeded tight budget: used {} > {}",
+            pack.total_chars, pack.budget_limit
+        ));
+    }
+
+    eval_result(
+        "writer_agent:result_feedback_survives_tight_budget",
+        format!("sources={} used={}", pack.sources.len(), pack.total_chars),
+        errors,
+    )
+}
+
 fn run_context_decision_slice_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -720,6 +780,52 @@ fn run_story_contract_guard_eval() -> EvalResult {
     )
 }
 
+fn run_story_contract_negated_guard_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "张三没有说出真相，也拒绝解释玉佩来源。",
+            "Chapter-2",
+        ))
+        .unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    if proposals
+        .iter()
+        .any(|proposal| proposal.kind == ProposalKind::StoryContract)
+    {
+        errors.push("negated reveal still created story contract proposal".to_string());
+    }
+    if debt.contract_count != 0 {
+        errors.push(format!(
+            "negated reveal created {} contract debts",
+            debt.contract_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:story_contract_negated_reveal_no_debt",
+        format!(
+            "proposals={} contractDebt={}",
+            proposals.len(),
+            debt.contract_count
+        ),
+        errors,
+    )
+}
+
 fn run_chapter_mission_result_feedback_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -767,6 +873,56 @@ fn run_chapter_mission_result_feedback_eval() -> EvalResult {
                 .map(|mission| mission.status.as_str())
                 .unwrap_or("missing"),
             ledger.recent_chapter_results.len()
+        ),
+        errors,
+    )
+}
+
+fn run_chapter_mission_partial_progress_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落。",
+            "玉佩下落",
+            "提前揭开真相",
+            "以新的疑问收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter(
+        "林墨找到玉佩的下落，却发现线索指向另一个疑问。",
+        "Chapter-2",
+    );
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    let proposals = kernel.observe(save).unwrap();
+    let ledger = kernel.ledger_snapshot();
+
+    let mut errors = Vec::new();
+    let mission = ledger.active_chapter_mission.as_ref();
+    if !mission.is_some_and(|mission| mission.status == "completed") {
+        errors.push(format!(
+            "expected mission completed from must_include + ending, got {:?}",
+            mission.map(|mission| mission.status.as_str())
+        ));
+    }
+    if proposals.iter().any(|proposal| {
+        proposal.kind == ProposalKind::ChapterMission && proposal.preview.contains("必保事项")
+    }) {
+        errors.push("completed mission still emitted save-gap proposal".to_string());
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_completed_no_save_gap",
+        format!(
+            "mission={} proposals={}",
+            mission
+                .map(|mission| mission.status.as_str())
+                .unwrap_or("missing"),
+            proposals.len()
         ),
         errors,
     )
@@ -824,6 +980,163 @@ fn run_chapter_mission_guard_eval() -> EvalResult {
     eval_result(
         "writer_agent:chapter_mission_guard_story_debt",
         format!("proposals={} debt={}", proposals.len(), debt.total),
+        errors,
+    )
+}
+
+fn run_chapter_mission_negated_guard_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落，但不能提前揭开真相。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨没有揭开真相，只确认玉佩仍在张三袖中。",
+            "Chapter-2",
+        ))
+        .unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    if proposals
+        .iter()
+        .any(|proposal| proposal.kind == ProposalKind::ChapterMission)
+    {
+        errors.push("negated mission reveal still created guard proposal".to_string());
+    }
+    if debt.mission_count != 0 {
+        errors.push(format!(
+            "negated mission reveal created {} mission debts",
+            debt.mission_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_negated_reveal_no_debt",
+        format!(
+            "proposals={} missionDebt={}",
+            proposals.len(),
+            debt.mission_count
+        ),
+        errors,
+    )
+}
+
+fn run_chapter_mission_save_gap_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以线索推进收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter("林墨站在雨里，沉默地看着远处灯火。", "Chapter-2");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    let proposals = kernel.observe(save).unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    let guard = proposals.iter().find(|proposal| {
+        proposal.kind == ProposalKind::ChapterMission && proposal.preview.contains("必保事项")
+    });
+    if guard.is_none() {
+        errors.push("missing chapter mission save-gap guard".to_string());
+    }
+    if !guard.is_some_and(|proposal| {
+        proposal
+            .evidence
+            .iter()
+            .any(|evidence| evidence.source == EvidenceSource::ChapterMission)
+            && proposal
+                .evidence
+                .iter()
+                .any(|evidence| evidence.source == EvidenceSource::ChapterText)
+    }) {
+        errors.push("save-gap guard lacks mission and chapter-result evidence".to_string());
+    }
+    if debt.mission_count != 1 {
+        errors.push(format!(
+            "expected 1 mission debt after save gap, got {}",
+            debt.mission_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_save_gap_story_debt",
+        format!(
+            "proposals={} missionDebt={}",
+            proposals.len(),
+            debt.mission_count
+        ),
+        errors,
+    )
+}
+
+fn run_chapter_mission_drifted_no_duplicate_save_gap_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落，但不能提前揭开真相。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter("林墨直接揭开真相，玉佩来自禁地。", "Chapter-2");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    let proposals = kernel.observe(save).unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    let mission = kernel.ledger_snapshot().active_chapter_mission;
+    if !mission.is_some_and(|mission| mission.status == "drifted") {
+        errors.push("mission did not calibrate to drifted".to_string());
+    }
+    let mission_proposals = proposals
+        .iter()
+        .filter(|proposal| proposal.kind == ProposalKind::ChapterMission)
+        .count();
+    if mission_proposals != 1 {
+        errors.push(format!(
+            "expected one mission violation proposal, got {}",
+            mission_proposals
+        ));
+    }
+    if debt.mission_count != 1 {
+        errors.push(format!(
+            "expected one mission debt after drift, got {}",
+            debt.mission_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_drift_no_duplicate_gap",
+        format!(
+            "proposals={} missionDebt={}",
+            proposals.len(),
+            debt.mission_count
+        ),
         errors,
     )
 }
@@ -1278,6 +1591,70 @@ fn run_promise_resolve_operation_eval() -> EvalResult {
     )
 }
 
+fn run_promise_last_seen_context_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "玉佩",
+            "张三拿走玉佩，需要交代下落。",
+            "Chapter-1",
+            "Chapter-4",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter("张三把玉佩藏进袖中，没有交代下落。", "Chapter-2");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    kernel.observe(save).unwrap();
+
+    let ledger = kernel.ledger_snapshot();
+    let promise = ledger
+        .open_promises
+        .iter()
+        .find(|promise| promise.title == "玉佩");
+    let obs = observation_in_chapter("林墨看着张三空空的袖口。", "Chapter-3");
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &obs, 1_200);
+    let promise_slice = pack
+        .sources
+        .iter()
+        .find(|source| source.source == ContextSource::PromiseSlice);
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    if !promise.is_some_and(|promise| promise.last_seen_chapter == "Chapter-2") {
+        errors.push(format!(
+            "promise last seen not updated: {:?}",
+            promise.map(|promise| promise.last_seen_chapter.as_str())
+        ));
+    }
+    if !promise_slice.is_some_and(|source| source.content.contains("last seen: Chapter-2")) {
+        errors.push("promise context lacks last-seen trail".to_string());
+    }
+    if !debt.entries.iter().any(|entry| {
+        entry.category == StoryDebtCategory::Promise
+            && entry
+                .evidence
+                .iter()
+                .any(|evidence| evidence.snippet.contains("last seen: Chapter-2"))
+    }) {
+        errors.push("story debt promise evidence lacks last-seen trail".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_last_seen_trail",
+        format!(
+            "lastSeen={} sources={}",
+            promise
+                .map(|promise| promise.last_seen_chapter.as_str())
+                .unwrap_or("missing"),
+            pack.sources.len()
+        ),
+        errors,
+    )
+}
+
 fn run_story_review_queue_promise_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1428,6 +1805,151 @@ fn run_story_debt_snapshot_eval() -> EvalResult {
     )
 }
 
+fn run_story_debt_priority_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落，但不能提前揭开真相。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "密信",
+            "密信被张三拿走，需要交代下落。",
+            "Chapter-1",
+            "Chapter-4",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel
+        .observe(observation_in_chapter(
+            "林墨拔出长剑，张三直接揭开真相：玉佩来自禁地。",
+            "Chapter-2",
+        ))
+        .unwrap();
+
+    let debt = kernel.story_debt_snapshot();
+    let categories = debt
+        .entries
+        .iter()
+        .take(4)
+        .map(|entry| entry.category.clone())
+        .collect::<Vec<_>>();
+    let mut errors = Vec::new();
+    if categories.len() < 4 {
+        errors.push(format!(
+            "expected at least 4 debt entries, got {}",
+            categories.len()
+        ));
+    }
+    let expected = [
+        StoryDebtCategory::StoryContract,
+        StoryDebtCategory::ChapterMission,
+        StoryDebtCategory::CanonRisk,
+        StoryDebtCategory::Promise,
+    ];
+    for (index, expected_category) in expected.iter().enumerate() {
+        if categories.get(index) != Some(expected_category) {
+            errors.push(format!(
+                "debt priority index {} got {:?}, expected {:?}",
+                index,
+                categories.get(index),
+                expected_category
+            ));
+        }
+    }
+
+    eval_result(
+        "writer_agent:story_debt_priority_foundation",
+        format!("categories={:?}", categories),
+        errors,
+    )
+}
+
+fn run_guard_trace_evidence_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-2",
+            "林墨追查玉佩下落。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以线索推进收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter("林墨站在雨里，沉默地看着远处灯火。", "Chapter-2");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    let proposals = kernel.observe(save).unwrap();
+    let gap = proposals.iter().find(|proposal| {
+        proposal.kind == ProposalKind::ChapterMission && proposal.preview.contains("必保事项")
+    });
+    let trace = kernel.trace_snapshot(10);
+    let trace_entry = gap.and_then(|proposal| {
+        trace
+            .recent_proposals
+            .iter()
+            .find(|entry| entry.id == proposal.id)
+    });
+
+    let mut errors = Vec::new();
+    if trace_entry.is_none() {
+        errors.push("missing trace entry for mission guard".to_string());
+    }
+    if !trace_entry.is_some_and(|entry| {
+        entry
+            .evidence
+            .iter()
+            .any(|evidence| evidence.source == EvidenceSource::ChapterMission)
+            && entry
+                .evidence
+                .iter()
+                .any(|evidence| evidence.source == EvidenceSource::ChapterText)
+    }) {
+        errors.push("trace entry lacks mission and chapter text evidence".to_string());
+    }
+
+    eval_result(
+        "writer_agent:guard_trace_evidence",
+        format!(
+            "traceEvidence={}",
+            trace_entry.map(|entry| entry.evidence.len()).unwrap_or(0)
+        ),
+        errors,
+    )
+}
+
 fn main() {
     let mut results = Vec::new();
     results.extend(run_intent_eval());
@@ -1439,11 +1961,17 @@ fn main() {
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
+    results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
     results.push(run_story_contract_guard_eval());
+    results.push(run_story_contract_negated_guard_eval());
     results.push(run_chapter_mission_result_feedback_eval());
+    results.push(run_chapter_mission_partial_progress_eval());
     results.push(run_chapter_mission_guard_eval());
+    results.push(run_chapter_mission_negated_guard_eval());
+    results.push(run_chapter_mission_save_gap_eval());
+    results.push(run_chapter_mission_drifted_no_duplicate_save_gap_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
@@ -1452,8 +1980,11 @@ fn main() {
     results.push(run_promise_defer_operation_eval());
     results.push(run_promise_abandon_operation_eval());
     results.push(run_promise_resolve_operation_eval());
+    results.push(run_promise_last_seen_context_eval());
     results.push(run_story_review_queue_promise_eval());
     results.push(run_story_debt_snapshot_eval());
+    results.push(run_story_debt_priority_eval());
+    results.push(run_guard_trace_evidence_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

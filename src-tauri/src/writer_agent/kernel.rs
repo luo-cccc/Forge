@@ -166,6 +166,7 @@ pub struct WriterProposalTrace {
     pub state: String,
     pub confidence: f64,
     pub preview_snippet: String,
+    pub evidence: Vec<EvidenceRef>,
     pub context_budget: Option<ContextBudgetTrace>,
 }
 
@@ -266,6 +267,15 @@ impl WriterAgentKernel {
             if !result.is_empty() {
                 self.memory.record_chapter_result(&result).ok();
                 self.calibrate_chapter_mission(&observation, &result).ok();
+                self.touch_promise_last_seen_from_result(&result).ok();
+                proposals.extend(chapter_mission_result_proposals(
+                    &observation,
+                    &result,
+                    &self.memory,
+                    &obs_id,
+                    &mut self.proposal_counter,
+                    &self.session_id,
+                ));
             }
         }
 
@@ -1463,6 +1473,10 @@ impl WriterAgentKernel {
             story_debt_status_weight(&b.status)
                 .cmp(&story_debt_status_weight(&a.status))
                 .then_with(|| {
+                    story_debt_category_weight(&b.category)
+                        .cmp(&story_debt_category_weight(&a.category))
+                })
+                .then_with(|| {
                     queue_severity_weight(&b.severity).cmp(&queue_severity_weight(&a.severity))
                 })
                 .then_with(|| b.created_at.cmp(&a.created_at))
@@ -1593,6 +1607,7 @@ impl WriterAgentKernel {
                         state: self.proposal_state(proposal, now),
                         confidence: proposal.confidence,
                         preview_snippet: snippet(&proposal.preview, 120),
+                        evidence: proposal.evidence.clone(),
                         context_budget: self.proposal_context_budgets.get(&proposal.id).cloned(),
                     })
                     .collect()
@@ -1607,6 +1622,7 @@ impl WriterAgentKernel {
                         state: trace_state_with_expiry(&proposal.state, proposal.expires_at, now),
                         confidence: proposal.confidence,
                         preview_snippet: proposal.preview_snippet,
+                        evidence: proposal.evidence,
                         context_budget: proposal.context_budget,
                     })
                     .collect()
@@ -1716,6 +1732,29 @@ impl WriterAgentKernel {
                 &[result.source_ref.clone()],
             )
             .ok();
+        Ok(())
+    }
+
+    fn touch_promise_last_seen_from_result(
+        &self,
+        result: &ChapterResultSummary,
+    ) -> Result<(), String> {
+        let haystack = mission_result_haystack(result);
+        for promise in self
+            .memory
+            .get_open_promise_summaries()
+            .map_err(|e| e.to_string())?
+        {
+            let title_hit =
+                !promise.title.trim().is_empty() && haystack.contains(promise.title.trim());
+            let description_hit = !promise.description.trim().is_empty()
+                && cue_hit_score(&promise.description, &haystack) > 0;
+            if title_hit || description_hit {
+                self.memory
+                    .touch_promise_last_seen(promise.id, &result.chapter_title, &result.source_ref)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         Ok(())
     }
 }
@@ -1913,7 +1952,8 @@ fn calibrated_mission_status(
     result: &ChapterResultSummary,
 ) -> String {
     let haystack = mission_result_haystack(result);
-    let must_not_hit = cue_hit_score(&mission.must_not, &haystack) > 0;
+    let violation_haystack = mission_result_violation_haystack(result);
+    let must_not_hit = cue_violation_hit_score(&mission.must_not, &violation_haystack) > 0;
     if must_not_hit {
         return "drifted".to_string();
     }
@@ -1931,6 +1971,86 @@ fn calibrated_mission_status(
     }
 }
 
+fn chapter_mission_result_proposals(
+    observation: &WriterObservation,
+    result: &ChapterResultSummary,
+    memory: &WriterMemory,
+    observation_id: &str,
+    proposal_counter: &mut u64,
+    session_id: &str,
+) -> Vec<AgentProposal> {
+    let Some(chapter_title) = observation.chapter_title.as_deref() else {
+        return Vec::new();
+    };
+    let Ok(Some(mission)) = memory.get_chapter_mission(&observation.project_id, chapter_title)
+    else {
+        return Vec::new();
+    };
+    let haystack = mission_result_haystack(result);
+    let violation_haystack = mission_result_violation_haystack(result);
+    if cue_violation_hit_score(&mission.must_not, &violation_haystack) > 0 {
+        return Vec::new();
+    }
+    if matches!(mission.status.as_str(), "completed" | "drifted") {
+        return Vec::new();
+    }
+    if mission.must_include.trim().is_empty() || cue_hit_score(&mission.must_include, &haystack) > 0
+    {
+        return Vec::new();
+    }
+
+    let proposal = AgentProposal {
+        id: proposal_id(session_id, *proposal_counter),
+        observation_id: observation_id.to_string(),
+        kind: ProposalKind::ChapterMission,
+        priority: ProposalPriority::Normal,
+        target: observation.cursor.clone(),
+        preview: format!(
+            "章节任务缺口: {} 保存后仍未体现必保事项「{}」",
+            chapter_title, mission.must_include
+        ),
+        operations: vec![WriterOperation::TextAnnotate {
+            chapter: chapter_title.to_string(),
+            from: observation
+                .cursor
+                .as_ref()
+                .map(|range| range.from)
+                .unwrap_or(0),
+            to: observation
+                .cursor
+                .as_ref()
+                .map(|range| range.to.max(range.from + 1))
+                .unwrap_or(1),
+            message: format!("本章必保事项尚未兑现：{}", mission.must_include),
+            severity: super::operation::AnnotationSeverity::Warning,
+        }],
+        rationale: format!(
+            "Chapter save result did not satisfy mission must_include. Status candidate: {}.",
+            calibrated_mission_status(&mission, result)
+        ),
+        evidence: vec![
+            EvidenceRef {
+                source: EvidenceSource::ChapterMission,
+                reference: format!("{}:must_include", chapter_title),
+                snippet: mission.must_include.clone(),
+            },
+            EvidenceRef {
+                source: EvidenceSource::ChapterText,
+                reference: result.source_ref.clone(),
+                snippet: result.summary.clone(),
+            },
+        ],
+        risks: vec![
+            "Ignoring this can let the chapter end without paying its assigned job.".into(),
+        ],
+        alternatives: vec![],
+        confidence: 0.74,
+        expires_at: None,
+    };
+    *proposal_counter += 1;
+    vec![proposal]
+}
+
 fn mission_result_haystack(result: &ChapterResultSummary) -> String {
     [
         vec![result.summary.clone()],
@@ -1945,11 +2065,74 @@ fn mission_result_haystack(result: &ChapterResultSummary) -> String {
     .join("\n")
 }
 
+fn mission_result_violation_haystack(result: &ChapterResultSummary) -> String {
+    [
+        vec![result.summary.clone()],
+        result.state_changes.clone(),
+        result.character_progress.clone(),
+        result.new_conflicts.clone(),
+        result.promise_updates.clone(),
+        result.canon_updates.clone(),
+    ]
+    .concat()
+    .join("\n")
+}
+
 fn cue_hit_score(cues: &str, haystack: &str) -> usize {
     mission_keywords(cues)
         .into_iter()
         .filter(|cue| haystack.contains(cue))
         .count()
+}
+
+fn cue_violation_hit_score(cues: &str, haystack: &str) -> usize {
+    mission_keywords(cues)
+        .into_iter()
+        .filter(|cue| cue_occurs_without_negation(haystack, cue))
+        .count()
+}
+
+fn cue_occurs_without_negation(haystack: &str, cue: &str) -> bool {
+    let mut search_from = 0usize;
+    while let Some(relative) = haystack[search_from..].find(cue) {
+        let byte_pos = search_from + relative;
+        let char_pos = haystack[..byte_pos].chars().count();
+        if !mission_context_negated_or_deferred_before(haystack, char_pos) {
+            return true;
+        }
+        search_from = byte_pos + cue.len();
+        if search_from >= haystack.len() {
+            break;
+        }
+    }
+    false
+}
+
+fn mission_context_negated_or_deferred_before(text: &str, match_from: usize) -> bool {
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = match_from.saturating_sub(10);
+    let context = chars[start..match_from.min(chars.len())]
+        .iter()
+        .collect::<String>();
+    [
+        "没有",
+        "并未",
+        "未曾",
+        "尚未",
+        "还没",
+        "不会",
+        "不能",
+        "不该",
+        "不肯",
+        "拒绝",
+        "暂不",
+        "避免",
+        "仍没有",
+        "没有真正",
+        "并没有",
+    ]
+    .iter()
+    .any(|cue| context.contains(cue))
 }
 
 fn mission_keywords(text: &str) -> Vec<String> {
@@ -1980,7 +2163,6 @@ fn push_mission_keyword(keywords: &mut Vec<String>, raw: &str, stopwords: &[&str
     }
     if raw.chars().count() <= 6 {
         keywords.push(raw.to_string());
-        return;
     }
 
     for marker in [
@@ -1991,7 +2173,10 @@ fn push_mission_keyword(keywords: &mut Vec<String>, raw: &str, stopwords: &[&str
         "令牌",
         "真相",
         "秘密",
+        "疑问",
         "下落",
+        "来源",
+        "禁地",
         "信任",
         "怀疑",
     ] {
@@ -2132,6 +2317,7 @@ fn proposal_trace_summary(
         state: state.to_string(),
         confidence: proposal.confidence,
         preview_snippet: snippet(&proposal.preview, 120),
+        evidence: proposal.evidence.clone(),
         context_budget,
         expires_at: proposal.expires_at,
     }
@@ -2238,11 +2424,44 @@ fn story_debt_from_review_entry(
         },
         title: entry.title.clone(),
         message: entry.message.clone(),
-        evidence: entry.evidence.clone(),
+        evidence: story_debt_review_evidence(entry),
         related_review_ids: vec![entry.id.clone()],
         operations: entry.operations.clone(),
         created_at: entry.created_at,
     }
+}
+
+fn story_debt_review_evidence(entry: &StoryReviewQueueEntry) -> Vec<EvidenceRef> {
+    entry
+        .evidence
+        .iter()
+        .map(|evidence| {
+            if evidence.source == EvidenceSource::PromiseLedger {
+                let mut enriched = evidence.clone();
+                if let Some(last_seen) =
+                    promise_last_seen_chapter_from_operations(&entry.operations)
+                {
+                    if !enriched.snippet.contains("last seen:") {
+                        enriched
+                            .snippet
+                            .push_str(&format!(" | last seen: {}", last_seen));
+                    }
+                }
+                enriched
+            } else {
+                evidence.clone()
+            }
+        })
+        .collect()
+}
+
+fn promise_last_seen_chapter_from_operations(operations: &[WriterOperation]) -> Option<String> {
+    operations.iter().find_map(|operation| match operation {
+        WriterOperation::PromiseResolve { chapter, .. }
+        | WriterOperation::PromiseDefer { chapter, .. }
+        | WriterOperation::PromiseAbandon { chapter, .. } => Some(chapter.clone()),
+        _ => None,
+    })
 }
 
 fn story_debt_from_open_promise(
@@ -2271,7 +2490,7 @@ fn story_debt_from_open_promise(
         evidence: vec![EvidenceRef {
             source: EvidenceSource::PromiseLedger,
             reference: promise.title.clone(),
-            snippet: promise.description.clone(),
+            snippet: promise_debt_evidence_snippet(promise),
         }],
         related_review_ids: Vec::new(),
         operations: story_debt_promise_operations(promise, active_chapter),
@@ -2353,6 +2572,33 @@ fn story_debt_category_for_review(entry: &StoryReviewQueueEntry) -> StoryDebtCat
         ProposalKind::ChapterStructure => StoryDebtCategory::Pacing,
         ProposalKind::ParallelDraft | ProposalKind::Ghost => StoryDebtCategory::Question,
     }
+}
+
+fn story_debt_category_weight(category: &StoryDebtCategory) -> i32 {
+    match category {
+        StoryDebtCategory::StoryContract => 80,
+        StoryDebtCategory::ChapterMission => 70,
+        StoryDebtCategory::CanonRisk | StoryDebtCategory::TimelineRisk => 60,
+        StoryDebtCategory::Promise => 50,
+        StoryDebtCategory::Pacing => 40,
+        StoryDebtCategory::Memory => 30,
+        StoryDebtCategory::Question => 20,
+    }
+}
+
+fn promise_debt_evidence_snippet(promise: &super::memory::PlotPromiseSummary) -> String {
+    let mut parts = vec![promise.description.clone()];
+    if !promise.introduced_chapter.trim().is_empty() {
+        parts.push(format!("introduced: {}", promise.introduced_chapter));
+    }
+    if !promise.last_seen_chapter.trim().is_empty() {
+        parts.push(format!("last seen: {}", promise.last_seen_chapter));
+    }
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 fn chapter_from_operations(operations: &[WriterOperation]) -> Option<String> {

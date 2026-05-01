@@ -632,6 +632,9 @@ fn detect_mission_must_not_violation(
     let matched = terms
         .iter()
         .find_map(|term| match_mission_guard_term(paragraph, term))?;
+    if looks_negated_or_deferred_before(paragraph, matched.0) {
+        return None;
+    }
     let from = paragraph_offset + matched.0;
     let to = paragraph_offset + matched.1.max(matched.0 + 1);
 
@@ -723,6 +726,9 @@ fn detect_structural_boundary_violation(
     let matched = terms
         .iter()
         .find_map(|term| match_contract_term(paragraph, term))?;
+    if looks_negated_or_deferred_before(paragraph, matched.0) {
+        return None;
+    }
     let from = paragraph_offset + matched.0;
     let to = paragraph_offset + matched.1.max(matched.0 + 1);
 
@@ -798,6 +804,33 @@ fn is_contract_boundary_stop_term(term: &str) -> bool {
         "真相", "来源", "身份", "秘密",
     ];
     STOP_TERMS.iter().any(|stop| term.contains(stop))
+}
+
+fn looks_negated_or_deferred_before(text: &str, match_from: usize) -> bool {
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = match_from.saturating_sub(8);
+    let context = chars[start..match_from.min(chars.len())]
+        .iter()
+        .collect::<String>();
+    text_contains_any(
+        &context,
+        &[
+            "没有",
+            "并未",
+            "未曾",
+            "尚未",
+            "还没",
+            "不会",
+            "不能",
+            "不该",
+            "不肯",
+            "拒绝",
+            "暂不",
+            "避免",
+            "没有真正",
+            "并没有",
+        ],
+    )
 }
 
 #[derive(Default)]
@@ -1164,6 +1197,57 @@ mod tests {
             .unwrap();
         assert!(warning.message.contains("章节任务违例"));
         assert_eq!(warning.evidence[0].source, "chapter_mission");
+    }
+
+    #[test]
+    fn test_chapter_mission_must_not_negated_does_not_warn() {
+        let m = test_memory();
+        m.ensure_chapter_mission_seed(
+            "default",
+            "Chapter-2",
+            "让林墨追查玉佩下落。",
+            "玉佩线索",
+            "提前揭开真相",
+            "以误导线索收束。",
+            "test",
+        )
+        .unwrap();
+        let engine = DiagnosticsEngine::new();
+        let results = engine.diagnose(
+            "林墨没有揭开真相，只把玉佩重新收进袖中。",
+            0,
+            "Chapter-2",
+            "default",
+            &m,
+        );
+        assert!(!results
+            .iter()
+            .any(|result| matches!(result.category, DiagnosticCategory::ChapterMissionViolation)));
+    }
+
+    #[test]
+    fn test_story_contract_negated_reveal_does_not_warn() {
+        let m = test_memory();
+        m.ensure_story_contract_seed(
+            "default",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+        let engine = DiagnosticsEngine::new();
+        let results = engine.diagnose(
+            "张三没有说出真相，也不肯解释玉佩来源。",
+            0,
+            "Chapter-2",
+            "default",
+            &m,
+        );
+        assert!(!results
+            .iter()
+            .any(|result| matches!(result.category, DiagnosticCategory::StoryContractViolation)));
     }
 
     #[test]
