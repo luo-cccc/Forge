@@ -1,5 +1,6 @@
 pub mod canon;
 pub mod context;
+pub mod diagnostics;
 pub mod feedback;
 pub mod intent;
 pub mod kernel;
@@ -10,6 +11,7 @@ pub mod proposal;
 
 pub use canon::CanonEngine;
 pub use context::{WritingContextPack, ContextBudgetReport, AgentTask, assemble_context_pack};
+pub use diagnostics::{DiagnosticsEngine, DiagnosticResult, DiagnosticSeverity, DiagnosticCategory};
 pub use feedback::ProposalFeedback;
 pub use intent::{IntentEngine, WritingIntent, WritingIntentEstimate, AgentBehavior};
 pub use kernel::{WriterAgentKernel, WriterAgentStatus};
