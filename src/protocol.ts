@@ -22,6 +22,7 @@ export const Commands = {
   getWriterAgentStatus: "get_writer_agent_status",
   getWriterAgentTrace: "get_writer_agent_trace",
   getStoryReviewQueue: "get_story_review_queue",
+  getStoryDebtSnapshot: "get_story_debt_snapshot",
   getAgentTools: "get_agent_tools",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
@@ -558,6 +559,29 @@ export interface StoryReviewQueueEntry {
   expiresAt?: number;
 }
 
+export interface StoryDebtSnapshot {
+  chapterTitle?: string;
+  total: number;
+  openCount: number;
+  canonRiskCount: number;
+  promiseCount: number;
+  pacingCount: number;
+  entries: StoryDebtEntry[];
+}
+
+export interface StoryDebtEntry {
+  id: string;
+  chapterTitle?: string;
+  category: "canon_risk" | "timeline_risk" | "promise" | "pacing" | "memory" | "question";
+  severity: "info" | "warning" | "error";
+  status: "open" | "snoozed" | "stale";
+  title: string;
+  message: string;
+  evidence: EvidenceRef[];
+  relatedReviewIds: string[];
+  createdAt: number;
+}
+
 export type WriterOperation =
   | { kind: "text.insert"; chapter: string; at: number; text: string; revision: string }
   | { kind: "text.replace"; chapter: string; from: number; to: number; text: string; revision: string }
@@ -679,6 +703,7 @@ export const WriterAgentCommands = {
   getWriterAgentStatus: "get_writer_agent_status",
   getWriterAgentLedger: "get_writer_agent_ledger",
   getStoryReviewQueue: "get_story_review_queue",
+  getStoryDebtSnapshot: "get_story_debt_snapshot",
   agentObserve: "agent_observe",
   applyProposalFeedback: "apply_proposal_feedback",
   approveWriterOperation: "approve_writer_operation",

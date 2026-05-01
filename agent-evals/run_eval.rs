@@ -770,6 +770,81 @@ fn run_story_review_queue_promise_eval() -> EvalResult {
     )
 }
 
+fn run_story_debt_snapshot_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "玉佩",
+            "张三拿走玉佩，需要交代下落。",
+            "Chapter-1",
+            "Chapter-4",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel
+        .observe(observation_in_chapter(
+            "林墨拔出长剑，指向门外的人。",
+            "Chapter-3",
+        ))
+        .unwrap();
+
+    let debt = kernel.story_debt_snapshot();
+    let mut errors = Vec::new();
+    if debt.canon_risk_count != 1 {
+        errors.push(format!(
+            "expected 1 canon risk, got {}",
+            debt.canon_risk_count
+        ));
+    }
+    if debt.promise_count != 1 {
+        errors.push(format!(
+            "expected 1 promise debt, got {}",
+            debt.promise_count
+        ));
+    }
+    if debt.open_count < 2 {
+        errors.push(format!(
+            "expected at least 2 open debts, got {}",
+            debt.open_count
+        ));
+    }
+    if !debt
+        .entries
+        .iter()
+        .any(|entry| entry.title.contains("Story truth"))
+    {
+        errors.push("missing story truth debt entry".to_string());
+    }
+    if !debt
+        .entries
+        .iter()
+        .any(|entry| entry.title.contains("Open promise"))
+    {
+        errors.push("missing open promise debt entry".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_debt_snapshot_counts_foundation",
+        format!(
+            "total={} open={} canon={} promise={}",
+            debt.total, debt.open_count, debt.canon_risk_count, debt.promise_count
+        ),
+        errors,
+    )
+}
+
 fn main() {
     let mut results = Vec::new();
     results.extend(run_intent_eval());
@@ -785,6 +860,7 @@ fn main() {
     results.push(run_promise_stale_eval());
     results.push(run_promise_resolve_operation_eval());
     results.push(run_story_review_queue_promise_eval());
+    results.push(run_story_debt_snapshot_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

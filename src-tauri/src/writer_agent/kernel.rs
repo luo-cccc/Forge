@@ -90,6 +90,52 @@ pub enum StoryReviewQueueStatus {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StoryDebtSnapshot {
+    pub chapter_title: Option<String>,
+    pub total: usize,
+    pub open_count: usize,
+    pub canon_risk_count: usize,
+    pub promise_count: usize,
+    pub pacing_count: usize,
+    pub entries: Vec<StoryDebtEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryDebtEntry {
+    pub id: String,
+    pub chapter_title: Option<String>,
+    pub category: StoryDebtCategory,
+    pub severity: StoryReviewSeverity,
+    pub status: StoryDebtStatus,
+    pub title: String,
+    pub message: String,
+    pub evidence: Vec<EvidenceRef>,
+    pub related_review_ids: Vec<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryDebtCategory {
+    CanonRisk,
+    TimelineRisk,
+    Promise,
+    Pacing,
+    Memory,
+    Question,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryDebtStatus {
+    Open,
+    Snoozed,
+    Stale,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WriterAgentTraceSnapshot {
     pub recent_observations: Vec<WriterObservationTrace>,
     pub recent_proposals: Vec<WriterProposalTrace>,
@@ -931,6 +977,71 @@ impl WriterAgentKernel {
         entries
     }
 
+    pub fn story_debt_snapshot(&self) -> StoryDebtSnapshot {
+        let mut entries = Vec::new();
+        let chapter_title = self.active_chapter.clone();
+        let review_entries = self.story_review_queue();
+
+        for entry in review_entries.iter().filter(|entry| {
+            matches!(
+                entry.status,
+                StoryReviewQueueStatus::Pending | StoryReviewQueueStatus::Snoozed
+            )
+        }) {
+            entries.push(story_debt_from_review_entry(entry, &chapter_title));
+        }
+
+        let queued_promise_ids = entries
+            .iter()
+            .flat_map(|entry| &entry.evidence)
+            .filter(|evidence| evidence.source == EvidenceSource::PromiseLedger)
+            .map(|evidence| evidence.reference.clone())
+            .collect::<HashSet<_>>();
+
+        for promise in self.memory.get_open_promise_summaries().unwrap_or_default() {
+            if queued_promise_ids.contains(&promise.title) {
+                continue;
+            }
+            entries.push(story_debt_from_open_promise(&promise, &chapter_title));
+        }
+
+        entries.sort_by(|a, b| {
+            story_debt_status_weight(&b.status)
+                .cmp(&story_debt_status_weight(&a.status))
+                .then_with(|| {
+                    queue_severity_weight(&b.severity).cmp(&queue_severity_weight(&a.severity))
+                })
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+
+        let open_count = entries
+            .iter()
+            .filter(|entry| entry.status == StoryDebtStatus::Open)
+            .count();
+        let canon_risk_count = entries
+            .iter()
+            .filter(|entry| entry.category == StoryDebtCategory::CanonRisk)
+            .count();
+        let promise_count = entries
+            .iter()
+            .filter(|entry| entry.category == StoryDebtCategory::Promise)
+            .count();
+        let pacing_count = entries
+            .iter()
+            .filter(|entry| entry.category == StoryDebtCategory::Pacing)
+            .count();
+
+        StoryDebtSnapshot {
+            chapter_title,
+            total: entries.len(),
+            open_count,
+            canon_risk_count,
+            promise_count,
+            pacing_count,
+            entries,
+        }
+    }
+
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
         WriterAgentLedgerSnapshot {
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
@@ -1117,6 +1228,102 @@ fn review_title_for_proposal(proposal: &AgentProposal) -> String {
         ProposalKind::Question => "Open story question".to_string(),
         ProposalKind::ParallelDraft => "Parallel draft".to_string(),
         ProposalKind::Ghost => "Draft continuation".to_string(),
+    }
+}
+
+fn story_debt_from_review_entry(
+    entry: &StoryReviewQueueEntry,
+    active_chapter: &Option<String>,
+) -> StoryDebtEntry {
+    StoryDebtEntry {
+        id: format!("debt_{}", entry.id),
+        chapter_title: chapter_from_operations(&entry.operations)
+            .or_else(|| active_chapter.clone()),
+        category: story_debt_category_for_review(entry),
+        severity: entry.severity.clone(),
+        status: match entry.status {
+            StoryReviewQueueStatus::Snoozed => StoryDebtStatus::Snoozed,
+            StoryReviewQueueStatus::Expired => StoryDebtStatus::Stale,
+            _ => StoryDebtStatus::Open,
+        },
+        title: entry.title.clone(),
+        message: entry.message.clone(),
+        evidence: entry.evidence.clone(),
+        related_review_ids: vec![entry.id.clone()],
+        created_at: entry.created_at,
+    }
+}
+
+fn story_debt_from_open_promise(
+    promise: &super::memory::PlotPromiseSummary,
+    active_chapter: &Option<String>,
+) -> StoryDebtEntry {
+    StoryDebtEntry {
+        id: format!("debt_promise_{}", promise.id),
+        chapter_title: active_chapter.clone(),
+        category: StoryDebtCategory::Promise,
+        severity: if promise.priority >= 5 {
+            StoryReviewSeverity::Warning
+        } else {
+            StoryReviewSeverity::Info
+        },
+        status: StoryDebtStatus::Open,
+        title: format!("Open promise: {}", promise.title),
+        message: if promise.expected_payoff.trim().is_empty() {
+            promise.description.clone()
+        } else {
+            format!(
+                "{} Expected payoff: {}",
+                promise.description, promise.expected_payoff
+            )
+        },
+        evidence: vec![EvidenceRef {
+            source: EvidenceSource::PromiseLedger,
+            reference: promise.title.clone(),
+            snippet: promise.description.clone(),
+        }],
+        related_review_ids: Vec::new(),
+        created_at: 0,
+    }
+}
+
+fn story_debt_category_for_review(entry: &StoryReviewQueueEntry) -> StoryDebtCategory {
+    match entry.category {
+        ProposalKind::ContinuityWarning => {
+            if entry.message.contains("时间线")
+                || entry.evidence.iter().any(|evidence| {
+                    evidence.snippet.contains("死亡") || evidence.snippet.contains("已死亡")
+                })
+            {
+                StoryDebtCategory::TimelineRisk
+            } else {
+                StoryDebtCategory::CanonRisk
+            }
+        }
+        ProposalKind::PlotPromise => StoryDebtCategory::Promise,
+        ProposalKind::StyleNote => StoryDebtCategory::Pacing,
+        ProposalKind::CanonUpdate => StoryDebtCategory::Memory,
+        ProposalKind::Question => StoryDebtCategory::Question,
+        ProposalKind::ChapterStructure => StoryDebtCategory::Pacing,
+        ProposalKind::ParallelDraft | ProposalKind::Ghost => StoryDebtCategory::Question,
+    }
+}
+
+fn chapter_from_operations(operations: &[WriterOperation]) -> Option<String> {
+    operations.first().and_then(|operation| match operation {
+        WriterOperation::TextInsert { chapter, .. }
+        | WriterOperation::TextReplace { chapter, .. }
+        | WriterOperation::TextAnnotate { chapter, .. }
+        | WriterOperation::PromiseResolve { chapter, .. } => Some(chapter.clone()),
+        _ => None,
+    })
+}
+
+fn story_debt_status_weight(status: &StoryDebtStatus) -> i32 {
+    match status {
+        StoryDebtStatus::Open => 2,
+        StoryDebtStatus::Snoozed => 1,
+        StoryDebtStatus::Stale => 0,
     }
 }
 

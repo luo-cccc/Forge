@@ -1909,6 +1909,14 @@ fn get_story_review_queue(
 }
 
 #[tauri::command]
+fn get_story_debt_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<writer_agent::kernel::StoryDebtSnapshot, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.story_debt_snapshot())
+}
+
+#[tauri::command]
 fn get_writer_agent_trace(
     state: tauri::State<'_, AppState>,
     limit: Option<usize>,
@@ -2858,6 +2866,7 @@ pub fn run() {
             get_writer_agent_ledger,
             get_writer_agent_pending_proposals,
             get_story_review_queue,
+            get_story_debt_snapshot,
             get_writer_agent_trace,
             apply_proposal_feedback,
             record_implicit_ghost_rejection,

@@ -10,6 +10,7 @@ import type {
   OperationResult,
   ProposalFeedback,
   StoryMode,
+  StoryDebtSnapshot,
   StoryReviewQueueEntry,
   WriterOperation,
 } from "../protocol";
@@ -114,21 +115,24 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [ledger, setLedger] = useState<WriterAgentLedgerSnapshot | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
+  const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<"status" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [nextStatus, nextLedger, nextProposals, nextReviewQueue] = await Promise.all([
+      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt] = await Promise.all([
         invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
         invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
         invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
+        invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
       ]);
       setStatus(nextStatus);
       setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
+      setStoryDebt(nextStoryDebt);
       setProposals((prev) => {
         const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
         return merged.filter((proposal) =>
@@ -182,6 +186,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setReviewQueue((prev) => prev.filter((entry) => entry.proposalId !== proposalId));
       const nextLedger = await invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger);
       setLedger(nextLedger);
+      const nextStoryDebt = await invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot);
+      setStoryDebt(nextStoryDebt);
     } catch (e) {
       console.error("Proposal feedback failed:", e);
     }
@@ -482,6 +488,45 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {operationError && (
               <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
                 {operationError}
+              </div>
+            )}
+            {storyDebt && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Story Debt</span>
+                  <span className="text-[10px] text-text-muted">
+                    {storyDebt.chapterTitle || currentChapter || "project"}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-4 gap-1 text-center">
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-text-primary">{storyDebt.openCount}</div>
+                    <div className="text-[10px] text-text-muted">open</div>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-danger">{storyDebt.canonRiskCount}</div>
+                    <div className="text-[10px] text-text-muted">canon</div>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-accent">{storyDebt.promiseCount}</div>
+                    <div className="text-[10px] text-text-muted">promise</div>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-text-secondary">{storyDebt.pacingCount}</div>
+                    <div className="text-[10px] text-text-muted">pacing</div>
+                  </div>
+                </div>
+                {storyDebt.entries.slice(0, 3).map((entry) => (
+                  <div key={entry.id} className="mt-2 border-t border-border-subtle pt-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-text-secondary">{entry.title}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${severityBadgeClass(entry.severity)}`}>
+                        {entry.category}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-text-muted">{entry.message}</p>
+                  </div>
+                ))}
               </div>
             )}
             {visibleReviewQueue.length === 0 && (
