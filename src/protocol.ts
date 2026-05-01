@@ -13,11 +13,13 @@ export const Commands = {
   exportDiagnosticLogs: "export_diagnostic_logs",
   generateChapterAutonomous: "generate_chapter_autonomous",
   getApiKey: "get_api_key",
+  getAgentKernelStatus: "get_agent_kernel_status",
   getAgentTools: "get_agent_tools",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
   getProjectGraphData: "get_project_graph_data",
+  getWritingSkills: "get_writing_skills",
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
@@ -194,12 +196,52 @@ export interface AgentObserveResult {
 
 export interface AgentToolDescriptor {
   name: string;
+  description: string;
   inputType: string;
   outputType: string;
-  sideEffectLevel: "none" | "read" | "provider_call" | "write";
+  sideEffectLevel: "none" | "read" | "provider_call" | "write" | "external";
   requiresApproval: boolean;
   timeoutMs: number;
   contextCostChars: number;
+  tags: string[];
+  stage: "observe" | "plan" | "context" | "execute" | "reflect";
+  source: string;
+  supportedIntents: Array<
+    "chat" | "retrieve_knowledge" | "analyze_text" | "generate_content" | "execute_plan" | "linter"
+  >;
+  enabledByDefault: boolean;
+  inputSchema?: unknown;
+}
+
+export interface AgentKernelStatus {
+  toolGeneration: number;
+  toolCount: number;
+  approvalRequiredToolCount: number;
+  writeToolCount: number;
+  skillCount: number;
+  skillDiagnosticCount: number;
+  traceEnabled: boolean;
+}
+
+export interface WritingSkill {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  source: "builtin" | "project" | "user";
+  path: string;
+  body: string;
+}
+
+export interface SkillLoadDiagnostic {
+  path: string;
+  message: string;
+}
+
+export interface SkillLoadReport {
+  skills: WritingSkill[];
+  diagnostics: SkillLoadDiagnostic[];
 }
 
 export interface FrontendChapterStateSnapshot {

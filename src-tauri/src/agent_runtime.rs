@@ -1,3 +1,4 @@
+use agent_harness_core::{default_writing_tool_registry, ToolDescriptor};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -111,17 +112,7 @@ pub struct AgentObserveResult {
     pub suggestion_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentToolDescriptor {
-    pub name: String,
-    pub input_type: String,
-    pub output_type: String,
-    pub side_effect_level: String,
-    pub requires_approval: bool,
-    pub timeout_ms: u64,
-    pub context_cost_chars: usize,
-}
+pub type AgentToolDescriptor = ToolDescriptor;
 
 #[derive(Debug, Clone)]
 pub struct AttentionDecision {
@@ -280,7 +271,9 @@ pub fn build_suggestion(
             "建议先核对前文因果：这一句可能需要补一个触发点或解释。".to_string()
         }
         AgentSuggestionKind::Lore => "这里可能需要引用设定库中的既有规则。".to_string(),
-        AgentSuggestionKind::Structure => "这一段可以对齐当前章节节拍，提前埋下下一场冲突。".to_string(),
+        AgentSuggestionKind::Structure => {
+            "这一段可以对齐当前章节节拍，提前埋下下一场冲突。".to_string()
+        }
         AgentSuggestionKind::Question => "这里需要你确认角色真正想隐瞒什么。".to_string(),
         AgentSuggestionKind::Continue => {
             "可以顺着当前情绪推进一小段，让人物先做出一个无法回避的动作。".to_string()
@@ -317,13 +310,21 @@ pub fn build_source_summaries(
     let mut sources = Vec::new();
     sources.push(summary_source(
         "editor_window",
-        observation.chapter_title.as_deref().unwrap_or("current chapter"),
+        observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
         &observation.nearby_text,
         220,
     ));
 
     if let Some(summary) = outline_summary {
-        sources.push(summary_source("outline", "current outline node", &summary, 220));
+        sources.push(summary_source(
+            "outline",
+            "current outline node",
+            &summary,
+            220,
+        ));
     }
 
     for (keyword, content) in lore_hits.into_iter().take(3) {
@@ -364,71 +365,7 @@ fn summary_source(
 }
 
 pub fn registered_tools() -> Vec<AgentToolDescriptor> {
-    vec![
-        AgentToolDescriptor {
-            name: "load_current_chapter".to_string(),
-            input_type: "chapter_title".to_string(),
-            output_type: "chapter_text".to_string(),
-            side_effect_level: "read".to_string(),
-            requires_approval: false,
-            timeout_ms: 500,
-            context_cost_chars: 1_800,
-        },
-        AgentToolDescriptor {
-            name: "load_outline_node".to_string(),
-            input_type: "chapter_title".to_string(),
-            output_type: "outline_node".to_string(),
-            side_effect_level: "read".to_string(),
-            requires_approval: false,
-            timeout_ms: 500,
-            context_cost_chars: 800,
-        },
-        AgentToolDescriptor {
-            name: "search_lorebook".to_string(),
-            input_type: "keywords".to_string(),
-            output_type: "lorebook_entries".to_string(),
-            side_effect_level: "read".to_string(),
-            requires_approval: false,
-            timeout_ms: 800,
-            context_cost_chars: 1_200,
-        },
-        AgentToolDescriptor {
-            name: "query_project_brain".to_string(),
-            input_type: "semantic_query".to_string(),
-            output_type: "rag_snippets".to_string(),
-            side_effect_level: "provider_call".to_string(),
-            requires_approval: false,
-            timeout_ms: 2_500,
-            context_cost_chars: 1_500,
-        },
-        AgentToolDescriptor {
-            name: "read_user_drift_profile".to_string(),
-            input_type: "none".to_string(),
-            output_type: "preference_entries".to_string(),
-            side_effect_level: "read".to_string(),
-            requires_approval: false,
-            timeout_ms: 500,
-            context_cost_chars: 800,
-        },
-        AgentToolDescriptor {
-            name: "generate_bounded_continuation".to_string(),
-            input_type: "agent_observation_context".to_string(),
-            output_type: "suggestion_preview".to_string(),
-            side_effect_level: "provider_call".to_string(),
-            requires_approval: false,
-            timeout_ms: 6_000,
-            context_cost_chars: 2_400,
-        },
-        AgentToolDescriptor {
-            name: "generate_chapter_draft".to_string(),
-            input_type: "chapter_generation_payload".to_string(),
-            output_type: "saved_chapter".to_string(),
-            side_effect_level: "write".to_string(),
-            requires_approval: true,
-            timeout_ms: 120_000,
-            context_cost_chars: 12_000,
-        },
-    ]
+    default_writing_tool_registry().list()
 }
 
 #[cfg(test)]
@@ -457,7 +394,10 @@ mod tests {
 
     #[test]
     fn policy_noops_when_disabled() {
-        let obs = observation(AgentMode::Off, "这是一个足够长的段落，用来验证关闭状态不会触发主动建议。");
+        let obs = observation(
+            AgentMode::Off,
+            "这是一个足够长的段落，用来验证关闭状态不会触发主动建议。",
+        );
         let decision = attention_policy(&obs, 1_000);
         assert!(!decision.should_suggest);
         assert_eq!(decision.reason, "proactive agent disabled");
@@ -465,7 +405,10 @@ mod tests {
 
     #[test]
     fn policy_noops_when_snoozed() {
-        let mut obs = observation(AgentMode::Proactive, "这是一个足够长的段落，用来验证暂停状态不会触发主动建议。");
+        let mut obs = observation(
+            AgentMode::Proactive,
+            "这是一个足够长的段落，用来验证暂停状态不会触发主动建议。",
+        );
         obs.snoozed_until = Some(2_000);
         let decision = attention_policy(&obs, 1_000);
         assert!(!decision.should_suggest);
@@ -482,7 +425,10 @@ mod tests {
 
     #[test]
     fn policy_triggers_lore_when_paragraph_has_setting_cue() {
-        let obs = observation(AgentMode::Proactive, "林墨停在破庙门前，密道里的毒雾正从裂缝里渗出来。");
+        let obs = observation(
+            AgentMode::Proactive,
+            "林墨停在破庙门前，密道里的毒雾正从裂缝里渗出来。",
+        );
         let decision = attention_policy(&obs, 1_000);
         assert!(decision.should_suggest);
         assert_eq!(decision.kind, AgentSuggestionKind::Lore);
@@ -518,7 +464,10 @@ mod tests {
             .iter()
             .find(|tool| tool.name == "generate_chapter_draft")
             .expect("chapter generation tool registered");
-        assert_eq!(chapter_tool.side_effect_level, "write");
+        assert_eq!(
+            chapter_tool.side_effect_level,
+            agent_harness_core::ToolSideEffectLevel::Write
+        );
         assert!(chapter_tool.requires_approval);
     }
 }

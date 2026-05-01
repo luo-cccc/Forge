@@ -1,13 +1,16 @@
 use std::sync::{Mutex, MutexGuard};
 
-use agent_harness_core::{classify_intent, hermes_memory::HermesDB};
+use agent_harness_core::{
+    classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, SkillLoadReport,
+    SkillLoader, SkillRoot, SkillSource,
+};
 
-mod brain_service;
 mod agent_runtime;
+mod brain_service;
 mod chapter_generation;
 mod llm_runtime;
 mod storage;
-use agent_runtime::{AgentObserveResult, AgentObservation, AgentToolDescriptor};
+use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
 };
@@ -297,6 +300,18 @@ struct AgentError {
     source: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentKernelStatus {
+    tool_generation: u64,
+    tool_count: usize,
+    approval_required_tool_count: usize,
+    write_tool_count: usize,
+    skill_count: usize,
+    skill_diagnostic_count: usize,
+    trace_enabled: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EditorStatePayload {
@@ -364,7 +379,11 @@ fn realtime_cowrite_enabled() -> bool {
         .unwrap_or(true)
 }
 
-fn build_fim_messages(prefix: &str, suffix: &str, chapter_title: Option<&str>) -> Vec<serde_json::Value> {
+fn build_fim_messages(
+    prefix: &str,
+    suffix: &str,
+    chapter_title: Option<&str>,
+) -> Vec<serde_json::Value> {
     let title = chapter_title.unwrap_or("current chapter");
     let system_prompt = "You are a low-latency fill-in-the-middle writing engine for a novelist. \
 Complete only the text that belongs exactly at the cursor. Return 1-3 short Chinese sentences at most. \
@@ -471,7 +490,10 @@ fn build_lore_conflict_hint(
             return Some((
                 start,
                 end,
-                format!("设定冲突：{} 的设定里提到“{}{}”。", lore_keyword, marker, term),
+                format!(
+                    "设定冲突：{} 的设定里提到“{}{}”。",
+                    lore_keyword, marker, term
+                ),
             ));
         }
     }
@@ -479,7 +501,10 @@ fn build_lore_conflict_hint(
     None
 }
 
-fn find_semantic_lint(app: &tauri::AppHandle, payload: &SemanticLintPayload) -> Option<EditorSemanticLint> {
+fn find_semantic_lint(
+    app: &tauri::AppHandle,
+    payload: &SemanticLintPayload,
+) -> Option<EditorSemanticLint> {
     let paragraph = payload.paragraph.trim();
     if paragraph.chars().count() < 8 {
         return None;
@@ -531,7 +556,10 @@ fn find_semantic_lint(app: &tauri::AppHandle, payload: &SemanticLintPayload) -> 
     None
 }
 
-fn abort_editor_prediction_task(state: &AppState, request_id: Option<&str>) -> Result<bool, String> {
+fn abort_editor_prediction_task(
+    state: &AppState,
+    request_id: Option<&str>,
+) -> Result<bool, String> {
     let mut task = lock_editor_prediction(state)?;
     let should_cancel = match (&*task, request_id) {
         (Some(active), Some(request_id)) => active.request_id == request_id,
@@ -684,7 +712,6 @@ async fn report_semantic_lint_state(
 
     Ok(())
 }
-
 
 #[tauri::command]
 async fn batch_generate_chapter(
@@ -991,7 +1018,87 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
     }
 
     drop(db);
+
+    let file_skills = load_writing_skill_report(app);
+    if !file_skills.skills.is_empty() {
+        let query_lower = query.to_lowercase();
+        let mut packer = agent_harness_core::ContextPacker::new(2_400);
+        for skill in file_skills
+            .skills
+            .iter()
+            .filter(|skill| {
+                query_lower.is_empty()
+                    || skill.name.to_lowercase().contains(&query_lower)
+                    || skill.description.to_lowercase().contains(&query_lower)
+                    || skill
+                        .tags
+                        .iter()
+                        .any(|tag| tag.to_lowercase().contains(&query_lower))
+                    || skill.body.to_lowercase().contains(&query_lower)
+            })
+            .take(6)
+        {
+            let content = format!(
+                "Source: {}\nCategory: {}\nTags: {}\nDescription: {}\n\n{}",
+                skill.source.as_label(),
+                skill.category,
+                skill.tags.join(", "),
+                skill.description,
+                skill.body
+            );
+            packer.add_source(
+                "writing_skill",
+                &skill.id,
+                &format!(
+                    "File skill: [{}:{}] {}",
+                    skill.source.as_label(),
+                    skill.category,
+                    skill.name
+                ),
+                &content,
+                600,
+                None,
+            );
+        }
+
+        let packed = packer.finish();
+        if !packed.text.trim().is_empty() {
+            parts.push(packed.text);
+        }
+    }
+
     parts.join("\n")
+}
+
+trait SkillSourceLabel {
+    fn as_label(&self) -> &'static str;
+}
+
+impl SkillSourceLabel for SkillSource {
+    fn as_label(&self) -> &'static str {
+        match self {
+            SkillSource::Builtin => "builtin",
+            SkillSource::Project => "project",
+            SkillSource::User => "user",
+        }
+    }
+}
+
+fn load_writing_skill_report(app: &tauri::AppHandle) -> SkillLoadReport {
+    let mut roots = Vec::new();
+    if let Ok(app_data_dir) = storage::app_data_dir(app) {
+        roots.push(SkillRoot {
+            path: app_data_dir.join("skills"),
+            source: SkillSource::User,
+        });
+    }
+    if let Ok(project_dir) = storage::project_dir(app) {
+        roots.push(SkillRoot {
+            path: project_dir.join(".forge").join("skills"),
+            source: SkillSource::Project,
+        });
+    }
+    SkillLoader::default().load(&roots)
 }
 
 fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
@@ -1240,6 +1347,31 @@ fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
 }
 
 #[tauri::command]
+fn get_agent_kernel_status(app: tauri::AppHandle) -> Result<AgentKernelStatus, String> {
+    let registry = default_writing_tool_registry();
+    let tools = registry.list();
+    let skill_report = load_writing_skill_report(&app);
+
+    Ok(AgentKernelStatus {
+        tool_generation: registry.generation(),
+        tool_count: tools.len(),
+        approval_required_tool_count: tools.iter().filter(|tool| tool.requires_approval).count(),
+        write_tool_count: tools
+            .iter()
+            .filter(|tool| tool.side_effect_level == agent_harness_core::ToolSideEffectLevel::Write)
+            .count(),
+        skill_count: skill_report.skills.len(),
+        skill_diagnostic_count: skill_report.diagnostics.len(),
+        trace_enabled: true,
+    })
+}
+
+#[tauri::command]
+fn get_writing_skills(app: tauri::AppHandle) -> Result<SkillLoadReport, String> {
+    Ok(load_writing_skill_report(&app))
+}
+
+#[tauri::command]
 fn agent_observe(
     app: tauri::AppHandle,
     observation: AgentObservation,
@@ -1258,15 +1390,18 @@ fn agent_observe(
         });
     }
 
-    let outline_summary = observation.chapter_title.as_ref().and_then(|chapter_title| {
-        storage::load_outline(&app).ok().and_then(|nodes| {
-            nodes
-                .into_iter()
-                .find(|node| &node.chapter_title == chapter_title)
-                .map(|node| node.summary)
-                .filter(|summary| !summary.trim().is_empty())
-        })
-    });
+    let outline_summary = observation
+        .chapter_title
+        .as_ref()
+        .and_then(|chapter_title| {
+            storage::load_outline(&app).ok().and_then(|nodes| {
+                nodes
+                    .into_iter()
+                    .find(|node| &node.chapter_title == chapter_title)
+                    .map(|node| node.summary)
+                    .filter(|summary| !summary.trim().is_empty())
+            })
+        });
 
     let paragraph_lower = observation.current_paragraph.to_lowercase();
     let nearby_lower = observation.nearby_text.to_lowercase();
@@ -1284,8 +1419,12 @@ fn agent_observe(
     let profile_count = collect_user_profile_entries(&app)
         .map(|entries| entries.len())
         .unwrap_or(0);
-    let source_summaries =
-        agent_runtime::build_source_summaries(&observation, outline_summary, lore_hits, profile_count);
+    let source_summaries = agent_runtime::build_source_summaries(
+        &observation,
+        outline_summary,
+        lore_hits,
+        profile_count,
+    );
     let suggestion = agent_runtime::build_suggestion(
         &observation,
         request_id.clone(),
@@ -1574,7 +1713,9 @@ pub fn run() {
             report_semantic_lint_state,
             ask_agent,
             agent_observe,
+            get_agent_kernel_status,
             get_agent_tools,
+            get_writing_skills,
             get_lorebook,
             save_lore_entry,
             delete_lore_entry,
