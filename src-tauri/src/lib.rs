@@ -1,8 +1,7 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, SkillLoadReport,
-    SkillLoader, SkillRoot, SkillSource,
+    classify_intent, default_writing_tool_registry, hermes_memory::HermesDB, writing_domain_profile,
 };
 
 mod agent_runtime;
@@ -307,8 +306,9 @@ struct AgentKernelStatus {
     tool_count: usize,
     approval_required_tool_count: usize,
     write_tool_count: usize,
-    skill_count: usize,
-    skill_diagnostic_count: usize,
+    domain_id: String,
+    capability_count: usize,
+    quality_gate_count: usize,
     trace_enabled: bool,
 }
 
@@ -1019,86 +1019,7 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
 
     drop(db);
 
-    let file_skills = load_writing_skill_report(app);
-    if !file_skills.skills.is_empty() {
-        let query_lower = query.to_lowercase();
-        let mut packer = agent_harness_core::ContextPacker::new(2_400);
-        for skill in file_skills
-            .skills
-            .iter()
-            .filter(|skill| {
-                query_lower.is_empty()
-                    || skill.name.to_lowercase().contains(&query_lower)
-                    || skill.description.to_lowercase().contains(&query_lower)
-                    || skill
-                        .tags
-                        .iter()
-                        .any(|tag| tag.to_lowercase().contains(&query_lower))
-                    || skill.body.to_lowercase().contains(&query_lower)
-            })
-            .take(6)
-        {
-            let content = format!(
-                "Source: {}\nCategory: {}\nTags: {}\nDescription: {}\n\n{}",
-                skill.source.as_label(),
-                skill.category,
-                skill.tags.join(", "),
-                skill.description,
-                skill.body
-            );
-            packer.add_source(
-                "writing_skill",
-                &skill.id,
-                &format!(
-                    "File skill: [{}:{}] {}",
-                    skill.source.as_label(),
-                    skill.category,
-                    skill.name
-                ),
-                &content,
-                600,
-                None,
-            );
-        }
-
-        let packed = packer.finish();
-        if !packed.text.trim().is_empty() {
-            parts.push(packed.text);
-        }
-    }
-
     parts.join("\n")
-}
-
-trait SkillSourceLabel {
-    fn as_label(&self) -> &'static str;
-}
-
-impl SkillSourceLabel for SkillSource {
-    fn as_label(&self) -> &'static str {
-        match self {
-            SkillSource::Builtin => "builtin",
-            SkillSource::Project => "project",
-            SkillSource::User => "user",
-        }
-    }
-}
-
-fn load_writing_skill_report(app: &tauri::AppHandle) -> SkillLoadReport {
-    let mut roots = Vec::new();
-    if let Ok(app_data_dir) = storage::app_data_dir(app) {
-        roots.push(SkillRoot {
-            path: app_data_dir.join("skills"),
-            source: SkillSource::User,
-        });
-    }
-    if let Ok(project_dir) = storage::project_dir(app) {
-        roots.push(SkillRoot {
-            path: project_dir.join(".forge").join("skills"),
-            source: SkillSource::Project,
-        });
-    }
-    SkillLoader::default().load(&roots)
 }
 
 fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
@@ -1347,10 +1268,10 @@ fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
 }
 
 #[tauri::command]
-fn get_agent_kernel_status(app: tauri::AppHandle) -> Result<AgentKernelStatus, String> {
+fn get_agent_kernel_status() -> Result<AgentKernelStatus, String> {
     let registry = default_writing_tool_registry();
     let tools = registry.list();
-    let skill_report = load_writing_skill_report(&app);
+    let domain = writing_domain_profile();
 
     Ok(AgentKernelStatus {
         tool_generation: registry.generation(),
@@ -1360,15 +1281,16 @@ fn get_agent_kernel_status(app: tauri::AppHandle) -> Result<AgentKernelStatus, S
             .iter()
             .filter(|tool| tool.side_effect_level == agent_harness_core::ToolSideEffectLevel::Write)
             .count(),
-        skill_count: skill_report.skills.len(),
-        skill_diagnostic_count: skill_report.diagnostics.len(),
+        domain_id: domain.id,
+        capability_count: domain.capabilities.len(),
+        quality_gate_count: domain.quality_gates.len(),
         trace_enabled: true,
     })
 }
 
 #[tauri::command]
-fn get_writing_skills(app: tauri::AppHandle) -> Result<SkillLoadReport, String> {
-    Ok(load_writing_skill_report(&app))
+fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, String> {
+    Ok(writing_domain_profile())
 }
 
 #[tauri::command]
@@ -1713,9 +1635,9 @@ pub fn run() {
             report_semantic_lint_state,
             ask_agent,
             agent_observe,
+            get_agent_domain_profile,
             get_agent_kernel_status,
             get_agent_tools,
-            get_writing_skills,
             get_lorebook,
             save_lore_entry,
             delete_lore_entry,

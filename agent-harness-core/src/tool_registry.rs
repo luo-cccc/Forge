@@ -288,17 +288,17 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
         .with_tags(&["memory", "preference", "read"])
         .with_supported_intents(&[Chat, AnalyzeText, GenerateContent, ExecutePlan]),
         ToolDescriptor::new(
-            "load_writing_skills",
-            "Discover reusable writing skills from markdown SKILL files and learned memory.",
-            "skill_roots",
-            "writing_skills",
+            "load_domain_profile",
+            "Load the active domain capability profile for tool selection, context priority, and quality gates.",
+            "domain_id",
+            "domain_profile",
             Read,
             false,
             700,
             1_200,
             Context,
         )
-        .with_tags(&["skills", "read", "writing"])
+        .with_tags(&["domain", "capability", "read"])
         .with_supported_intents(&[Chat, AnalyzeText, GenerateContent, ExecutePlan, Linter]),
         ToolDescriptor::new(
             "pack_agent_context",

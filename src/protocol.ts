@@ -13,13 +13,13 @@ export const Commands = {
   exportDiagnosticLogs: "export_diagnostic_logs",
   generateChapterAutonomous: "generate_chapter_autonomous",
   getApiKey: "get_api_key",
+  getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",
   getAgentTools: "get_agent_tools",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
   getProjectGraphData: "get_project_graph_data",
-  getWritingSkills: "get_writing_skills",
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
@@ -218,30 +218,37 @@ export interface AgentKernelStatus {
   toolCount: number;
   approvalRequiredToolCount: number;
   writeToolCount: number;
-  skillCount: number;
-  skillDiagnosticCount: number;
+  domainId: string;
+  capabilityCount: number;
+  qualityGateCount: number;
   traceEnabled: boolean;
 }
 
-export interface WritingSkill {
+export interface AgentDomainCapability {
+  id: string;
+  label: string;
+  description: string;
+  stage: AgentToolDescriptor["stage"];
+  intents: AgentToolDescriptor["supportedIntents"];
+  contextSources: string[];
+  qualityChecks: string[];
+  priority: number;
+}
+
+export interface AgentContextPriority {
+  sourceType: string;
+  priority: number;
+  maxChars: number;
+  required: boolean;
+}
+
+export interface AgentDomainProfile {
   id: string;
   name: string;
   description: string;
-  category: string;
-  tags: string[];
-  source: "builtin" | "project" | "user";
-  path: string;
-  body: string;
-}
-
-export interface SkillLoadDiagnostic {
-  path: string;
-  message: string;
-}
-
-export interface SkillLoadReport {
-  skills: WritingSkill[];
-  diagnostics: SkillLoadDiagnostic[];
+  capabilities: AgentDomainCapability[];
+  contextPriorities: AgentContextPriority[];
+  qualityGates: string[];
 }
 
 export interface FrontendChapterStateSnapshot {
