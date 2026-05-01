@@ -1,8 +1,8 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Editor } from "@tiptap/core";
 import { useAppStore } from "./store";
-import { Commands, type WriterOperation } from "./protocol";
+import { Commands, Events, type ChapterRestored, type WriterOperation } from "./protocol";
 import EditorPanel from "./components/EditorPanel";
 import AgentPanel from "./components/AgentPanel";
 import { CompanionPanel } from "./components/CompanionPanel";
@@ -175,6 +175,29 @@ function App() {
         return false;
     }
   }, [setIsEditorDirty]);
+
+  useEffect(() => {
+    const handleRestored = async (event: Event) => {
+      const detail = (event as CustomEvent<ChapterRestored>).detail;
+      if (!detail?.title || detail.title !== currentChapter) return;
+      try {
+        const content = await invoke<string>(Commands.loadChapter, { title: detail.title });
+        if (editorRef.current) {
+          editorRef.current.commands.setContent(content || "<p></p>");
+        }
+        setCurrentChapterRevision(
+          detail.revision
+            ?? await invoke<string>(Commands.getChapterRevision, { title: detail.title }),
+        );
+        setIsEditorDirty(false);
+      } catch (e) {
+        console.error("Reload restored chapter failed:", e);
+      }
+    };
+
+    window.addEventListener(Events.chapterRestored, handleRestored);
+    return () => window.removeEventListener(Events.chapterRestored, handleRestored);
+  }, [currentChapter, setCurrentChapterRevision, setIsEditorDirty]);
 
   const getContext = useCallback(() => {
     const editor = editorRef.current;

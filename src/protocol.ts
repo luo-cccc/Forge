@@ -31,12 +31,14 @@ export const Commands = {
   getProjectGraphData: "get_project_graph_data",
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
+  listFileBackups: "list_file_backups",
   readProjectDir: "read_project_dir",
   recordImplicitGhostRejection: "record_implicit_ghost_rejection",
   reportEditorState: "report_editor_state",
   reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
   renameChapterFile: "rename_chapter_file",
+  restoreFileBackup: "restore_file_backup",
   saveChapter: "save_chapter",
   saveLoreEntry: "save_lore_entry",
   saveOutlineNode: "save_outline_node",
@@ -59,8 +61,14 @@ export const Events = {
   editorSemanticLint: "editor-semantic-lint",
   editorEntityCard: "editor-entity-card",
   editorHoverHint: "editor-hover-hint",
+  chapterRestored: "chapter-restored",
   storyboardMarker: "storyboard-marker",
 } as const;
+
+export interface ChapterRestored {
+  title: string;
+  revision: string;
+}
 
 export interface StreamChunk {
   content: string;
@@ -638,6 +646,20 @@ export interface ProjectStorageDiagnostics {
   healthy: boolean;
   files: StorageFileDiagnostic[];
   databases: SqliteDatabaseDiagnostic[];
+}
+
+export type BackupTarget =
+  | { kind: "lorebook" }
+  | { kind: "outline" }
+  | { kind: "project_brain" }
+  | { kind: "chapter"; title: string };
+
+export interface FileBackupInfo {
+  id: string;
+  filename: string;
+  path: string;
+  bytes: number;
+  modifiedAt: number;
 }
 
 export interface StorageFileDiagnostic {

@@ -103,6 +103,25 @@ pub struct SqliteTableCount {
     pub rows: u64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BackupTarget {
+    Lorebook,
+    Outline,
+    ProjectBrain,
+    Chapter { title: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBackupInfo {
+    pub id: String,
+    pub filename: String,
+    pub path: String,
+    pub bytes: u64,
+    pub modified_at: u64,
+}
+
 pub fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
@@ -302,11 +321,50 @@ pub fn project_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String>
 }
 
 pub fn chapter_filename(title: &str) -> String {
-    format!("{}.md", title.replace(' ', "-").to_lowercase())
+    let mut safe = String::new();
+    let mut last_was_dash = false;
+    for ch in title.trim().to_lowercase().chars() {
+        let next = if ch.is_ascii_alphanumeric() || is_cjk(ch) {
+            Some(ch)
+        } else if ch == ' ' || ch == '-' || ch == '_' {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(ch) = next {
+            if ch == '-' {
+                if last_was_dash {
+                    continue;
+                }
+                last_was_dash = true;
+            } else {
+                last_was_dash = false;
+            }
+            safe.push(ch);
+        }
+    }
+
+    let safe = safe.trim_matches('-');
+    let stem = if safe.is_empty() { "untitled" } else { safe };
+    format!("{}.md", stem)
 }
 
 pub fn chapter_path(app: &tauri::AppHandle, title: &str) -> Result<std::path::PathBuf, String> {
     Ok(project_dir(app)?.join(chapter_filename(title)))
+}
+
+fn is_cjk(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B820..=0x2CEAF
+    )
 }
 
 pub fn content_revision(content: &str) -> String {
@@ -539,6 +597,59 @@ pub fn project_storage_diagnostics(
     })
 }
 
+pub fn list_file_backups(
+    app: &tauri::AppHandle,
+    target: BackupTarget,
+) -> Result<Vec<FileBackupInfo>, String> {
+    let target_path = backup_target_path(app, &target)?;
+    let backup_dir = backup_dir_for(&target_path)?;
+    if !backup_dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut backups = std::fs::read_dir(&backup_dir)
+        .map_err(|e| {
+            format!(
+                "Failed to read backup dir '{}': {}",
+                backup_dir.display(),
+                e
+            )
+        })?
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| backup_info(entry).ok())
+        .collect::<Vec<_>>();
+    backups.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    Ok(backups)
+}
+
+pub fn restore_file_backup(
+    app: &tauri::AppHandle,
+    target: BackupTarget,
+    backup_id: String,
+) -> Result<(), String> {
+    let target_path = backup_target_path(app, &target)?;
+    let backup_dir = backup_dir_for(&target_path)?;
+    let backup_path = safe_backup_file_path(&backup_dir, &backup_id)?;
+    if !backup_path.exists() {
+        return Err(format!("Backup '{}' not found", backup_id));
+    }
+    let content = std::fs::read_to_string(&backup_path)
+        .map_err(|e| format!("Failed to read backup '{}': {}", backup_path.display(), e))?;
+    atomic_write(&target_path, &content)
+}
+
+fn backup_target_path(
+    app: &tauri::AppHandle,
+    target: &BackupTarget,
+) -> Result<std::path::PathBuf, String> {
+    match target {
+        BackupTarget::Lorebook => lorebook_path(app),
+        BackupTarget::Outline => outline_path(app),
+        BackupTarget::ProjectBrain => brain_path(app),
+        BackupTarget::Chapter { title } => chapter_path(app, title),
+    }
+}
+
 fn diagnose_json_array_file<T: for<'de> Deserialize<'de>>(
     label: &str,
     path: &std::path::Path,
@@ -727,13 +838,27 @@ pub fn rename_chapter_file(
     new_name: String,
 ) -> Result<(), String> {
     let dir = project_dir(app)?;
-    let old_path = dir.join(&old_name);
-    let new_path = dir.join(&new_name);
+    let old_path = safe_chapter_file_path(&dir, &old_name)?;
+    let new_path = safe_chapter_file_path(&dir, &new_name)?;
     if old_path.exists() && !new_path.exists() {
         std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())
     } else {
         Ok(())
     }
+}
+
+fn safe_chapter_file_path(
+    dir: &std::path::Path,
+    filename: &str,
+) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(filename);
+    if path.components().count() != 1 || path.file_name().is_none() {
+        return Err(format!("Invalid chapter filename: {}", filename));
+    }
+    if path.extension().map(|e| e != "md").unwrap_or(true) {
+        return Err(format!("Chapter filename must end with .md: {}", filename));
+    }
+    Ok(dir.join(path))
 }
 
 pub fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
@@ -831,6 +956,38 @@ fn safe_backup_segment(name: &str) -> String {
         .collect()
 }
 
+fn safe_backup_file_path(
+    backup_dir: &std::path::Path,
+    backup_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(backup_id);
+    if path.components().count() != 1 || path.file_name().is_none() {
+        return Err(format!("Invalid backup id: {}", backup_id));
+    }
+    Ok(backup_dir.join(path))
+}
+
+fn backup_info(entry: std::fs::DirEntry) -> Result<FileBackupInfo, String> {
+    let path = entry.path();
+    let metadata = entry
+        .metadata()
+        .map_err(|e| format!("Failed to read backup metadata '{}': {}", path.display(), e))?;
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let filename = entry.file_name().to_string_lossy().to_string();
+    Ok(FileBackupInfo {
+        id: filename.clone(),
+        filename,
+        path: path.to_string_lossy().to_string(),
+        bytes: metadata.len(),
+        modified_at,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,6 +1034,38 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].chapter_title, "第一章");
+    }
+
+    #[test]
+    fn chapter_filename_rejects_path_segments() {
+        assert_eq!(
+            chapter_filename("../第一章: 开端/草稿"),
+            "第一章-开端草稿.md"
+        );
+        assert_eq!(chapter_filename("   "), "untitled.md");
+        assert_eq!(
+            chapter_filename("Chapter 01 - Setup"),
+            "chapter-01-setup.md"
+        );
+    }
+
+    #[test]
+    fn safe_chapter_file_path_rejects_traversal() {
+        let dir = std::path::Path::new("chapters");
+
+        assert!(safe_chapter_file_path(dir, "chapter-1.md").is_ok());
+        assert!(safe_chapter_file_path(dir, "../chapter-1.md").is_err());
+        assert!(safe_chapter_file_path(dir, "nested/chapter-1.md").is_err());
+        assert!(safe_chapter_file_path(dir, "chapter-1.txt").is_err());
+    }
+
+    #[test]
+    fn safe_backup_file_path_rejects_traversal() {
+        let dir = std::path::Path::new("backups");
+
+        assert!(safe_backup_file_path(dir, "123-chapter.md").is_ok());
+        assert!(safe_backup_file_path(dir, "../123-chapter.md").is_err());
+        assert!(safe_backup_file_path(dir, "nested/123-chapter.md").is_err());
     }
 
     #[test]
@@ -932,6 +1121,25 @@ mod tests {
         assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), "old");
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(backup_dir.parent().unwrap());
+    }
+
+    #[test]
+    fn backup_info_lists_safe_restore_candidates() {
+        let path = temp_path("outline.json");
+        std::fs::write(&path, "v1").unwrap();
+        atomic_write(&path, "v2").unwrap();
+        let dir = backup_dir_for(&path).unwrap();
+        let backups = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| backup_info(entry).ok())
+            .collect::<Vec<_>>();
+
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0].id.ends_with("outline.json"));
+        assert_eq!(backups[0].bytes, 2);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]

@@ -7,6 +7,8 @@ import type {
   WriterAgentStatus,
   WriterAgentLedgerSnapshot,
   AgentProposal,
+  BackupTarget,
+  FileBackupInfo,
   OperationResult,
   ProposalFeedback,
   ProjectStorageDiagnostics,
@@ -153,6 +155,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [status, setStatus] = useState<WriterAgentStatus | null>(null);
   const [ledger, setLedger] = useState<WriterAgentLedgerSnapshot | null>(null);
   const [storageDiagnostics, setStorageDiagnostics] = useState<ProjectStorageDiagnostics | null>(null);
+  const [chapterBackups, setChapterBackups] = useState<FileBackupInfo[]>([]);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
@@ -172,6 +175,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
         .then(setStorageDiagnostics)
         .catch(() => setStorageDiagnostics(null));
+      if (currentChapter) {
+        const target: BackupTarget = { kind: "chapter", title: currentChapter };
+        invoke<FileBackupInfo[]>(Commands.listFileBackups, { target })
+          .then((backups) => setChapterBackups(backups.slice(0, 5)))
+          .catch(() => setChapterBackups([]));
+      } else {
+        setChapterBackups([]);
+      }
       setStatus(nextStatus);
       setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
@@ -185,7 +196,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch {
       // kernel not initialized yet
     }
-  }, []);
+  }, [currentChapter]);
 
   useEffect(() => {
     const initial = setTimeout(refreshStatus, 0);
@@ -410,6 +421,25 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     }
   }, [recordFeedback]);
 
+  const handleRestoreLatestChapterBackup = useCallback(async () => {
+    if (!currentChapter || chapterBackups.length === 0) return;
+    setOperationError(null);
+    try {
+      const target: BackupTarget = { kind: "chapter", title: currentChapter };
+      await invoke(Commands.restoreFileBackup, {
+        target,
+        backupId: chapterBackups[0].id,
+      });
+      const revision = await invoke<string>(Commands.getChapterRevision, { title: currentChapter });
+      window.dispatchEvent(new CustomEvent(Events.chapterRestored, {
+        detail: { title: currentChapter, revision },
+      }));
+      await refreshStatus();
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [chapterBackups, currentChapter, refreshStatus]);
+
   const pendingProposals = proposals.filter((p) => {
     return p.expiresAt === undefined || p.expiresAt === 0 || nowMs < p.expiresAt;
   });
@@ -519,7 +549,23 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             <div className="text-xs text-text-muted">
               <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
               <div className="p-2 rounded bg-bg-raised border border-border-subtle">
-                {currentChapter || "No chapter loaded"}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate">{currentChapter || "No chapter loaded"}</span>
+                  {chapterBackups.length > 0 && (
+                    <button
+                      onClick={handleRestoreLatestChapterBackup}
+                      className="shrink-0 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent"
+                      title={chapterBackups[0].filename}
+                    >
+                      Restore latest
+                    </button>
+                  )}
+                </div>
+                {chapterBackups.length > 0 && (
+                  <div className="mt-1 text-[10px] text-text-muted">
+                    {chapterBackups.length} recent backups · latest {formatBytes(chapterBackups[0].bytes)}
+                  </div>
+                )}
               </div>
             </div>
             {storageDiagnostics && (

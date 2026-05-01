@@ -2003,6 +2003,23 @@ fn get_project_storage_diagnostics(
 }
 
 #[tauri::command]
+fn list_file_backups(
+    app: tauri::AppHandle,
+    target: storage::BackupTarget,
+) -> Result<Vec<storage::FileBackupInfo>, String> {
+    storage::list_file_backups(&app, target)
+}
+
+#[tauri::command]
+fn restore_file_backup(
+    app: tauri::AppHandle,
+    target: storage::BackupTarget,
+    backup_id: String,
+) -> Result<(), String> {
+    storage::restore_file_backup(&app, target, backup_id)
+}
+
+#[tauri::command]
 fn get_writer_agent_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<writer_agent::WriterAgentStatus, String> {
@@ -2987,6 +3004,8 @@ pub fn run() {
             get_agent_domain_profile,
             get_agent_kernel_status,
             get_project_storage_diagnostics,
+            list_file_backups,
+            restore_file_backup,
             get_writer_agent_status,
             get_writer_agent_ledger,
             get_writer_agent_pending_proposals,
