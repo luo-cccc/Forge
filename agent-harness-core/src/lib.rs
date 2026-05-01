@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agent_loop;
+pub mod ambient;
 pub mod compaction;
 pub mod config;
 pub mod context_pack;
@@ -20,6 +21,7 @@ pub mod vector_db;
 
 pub use actions::{parse_actions, Action};
 pub use agent_loop::{AgentLoop, AgentLoopConfig, AgentLoopEvent};
+pub use ambient::{AgentOutput, AmbientAgent, AmbientEventBus, EditorEvent};
 pub use compaction::{
     compact_messages, estimate_message_tokens, find_safe_boundary, should_compact,
     CompactionConfig, CompactionResult,
