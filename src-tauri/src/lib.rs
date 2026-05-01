@@ -21,6 +21,8 @@ use chapter_generation::{
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
 
 const KEYRING_SERVICE: &str = "agent-writer";
+const HERMES_DB_FILENAME: &str = "hermes_memory.db";
+const WRITER_MEMORY_DB_FILENAME: &str = "writer_memory.db";
 
 mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
@@ -159,6 +161,82 @@ fn lock_editor_prediction<'a>(
         .editor_prediction
         .lock()
         .map_err(|_| "Editor prediction lock poisoned".to_string())
+}
+
+fn legacy_workspace_db_path(filename: &str) -> Option<std::path::PathBuf> {
+    std::env::current_dir().ok().map(|dir| dir.join(filename))
+}
+
+fn migrate_legacy_db_if_needed(
+    target_path: &std::path::Path,
+    legacy_path: Option<std::path::PathBuf>,
+) -> Result<(), String> {
+    if target_path.exists() {
+        return Ok(());
+    }
+
+    let Some(legacy_path) = legacy_path else {
+        return Ok(());
+    };
+    if legacy_path == target_path || !legacy_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create memory DB directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    std::fs::copy(&legacy_path, target_path).map_err(|e| {
+        format!(
+            "Failed to migrate memory DB from '{}' to '{}': {}",
+            legacy_path.display(),
+            target_path.display(),
+            e
+        )
+    })?;
+    Ok(())
+}
+
+fn app_data_db_path(app: &tauri::AppHandle, filename: &str) -> Result<std::path::PathBuf, String> {
+    Ok(storage::app_data_dir(app)?.join(filename))
+}
+
+fn open_app_hermes_db(app: &tauri::AppHandle) -> Result<HermesDB, String> {
+    let path = app_data_db_path(app, HERMES_DB_FILENAME)?;
+    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(HERMES_DB_FILENAME))?;
+    HermesDB::open(&path).map_err(|e| {
+        format!(
+            "Failed to open Hermes memory DB at '{}': {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+fn open_app_writer_kernel(
+    app: &tauri::AppHandle,
+) -> Result<writer_agent::WriterAgentKernel, String> {
+    let path = app_data_db_path(app, WRITER_MEMORY_DB_FILENAME)?;
+    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(WRITER_MEMORY_DB_FILENAME))?;
+    let memory = writer_agent::memory::WriterMemory::open(&path).map_err(|e| {
+        format!(
+            "Failed to open writer memory DB at '{}': {}",
+            path.display(),
+            e
+        )
+    })?;
+    Ok(writer_agent::WriterAgentKernel::new("default", memory))
+}
+
+fn startup_error(message: String) -> Box<dyn std::error::Error> {
+    tracing::error!("{}", message);
+    std::io::Error::new(std::io::ErrorKind::Other, message).into()
 }
 
 #[derive(Serialize, Clone)]
@@ -2793,18 +2871,6 @@ async fn ask_agent(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("hermes_memory.db");
-    let hermes_db = match HermesDB::open(&db_path) {
-        Ok(db) => db,
-        Err(e) => {
-            let message = format!("Failed to open Hermes memory DB: {}", e);
-            tracing::error!("{}", message);
-            let _ = msgbox::create("Agent-Writer Error", &message, msgbox::IconType::Error);
-            return;
-        }
-    };
 
     // Shared context cache for ambient agents
     let cache: std::sync::Arc<tokio::sync::Mutex<ambient_agents::context_fetcher::ContextCache>> =
@@ -2812,23 +2878,15 @@ pub fn run() {
             ambient_agents::context_fetcher::ContextCache::default(),
         ));
 
-    // Initialize Writer Agent Kernel with creative memory
-    let writer_kernel = {
-        let writer_memory_path = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join("writer_memory.db");
-        let writer_memory = writer_agent::memory::WriterMemory::open(&writer_memory_path)
-            .unwrap_or_else(|_| {
-                writer_agent::memory::WriterMemory::open(std::path::Path::new(":memory:")).unwrap()
-            });
-        writer_agent::WriterAgentKernel::new("default", writer_memory)
-    };
-
     // Capture clones before the setup closure
     let cache1 = cache.clone();
+    let cache_for_state = cache.clone();
 
     if let Err(e) = tauri::Builder::default()
         .setup(move |app| {
+            let hermes_db = open_app_hermes_db(app.handle()).map_err(startup_error)?;
+            let writer_kernel = open_app_writer_kernel(app.handle()).map_err(startup_error)?;
+
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
             let ah = app.handle().clone();
             let output_app = ah.clone();
@@ -2844,15 +2902,15 @@ pub fn run() {
             ));
 
             app.manage(Mutex::new(event_bus));
+            app.manage(AppState {
+                harness_state: Mutex::new(HarnessState::Idle),
+                hermes_db: Mutex::new(hermes_db),
+                editor_prediction: Mutex::new(None),
+                writer_kernel: Mutex::new(writer_kernel),
+            });
+            app.manage(cache_for_state);
             Ok(())
         })
-        .manage(AppState {
-            harness_state: Mutex::new(HarnessState::Idle),
-            hermes_db: Mutex::new(hermes_db),
-            editor_prediction: Mutex::new(None),
-            writer_kernel: Mutex::new(writer_kernel),
-        })
-        .manage(cache)
         .invoke_handler(tauri::generate_handler![
             abort_editor_prediction,
             harness_echo,
@@ -3003,5 +3061,49 @@ mod tests {
 
         assert_eq!(observation.cursor.unwrap().to, "林墨拔出".chars().count());
         assert!(observation.paragraph.contains("Current paragraph"));
+    }
+
+    #[test]
+    fn migrate_legacy_db_copies_when_target_is_missing() {
+        let root = std::env::temp_dir().join(format!(
+            "forge-db-migrate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let legacy_path = root.join("legacy.db");
+        let target_path = root.join("app-data").join("writer_memory.db");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&legacy_path, b"legacy-memory").unwrap();
+
+        migrate_legacy_db_if_needed(&target_path, Some(legacy_path.clone())).unwrap();
+
+        assert_eq!(std::fs::read(&target_path).unwrap(), b"legacy-memory");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn migrate_legacy_db_does_not_overwrite_existing_target() {
+        let root = std::env::temp_dir().join(format!(
+            "forge-db-migrate-existing-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let legacy_path = root.join("legacy.db");
+        let target_dir = root.join("app-data");
+        let target_path = target_dir.join("writer_memory.db");
+
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(&legacy_path, b"legacy-memory").unwrap();
+        std::fs::write(&target_path, b"current-memory").unwrap();
+
+        migrate_legacy_db_if_needed(&target_path, Some(legacy_path)).unwrap();
+
+        assert_eq!(std::fs::read(&target_path).unwrap(), b"current-memory");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
