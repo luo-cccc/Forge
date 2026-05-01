@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import { Commands } from "../protocol";
+import { Commands, Events, type ChapterGenerationEvent } from "../protocol";
 import OutlinePanel from "./OutlinePanel";
 import ScriptDoctorPanel from "./ScriptDoctorPanel";
 import LoreGraphView from "./LoreGraphView";
@@ -41,6 +42,21 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
       void refresh();
     }, 0);
     return () => clearTimeout(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn;
+    const setup = async () => {
+      unlisten = await listen<ChapterGenerationEvent>(Events.chapterGeneration, (event) => {
+        if (event.payload.phase === "chapter_generation_completed") {
+          void refresh();
+        }
+      });
+    };
+    setup();
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, [refresh]);
 
   const handleCreate = async () => {
@@ -143,6 +159,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
                     : "text-text-secondary hover:bg-bg-raised hover:text-text-primary border-l-2 border-transparent"
                 }`}
               >
+                <span className="mr-1">{currentChapter === ch.title ? "✓" : "□"}</span>
                 {ch.title}
               </button>
             ))}

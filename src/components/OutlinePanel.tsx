@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Commands, Events } from "../protocol";
+import { Commands, Events, type ChapterGenerationEvent } from "../protocol";
 
 interface OutlineNode {
   chapter_title: string;
@@ -40,6 +40,7 @@ export default function OutlinePanel() {
 
   useEffect(() => {
     let unlisten: UnlistenFn;
+    let unlistenChapter: UnlistenFn;
     const setup = async () => {
       unlisten = await listen<BatchStatus>(Events.batchStatus, (event) => {
         const { chapter_title, status, error } = event.payload;
@@ -59,10 +60,17 @@ export default function OutlinePanel() {
           refresh();
         }
       });
+      unlistenChapter = await listen<ChapterGenerationEvent>(Events.chapterGeneration, (event) => {
+        if (event.payload.phase === "chapter_generation_completed") {
+          setToast(`${event.payload.saved?.chapterTitle ?? "Chapter"} drafted successfully`);
+          refresh();
+        }
+      });
     };
     setup();
     return () => {
       if (unlisten) unlisten();
+      if (unlistenChapter) unlistenChapter();
     };
   }, [refresh]);
 
@@ -115,6 +123,7 @@ export default function OutlinePanel() {
   const statusColors: Record<string, string> = {
     empty: "bg-bg-raised text-text-muted",
     generated: "bg-success/20 text-success border border-success/30",
+    drafted: "bg-success/20 text-success border border-success/30",
     polished: "bg-accent-subtle text-accent border border-accent/30",
   };
 

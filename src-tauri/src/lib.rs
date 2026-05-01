@@ -3,8 +3,14 @@ use std::sync::{Mutex, MutexGuard};
 use agent_harness_core::{classify_intent, hermes_memory::HermesDB};
 
 mod brain_service;
+mod agent_runtime;
+mod chapter_generation;
 mod llm_runtime;
 mod storage;
+use agent_runtime::{AgentObserveResult, AgentObservation, AgentToolDescriptor};
+use chapter_generation::{
+    ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
+};
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
 
 const KEYRING_SERVICE: &str = "agent-writer";
@@ -13,10 +19,12 @@ mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
     pub const AGENT_ERROR: &str = "agent-error";
+    pub const AGENT_SUGGESTION: &str = "agent-suggestion";
     pub const AGENT_SEARCH_STATUS: &str = "agent-search-status";
     pub const AGENT_STREAM_CHUNK: &str = "agent-stream-chunk";
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
     pub const BATCH_STATUS: &str = "batch-status";
+    pub const CHAPTER_GENERATION: &str = "chapter-generation";
 }
 
 #[tauri::command]
@@ -188,8 +196,8 @@ fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, S
 }
 
 #[tauri::command]
-fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<(), String> {
-    storage::save_chapter_content(&app, &title, &content)?;
+fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<String, String> {
+    let revision = storage::save_chapter_content_and_revision(&app, &title, &content)?;
 
     // Background auto-embed
     let app_clone = app.clone();
@@ -199,12 +207,17 @@ fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result
         auto_embed_chapter(&app_clone, &title_clone, &content_clone).await;
     });
 
-    Ok(())
+    Ok(revision)
 }
 
 #[tauri::command]
 fn load_chapter(app: tauri::AppHandle, title: String) -> Result<String, String> {
     storage::load_chapter(&app, title)
+}
+
+#[tauri::command]
+fn get_chapter_revision(app: tauri::AppHandle, title: String) -> Result<String, String> {
+    storage::chapter_revision(&app, &title)
 }
 
 #[tauri::command]
@@ -254,6 +267,12 @@ struct BatchStatus {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ChapterGenerationStart {
+    request_id: String,
+}
+
+#[derive(Serialize, Clone)]
 struct AgentError {
     message: String,
     source: String,
@@ -277,6 +296,8 @@ async fn batch_generate_chapter(
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
     let settings = llm_runtime::settings(api_key);
+    let user_profile_entries = collect_user_profile_entries(&app).unwrap_or_default();
+    let request_id = chapter_generation::make_request_id("batch");
 
     let app_clone = app.clone();
     let title_clone = chapter_title.clone();
@@ -291,83 +312,37 @@ async fn batch_generate_chapter(
             },
         );
 
-        // Gather context
-        let lorebook = storage::load_lorebook(&app_clone).unwrap_or_default();
-        let lore_context = if lorebook.is_empty() {
-            String::from("No lorebook entries.")
-        } else {
-            lorebook
-                .iter()
-                .map(|e| format!("[{}]: {}", e.keyword, e.content))
-                .collect::<Vec<_>>()
-                .join("\n")
+        let payload = GenerateChapterAutonomousPayload {
+            request_id: Some(request_id),
+            target_chapter_title: Some(title_clone.clone()),
+            target_chapter_number: None,
+            user_instruction: format!("帮我写《{}》这一章的完整初稿。", title_clone),
+            budget: None,
+            frontend_state: None,
+            save_mode: SaveMode::ReplaceIfClean,
+            chapter_summary_override: Some(summary),
         };
 
-        // Get previous 2 chapter summaries from outline (sliding window)
-        let outline = storage::load_outline(&app_clone).unwrap_or_default();
-        let prev_idx = outline.iter().position(|n| n.chapter_title == title_clone);
-        let prev_summaries: Vec<&OutlineNode> = if let Some(idx) = prev_idx {
-            let start = idx.saturating_sub(2);
-            outline[start..idx].iter().collect()
-        } else {
-            // Chapter not in outline yet; take last 2
-            let start = outline.len().saturating_sub(2);
-            outline[start..].iter().collect()
-        };
-        let prev_context = if prev_summaries.is_empty() {
-            "None (first chapter)".to_string()
-        } else {
-            prev_summaries
-                .iter()
-                .map(|n| format!("[{}]: {}", n.chapter_title, n.summary))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        let system_prompt = format!(
-            "You are a professional novelist. Write a complete chapter based on the beat sheet.\n\n\
-             ## Lorebook (world setting)\n{}\n\n\
-             ## Previous chapters (last 2)\n{}\n\n\
-             ## Current chapter beat\n{}\n\n\
-             Write this chapter in full prose. Do NOT use any action tags. \
-             Write naturally in Chinese. Output ONLY the chapter content, no meta-commentary.",
-            lore_context, prev_context, summary
-        );
-
-        let resp = llm_runtime::chat_text(
-            &settings,
-            vec![
-                serde_json::json!({"role": "system", "content": system_prompt}),
-                serde_json::json!({"role": "user", "content": format!(
-                    "Write the full chapter for: {}", summary
-                )}),
-            ],
-            false,
-            60,
+        let terminal = chapter_generation::run_chapter_generation_pipeline(
+            app_clone.clone(),
+            settings,
+            payload,
+            user_profile_entries,
+            |event| {
+                let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
+            },
         )
         .await;
 
-        match resp {
-            Ok(content) => {
-                if !content.is_empty() {
-                    // Write to chapter file
-                    let _ = storage::save_chapter_content(&app_clone, &title_clone, &content);
-
-                    let embed_app = app_clone.clone();
-                    let embed_title = title_clone.clone();
-                    let embed_content = content.clone();
-                    tokio::spawn(async move {
-                        auto_embed_chapter(&embed_app, &embed_title, &embed_content).await;
-                    });
-
-                    // Update outline status
-                    let _ = crate::update_outline_status(
-                        app_clone.clone(),
-                        title_clone.clone(),
-                        "generated".to_string(),
-                    );
-                }
-
+        match terminal {
+            PipelineTerminal::Completed {
+                generated_content, ..
+            } => {
+                let embed_app = app_clone.clone();
+                let embed_title = title_clone.clone();
+                tokio::spawn(async move {
+                    auto_embed_chapter(&embed_app, &embed_title, &generated_content).await;
+                });
                 let _ = app_clone.emit(
                     events::BATCH_STATUS,
                     BatchStatus {
@@ -377,13 +352,23 @@ async fn batch_generate_chapter(
                     },
                 );
             }
-            Err(e) => {
+            PipelineTerminal::Conflict(conflict) => {
                 let _ = app_clone.emit(
                     events::BATCH_STATUS,
                     BatchStatus {
                         chapter_title: title_clone,
                         status: "error".to_string(),
-                        error: e.to_string(),
+                        error: format!("save conflict: {}", conflict.reason),
+                    },
+                );
+            }
+            PipelineTerminal::Failed(error) => {
+                let _ = app_clone.emit(
+                    events::BATCH_STATUS,
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "error".to_string(),
+                        error: error.message,
                     },
                 );
             }
@@ -391,6 +376,51 @@ async fn batch_generate_chapter(
     });
 
     Ok(())
+}
+
+#[tauri::command]
+async fn generate_chapter_autonomous(
+    app: tauri::AppHandle,
+    payload: GenerateChapterAutonomousPayload,
+) -> Result<ChapterGenerationStart, String> {
+    let api_key = require_api_key()?;
+    let settings = llm_runtime::settings(api_key);
+    let user_profile_entries = collect_user_profile_entries(&app).unwrap_or_default();
+    let request_id = payload
+        .request_id
+        .clone()
+        .unwrap_or_else(|| chapter_generation::make_request_id("chapter"));
+    let payload = GenerateChapterAutonomousPayload {
+        request_id: Some(request_id.clone()),
+        ..payload
+    };
+    let app_clone = app.clone();
+
+    tokio::spawn(async move {
+        let terminal = chapter_generation::run_chapter_generation_pipeline(
+            app_clone.clone(),
+            settings,
+            payload,
+            user_profile_entries,
+            |event: ChapterGenerationEvent| {
+                let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
+            },
+        )
+        .await;
+
+        if let PipelineTerminal::Completed {
+            saved,
+            generated_content,
+        } = terminal
+        {
+            let embed_app = app_clone.clone();
+            tokio::spawn(async move {
+                auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content).await;
+            });
+        }
+    });
+
+    Ok(ChapterGenerationStart { request_id })
 }
 
 async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
@@ -564,6 +594,25 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
 
     drop(db);
     parts.join("\n")
+}
+
+fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+    let state = app.state::<AppState>();
+    let db = lock_hermes(&state)?;
+    let profiles = db
+        .get_drift_profiles()
+        .map_err(|e| format!("Failed to read user profile: {}", e))?;
+    Ok(profiles
+        .iter()
+        .map(|profile| {
+            format!(
+                "- {}: {} (confidence {:.0}%)",
+                profile.key,
+                profile.value,
+                profile.confidence * 100.0
+            )
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -784,6 +833,77 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
         entities,
         relationships,
         chapters,
+    })
+}
+
+#[tauri::command]
+fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
+    Ok(agent_runtime::registered_tools())
+}
+
+#[tauri::command]
+fn agent_observe(
+    app: tauri::AppHandle,
+    observation: AgentObservation,
+) -> Result<AgentObserveResult, String> {
+    let request_id = format!("agent-{}", agent_runtime::now_ms());
+    let now = agent_runtime::now_ms();
+    let decision = agent_runtime::attention_policy(&observation, now);
+
+    if !decision.should_suggest {
+        return Ok(AgentObserveResult {
+            request_id,
+            observation_id: observation.id,
+            decision: "noop".to_string(),
+            reason: decision.reason,
+            suggestion_id: None,
+        });
+    }
+
+    let outline_summary = observation.chapter_title.as_ref().and_then(|chapter_title| {
+        storage::load_outline(&app).ok().and_then(|nodes| {
+            nodes
+                .into_iter()
+                .find(|node| &node.chapter_title == chapter_title)
+                .map(|node| node.summary)
+                .filter(|summary| !summary.trim().is_empty())
+        })
+    });
+
+    let paragraph_lower = observation.current_paragraph.to_lowercase();
+    let nearby_lower = observation.nearby_text.to_lowercase();
+    let lore_hits = storage::load_lorebook(&app)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| {
+            let keyword = entry.keyword.to_lowercase();
+            !keyword.is_empty()
+                && (paragraph_lower.contains(&keyword) || nearby_lower.contains(&keyword))
+        })
+        .map(|entry| (entry.keyword, entry.content))
+        .collect::<Vec<_>>();
+
+    let profile_count = collect_user_profile_entries(&app)
+        .map(|entries| entries.len())
+        .unwrap_or(0);
+    let source_summaries =
+        agent_runtime::build_source_summaries(&observation, outline_summary, lore_hits, profile_count);
+    let suggestion = agent_runtime::build_suggestion(
+        &observation,
+        request_id.clone(),
+        &decision,
+        source_summaries,
+    );
+    let suggestion_id = suggestion.id.clone();
+    app.emit(events::AGENT_SUGGESTION, suggestion)
+        .map_err(|e| format!("Failed to emit agent suggestion: {}", e))?;
+
+    Ok(AgentObserveResult {
+        request_id,
+        observation_id: observation.id,
+        decision: "suggestion".to_string(),
+        reason: decision.reason,
+        suggestion_id: Some(suggestion_id),
     })
 }
 
@@ -1051,6 +1171,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             harness_echo,
             ask_agent,
+            agent_observe,
+            get_agent_tools,
             get_lorebook,
             save_lore_entry,
             delete_lore_entry,
@@ -1058,12 +1180,14 @@ pub fn run() {
             create_chapter,
             save_chapter,
             load_chapter,
+            get_chapter_revision,
             get_outline,
             save_outline_node,
             delete_outline_node,
             update_outline_status,
             reorder_outline_nodes,
             batch_generate_chapter,
+            generate_chapter_autonomous,
             analyze_chapter,
             ask_project_brain,
             get_project_graph_data,

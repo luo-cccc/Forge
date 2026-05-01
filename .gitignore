@@ -15,6 +15,17 @@ target
 dist-ssr
 *.local
 
+# OMX runtime state
+.omx/cache/
+.omx/logs/
+.omx/state/
+.omx/hud-config.json
+.omx/metrics.json
+.omx/notepad.md
+.omx/project-memory.json
+.omx/setup-scope.json
+.omx/tmux-hook.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

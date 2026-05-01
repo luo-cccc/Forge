@@ -19,6 +19,8 @@ function App() {
 
   const currentChapter = useAppStore((s) => s.currentChapter);
   const setCurrentChapter = useAppStore((s) => s.setCurrentChapter);
+  const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
+  const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
 
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
@@ -30,10 +32,13 @@ function App() {
     try {
       const content = await invoke<string>(Commands.loadChapter, { title: "Chapter-1" });
       editor.commands.setContent(content || "<p>Start writing...</p>");
+      const revision = await invoke<string>(Commands.getChapterRevision, { title: "Chapter-1" });
+      setCurrentChapterRevision(revision);
+      setIsEditorDirty(false);
     } catch {
       // No content yet
     }
-  }, []);
+  }, [setCurrentChapterRevision, setIsEditorDirty]);
 
   const handleSelectionUpdate = useCallback((sel: SelectionState) => {
     selectionRef.current = sel;
@@ -46,7 +51,9 @@ function App() {
       if (editor) {
         const content = editor.getHTML();
         try {
-          await invoke(Commands.saveChapter, { title: currentChapter, content });
+          const revision = await invoke<string>(Commands.saveChapter, { title: currentChapter, content });
+          setCurrentChapterRevision(revision);
+          setIsEditorDirty(false);
         } catch (e) {
           console.error("Auto-save failed:", e);
         }
@@ -56,6 +63,9 @@ function App() {
         if (editorRef.current) {
           editorRef.current.commands.setContent(content || "<p></p>");
         }
+        const revision = await invoke<string>(Commands.getChapterRevision, { title });
+        setCurrentChapterRevision(revision);
+        setIsEditorDirty(false);
         setCurrentChapter(title);
       } catch (e) {
         console.error("Load chapter failed:", e);
@@ -64,13 +74,16 @@ function App() {
           if (editorRef.current) {
             editorRef.current.commands.setContent("<p>Start writing...</p>");
           }
+          const revision = await invoke<string>(Commands.getChapterRevision, { title });
+          setCurrentChapterRevision(revision);
+          setIsEditorDirty(false);
           setCurrentChapter(title);
         } catch (e2) {
           console.error("Create chapter failed:", e2);
         }
       }
     },
-    [currentChapter, setCurrentChapter],
+    [currentChapter, setCurrentChapter, setCurrentChapterRevision, setIsEditorDirty],
   );
 
   const handleActionInsert = useCallback((text: string) => {

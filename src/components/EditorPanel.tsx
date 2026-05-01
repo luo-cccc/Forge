@@ -5,11 +5,21 @@ import { listen } from "@tauri-apps/api/event";
 import type { Editor } from "@tiptap/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
-import { ACTION_RE, Commands, Events, type StreamChunk } from "../protocol";
+import {
+  ACTION_RE,
+  Commands,
+  Events,
+  type AgentMode,
+  type AgentObservation,
+  type AgentObservationReason,
+  type AgentSuggestion,
+  type StreamChunk,
+} from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
 import LorebookDrawer from "./LorebookDrawer";
 import InlineCommandBubble from "./InlineCommandBubble";
+import AgentSuggestionOverlay from "./AgentSuggestionOverlay";
 
 interface SelectionState {
   from: number;
@@ -22,6 +32,69 @@ interface EditorPanelProps {
   onSelectionUpdate?: (sel: SelectionState) => void;
 }
 
+const OBSERVATION_DEBOUNCE_MS = 1100;
+const OBSERVATION_WINDOW_CHARS = 1800;
+const PARAGRAPH_BUDGET_CHARS = 900;
+
+function limitChars(text: string, maxChars: number): string {
+  const chars = Array.from(text);
+  return chars.length > maxChars ? chars.slice(0, maxChars).join("") : text;
+}
+
+function makeObservationId(): string {
+  return `obs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildObservation(
+  editor: Editor,
+  mode: AgentMode,
+  reason: AgentObservationReason,
+  chapterTitle: string,
+  chapterRevision: string | null,
+  dirty: boolean,
+  snoozedUntil: number | null,
+  lastEditAt: number,
+): AgentObservation {
+  const now = Date.now();
+  const { from, to } = editor.state.selection;
+  const selectedText = editor.state.doc.textBetween(from, to, " ");
+  const $from = editor.state.doc.resolve(from);
+  const paragraph = editor.state.doc.textBetween($from.start(), $from.end(), " ");
+  const fullText = editor.getText();
+  const cursorInText = Math.min(from, fullText.length);
+  const halfWindow = Math.floor(OBSERVATION_WINDOW_CHARS / 2);
+  const start = Math.max(0, cursorInText - halfWindow);
+  const end = Math.min(fullText.length, cursorInText + halfWindow);
+
+  return {
+    id: makeObservationId(),
+    mode,
+    reason,
+    createdAt: now,
+    chapterTitle,
+    chapterRevision: chapterRevision ?? undefined,
+    dirty,
+    cursorPosition: from,
+    selection:
+      from < to
+        ? {
+            from,
+            to,
+            text: limitChars(selectedText, PARAGRAPH_BUDGET_CHARS),
+          }
+        : undefined,
+    currentParagraph: limitChars(paragraph, PARAGRAPH_BUDGET_CHARS),
+    nearbyText: limitChars(fullText.slice(start, end), OBSERVATION_WINDOW_CHARS),
+    recentEditSummary:
+      reason === "selection_change"
+        ? "Selection changed after user pause."
+        : `Editor paused after local changes in ${chapterTitle}.`,
+    idleMs: Math.max(0, now - lastEditAt),
+    snoozedUntil: snoozedUntil ?? undefined,
+    outlineChapterTitle: chapterTitle,
+  };
+}
+
 export default function EditorPanel({
   onEditorReady,
   onSelectionUpdate,
@@ -29,6 +102,15 @@ export default function EditorPanel({
   const actionEpoch = useAppStore((s) => s.actionEpoch);
   const setIsInlineRequest = useAppStore((s) => s.setIsInlineRequest);
   const incrementActionEpoch = useAppStore((s) => s.incrementActionEpoch);
+  const agentMode = useAppStore((s) => s.agentMode);
+  const latestSuggestion = useAppStore((s) => s.suggestionQueue[0] ?? null);
+  const enqueueSuggestion = useAppStore((s) => s.enqueueSuggestion);
+  const acceptSuggestion = useAppStore((s) => s.acceptSuggestion);
+  const rejectSuggestion = useAppStore((s) => s.rejectSuggestion);
+  const snoozeSuggestions = useAppStore((s) => s.snoozeSuggestions);
+  const setLatestObservation = useAppStore((s) => s.setLatestObservation);
+  const snoozedUntil = useAppStore((s) => s.snoozedUntil);
+  const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const editor = useEditor({
     extensions: [StarterKit, AIPreviewMark, CommentMark],
     content: "<p>Start writing your novel here...</p>",
@@ -45,19 +127,6 @@ export default function EditorPanel({
       onEditorReady(editor);
     }
   }, [editor, onEditorReady]);
-
-  useEffect(() => {
-    if (!editor || !onSelectionUpdate) return;
-    const handler = () => {
-      const { from, to } = editor.state.selection;
-      const text = editor.state.doc.textBetween(from, to, " ");
-      onSelectionUpdate({ from, to, text });
-    };
-    editor.on("selectionUpdate", handler);
-    return () => {
-      editor.off("selectionUpdate", handler);
-    };
-  }, [editor, onSelectionUpdate]);
 
   const [showToast, setShowToast] = useState(false);
 
@@ -79,16 +148,119 @@ export default function EditorPanel({
   const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentChapter = useAppStore((s) => s.currentChapter);
+  const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
+  const isEditorDirty = useAppStore((s) => s.isEditorDirty);
+  const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
+  const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
+  const observationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastEditAtRef = useRef(0);
+  const lastObservationKeyRef = useRef("");
+
+  useEffect(() => {
+    lastEditAtRef.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    if (agentMode === "off" || !editor) return;
+
+    let unlistenSuggestion: (() => void) | undefined;
+    const setup = async () => {
+      unlistenSuggestion = await listen<AgentSuggestion>(Events.agentSuggestion, (event) => {
+        enqueueSuggestion(event.payload);
+      });
+    };
+    setup();
+    return () => {
+      if (unlistenSuggestion) unlistenSuggestion();
+    };
+  }, [agentMode, editor, enqueueSuggestion]);
+
+  const submitObservation = useCallback(
+    async (reason: AgentObservationReason) => {
+      if (!editor) return;
+      const now = Date.now();
+      clearExpiredSnooze(now);
+      const observation = buildObservation(
+        editor,
+        agentMode,
+        reason,
+        currentChapter,
+        currentChapterRevision,
+        isEditorDirty,
+        snoozedUntil,
+        lastEditAtRef.current,
+      );
+      const key = [
+        observation.mode,
+        observation.reason,
+        observation.chapterTitle,
+        observation.cursorPosition,
+        observation.selection?.text ?? "",
+        observation.currentParagraph,
+        observation.snoozedUntil ?? "",
+      ].join("|");
+      if (key === lastObservationKeyRef.current) return;
+      lastObservationKeyRef.current = key;
+      setLatestObservation(observation);
+      try {
+        await invoke(Commands.agentObserve, { observation });
+      } catch (e) {
+        console.error("Agent observation failed:", e);
+      }
+    },
+    [
+      agentMode,
+      clearExpiredSnooze,
+      currentChapter,
+      currentChapterRevision,
+      editor,
+      isEditorDirty,
+      setLatestObservation,
+      snoozedUntil,
+    ],
+  );
+
+  const scheduleObservation = useCallback(
+    (reason: AgentObservationReason) => {
+      if (agentMode === "off") return;
+      if (observationTimerRef.current) clearTimeout(observationTimerRef.current);
+      observationTimerRef.current = setTimeout(() => {
+        void submitObservation(reason);
+      }, OBSERVATION_DEBOUNCE_MS);
+    },
+    [agentMode, submitObservation],
+  );
+
+  useEffect(() => {
+    if (!editor || !onSelectionUpdate) return;
+    const handler = () => {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to, " ");
+      onSelectionUpdate({ from, to, text });
+      if (from < to) {
+        scheduleObservation("selection_change");
+      }
+    };
+    editor.on("selectionUpdate", handler);
+    return () => {
+      editor.off("selectionUpdate", handler);
+    };
+  }, [editor, onSelectionUpdate, scheduleObservation]);
 
   // Debounced auto-save: 3s after typing stops
   useEffect(() => {
     if (!editor) return;
     const handler = () => {
+      lastEditAtRef.current = Date.now();
+      setIsEditorDirty(true);
+      scheduleObservation("user_typed");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
         const content = editor.getHTML();
         try {
-          await invoke(Commands.saveChapter, { title: currentChapter, content });
+          const revision = await invoke<string>(Commands.saveChapter, { title: currentChapter, content });
+          setCurrentChapterRevision(revision);
+          setIsEditorDirty(false);
           const now = new Date();
           setSaveIndicator(
             `Saved at ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
@@ -103,8 +275,14 @@ export default function EditorPanel({
     return () => {
       editor.off("update", handler);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (observationTimerRef.current) clearTimeout(observationTimerRef.current);
     };
-  }, [editor, currentChapter]);
+  }, [editor, currentChapter, scheduleObservation, setCurrentChapterRevision, setIsEditorDirty]);
+
+  useEffect(() => {
+    if (!editor || agentMode === "off") return;
+    scheduleObservation("chapter_switch");
+  }, [agentMode, currentChapter, editor, scheduleObservation]);
 
   useEffect(() => {
     if (!editor) return;
@@ -243,6 +421,36 @@ export default function EditorPanel({
     setInlineDone(false);
   }, [editor]);
 
+  const handleAcceptSuggestion = useCallback(
+    (suggestion: AgentSuggestion) => {
+      if (!editor) return;
+      const accepted = acceptSuggestion(suggestion.id);
+      if (!accepted) return;
+      const insertAt = accepted.targetRange ?? {
+        from: accepted.anchorPosition ?? editor.state.selection.from,
+        to: accepted.anchorPosition ?? editor.state.selection.from,
+      };
+      editor
+        .chain()
+        .focus()
+        .insertContentAt({ from: insertAt.from, to: insertAt.to }, accepted.previewText)
+        .run();
+      incrementActionEpoch();
+    },
+    [acceptSuggestion, editor, incrementActionEpoch],
+  );
+
+  const handleRejectSuggestion = useCallback(
+    (suggestion: AgentSuggestion) => {
+      rejectSuggestion(suggestion.id);
+    },
+    [rejectSuggestion],
+  );
+
+  const handleSnoozeSuggestions = useCallback(() => {
+    snoozeSuggestions(5 * 60 * 1000);
+  }, [snoozeSuggestions]);
+
   useEffect(() => {
     if (!editor || !inlineDone) return;
     const handler = (e: KeyboardEvent) => {
@@ -365,6 +573,14 @@ export default function EditorPanel({
               Reject (Esc)
             </button>
           </div>
+        )}
+        {latestSuggestion && (
+          <AgentSuggestionOverlay
+            suggestion={latestSuggestion}
+            onAccept={handleAcceptSuggestion}
+            onReject={handleRejectSuggestion}
+            onSnooze={handleSnoozeSuggestions}
+          />
         )}
       </div>
     </div>

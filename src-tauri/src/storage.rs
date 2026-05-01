@@ -86,6 +86,31 @@ pub fn chapter_filename(title: &str) -> String {
     format!("{}.md", title.replace(' ', "-").to_lowercase())
 }
 
+pub fn chapter_path(app: &tauri::AppHandle, title: &str) -> Result<std::path::PathBuf, String> {
+    Ok(project_dir(app)?.join(chapter_filename(title)))
+}
+
+pub fn content_revision(content: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in content.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{:016x}-{}", hash, content.len())
+}
+
+pub fn chapter_revision(app: &tauri::AppHandle, title: &str) -> Result<String, String> {
+    let path = chapter_path(app, title)?;
+    if !path.exists() {
+        return Ok("missing".to_string());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content_revision(&content))
+}
+
 pub fn read_project_dir(app: &tauri::AppHandle) -> Result<Vec<ChapterInfo>, String> {
     let dir = project_dir(app)?;
     let mut chapters = Vec::new();
@@ -115,9 +140,8 @@ pub fn read_project_dir(app: &tauri::AppHandle) -> Result<Vec<ChapterInfo>, Stri
 }
 
 pub fn create_chapter(app: &tauri::AppHandle, title: String) -> Result<ChapterInfo, String> {
-    let dir = project_dir(app)?;
     let filename = chapter_filename(&title);
-    let path = dir.join(&filename);
+    let path = chapter_path(app, &title)?;
     if !path.exists() {
         atomic_write(&path, "")?;
     }
@@ -129,14 +153,21 @@ pub fn save_chapter_content(
     title: &str,
     content: &str,
 ) -> Result<(), String> {
-    let dir = project_dir(app)?;
-    let path = dir.join(chapter_filename(title));
+    let path = chapter_path(app, title)?;
     atomic_write(&path, content)
 }
 
+pub fn save_chapter_content_and_revision(
+    app: &tauri::AppHandle,
+    title: &str,
+    content: &str,
+) -> Result<String, String> {
+    save_chapter_content(app, title, content)?;
+    Ok(content_revision(content))
+}
+
 pub fn load_chapter(app: &tauri::AppHandle, title: String) -> Result<String, String> {
-    let dir = project_dir(app)?;
-    let path = dir.join(chapter_filename(&title));
+    let path = chapter_path(app, &title)?;
     if !path.exists() {
         return Err(format!("Chapter '{}' not found", title));
     }
