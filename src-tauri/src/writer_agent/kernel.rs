@@ -14,7 +14,8 @@ use super::diagnostics::{
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
-    ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary, WriterMemory,
+    ContextBudgetTrace, ContextSourceBudgetTrace, ManualAgentTurnSummary, StoryContractSummary,
+    WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -39,6 +40,7 @@ pub struct WriterAgentStatus {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriterAgentLedgerSnapshot {
+    pub story_contract: Option<super::memory::StoryContractSummary>,
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
     pub canon_rules: Vec<super::memory::CanonRuleSummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
@@ -1216,6 +1218,39 @@ impl WriterAgentKernel {
                     revision_after: None,
                 })
             }
+            WriterOperation::StoryContractUpsert { contract } => {
+                let summary = StoryContractSummary {
+                    project_id: contract.project_id.clone(),
+                    title: contract.title.clone(),
+                    genre: contract.genre.clone(),
+                    target_reader: contract.target_reader.clone(),
+                    reader_promise: contract.reader_promise.clone(),
+                    first_30_chapter_promise: contract.first_30_chapter_promise.clone(),
+                    main_conflict: contract.main_conflict.clone(),
+                    structural_boundary: contract.structural_boundary.clone(),
+                    tone_contract: contract.tone_contract.clone(),
+                    updated_at: String::new(),
+                };
+                self.memory
+                    .upsert_story_contract(&summary)
+                    .map_err(|e| format!("story contract: {}", e))?;
+                self.memory
+                    .record_decision(
+                        "project",
+                        "Story contract",
+                        "updated_story_contract",
+                        &[],
+                        &summary.render_for_context(),
+                        &[format!("story_contract:{}", summary.project_id)],
+                    )
+                    .ok();
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
             WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
                 success: false,
                 operation,
@@ -1405,6 +1440,10 @@ impl WriterAgentKernel {
 
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
         WriterAgentLedgerSnapshot {
+            story_contract: self
+                .memory
+                .get_story_contract(&self.project_id)
+                .unwrap_or_default(),
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
             canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
             open_promises: self.memory.get_open_promise_summaries().unwrap_or_default(),
@@ -3635,6 +3674,36 @@ mod tests {
 
         assert!(result.success);
         assert!(kernel.ledger_snapshot().open_promises.is_empty());
+    }
+
+    #[test]
+    fn story_contract_operation_updates_ledger_snapshot() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("novel-a", memory);
+        let result = kernel
+            .approve_editor_operation(
+                WriterOperation::StoryContractUpsert {
+                    contract: crate::writer_agent::operation::StoryContractOp {
+                        project_id: "novel-a".to_string(),
+                        title: "寒影录".to_string(),
+                        genre: "玄幻".to_string(),
+                        target_reader: "长篇玄幻读者".to_string(),
+                        reader_promise: "刀客追查玉佩真相。".to_string(),
+                        first_30_chapter_promise: "建立宗门危机与玉佩谜团。".to_string(),
+                        main_conflict: "复仇与守护的冲突。".to_string(),
+                        structural_boundary: "不得提前泄露玉佩来源。".to_string(),
+                        tone_contract: "克制、冷峻、少解释。".to_string(),
+                    },
+                },
+                "",
+            )
+            .unwrap();
+
+        assert!(result.success);
+        let ledger = kernel.ledger_snapshot();
+        let contract = ledger.story_contract.unwrap();
+        assert_eq!(contract.title, "寒影录");
+        assert!(contract.render_for_context().contains("前30章承诺"));
     }
 
     #[test]

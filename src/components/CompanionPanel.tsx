@@ -245,6 +245,18 @@ function buildSecondBrainItems(
   const arcProposal = proposalForArc(proposals);
   const openPromise = ledger?.openPromises[0];
   const canonRule = ledger?.canonRules[0];
+  const storyContract = ledger?.storyContract;
+  const hasStoryContract = Boolean(storyContract && (
+    storyContract.readerPromise ||
+    storyContract.first30ChapterPromise ||
+    storyContract.mainConflict ||
+    storyContract.genre
+  ));
+  const contractNeedsReview = Boolean(storyContract && (
+    storyContract.genre.includes("待定") ||
+    storyContract.mainConflict.includes("待明确") ||
+    storyContract.readerPromise.includes("保持主线清晰")
+  ));
 
   const sceneGoal = canonRisk ?? promiseDebt ?? pacingDebt;
   const sceneValue = sceneGoal
@@ -298,7 +310,36 @@ function buildSecondBrainItems(
       ? compactLine(arcProposal.preview, arcProposal.rationale || "Review current scene movement")
       : "Current arc has no flagged drag or missing beat.";
 
+  const contractValue = hasStoryContract
+    ? compactLine(
+        storyContract?.readerPromise ||
+          storyContract?.mainConflict ||
+          storyContract?.first30ChapterPromise ||
+          storyContract?.genre,
+        "Story contract",
+        72,
+      )
+    : "No story contract";
+  const contractDetail = hasStoryContract
+    ? compactLine(
+        [
+          storyContract?.genre && `Genre: ${storyContract.genre}`,
+          storyContract?.first30ChapterPromise && `First 30: ${storyContract.first30ChapterPromise}`,
+          storyContract?.mainConflict && `Conflict: ${storyContract.mainConflict}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        "Book-level promise is active.",
+      )
+    : "Set the book-level promise so the agent can judge local choices against the whole novel.";
+
   return [
+    {
+      label: "Book Contract",
+      value: contractValue,
+      detail: contractDetail,
+      tone: hasStoryContract && !contractNeedsReview ? "success" : "accent",
+    },
     {
       label: "Scene Goal",
       value: sceneValue,
@@ -745,7 +786,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 2xl:grid-cols-2">
                 {secondBrainItems.map((item) => (
                   <div
                     key={item.label}

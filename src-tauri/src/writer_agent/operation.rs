@@ -65,6 +65,8 @@ pub enum WriterOperation {
     },
     #[serde(rename = "style.update_preference")]
     StyleUpdatePreference { key: String, value: String },
+    #[serde(rename = "story_contract.upsert")]
+    StoryContractUpsert { contract: StoryContractOp },
     #[serde(rename = "outline.update")]
     OutlineUpdate {
         #[serde(rename = "nodeId")]
@@ -109,6 +111,20 @@ pub struct PlotPromiseOp {
     pub introduced_chapter: String,
     pub expected_payoff: String,
     pub priority: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryContractOp {
+    pub project_id: String,
+    pub title: String,
+    pub genre: String,
+    pub target_reader: String,
+    pub reader_promise: String,
+    pub first_30_chapter_promise: String,
+    pub main_conflict: String,
+    pub structural_boundary: String,
+    pub tone_contract: String,
 }
 
 /// Result of executing a WriterOperation.

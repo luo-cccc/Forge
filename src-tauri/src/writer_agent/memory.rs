@@ -2,10 +2,10 @@
 //! Canon, promises, style preferences, creative decisions.
 //! Ported from the plan's Creative Ledgers specification.
 
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -87,6 +87,19 @@ CREATE TABLE IF NOT EXISTS proposal_feedback (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS story_contracts (
+    project_id TEXT PRIMARY KEY,
+    title TEXT DEFAULT '',
+    genre TEXT DEFAULT '',
+    target_reader TEXT DEFAULT '',
+    reader_promise TEXT DEFAULT '',
+    first_30_chapter_promise TEXT DEFAULT '',
+    main_conflict TEXT DEFAULT '',
+    structural_boundary TEXT DEFAULT '',
+    tone_contract TEXT DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS memory_audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proposal_id TEXT NOT NULL,
@@ -151,6 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_canon_rule_category ON canon_rules(category);
 CREATE INDEX IF NOT EXISTS idx_canon_rule_status ON canon_rules(status);
 CREATE INDEX IF NOT EXISTS idx_promise_status ON plot_promises(status);
 CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_story_contract_updated_at ON story_contracts(updated_at);
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
@@ -211,6 +225,58 @@ pub struct StylePreferenceSummary {
     pub value: String,
     pub accepted_count: i64,
     pub rejected_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryContractSummary {
+    pub project_id: String,
+    pub title: String,
+    pub genre: String,
+    pub target_reader: String,
+    pub reader_promise: String,
+    pub first_30_chapter_promise: String,
+    pub main_conflict: String,
+    pub structural_boundary: String,
+    pub tone_contract: String,
+    pub updated_at: String,
+}
+
+impl StoryContractSummary {
+    pub fn is_empty(&self) -> bool {
+        [
+            &self.title,
+            &self.genre,
+            &self.target_reader,
+            &self.reader_promise,
+            &self.first_30_chapter_promise,
+            &self.main_conflict,
+            &self.structural_boundary,
+            &self.tone_contract,
+        ]
+        .iter()
+        .all(|value| value.trim().is_empty())
+    }
+
+    pub fn render_for_context(&self) -> String {
+        let mut lines = Vec::new();
+        push_contract_line(&mut lines, "标题", &self.title);
+        push_contract_line(&mut lines, "题材定位", &self.genre);
+        push_contract_line(&mut lines, "目标读者", &self.target_reader);
+        push_contract_line(&mut lines, "读者承诺", &self.reader_promise);
+        push_contract_line(&mut lines, "前30章承诺", &self.first_30_chapter_promise);
+        push_contract_line(&mut lines, "核心冲突", &self.main_conflict);
+        push_contract_line(&mut lines, "结构边界", &self.structural_boundary);
+        push_contract_line(&mut lines, "语气/风格合同", &self.tone_contract);
+        lines.join("\n")
+    }
+}
+
+fn push_contract_line(lines: &mut Vec<String>, label: &str, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() {
+        lines.push(format!("{}: {}", label, value));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -638,6 +704,96 @@ impl WriterMemory {
             })
         })?;
         rows.collect()
+    }
+
+    // -- Story Contract --
+
+    pub fn upsert_story_contract(&self, contract: &StoryContractSummary) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO story_contracts
+             (project_id, title, genre, target_reader, reader_promise, first_30_chapter_promise,
+              main_conflict, structural_boundary, tone_contract, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))
+             ON CONFLICT(project_id) DO UPDATE SET
+                title=excluded.title,
+                genre=excluded.genre,
+                target_reader=excluded.target_reader,
+                reader_promise=excluded.reader_promise,
+                first_30_chapter_promise=excluded.first_30_chapter_promise,
+                main_conflict=excluded.main_conflict,
+                structural_boundary=excluded.structural_boundary,
+                tone_contract=excluded.tone_contract,
+                updated_at=datetime('now')",
+            rusqlite::params![
+                contract.project_id,
+                contract.title,
+                contract.genre,
+                contract.target_reader,
+                contract.reader_promise,
+                contract.first_30_chapter_promise,
+                contract.main_conflict,
+                contract.structural_boundary,
+                contract.tone_contract,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_story_contract(
+        &self,
+        project_id: &str,
+    ) -> rusqlite::Result<Option<StoryContractSummary>> {
+        self.conn
+            .query_row(
+                "SELECT project_id, title, genre, target_reader, reader_promise,
+                        first_30_chapter_promise, main_conflict, structural_boundary,
+                        tone_contract, updated_at
+                 FROM story_contracts WHERE project_id=?1",
+                rusqlite::params![project_id],
+                |row| {
+                    Ok(StoryContractSummary {
+                        project_id: row.get(0)?,
+                        title: row.get(1)?,
+                        genre: row.get(2)?,
+                        target_reader: row.get(3)?,
+                        reader_promise: row.get(4)?,
+                        first_30_chapter_promise: row.get(5)?,
+                        main_conflict: row.get(6)?,
+                        structural_boundary: row.get(7)?,
+                        tone_contract: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub fn ensure_story_contract_seed(
+        &self,
+        project_id: &str,
+        title: &str,
+        genre: &str,
+        reader_promise: &str,
+        main_conflict: &str,
+        structural_boundary: &str,
+    ) -> rusqlite::Result<bool> {
+        if self.get_story_contract(project_id)?.is_some() {
+            return Ok(false);
+        }
+        let contract = StoryContractSummary {
+            project_id: project_id.to_string(),
+            title: title.to_string(),
+            genre: genre.to_string(),
+            target_reader: String::new(),
+            reader_promise: reader_promise.to_string(),
+            first_30_chapter_promise: String::new(),
+            main_conflict: main_conflict.to_string(),
+            structural_boundary: structural_boundary.to_string(),
+            tone_contract: String::new(),
+            updated_at: String::new(),
+        };
+        self.upsert_story_contract(&contract)?;
+        Ok(true)
     }
 
     // -- Creative Decisions --
@@ -1265,6 +1421,58 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "created_at INTEGER DEFAULT 0",
     )?;
 
+    ensure_column(
+        conn,
+        "story_contracts",
+        "project_id",
+        "project_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(conn, "story_contracts", "title", "title TEXT DEFAULT ''")?;
+    ensure_column(conn, "story_contracts", "genre", "genre TEXT DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "target_reader",
+        "target_reader TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "reader_promise",
+        "reader_promise TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "first_30_chapter_promise",
+        "first_30_chapter_promise TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "main_conflict",
+        "main_conflict TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "structural_boundary",
+        "structural_boundary TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "tone_contract",
+        "tone_contract TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "story_contracts",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "story_contracts", "updated_at")?;
+
     Ok(())
 }
 
@@ -1562,6 +1770,34 @@ mod tests {
     }
 
     #[test]
+    fn test_story_contract_upsert_and_seed() {
+        let m = memory();
+        assert!(m
+            .ensure_story_contract_seed(
+                "novel-a",
+                "寒影录",
+                "玄幻",
+                "刀客追查玉佩真相。",
+                "复仇与守护的冲突。",
+                "不得提前泄露玉佩来源。",
+            )
+            .unwrap());
+        assert!(!m
+            .ensure_story_contract_seed("novel-a", "不覆盖", "悬疑", "", "", "",)
+            .unwrap());
+
+        let mut contract = m.get_story_contract("novel-a").unwrap().unwrap();
+        assert_eq!(contract.title, "寒影录");
+        assert!(contract.render_for_context().contains("读者承诺"));
+
+        contract.reader_promise = "新的读者承诺".to_string();
+        m.upsert_story_contract(&contract).unwrap();
+        let updated = m.get_story_contract("novel-a").unwrap().unwrap();
+        assert_eq!(updated.reader_promise, "新的读者承诺");
+        assert!(!updated.is_empty());
+    }
+
+    #[test]
     fn open_migrates_legacy_writer_memory_columns() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -1598,6 +1834,8 @@ mod tests {
         assert!(table_has_column(&conn, "writer_proposal_trace", "expires_at").unwrap());
         assert!(table_exists(&conn, "manual_agent_turns").unwrap());
         assert!(table_has_column(&conn, "manual_agent_turns", "source_refs_json").unwrap());
+        assert!(table_exists(&conn, "story_contracts").unwrap());
+        assert!(table_has_column(&conn, "story_contracts", "reader_promise").unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();

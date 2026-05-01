@@ -382,7 +382,31 @@ fn open_app_writer_kernel(
             e
         )
     })?;
+    seed_story_contract_if_empty(app, &project_id, &memory);
     Ok(writer_agent::WriterAgentKernel::new(&project_id, memory))
+}
+
+fn seed_story_contract_if_empty(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    memory: &writer_agent::memory::WriterMemory,
+) {
+    let project_name = storage::active_project_manifest(app)
+        .map(|manifest| manifest.name)
+        .unwrap_or_else(|_| "Local Project".to_string());
+    let lorebook = storage::load_lorebook(app).unwrap_or_default();
+    let outline = storage::load_outline(app).unwrap_or_default();
+    match writer_agent::context::seed_story_contract_from_project_assets(
+        project_id,
+        &project_name,
+        &lorebook,
+        &outline,
+        memory,
+    ) {
+        Ok(true) => tracing::info!("Seeded initial story contract for project {}", project_id),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("Story contract seed skipped: {}", e),
+    }
 }
 
 fn startup_error(message: String) -> Box<dyn std::error::Error> {

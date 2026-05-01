@@ -64,6 +64,7 @@ impl AgentTask {
         match self {
             AgentTask::GhostWriting => vec![
                 (ContextSource::CursorPrefix, 10, 800),
+                (ContextSource::ProjectBrief, 9, 420),
                 (ContextSource::CursorSuffix, 9, 400),
                 (ContextSource::CanonSlice, 8, 600),
                 (ContextSource::PromiseSlice, 7, 400),
@@ -75,11 +76,13 @@ impl AgentTask {
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 10, 300),
                 (ContextSource::CanonSlice, 10, 800),
+                (ContextSource::ProjectBrief, 9, 400),
                 (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::OutlineSlice, 9, 500),
                 (ContextSource::RagExcerpt, 8, 600),
             ],
             AgentTask::ChapterGeneration => vec![
+                (ContextSource::ProjectBrief, 11, 1600),
                 (ContextSource::OutlineSlice, 10, 6000),
                 (ContextSource::PreviousChapter, 9, 5000),
                 (ContextSource::PromiseSlice, 8, 4000),
@@ -93,6 +96,7 @@ impl AgentTask {
                 (ContextSource::SelectedText, 10, 2000),
                 (ContextSource::CursorPrefix, 9, 500),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::ProjectBrief, 8, 400),
                 (ContextSource::CanonSlice, 7, 400),
                 (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::AuthorStyle, 6, 300),
@@ -101,18 +105,21 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 10, 500),
                 (ContextSource::PromiseSlice, 9, 300),
                 (ContextSource::DecisionSlice, 9, 300),
+                (ContextSource::ProjectBrief, 8, 300),
                 (ContextSource::AuthorStyle, 8, 300),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 10, 2000),
                 (ContextSource::PromiseSlice, 9, 1000),
                 (ContextSource::DecisionSlice, 9, 800),
+                (ContextSource::ProjectBrief, 8, 600),
                 (ContextSource::OutlineSlice, 8, 1000),
             ],
             AgentTask::ManualRequest => vec![
                 (ContextSource::SelectedText, 10, 1200),
                 (ContextSource::CursorPrefix, 9, 1400),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::ProjectBrief, 8, 600),
                 (ContextSource::CanonSlice, 8, 800),
                 (ContextSource::PromiseSlice, 7, 600),
                 (ContextSource::DecisionSlice, 7, 500),
@@ -126,14 +133,17 @@ impl AgentTask {
         match self {
             AgentTask::GhostWriting => vec![
                 (ContextSource::CursorPrefix, 240),
+                (ContextSource::ProjectBrief, 160),
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::PromiseSlice, 140),
             ],
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 160),
                 (ContextSource::CanonSlice, 240),
+                (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::ChapterGeneration => vec![
+                (ContextSource::ProjectBrief, 500),
                 (ContextSource::OutlineSlice, 1_000),
                 (ContextSource::PreviousChapter, 800),
                 (ContextSource::PromiseSlice, 600),
@@ -142,18 +152,22 @@ impl AgentTask {
             AgentTask::InlineRewrite => vec![
                 (ContextSource::SelectedText, 400),
                 (ContextSource::CursorPrefix, 160),
+                (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::ProposalEvaluation => vec![
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::DecisionSlice, 120),
+                (ContextSource::ProjectBrief, 120),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 600),
                 (ContextSource::PromiseSlice, 240),
+                (ContextSource::ProjectBrief, 180),
             ],
             AgentTask::ManualRequest => vec![
                 (ContextSource::SelectedText, 300),
                 (ContextSource::CursorPrefix, 300),
+                (ContextSource::ProjectBrief, 180),
                 (ContextSource::CanonSlice, 220),
                 (ContextSource::PromiseSlice, 180),
             ],
@@ -361,6 +375,7 @@ pub fn assemble_observation_context(
     memory: &WriterMemory,
     total_budget: usize,
 ) -> WritingContextPack {
+    let project_brief = build_project_brief(&observation.project_id, memory);
     let canon_slice = build_canon_slice(&observation.paragraph, memory);
     let promise_slice = build_promise_slice(memory);
     let decision_slice = build_decision_slice(memory);
@@ -379,6 +394,7 @@ pub fn assemble_observation_context(
             ContextSource::CursorPrefix => non_empty(cursor_prefix.clone()),
             ContextSource::CursorSuffix => non_empty(cursor_suffix.clone()),
             ContextSource::SelectedText => non_empty(selected_text.clone()),
+            ContextSource::ProjectBrief => non_empty(project_brief.clone()),
             ContextSource::CanonSlice => non_empty(canon_slice.clone()),
             ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
             ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
@@ -387,6 +403,148 @@ pub fn assemble_observation_context(
         },
         total_budget,
     )
+}
+
+fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
+    memory
+        .get_story_contract(project_id)
+        .ok()
+        .flatten()
+        .filter(|contract| !contract.is_empty())
+        .map(|contract| contract.render_for_context())
+        .unwrap_or_default()
+}
+
+pub fn seed_story_contract_from_project_assets(
+    project_id: &str,
+    project_name: &str,
+    lorebook: &[crate::storage::LoreEntry],
+    outline: &[crate::storage::OutlineNode],
+    memory: &WriterMemory,
+) -> Result<bool, String> {
+    let title = if project_name.trim().is_empty() {
+        "Untitled Story"
+    } else {
+        project_name.trim()
+    };
+    let genre = infer_contract_genre(lorebook, outline);
+    let reader_promise = infer_reader_promise(outline);
+    let main_conflict = infer_main_conflict(outline, lorebook);
+    let structural_boundary = infer_structural_boundary(lorebook, outline);
+    memory
+        .ensure_story_contract_seed(
+            project_id,
+            title,
+            &genre,
+            &reader_promise,
+            &main_conflict,
+            &structural_boundary,
+        )
+        .map_err(|e| e.to_string())
+}
+
+fn infer_contract_genre(
+    lorebook: &[crate::storage::LoreEntry],
+    outline: &[crate::storage::OutlineNode],
+) -> String {
+    let haystack = project_asset_haystack(lorebook, outline);
+    if contains_any(&haystack, &["玄幻", "修仙", "灵力", "宗门", "秘境"]) {
+        "玄幻/修仙".to_string()
+    } else if contains_any(&haystack, &["悬疑", "案件", "凶手", "线索", "侦探"]) {
+        "悬疑".to_string()
+    } else if contains_any(&haystack, &["末日", "丧尸", "废土", "灾变"]) {
+        "末日/废土".to_string()
+    } else if contains_any(&haystack, &["星舰", "宇宙", "机甲", "AI", "人工智能"]) {
+        "科幻".to_string()
+    } else if contains_any(&haystack, &["宫廷", "朝堂", "皇帝", "王府", "江湖"]) {
+        "古风/权谋".to_string()
+    } else {
+        "待定长篇小说".to_string()
+    }
+}
+
+fn infer_reader_promise(outline: &[crate::storage::OutlineNode]) -> String {
+    let first_nodes = outline
+        .iter()
+        .take(3)
+        .map(|node| compact_context_line(&node.summary, 80))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if first_nodes.is_empty() {
+        "保持主线清晰、角色选择有后果，并让每章都推动故事状态。".to_string()
+    } else {
+        format!("围绕开篇承诺推进: {}", first_nodes.join(" / "))
+    }
+}
+
+fn infer_main_conflict(
+    outline: &[crate::storage::OutlineNode],
+    lorebook: &[crate::storage::LoreEntry],
+) -> String {
+    let outline_conflict = outline
+        .iter()
+        .find(|node| contains_any(&node.summary, &["冲突", "危机", "对抗", "矛盾", "敌"]))
+        .map(|node| compact_context_line(&node.summary, 96));
+    if let Some(conflict) = outline_conflict.filter(|value| !value.is_empty()) {
+        return conflict;
+    }
+
+    lorebook
+        .iter()
+        .find(|entry| contains_any(&entry.content, &["冲突", "危机", "对抗", "矛盾", "敌"]))
+        .map(|entry| compact_context_line(&entry.content, 96))
+        .unwrap_or_else(|| "待明确: 主角欲望、阻力与长期对立面需要在开篇阶段定盘。".to_string())
+}
+
+fn infer_structural_boundary(
+    lorebook: &[crate::storage::LoreEntry],
+    outline: &[crate::storage::OutlineNode],
+) -> String {
+    let mut boundaries = Vec::new();
+    if !lorebook.is_empty() {
+        boundaries.push("不得违背已记录 Lorebook 设定");
+    }
+    if !outline.is_empty() {
+        boundaries.push("不得跳过当前大纲承诺的因果推进");
+    }
+    if boundaries.is_empty() {
+        "先保护作者已写正文，不自动改写既有事实。".to_string()
+    } else {
+        boundaries.join("；")
+    }
+}
+
+fn project_asset_haystack(
+    lorebook: &[crate::storage::LoreEntry],
+    outline: &[crate::storage::OutlineNode],
+) -> String {
+    let mut text = String::new();
+    for entry in lorebook.iter().take(20) {
+        text.push_str(&entry.keyword);
+        text.push('\n');
+        text.push_str(&entry.content);
+        text.push('\n');
+    }
+    for node in outline.iter().take(20) {
+        text.push_str(&node.chapter_title);
+        text.push('\n');
+        text.push_str(&node.summary);
+        text.push('\n');
+    }
+    text
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn compact_context_line(text: &str, max_chars: usize) -> String {
+    let cleaned = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.chars().count() <= max_chars {
+        cleaned
+    } else {
+        cleaned.chars().take(max_chars).collect()
+    }
 }
 
 pub fn assemble_observation_context_with_default_budget(
@@ -621,6 +779,16 @@ mod tests {
     fn test_observation_context_includes_relevant_ledgers() {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         memory
+            .ensure_story_contract_seed(
+                "default",
+                "寒影",
+                "玄幻",
+                "刀客在旧怨中追查玉佩真相。",
+                "林墨必须在复仇和守护之间做选择。",
+                "不得提前泄露玉佩来源。",
+            )
+            .unwrap();
+        memory
             .upsert_canon_entity(
                 "character",
                 "林墨",
@@ -677,6 +845,10 @@ mod tests {
         assert!(pack
             .sources
             .iter()
+            .any(|s| s.source == ContextSource::ProjectBrief));
+        assert!(pack
+            .sources
+            .iter()
             .any(|s| s.source == ContextSource::CanonSlice));
         assert!(pack
             .sources
@@ -690,5 +862,41 @@ mod tests {
             .sources
             .iter()
             .any(|s| s.source == ContextSource::AuthorStyle));
+    }
+
+    #[test]
+    fn test_seed_story_contract_from_project_assets() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let seeded = seed_story_contract_from_project_assets(
+            "novel-a",
+            "寒影录",
+            &[crate::storage::LoreEntry {
+                id: "1".to_string(),
+                keyword: "林墨".to_string(),
+                content: "林墨来自宗门，惯用寒影刀。".to_string(),
+            }],
+            &[crate::storage::OutlineNode {
+                chapter_title: "第一章".to_string(),
+                summary: "林墨卷入宗门危机，发现玉佩线索。".to_string(),
+                status: "draft".to_string(),
+            }],
+            &memory,
+        )
+        .unwrap();
+
+        assert!(seeded);
+        let contract = memory.get_story_contract("novel-a").unwrap().unwrap();
+        assert_eq!(contract.title, "寒影录");
+        assert_eq!(contract.genre, "玄幻/修仙");
+        assert!(contract.reader_promise.contains("林墨"));
+
+        let seeded_again =
+            seed_story_contract_from_project_assets("novel-a", "新标题不应覆盖", &[], &[], &memory)
+                .unwrap();
+        assert!(!seeded_again);
+        assert_eq!(
+            memory.get_story_contract("novel-a").unwrap().unwrap().title,
+            "寒影录"
+        );
     }
 }
