@@ -13,6 +13,7 @@ import {
   type AgentObservation,
   type AgentObservationReason,
   type AgentSuggestion,
+  type EditorStatePayload,
   type StreamChunk,
 } from "../protocol";
 import AIPreviewMark from "../extensions/AIPreviewMark";
@@ -35,6 +36,9 @@ interface EditorPanelProps {
 const OBSERVATION_DEBOUNCE_MS = 1100;
 const OBSERVATION_WINDOW_CHARS = 1800;
 const PARAGRAPH_BUDGET_CHARS = 900;
+const EDITOR_TELEMETRY_DEBOUNCE_MS = 400;
+const FIM_PREFIX_CHARS = 1000;
+const FIM_SUFFIX_CHARS = 500;
 
 function limitChars(text: string, maxChars: number): string {
   const chars = Array.from(text);
@@ -43,6 +47,28 @@ function limitChars(text: string, maxChars: number): string {
 
 function makeObservationId(): string {
   return `obs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeEditorRequestId(): string {
+  return `fim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sliceAroundCursor(editor: Editor): EditorStatePayload {
+  const { from } = editor.state.selection;
+  const $from = editor.state.doc.resolve(from);
+  const docStart = Math.max(0, from - FIM_PREFIX_CHARS);
+  const docEnd = Math.min(editor.state.doc.content.size, from + FIM_SUFFIX_CHARS);
+  const prefix = editor.state.doc.textBetween(docStart, from, "\n");
+  const suffix = editor.state.doc.textBetween(from, docEnd, "\n");
+  const paragraph = editor.state.doc.textBetween($from.start(), $from.end(), " ");
+
+  return {
+    requestId: makeEditorRequestId(),
+    prefix,
+    suffix,
+    cursorPosition: from,
+    paragraph,
+  };
 }
 
 function buildObservation(
@@ -153,6 +179,8 @@ export default function EditorPanel({
   const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
   const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
   const observationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeGhostRequestIdRef = useRef<string | null>(null);
   const lastEditAtRef = useRef(0);
   const lastObservationKeyRef = useRef("");
 
@@ -231,12 +259,49 @@ export default function EditorPanel({
     [agentMode, submitObservation],
   );
 
+  const abortGhostRequest = useCallback((requestId?: string | null) => {
+    if (telemetryTimerRef.current) {
+      clearTimeout(telemetryTimerRef.current);
+      telemetryTimerRef.current = null;
+    }
+
+    const activeRequestId = requestId ?? activeGhostRequestIdRef.current;
+    if (!activeRequestId) return;
+    activeGhostRequestIdRef.current = null;
+    void invoke(Commands.abortEditorPrediction, { requestId: activeRequestId }).catch((e) => {
+      console.error("Failed to abort ghost completion:", e);
+    });
+  }, []);
+
+  const scheduleEditorTelemetry = useCallback(() => {
+    if (!editor || agentMode === "off") return;
+    if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
+    telemetryTimerRef.current = setTimeout(() => {
+      if (editor.state.selection.from !== editor.state.selection.to) return;
+
+      const payload = {
+        ...sliceAroundCursor(editor),
+        chapterTitle: currentChapter,
+      };
+      activeGhostRequestIdRef.current = payload.requestId;
+
+      void invoke(Commands.reportEditorState, { payload }).catch((e) => {
+        if (activeGhostRequestIdRef.current === payload.requestId) {
+          activeGhostRequestIdRef.current = null;
+        }
+        console.error("Editor telemetry failed:", e);
+      });
+    }, EDITOR_TELEMETRY_DEBOUNCE_MS);
+  }, [agentMode, currentChapter, editor]);
+
   useEffect(() => {
     if (!editor || !onSelectionUpdate) return;
     const handler = () => {
       const { from, to } = editor.state.selection;
       const text = editor.state.doc.textBetween(from, to, " ");
       onSelectionUpdate({ from, to, text });
+      abortGhostRequest();
+      scheduleEditorTelemetry();
       if (from < to) {
         scheduleObservation("selection_change");
       }
@@ -245,7 +310,7 @@ export default function EditorPanel({
     return () => {
       editor.off("selectionUpdate", handler);
     };
-  }, [editor, onSelectionUpdate, scheduleObservation]);
+  }, [abortGhostRequest, editor, onSelectionUpdate, scheduleEditorTelemetry, scheduleObservation]);
 
   // Debounced auto-save: 3s after typing stops
   useEffect(() => {
@@ -253,6 +318,8 @@ export default function EditorPanel({
     const handler = () => {
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
+      abortGhostRequest();
+      scheduleEditorTelemetry();
       scheduleObservation("user_typed");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
@@ -276,8 +343,18 @@ export default function EditorPanel({
       editor.off("update", handler);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (observationTimerRef.current) clearTimeout(observationTimerRef.current);
+      if (telemetryTimerRef.current) clearTimeout(telemetryTimerRef.current);
+      abortGhostRequest();
     };
-  }, [editor, currentChapter, scheduleObservation, setCurrentChapterRevision, setIsEditorDirty]);
+  }, [
+    abortGhostRequest,
+    currentChapter,
+    editor,
+    scheduleEditorTelemetry,
+    scheduleObservation,
+    setCurrentChapterRevision,
+    setIsEditorDirty,
+  ]);
 
   useEffect(() => {
     if (!editor || agentMode === "off") return;

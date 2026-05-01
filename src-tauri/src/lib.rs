@@ -25,6 +25,8 @@ mod events {
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
     pub const BATCH_STATUS: &str = "batch-status";
     pub const CHAPTER_GENERATION: &str = "chapter-generation";
+    pub const EDITOR_GHOST_CHUNK: &str = "editor-ghost-chunk";
+    pub const EDITOR_GHOST_END: &str = "editor-ghost-end";
 }
 
 #[tauri::command]
@@ -115,6 +117,7 @@ fn require_api_key() -> Result<String, String> {
 }
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 enum HarnessState {
@@ -126,6 +129,12 @@ enum HarnessState {
 struct AppState {
     harness_state: Mutex<HarnessState>,
     hermes_db: Mutex<HermesDB>,
+    editor_prediction: Mutex<Option<EditorPredictionTask>>,
+}
+
+struct EditorPredictionTask {
+    request_id: String,
+    cancel: CancellationToken,
 }
 
 fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
@@ -140,6 +149,15 @@ fn lock_harness_state<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HarnessS
         .harness_state
         .lock()
         .map_err(|_| "Harness state lock poisoned".to_string())
+}
+
+fn lock_editor_prediction<'a>(
+    state: &'a AppState,
+) -> Result<MutexGuard<'a, Option<EditorPredictionTask>>, String> {
+    state
+        .editor_prediction
+        .lock()
+        .map_err(|_| "Editor prediction lock poisoned".to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -278,6 +296,33 @@ struct AgentError {
     source: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorStatePayload {
+    request_id: String,
+    prefix: String,
+    suffix: String,
+    cursor_position: usize,
+    paragraph: String,
+    chapter_title: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostChunk {
+    request_id: String,
+    cursor_position: usize,
+    content: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostEnd {
+    request_id: String,
+    cursor_position: usize,
+    reason: String,
+}
+
 fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
     let _ = app.emit(
         events::AGENT_ERROR,
@@ -287,6 +332,184 @@ fn emit_error(app: &tauri::AppHandle, message: &str, source: &str) {
         },
     );
 }
+
+fn realtime_cowrite_enabled() -> bool {
+    std::env::var("AGENT_WRITER_REALTIME_COWRITE")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
+        })
+        .unwrap_or(true)
+}
+
+fn build_fim_messages(prefix: &str, suffix: &str, chapter_title: Option<&str>) -> Vec<serde_json::Value> {
+    let title = chapter_title.unwrap_or("current chapter");
+    let system_prompt = "You are a low-latency fill-in-the-middle writing engine for a novelist. \
+Complete only the text that belongs exactly at the cursor. Return 1-3 short Chinese sentences at most. \
+Do not explain, do not quote the prompt, do not wrap the answer in markdown, and stop at a natural boundary.";
+    let user_prompt = format!(
+        "<|fim_prefix|>\n# {}\n{}\n<|fim_suffix|>\n{}\n<|fim_middle|>",
+        title, prefix, suffix
+    );
+
+    vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": user_prompt}),
+    ]
+}
+
+fn paragraph_hint(paragraph: &str) -> String {
+    let trimmed = paragraph.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("\nCurrent paragraph:\n{}\n", trimmed)
+    }
+}
+
+fn trim_ghost_completion(text: &str) -> String {
+    let without_markers = text
+        .replace("<|fim_middle|>", "")
+        .replace("<|fim_prefix|>", "")
+        .replace("<|fim_suffix|>", "");
+    let trimmed = without_markers.trim_matches(|c: char| c == '`' || c.is_whitespace());
+    trimmed.chars().take(180).collect::<String>()
+}
+
+fn abort_editor_prediction_task(state: &AppState, request_id: Option<&str>) -> Result<bool, String> {
+    let mut task = lock_editor_prediction(state)?;
+    let should_cancel = match (&*task, request_id) {
+        (Some(active), Some(request_id)) => active.request_id == request_id,
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+
+    if should_cancel {
+        if let Some(active) = task.take() {
+            active.cancel.cancel();
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn clear_editor_prediction_task(state: &AppState, request_id: &str) -> Result<(), String> {
+    let mut task = lock_editor_prediction(state)?;
+    if task
+        .as_ref()
+        .is_some_and(|active| active.request_id == request_id)
+    {
+        *task = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn abort_editor_prediction(
+    app: tauri::AppHandle,
+    request_id: Option<String>,
+) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    abort_editor_prediction_task(&state, request_id.as_deref())
+}
+
+#[tauri::command]
+async fn report_editor_state(
+    app: tauri::AppHandle,
+    payload: EditorStatePayload,
+) -> Result<(), String> {
+    if !realtime_cowrite_enabled() {
+        return Ok(());
+    }
+
+    let prefix = payload.prefix.trim_end();
+    if prefix.chars().count() < 12 {
+        return Ok(());
+    }
+
+    let Some(api_key) = resolve_api_key() else {
+        return Ok(());
+    };
+
+    let request_id = payload.request_id.clone();
+    let cursor_position = payload.cursor_position;
+    let cancel = CancellationToken::new();
+
+    {
+        let state = app.state::<AppState>();
+        abort_editor_prediction_task(&state, None)?;
+        let mut task = lock_editor_prediction(&state)?;
+        *task = Some(EditorPredictionTask {
+            request_id: request_id.clone(),
+            cancel: cancel.clone(),
+        });
+    }
+
+    let settings = llm_runtime::settings(api_key);
+    let mut prefix = payload.prefix.clone();
+    prefix.push_str(&paragraph_hint(&payload.paragraph));
+    let messages = build_fim_messages(&prefix, &payload.suffix, payload.chapter_title.as_deref());
+    let app_clone = app.clone();
+
+    tokio::spawn(async move {
+        let mut emitted_chars = 0usize;
+        let stream_result = llm_runtime::stream_chat_cancellable(
+            &settings,
+            messages,
+            8,
+            cancel.clone(),
+            |content| {
+                let content = trim_ghost_completion(&content);
+                if content.is_empty() {
+                    return Ok(llm_runtime::StreamControl::Continue);
+                }
+
+                emitted_chars += content.chars().count();
+                let _ = app_clone.emit(
+                    events::EDITOR_GHOST_CHUNK,
+                    EditorGhostChunk {
+                        request_id: request_id.clone(),
+                        cursor_position,
+                        content,
+                    },
+                );
+
+                if emitted_chars >= 180 {
+                    Ok(llm_runtime::StreamControl::Stop)
+                } else {
+                    Ok(llm_runtime::StreamControl::Continue)
+                }
+            },
+        )
+        .await;
+
+        let reason = match stream_result {
+            Ok(_) => "complete",
+            Err(ref e) if e == "cancelled" || cancel.is_cancelled() => "cancelled",
+            Err(e) => {
+                tracing::warn!("Ghost completion failed: {}", e);
+                "error"
+            }
+        }
+        .to_string();
+
+        let _ = app_clone.emit(
+            events::EDITOR_GHOST_END,
+            EditorGhostEnd {
+                request_id: request_id.clone(),
+                cursor_position,
+                reason,
+            },
+        );
+
+        let state = app_clone.state::<AppState>();
+        let _ = clear_editor_prediction_task(&state, &request_id);
+    });
+
+    Ok(())
+}
+
 
 #[tauri::command]
 async fn batch_generate_chapter(
@@ -1167,9 +1390,12 @@ pub fn run() {
         .manage(AppState {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
+            editor_prediction: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            abort_editor_prediction,
             harness_echo,
+            report_editor_state,
             ask_agent,
             agent_observe,
             get_agent_tools,

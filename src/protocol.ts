@@ -1,4 +1,5 @@
 export const Commands = {
+  abortEditorPrediction: "abort_editor_prediction",
   analyzeChapter: "analyze_chapter",
   analyzePacing: "analyze_pacing",
   agentObserve: "agent_observe",
@@ -20,6 +21,7 @@ export const Commands = {
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
+  reportEditorState: "report_editor_state",
   reorderOutlineNodes: "reorder_outline_nodes",
   renameChapterFile: "rename_chapter_file",
   saveChapter: "save_chapter",
@@ -38,6 +40,9 @@ export const Events = {
   agentStreamEnd: "agent-stream-end",
   batchStatus: "batch-status",
   chapterGeneration: "chapter-generation",
+  editorGhostChunk: "editor-ghost-chunk",
+  editorGhostEnd: "editor-ghost-end",
+  editorSemanticLint: "editor-semantic-lint",
 } as const;
 
 export interface StreamChunk {
@@ -46,6 +51,36 @@ export interface StreamChunk {
 
 export interface StreamEnd {
   reason: string;
+}
+
+export interface EditorStatePayload {
+  requestId: string;
+  prefix: string;
+  suffix: string;
+  cursorPosition: number;
+  paragraph: string;
+  chapterTitle?: string;
+}
+
+export interface EditorGhostChunk {
+  requestId: string;
+  cursorPosition: number;
+  content: string;
+}
+
+export interface EditorGhostEnd {
+  requestId: string;
+  cursorPosition: number;
+  reason: "complete" | "cancelled" | "error" | string;
+}
+
+export interface EditorSemanticLint {
+  requestId: string;
+  cursorPosition: number;
+  from: number;
+  to: number;
+  message: string;
+  severity: "info" | "warning" | "error" | string;
 }
 
 export interface SearchStatus {
