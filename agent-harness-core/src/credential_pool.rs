@@ -88,7 +88,10 @@ impl CredentialPool {
 
     /// Get the next available credential according to the strategy.
     pub fn next(&mut self, now: Instant) -> Option<&PooledCredential> {
-        let available: Vec<usize> = self.entries.iter().enumerate()
+        let available: Vec<usize> = self
+            .entries
+            .iter()
+            .enumerate()
             .filter(|(_, c)| c.is_available(now))
             .map(|(i, _)| i)
             .collect();
@@ -128,8 +131,12 @@ impl CredentialPool {
         }
     }
 
-    pub fn provider(&self) -> &str { &self.provider }
-    pub fn entry_count(&self) -> usize { self.entries.len() }
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
 }
 
 /// Registry of credential pools keyed by provider name.
@@ -139,7 +146,9 @@ pub struct CredentialRegistry {
 
 impl CredentialRegistry {
     pub fn new() -> Self {
-        Self { pools: HashMap::new() }
+        Self {
+            pools: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, pool: CredentialPool) {
@@ -156,7 +165,9 @@ impl CredentialRegistry {
 }
 
 impl Default for CredentialRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

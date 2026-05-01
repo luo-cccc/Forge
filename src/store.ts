@@ -7,6 +7,7 @@ import type {
   AgentSuggestion,
   PatchSet,
   PatchStatus,
+  StoryMode,
   StoryboardMarker,
 } from "./protocol";
 
@@ -33,6 +34,8 @@ interface AppState {
   incrementActionEpoch: () => void;
   agentMode: AgentMode;
   setAgentMode: (mode: AgentMode) => void;
+  storyMode: StoryMode;
+  setStoryMode: (mode: StoryMode) => void;
   latestObservation: AgentObservation | null;
   setLatestObservation: (observation: AgentObservation) => void;
   suggestionQueue: AgentSuggestion[];
@@ -91,6 +94,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   agentMode: "proactive",
   setAgentMode: (mode) => set({ agentMode: mode }),
+  storyMode: "write",
+  setStoryMode: (mode) => set({ storyMode: mode }),
 
   latestObservation: null,
   setLatestObservation: (observation) => set({ latestObservation: observation }),

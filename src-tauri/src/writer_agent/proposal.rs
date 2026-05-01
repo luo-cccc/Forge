@@ -1,9 +1,9 @@
 //! AgentProposal — typed, evidenced, feedback-tracked suggestions.
 //! Replaces vague suggestion cards with structured agent output.
 
-use serde::{Deserialize, Serialize};
 use super::observation::TextRange;
 use super::operation::WriterOperation;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,9 +19,21 @@ pub struct AgentProposal {
     pub rationale: String,
     pub evidence: Vec<EvidenceRef>,
     pub risks: Vec<String>,
+    #[serde(default)]
+    pub alternatives: Vec<ProposalAlternative>,
     pub confidence: f64,
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalAlternative {
+    pub id: String,
+    pub label: String,
+    pub preview: String,
+    pub operation: Option<WriterOperation>,
+    pub rationale: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -73,12 +85,4 @@ pub enum EvidenceSource {
     PromiseLedger,
     #[serde(rename = "author_feedback")]
     AuthorFeedback,
-}
-
-impl AgentProposal {
-    pub fn is_ambient(&self) -> bool { self.priority == ProposalPriority::Ambient }
-    pub fn is_urgent(&self) -> bool { self.priority == ProposalPriority::Urgent }
-    pub fn should_suppress_during_typing(&self) -> bool {
-        self.priority == ProposalPriority::Ambient
-    }
 }

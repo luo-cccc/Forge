@@ -3,6 +3,8 @@ export const Commands = {
   analyzeChapter: "analyze_chapter",
   analyzePacing: "analyze_pacing",
   agentObserve: "agent_observe",
+  applyProposalFeedback: "apply_proposal_feedback",
+  approveWriterOperation: "approve_writer_operation",
   askAgent: "ask_agent",
   generateParallelDrafts: "generate_parallel_drafts",
   askProjectBrain: "ask_project_brain",
@@ -15,6 +17,11 @@ export const Commands = {
   generateChapterAutonomous: "generate_chapter_autonomous",
   getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",
+  getWriterAgentLedger: "get_writer_agent_ledger",
+  getWriterAgentPendingProposals: "get_writer_agent_pending_proposals",
+  getWriterAgentStatus: "get_writer_agent_status",
+  getWriterAgentTrace: "get_writer_agent_trace",
+  getStoryReviewQueue: "get_story_review_queue",
   getAgentTools: "get_agent_tools",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
@@ -23,6 +30,7 @@ export const Commands = {
   harnessEcho: "harness_echo",
   loadChapter: "load_chapter",
   readProjectDir: "read_project_dir",
+  recordImplicitGhostRejection: "record_implicit_ghost_rejection",
   reportEditorState: "report_editor_state",
   reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
@@ -37,6 +45,7 @@ export const Events = {
   agentChainOfThought: "agent-chain-of-thought",
   agentEpiphany: "agent-epiphany",
   agentError: "agent-error",
+  agentProposal: "agent-proposal",
   agentSuggestion: "agent-suggestion",
   agentSearchStatus: "agent-search-status",
   agentStreamChunk: "agent-stream-chunk",
@@ -64,8 +73,11 @@ export interface EditorStatePayload {
   prefix: string;
   suffix: string;
   cursorPosition: number;
+  textCursorPosition?: number;
   paragraph: string;
   chapterTitle?: string;
+  chapterRevision?: string;
+  editorDirty?: boolean;
 }
 
 export interface SemanticLintPayload {
@@ -78,10 +90,12 @@ export interface SemanticLintPayload {
 
 export interface EditorGhostChunk {
   requestId: string;
+  proposalId?: string;
   cursorPosition: number;
   content: string;
   intent?: string;
   candidates?: EditorGhostCandidate[];
+  replace?: boolean;
 }
 
 export interface EditorGhostCandidate {
@@ -161,6 +175,8 @@ export interface ChainOfThoughtStep {
 }
 
 export type AgentMode = "off" | "passive" | "proactive";
+
+export type StoryMode = "write" | "review" | "explore";
 
 export type AgentObservationReason =
   | "user_typed"
@@ -508,8 +524,17 @@ export interface AgentProposal {
   rationale: string;
   evidence: EvidenceRef[];
   risks: string[];
+  alternatives: ProposalAlternative[];
   confidence: number;
   expiresAt?: number;
+}
+
+export interface ProposalAlternative {
+  id: string;
+  label: string;
+  preview: string;
+  operation?: WriterOperation;
+  rationale: string;
 }
 
 export interface EvidenceRef {
@@ -518,9 +543,24 @@ export interface EvidenceRef {
   snippet: string;
 }
 
+export interface StoryReviewQueueEntry {
+  id: string;
+  proposalId: string;
+  category: AgentProposal["kind"];
+  severity: "info" | "warning" | "error";
+  title: string;
+  message: string;
+  target?: { from: number; to: number };
+  evidence: EvidenceRef[];
+  operations: WriterOperation[];
+  status: "pending" | "accepted" | "ignored" | "snoozed" | "expired";
+  createdAt: number;
+  expiresAt?: number;
+}
+
 export type WriterOperation =
-  | { kind: "text.insert"; chapter: string; at: number; text: string }
-  | { kind: "text.replace"; chapter: string; from: number; to: number; text: string }
+  | { kind: "text.insert"; chapter: string; at: number; text: string; revision: string }
+  | { kind: "text.replace"; chapter: string; from: number; to: number; text: string; revision: string }
   | { kind: "text.annotate"; chapter: string; from: number; to: number; message: string; severity: string }
   | { kind: "canon.upsert_entity"; entity: unknown }
   | { kind: "canon.upsert_rule"; rule: unknown }
@@ -528,6 +568,18 @@ export type WriterOperation =
   | { kind: "promise.resolve"; promiseId: string; chapter: string }
   | { kind: "style.update_preference"; key: string; value: string }
   | { kind: "outline.update"; nodeId: string; patch: unknown };
+
+export interface OperationError {
+  code: string;
+  message: string;
+}
+
+export interface OperationResult {
+  success: boolean;
+  operation: WriterOperation;
+  error?: OperationError;
+  revisionAfter?: string;
+}
 
 export interface ProposalFeedback {
   proposalId: string;
@@ -548,7 +600,87 @@ export interface WriterAgentStatus {
   totalFeedbackEvents: number;
 }
 
+export interface CanonEntitySummary {
+  kind: string;
+  name: string;
+  summary: string;
+  attributes: Record<string, unknown>;
+  confidence: number;
+}
+
+export interface PlotPromiseSummary {
+  id: number;
+  kind: string;
+  title: string;
+  description: string;
+  introducedChapter: string;
+  expectedPayoff: string;
+  priority: number;
+}
+
+export interface CreativeDecisionSummary {
+  scope: string;
+  title: string;
+  decision: string;
+  rationale: string;
+  createdAt: string;
+}
+
+export interface MemoryAuditEntry {
+  proposalId: string;
+  kind: string;
+  action: string;
+  title: string;
+  evidence: string;
+  rationale: string;
+  reason?: string;
+  createdAt: number;
+}
+
+export interface WriterAgentLedgerSnapshot {
+  canonEntities: CanonEntitySummary[];
+  openPromises: PlotPromiseSummary[];
+  recentDecisions: CreativeDecisionSummary[];
+  memoryAudit: MemoryAuditEntry[];
+}
+
+export interface WriterAgentTraceSnapshot {
+  recentObservations: WriterObservationTrace[];
+  recentProposals: WriterProposalTrace[];
+  recentFeedback: WriterFeedbackTrace[];
+}
+
+export interface WriterObservationTrace {
+  id: string;
+  createdAt: number;
+  reason: string;
+  chapterTitle?: string;
+  paragraphSnippet: string;
+}
+
+export interface WriterProposalTrace {
+  id: string;
+  observationId: string;
+  kind: string;
+  priority: string;
+  state: string;
+  confidence: number;
+  previewSnippet: string;
+}
+
+export interface WriterFeedbackTrace {
+  proposalId: string;
+  action: string;
+  reason?: string;
+  createdAt: number;
+}
+
 export const WriterAgentCommands = {
   getWriterAgentStatus: "get_writer_agent_status",
+  getWriterAgentLedger: "get_writer_agent_ledger",
+  getStoryReviewQueue: "get_story_review_queue",
   agentObserve: "agent_observe",
+  applyProposalFeedback: "apply_proposal_feedback",
+  approveWriterOperation: "approve_writer_operation",
+  recordImplicitGhostRejection: "record_implicit_ghost_rejection",
 } as const;

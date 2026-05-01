@@ -351,9 +351,7 @@ pub enum OverflowRecoveryLevel {
 
 /// Attempt to recover from a context overflow error.
 /// Returns the trimmed messages and the recovery level applied.
-pub fn recover_from_overflow(
-    messages: &[LlmMessage],
-) -> (Vec<LlmMessage>, OverflowRecoveryLevel) {
+pub fn recover_from_overflow(messages: &[LlmMessage]) -> (Vec<LlmMessage>, OverflowRecoveryLevel) {
     let total = messages.len();
     if total <= 4 {
         return (messages.to_vec(), OverflowRecoveryLevel::Failed);
@@ -384,7 +382,11 @@ pub fn recover_from_overflow(
 
     // Level 2: If still too large, keep last 3 pairs
     let keep_3: Vec<LlmMessage> = if total > 8 {
-        messages.iter().skip(total.saturating_sub(6)).cloned().collect()
+        messages
+            .iter()
+            .skip(total.saturating_sub(6))
+            .cloned()
+            .collect()
     } else {
         messages.to_vec()
     };
@@ -393,7 +395,10 @@ pub fn recover_from_overflow(
     let minimal: Vec<LlmMessage> = vec![
         LlmMessage {
             role: "system".into(),
-            content: Some("[Previous conversation was trimmed due to context limits. Continue concisely.]".into()),
+            content: Some(
+                "[Previous conversation was trimmed due to context limits. Continue concisely.]"
+                    .into(),
+            ),
             tool_calls: None,
             tool_call_id: None,
             name: None,
@@ -421,12 +426,14 @@ pub fn recover_from_overflow(
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::provider::ToolCall;
 
     fn msg(role: &str, content: &str) -> LlmMessage {
         LlmMessage {
-            role: role.into(), content: Some(content.into()),
-            tool_calls: None, tool_call_id: None, name: None,
+            role: role.into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
         }
     }
 
@@ -439,7 +446,9 @@ mod recovery_tests {
             LlmMessage {
                 role: "tool".into(),
                 content: Some("x".repeat(2000)),
-                tool_calls: None, tool_call_id: Some("c1".into()), name: Some("t".into()),
+                tool_calls: None,
+                tool_call_id: Some("c1".into()),
+                name: Some("t".into()),
             },
             msg("assistant", "done"),
             msg("user", "more"),
@@ -454,10 +463,7 @@ mod recovery_tests {
 
     #[test]
     fn test_overflow_recovery_small_returns_failed() {
-        let messages = vec![
-            msg("system", "s"),
-            msg("user", "q"),
-        ];
+        let messages = vec![msg("system", "s"), msg("user", "q")];
         let (_, level) = recover_from_overflow(&messages);
         assert_eq!(level, OverflowRecoveryLevel::Failed);
     }

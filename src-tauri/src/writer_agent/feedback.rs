@@ -27,31 +27,14 @@ pub enum FeedbackAction {
 }
 
 impl ProposalFeedback {
-    pub fn accepted(proposal_id: &str, now: u64) -> Self {
-        Self {
-            proposal_id: proposal_id.into(),
-            action: FeedbackAction::Accepted,
-            final_text: None,
-            reason: None,
-            created_at: now,
-        }
-    }
-
-    pub fn rejected(proposal_id: &str, reason: &str, now: u64) -> Self {
-        Self {
-            proposal_id: proposal_id.into(),
-            action: FeedbackAction::Rejected,
-            final_text: None,
-            reason: Some(reason.into()),
-            created_at: now,
-        }
-    }
-
     pub fn is_positive(&self) -> bool {
         matches!(self.action, FeedbackAction::Accepted)
     }
 
     pub fn is_negative(&self) -> bool {
-        matches!(self.action, FeedbackAction::Rejected | FeedbackAction::Snoozed)
+        matches!(
+            self.action,
+            FeedbackAction::Rejected | FeedbackAction::Snoozed
+        )
     }
 }

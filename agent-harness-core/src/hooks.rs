@@ -149,7 +149,9 @@ mod tests {
     fn test_pre_tool_deny_wins() {
         let mut runner = HookRunner::new();
         runner.on_pre_tool(Box::new(|_| HookDecision::Allow));
-        runner.on_pre_tool(Box::new(|_| HookDecision::Deny { reason: "blocked".into() }));
+        runner.on_pre_tool(Box::new(|_| HookDecision::Deny {
+            reason: "blocked".into(),
+        }));
         let d = runner.run_pre_tool("test", &serde_json::json!({}));
         assert!(matches!(d, HookDecision::Deny { .. }));
     }
@@ -161,6 +163,10 @@ mod tests {
             assert_eq!(p.tool_name, "test");
             HookDecision::Allow
         }));
-        runner.run_post_tool("test", &serde_json::json!({}), &serde_json::json!({"ok": true}));
+        runner.run_post_tool(
+            "test",
+            &serde_json::json!({}),
+            &serde_json::json!({"ok": true}),
+        );
     }
 }

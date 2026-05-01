@@ -17,6 +17,7 @@ import {
   type Epiphany,
   type FrontendChapterStateSnapshot,
   type GenerateChapterAutonomousPayload,
+  type StoryMode,
   type SearchStatus,
   type StoryboardMarker,
   type StreamChunk,
@@ -29,9 +30,25 @@ interface Message {
 }
 
 interface AgentPanelProps {
-  getContext: () => { full: string; paragraph: string; selected: string };
+  mode: StoryMode;
+  getContext: () => { full: string; paragraph: string; selected: string; cursorPosition: number };
   onActionInsert: (text: string) => void;
   onActionReplace: (text: string) => void;
+}
+
+function buildAskAgentContext(
+  currentChapter: string,
+  currentChapterRevision: string | null,
+  isEditorDirty: boolean,
+  full: string,
+  cursorPosition: number,
+) {
+  return {
+    chapterTitle: currentChapter,
+    chapterRevision: currentChapterRevision ?? undefined,
+    cursorPosition: Math.min(cursorPosition, Array.from(full).length),
+    dirty: isEditorDirty,
+  };
 }
 
 function detectChapterDraftRequest(text: string): number | null {
@@ -68,6 +85,7 @@ function parseChineseChapterNumber(raw: string): number | null {
 }
 
 export default function AgentPanel({
+  mode,
   getContext,
   onActionInsert,
   onActionReplace,
@@ -310,8 +328,8 @@ export default function AgentPanel({
     setChapterEvents([]);
 
     try {
-      const { full, paragraph, selected } = getContext();
-      const chapterNumber = !brainMode ? detectChapterDraftRequest(text) : null;
+      const { full, paragraph, selected, cursorPosition } = getContext();
+      const chapterNumber = mode === "explore" && !brainMode ? detectChapterDraftRequest(text) : null;
       if (chapterNumber) {
         const frontendState: FrontendChapterStateSnapshot = {
           openChapterTitle: currentChapter,
@@ -332,7 +350,19 @@ export default function AgentPanel({
       } else if (brainMode) {
         await invoke(Commands.askProjectBrain, { query: text });
       } else {
-        await invoke(Commands.askAgent, { message: text, context: full, paragraph, selectedText: selected });
+        await invoke(Commands.askAgent, {
+          message: text,
+          context: full,
+          paragraph,
+          selectedText: selected,
+          contextPayload: buildAskAgentContext(
+            currentChapter,
+            currentChapterRevision,
+            isEditorDirty,
+            full,
+            cursorPosition,
+          ),
+        });
       }
     } catch (e) {
       setStreaming("");
@@ -349,6 +379,7 @@ export default function AgentPanel({
     getContext,
     setIsAgentThinking,
     brainMode,
+    mode,
     currentChapter,
     currentChapterRevision,
     isEditorDirty,
@@ -364,8 +395,20 @@ export default function AgentPanel({
       if (brainMode) {
         await invoke(Commands.askProjectBrain, { query: lastInput });
       } else {
-        const { full, paragraph, selected } = getContext();
-        await invoke(Commands.askAgent, { message: lastInput, context: full, paragraph, selectedText: selected });
+        const { full, paragraph, selected, cursorPosition } = getContext();
+        await invoke(Commands.askAgent, {
+          message: lastInput,
+          context: full,
+          paragraph,
+          selectedText: selected,
+          contextPayload: buildAskAgentContext(
+            currentChapter,
+            currentChapterRevision,
+            isEditorDirty,
+            full,
+            cursorPosition,
+          ),
+        });
       }
     } catch (e) {
       setStreaming("");
@@ -373,12 +416,20 @@ export default function AgentPanel({
       setIsAgentThinking(false);
       setMessages((prev) => [...prev, { role: "agent", content: `Error: ${e}` }]);
     }
-  }, [lastInput, getContext, setIsAgentThinking, brainMode]);
+  }, [
+    lastInput,
+    getContext,
+    setIsAgentThinking,
+    brainMode,
+    currentChapter,
+    currentChapterRevision,
+    isEditorDirty,
+  ]);
 
   return (
     <div className="flex flex-col h-full border-l border-border-subtle">
       <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider flex items-center justify-between">
-        <span>{brainMode ? "Project Brain" : "Agent"}</span>
+        <span>{brainMode ? "Project Brain" : "Explore Lab"}</span>
         <div className="flex items-center gap-1">
           {(["off", "passive", "proactive"] as const).map((mode) => (
             <button
@@ -401,7 +452,7 @@ export default function AgentPanel({
                 : "bg-bg-raised text-text-muted border border-border-subtle"
             }`}
           >
-            {brainMode ? "Brain" : "Copilot"}
+            {brainMode ? "Brain" : "Draft Lab"}
           </button>
         </div>
       </div>
@@ -469,7 +520,9 @@ export default function AgentPanel({
           </div>
         )}
         {messages.length === 0 && !streaming && !searchStatus && (
-          <p className="text-text-muted text-xs">Agent responses will appear here.</p>
+          <div className="rounded-sm border border-border-subtle bg-bg-raised px-3 py-2 text-xs text-text-muted">
+            Explore mode is for deliberate drafting and project questions. Chapter draft requests stay here instead of the writing surface.
+          </div>
         )}
         {messages.map((msg, i) => (
           <div
@@ -589,7 +642,7 @@ export default function AgentPanel({
           onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
           disabled={isStreaming}
           className="w-full px-3 py-2 rounded-sm bg-bg-deep border border-border-subtle text-text-primary placeholder-text-muted focus:outline-none focus:border-accent text-sm disabled:opacity-50"
-          placeholder="Ask the agent..."
+          placeholder={brainMode ? "Ask Project Brain..." : "Explore a draft, branch, or chapter..."}
         />
       </div>
     </div>

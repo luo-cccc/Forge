@@ -18,7 +18,10 @@ pub struct PromptCacheConfig {
 
 impl Default for PromptCacheConfig {
     fn default() -> Self {
-        Self { ttl: DEFAULT_TTL, enabled: true }
+        Self {
+            ttl: DEFAULT_TTL,
+            enabled: true,
+        }
     }
 }
 
@@ -44,7 +47,11 @@ struct CacheEntry {
 
 impl PromptCache {
     pub fn new(config: PromptCacheConfig) -> Self {
-        Self { config, entries: HashMap::new(), stats: PromptCacheStats::default() }
+        Self {
+            config,
+            entries: HashMap::new(),
+            stats: PromptCacheStats::default(),
+        }
     }
 
     /// FNV-1a hash for content fingerprinting.
@@ -59,12 +66,15 @@ impl PromptCache {
 
     /// Check if a prompt is cached. Returns Some(tokens_saved) on hit.
     pub fn check(&mut self, system: &str, tools_json: &str) -> Option<u64> {
-        if !self.config.enabled { return None; }
+        if !self.config.enabled {
+            return None;
+        }
         let fp = Self::fingerprint(system, tools_json);
         let now = Instant::now();
 
         // Evict expired entries
-        self.entries.retain(|_, e| now.duration_since(e.created) < self.config.ttl);
+        self.entries
+            .retain(|_, e| now.duration_since(e.created) < self.config.ttl);
 
         if let Some(entry) = self.entries.get(&fp) {
             if now.duration_since(entry.created) < self.config.ttl {
@@ -118,7 +128,10 @@ mod tests {
 
     #[test]
     fn test_cache_disabled() {
-        let mut cache = PromptCache::new(PromptCacheConfig { enabled: false, ..Default::default() });
+        let mut cache = PromptCache::new(PromptCacheConfig {
+            enabled: false,
+            ..Default::default()
+        });
         assert!(cache.check("sys", "[]").is_none());
         assert!(cache.check("sys", "[]").is_none()); // still miss
     }

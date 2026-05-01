@@ -60,31 +60,51 @@ impl IntentEngine {
             rules: vec![
                 IntentRule {
                     intent: WritingIntent::Dialogue,
-                    cues: vec!["\"", "「", "」", "\u{201c}", "\u{201d}", "说", "问道", "回答", "喊道", "低语", "喃喃", "道"],
+                    cues: vec![
+                        "\"", "「", "」", "\u{201c}", "\u{201d}", "说", "问道", "回答", "喊道",
+                        "低语", "喃喃", "道",
+                    ],
                     behavior: AgentBehavior::SuggestContinuation,
                     min_confidence: 0.15,
                 },
                 IntentRule {
                     intent: WritingIntent::Action,
-                    cues: vec!["拔", "挥", "冲", "跳", "踢", "打", "击", "闪", "避", "刺", "劈", "砍"],
+                    cues: vec![
+                        "拔", "挥", "冲", "跳", "踢", "打", "击", "闪", "避", "刺", "劈", "砍",
+                    ],
                     behavior: AgentBehavior::SuggestContinuation,
                     min_confidence: 0.15,
                 },
                 IntentRule {
                     intent: WritingIntent::Description,
-                    cues: vec!["破庙", "密道", "山", "林", "城", "宫殿", "剑", "刀", "雾", "月光", "烛", "窗"],
+                    cues: vec![
+                        "破庙", "密道", "山", "林", "城", "宫殿", "剑", "刀", "雾", "月光", "烛",
+                        "窗",
+                    ],
                     behavior: AgentBehavior::SuggestContinuation,
                     min_confidence: 0.08,
                 },
                 IntentRule {
                     intent: WritingIntent::EmotionalBeat,
-                    cues: vec!["愤怒", "悲伤", "恐惧", "喜悦", "沉默", "泪", "颤抖", "心跳", "握紧", "咬牙"],
+                    cues: vec![
+                        "愤怒", "悲伤", "恐惧", "喜悦", "沉默", "泪", "颤抖", "心跳", "握紧",
+                        "咬牙",
+                    ],
                     behavior: AgentBehavior::StaySilent,
                     min_confidence: 0.1,
                 },
                 IntentRule {
                     intent: WritingIntent::ConflictEscalation,
-                    cues: vec!["突然", "但是", "然而", "不料", "没想到", "竟然", "猛地", "瞬间"],
+                    cues: vec![
+                        "突然",
+                        "但是",
+                        "然而",
+                        "不料",
+                        "没想到",
+                        "竟然",
+                        "猛地",
+                        "瞬间",
+                    ],
                     behavior: AgentBehavior::SuggestContinuation,
                     min_confidence: 0.12,
                 },
@@ -111,7 +131,12 @@ impl IntentEngine {
     }
 
     /// Classify writing intent from paragraph text and observation metadata.
-    pub fn classify(&self, paragraph: &str, has_selection: bool, is_chapter_switch: bool) -> WritingIntentEstimate {
+    pub fn classify(
+        &self,
+        paragraph: &str,
+        has_selection: bool,
+        is_chapter_switch: bool,
+    ) -> WritingIntentEstimate {
         let mut scores: Vec<(WritingIntent, f32, Vec<&str>, &AgentBehavior)> = Vec::new();
 
         for rule in &self.rules {
@@ -167,7 +192,8 @@ impl IntentEngine {
         let cues: Vec<String> = scores[0].2.iter().map(|s| s.to_string()).collect();
         let behavior = scores[0].3.clone();
 
-        let secondary: Vec<WritingIntent> = scores.iter().skip(1).take(2).map(|s| s.0.clone()).collect();
+        let secondary: Vec<WritingIntent> =
+            scores.iter().skip(1).take(2).map(|s| s.0.clone()).collect();
 
         WritingIntentEstimate {
             primary,
@@ -180,7 +206,9 @@ impl IntentEngine {
 }
 
 impl Default for IntentEngine {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -190,7 +218,11 @@ mod tests {
     #[test]
     fn test_dialogue_detection() {
         let engine = IntentEngine::new();
-        let est = engine.classify("\"你不能这样做，\"她低声说道，\"已经太晚了。\"", false, false);
+        let est = engine.classify(
+            "\"你不能这样做，\"她低声说道，\"已经太晚了。\"",
+            false,
+            false,
+        );
         assert_eq!(est.primary, WritingIntent::Dialogue);
         assert!(est.confidence > 0.15);
     }
@@ -202,7 +234,11 @@ mod tests {
         // Has both action (拔,冲,击,劈) and conflict (猛地) cues — either is valid
         let is_action_or_conflict = est.primary == WritingIntent::Action
             || est.primary == WritingIntent::ConflictEscalation;
-        assert!(is_action_or_conflict, "expected action or conflict, got {:?}", est.primary);
+        assert!(
+            is_action_or_conflict,
+            "expected action or conflict, got {:?}",
+            est.primary
+        );
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use futures_util::StreamExt;
 use serde::Deserialize;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct LlmSettings {
@@ -175,90 +174,6 @@ pub async fn stream_chat(
         sse_buffer.push_str(&text);
 
         while let Some(line_end) = sse_buffer.find('\n') {
-            let line = sse_buffer[..line_end].trim().to_string();
-            sse_buffer = sse_buffer[line_end + 1..].to_string();
-            if line.is_empty() {
-                continue;
-            }
-            let data = if let Some(d) = line.strip_prefix("data: ") {
-                d
-            } else {
-                continue;
-            };
-            if data == "[DONE]" {
-                continue;
-            }
-            let parsed: serde_json::Value =
-                serde_json::from_str(data).map_err(|e| format!("JSON parse error: {}", e))?;
-            let content = parsed["choices"][0]["delta"]["content"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            if content.is_empty() {
-                continue;
-            }
-
-            full.push_str(&content);
-            on_delta(content)?;
-        }
-    }
-
-    Ok(full)
-}
-
-pub async fn stream_chat_cancellable(
-    settings: &LlmSettings,
-    messages: Vec<serde_json::Value>,
-    timeout_secs: u64,
-    cancel: CancellationToken,
-    mut on_delta: impl FnMut(String) -> Result<StreamControl, String>,
-) -> Result<String, String> {
-    let client = client(timeout_secs)?;
-    let request = client
-        .post(endpoint(&settings.api_base, "chat/completions"))
-        .header("Authorization", format!("Bearer {}", settings.api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": settings.model,
-            "messages": messages,
-            "stream": true,
-            "temperature": 0.3
-        }))
-        .send();
-
-    let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err("cancelled".to_string()),
-        resp = request => resp.map_err(|e| format!("Request failed: {}", e))?,
-    };
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status.as_u16(), text));
-    }
-
-    let mut stream = resp.bytes_stream();
-    let mut sse_buffer = String::new();
-    let mut full = String::new();
-
-    loop {
-        let chunk = tokio::select! {
-            _ = cancel.cancelled() => return Err("cancelled".to_string()),
-            chunk = stream.next() => chunk,
-        };
-
-        let Some(chunk) = chunk else {
-            break;
-        };
-        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-        let text = String::from_utf8_lossy(&chunk);
-        sse_buffer.push_str(&text);
-
-        while let Some(line_end) = sse_buffer.find('\n') {
-            if cancel.is_cancelled() {
-                return Err("cancelled".to_string());
-            }
-
             let line = sse_buffer[..line_end].trim().to_string();
             sse_buffer = sse_buffer[line_end + 1..].to_string();
             if line.is_empty() {

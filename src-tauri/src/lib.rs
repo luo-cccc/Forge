@@ -13,7 +13,7 @@ mod chapter_generation;
 mod llm_runtime;
 mod storage;
 mod tool_bridge;
-mod writer_agent;
+pub mod writer_agent;
 use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
     ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
@@ -26,6 +26,7 @@ mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
     pub const AGENT_ERROR: &str = "agent-error";
+    pub const AGENT_PROPOSAL: &str = "agent-proposal";
     pub const AGENT_SUGGESTION: &str = "agent-suggestion";
     pub const AGENT_STREAM_CHUNK: &str = "agent-stream-chunk";
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
@@ -209,6 +210,9 @@ fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, S
 #[tauri::command]
 fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<String, String> {
     let revision = storage::save_chapter_content_and_revision(&app, &title, &content)?;
+    if let Err(e) = observe_chapter_save(&app, &title, &content, &revision) {
+        tracing::warn!("WriterAgent chapter-save observation failed: {}", e);
+    }
 
     if let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() {
         if let Ok(bus) = bus_state.lock() {
@@ -229,6 +233,140 @@ fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result
     });
 
     Ok(revision)
+}
+
+fn observe_chapter_save(
+    app: &tauri::AppHandle,
+    title: &str,
+    content: &str,
+    revision: &str,
+) -> Result<(), String> {
+    let text = html_to_plain_text(content);
+    let paragraph = last_meaningful_paragraph(&text).unwrap_or_else(|| char_tail(&text, 400));
+    let cursor = text.chars().count();
+    let observation = writer_agent::observation::WriterObservation {
+        id: format!("save-{}", agent_runtime::now_ms()),
+        created_at: agent_runtime::now_ms(),
+        source: writer_agent::observation::ObservationSource::ChapterSave,
+        reason: writer_agent::observation::ObservationReason::Save,
+        project_id: "default".to_string(),
+        chapter_title: Some(title.to_string()),
+        chapter_revision: Some(revision.to_string()),
+        cursor: Some(writer_agent::observation::TextRange {
+            from: cursor,
+            to: cursor,
+        }),
+        selection: None,
+        prefix: char_tail(&text, 3_000),
+        suffix: String::new(),
+        paragraph,
+        full_text_digest: Some(storage::content_revision(&text)),
+        editor_dirty: false,
+    };
+
+    let state = app.state::<AppState>();
+    let proposals = {
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        refresh_kernel_canon_from_lorebook(app, &mut kernel);
+        kernel.observe(observation.clone())?
+    };
+    for proposal in proposals {
+        app.emit(events::AGENT_PROPOSAL, proposal)
+            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+    }
+
+    if resolve_api_key().is_some() {
+        spawn_llm_memory_proposals(app.clone(), observation);
+    }
+
+    Ok(())
+}
+
+fn last_meaningful_paragraph(text: &str) -> Option<String> {
+    text.split('\n')
+        .rev()
+        .map(str::trim)
+        .find(|line| line.chars().count() >= 8)
+        .map(ToString::to_string)
+}
+
+fn html_to_plain_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut entity = String::new();
+    let mut in_entity = false;
+
+    for ch in html.chars() {
+        if in_tag {
+            if ch == '>' {
+                in_tag = false;
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            continue;
+        }
+
+        if in_entity {
+            if ch == ';' {
+                out.push_str(&decode_html_entity(&entity));
+                entity.clear();
+                in_entity = false;
+            } else if entity.chars().count() < 12 {
+                entity.push(ch);
+            } else {
+                out.push('&');
+                out.push_str(&entity);
+                out.push(ch);
+                entity.clear();
+                in_entity = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '<' => in_tag = true,
+            '&' => in_entity = true,
+            '\r' => {}
+            _ => out.push(ch),
+        }
+    }
+
+    if in_entity {
+        out.push('&');
+        out.push_str(&entity);
+    }
+
+    out.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn decode_html_entity(entity: &str) -> String {
+    match entity {
+        "amp" => "&".to_string(),
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        "quot" => "\"".to_string(),
+        "apos" => "'".to_string(),
+        "nbsp" => " ".to_string(),
+        entity if entity.starts_with("#x") || entity.starts_with("#X") => {
+            u32::from_str_radix(&entity[2..], 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| format!("&{};", entity))
+        }
+        entity if entity.starts_with('#') => entity[1..]
+            .parse::<u32>()
+            .ok()
+            .and_then(char::from_u32)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| format!("&{};", entity)),
+        _ => format!("&{};", entity),
+    }
 }
 
 #[tauri::command]
@@ -313,18 +451,23 @@ struct EditorStatePayload {
     prefix: String,
     suffix: String,
     cursor_position: usize,
+    text_cursor_position: Option<usize>,
     paragraph: String,
     chapter_title: Option<String>,
+    chapter_revision: Option<String>,
+    editor_dirty: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct EditorGhostChunk {
     request_id: String,
+    proposal_id: Option<String>,
     cursor_position: usize,
     content: String,
     intent: Option<String>,
     candidates: Vec<EditorGhostCandidate>,
+    replace: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -341,6 +484,12 @@ struct EditorGhostEnd {
     request_id: String,
     cursor_position: usize,
     reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct EditorGhostRenderTarget {
+    request_id: String,
+    cursor_position: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -361,6 +510,15 @@ struct ParallelDraftPayload {
     paragraph: String,
     selected_text: String,
     chapter_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AskAgentContext {
+    chapter_title: Option<String>,
+    chapter_revision: Option<String>,
+    cursor_position: Option<usize>,
+    dirty: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -407,6 +565,129 @@ fn trim_ghost_completion(text: &str) -> String {
         .replace("<|fim_suffix|>", "");
     let trimmed = without_markers.trim_matches(|c: char| c == '`' || c.is_whitespace());
     trimmed.chars().take(180).collect::<String>()
+}
+
+fn clean_ghost_candidate_text(text: &str) -> String {
+    trim_ghost_completion(text)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn ghost_intent_label(proposal: &writer_agent::proposal::AgentProposal) -> Option<String> {
+    proposal
+        .rationale
+        .split("意图识别:")
+        .nth(1)
+        .and_then(|tail| tail.split_whitespace().next())
+        .map(|label| label.trim_matches(|c: char| c == '.' || c == ',' || c == '，'))
+        .filter(|label| !label.is_empty())
+        .map(str::to_string)
+}
+
+fn proposal_to_ghost_candidate(
+    proposal: &writer_agent::proposal::AgentProposal,
+    id: &str,
+    label: &str,
+) -> Option<EditorGhostCandidate> {
+    let text = clean_ghost_candidate_text(&proposal.preview);
+    if text.is_empty() {
+        return None;
+    }
+    Some(EditorGhostCandidate {
+        id: id.to_string(),
+        label: label.to_string(),
+        text,
+    })
+}
+
+fn ghost_candidates_from_proposal(
+    proposal: &writer_agent::proposal::AgentProposal,
+    default_id: &str,
+    default_label: &str,
+) -> Vec<EditorGhostCandidate> {
+    let mut candidates = proposal
+        .alternatives
+        .iter()
+        .filter_map(|alternative| {
+            let text = clean_ghost_candidate_text(&alternative.preview);
+            if text.is_empty() {
+                return None;
+            }
+            Some(EditorGhostCandidate {
+                id: alternative.id.clone(),
+                label: alternative.label.clone(),
+                text,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        if let Some(candidate) = proposal_to_ghost_candidate(proposal, default_id, default_label) {
+            candidates.push(candidate);
+        }
+    }
+
+    candidates
+}
+
+fn emit_editor_ghost_end(
+    app: &tauri::AppHandle,
+    target: &EditorGhostRenderTarget,
+    reason: &str,
+) -> Result<(), String> {
+    app.emit(
+        events::EDITOR_GHOST_END,
+        EditorGhostEnd {
+            request_id: target.request_id.clone(),
+            cursor_position: target.cursor_position,
+            reason: reason.to_string(),
+        },
+    )
+    .map_err(|e| format!("Failed to emit editor ghost end: {}", e))?;
+    clear_editor_prediction_for_output(app, Some(&target.request_id));
+    Ok(())
+}
+
+fn emit_writer_ghost_proposal(
+    app: &tauri::AppHandle,
+    target: &EditorGhostRenderTarget,
+    proposal: &writer_agent::proposal::AgentProposal,
+    replace: bool,
+    complete: bool,
+) -> Result<(), String> {
+    let candidates = ghost_candidates_from_proposal(
+        proposal,
+        if replace { "llm" } else { "a" },
+        if replace {
+            "AI 增强"
+        } else {
+            "A 内核接力"
+        },
+    );
+    let Some(first_candidate) = candidates.first() else {
+        return Ok(());
+    };
+    let content = first_candidate.text.clone();
+    app.emit(
+        events::EDITOR_GHOST_CHUNK,
+        EditorGhostChunk {
+            request_id: target.request_id.clone(),
+            proposal_id: Some(proposal.id.clone()),
+            cursor_position: target.cursor_position,
+            content,
+            intent: ghost_intent_label(proposal),
+            candidates,
+            replace,
+        },
+    )
+    .map_err(|e| format!("Failed to emit editor ghost: {}", e))?;
+    if complete {
+        emit_editor_ghost_end(app, target, "complete")?;
+    }
+    Ok(())
 }
 
 fn trim_parallel_draft(text: &str) -> String {
@@ -473,32 +754,6 @@ fn parse_parallel_drafts(raw: &str) -> Vec<ParallelDraft> {
     drafts
 }
 
-fn extract_keywords_for_ambient(paragraph: &str, app: &tauri::AppHandle) -> Vec<String> {
-    let mut keywords = Vec::new();
-
-    if let Ok(entries) = storage::load_lorebook(app) {
-        for entry in entries {
-            let keyword = entry.keyword.trim();
-            if !keyword.is_empty() && paragraph.contains(keyword) {
-                keywords.push(keyword.to_string());
-            }
-            if keywords.len() >= 8 {
-                break;
-            }
-        }
-    }
-
-    if keywords.is_empty() {
-        keywords.extend(
-            agent_harness_core::extract_keywords(paragraph)
-                .into_iter()
-                .take(4),
-        );
-    }
-
-    keywords
-}
-
 fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::AgentOutput) {
     match output {
         agent_harness_core::AgentOutput::GhostText {
@@ -516,10 +771,12 @@ fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::Agent
                 events::EDITOR_GHOST_CHUNK,
                 EditorGhostChunk {
                     request_id: request_id_value.clone(),
+                    proposal_id: None,
                     cursor_position: position,
                     content,
                     intent: None,
                     candidates: Vec::new(),
+                    replace: false,
                 },
             );
             let _ = app.emit(
@@ -560,10 +817,12 @@ fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::Agent
                 events::EDITOR_GHOST_CHUNK,
                 EditorGhostChunk {
                     request_id: request_id_value.clone(),
+                    proposal_id: None,
                     cursor_position: position,
                     content,
                     intent: Some(intent),
                     candidates,
+                    replace: false,
                 },
             );
             let _ = app.emit(
@@ -760,6 +1019,10 @@ fn find_semantic_lint(
         .filter(|title| !title.trim().is_empty())
         .unwrap_or("当前章节");
 
+    if let Some(lint) = find_writer_agent_diagnostic_lint(app, payload, chapter_label) {
+        return Some(lint);
+    }
+
     let lore_entries = storage::load_lorebook(app).unwrap_or_default();
     for entry in lore_entries {
         if let Some((from, to, message)) =
@@ -799,6 +1062,37 @@ fn find_semantic_lint(
     }
 
     None
+}
+
+fn find_writer_agent_diagnostic_lint(
+    app: &tauri::AppHandle,
+    payload: &SemanticLintPayload,
+    chapter_label: &str,
+) -> Option<EditorSemanticLint> {
+    let state = app.state::<AppState>();
+    let kernel = state.writer_kernel.lock().ok()?;
+    let diagnostics = kernel.diagnose_paragraph(
+        &payload.paragraph,
+        payload.paragraph_from,
+        payload.chapter_title.as_deref().unwrap_or("Chapter-1"),
+    );
+    drop(kernel);
+
+    let diagnostic = diagnostics.into_iter().next()?;
+    let severity = match diagnostic.severity {
+        writer_agent::diagnostics::DiagnosticSeverity::Error => "error",
+        writer_agent::diagnostics::DiagnosticSeverity::Warning => "warning",
+        writer_agent::diagnostics::DiagnosticSeverity::Info => "info",
+    };
+
+    Some(EditorSemanticLint {
+        request_id: payload.request_id.clone(),
+        cursor_position: payload.cursor_position,
+        from: diagnostic.from,
+        to: diagnostic.to.max(diagnostic.from + 1),
+        message: format!("{}：{}", chapter_label, diagnostic.message),
+        severity: severity.to_string(),
+    })
 }
 
 fn abort_editor_prediction_task(
@@ -872,13 +1166,13 @@ async fn report_editor_state(
         return Ok(());
     }
 
-    let Some(api_key) = resolve_api_key() else {
-        return Ok(());
-    };
-
     let request_id = payload.request_id.clone();
     let cursor_position = payload.cursor_position;
     let cancel = CancellationToken::new();
+    let render_target = EditorGhostRenderTarget {
+        request_id: request_id.clone(),
+        cursor_position,
+    };
 
     {
         let state = app.state::<AppState>();
@@ -890,50 +1184,49 @@ async fn report_editor_state(
         });
     }
 
-    let chapter = payload
-        .chapter_title
-        .clone()
-        .unwrap_or_else(|| "current chapter".to_string());
-    let paragraph = if payload.paragraph.trim().is_empty() {
-        paragraph_hint(&payload.prefix)
-    } else {
-        payload.paragraph.clone()
+    let observation = build_writer_observation_from_editor_state(&payload);
+    let (proposals, context_pack_for_llm) = {
+        let state = app.state::<AppState>();
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        refresh_kernel_canon_from_lorebook(&app, &mut kernel);
+        let proposals = kernel.observe(observation.clone())?;
+        let context_pack = if proposals
+            .iter()
+            .any(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost)
+            && resolve_api_key().is_some()
+        {
+            Some(kernel.ghost_context_pack(&observation))
+        } else {
+            None
+        };
+        (proposals, context_pack)
     };
 
-    let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() else {
-        return Ok(());
-    };
-
-    let cache = app
-        .state::<std::sync::Arc<tokio::sync::Mutex<ambient_agents::context_fetcher::ContextCache>>>(
-        )
-        .inner()
-        .clone();
-    let keywords = extract_keywords_for_ambient(&paragraph, &app);
-    if let Ok(mut bus) = bus_state.lock() {
-        bus.abort_agent("co-writer");
-        bus.spawn_agent(std::sync::Arc::new(
-            ambient_agents::co_writer::CoWriterAgent { cache },
-        ));
-        if !keywords.is_empty() {
-            let _ = bus.publish(EditorEvent::KeywordDetected {
-                keywords,
-                chapter: chapter.clone(),
-                paragraph: paragraph.clone(),
-            });
-        }
-        let _ = bus.publish(EditorEvent::IdleTick {
-            request_id: Some(request_id),
-            idle_ms: 500,
-            chapter,
-            paragraph,
-            prefix: payload.prefix,
-            suffix: payload.suffix,
-            cursor_position,
-        });
+    for proposal in &proposals {
+        app.emit(events::AGENT_PROPOSAL, proposal.clone())
+            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
     }
 
-    drop(api_key);
+    if let Some(proposal) = proposals
+        .iter()
+        .find(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost)
+    {
+        emit_writer_ghost_proposal(
+            &app,
+            &render_target,
+            proposal,
+            false,
+            context_pack_for_llm.is_none(),
+        )?;
+    } else {
+        emit_editor_ghost_end(&app, &render_target, "complete")?;
+    }
+
+    if let Some(context_pack) = context_pack_for_llm {
+        spawn_llm_ghost_proposal(app.clone(), observation, context_pack, Some(render_target));
+        return Ok(());
+    }
+
     drop(cancel);
 
     Ok(())
@@ -1584,24 +1877,643 @@ fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, 
 }
 
 #[tauri::command]
-fn get_writer_agent_status(state: tauri::State<'_, AppState>) -> Result<writer_agent::WriterAgentStatus, String> {
+fn get_writer_agent_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<writer_agent::WriterAgentStatus, String> {
     let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     Ok(kernel.status())
 }
 
 #[tauri::command]
+fn get_writer_agent_ledger(
+    state: tauri::State<'_, AppState>,
+) -> Result<writer_agent::kernel::WriterAgentLedgerSnapshot, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.ledger_snapshot())
+}
+
+#[tauri::command]
+fn get_writer_agent_pending_proposals(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<writer_agent::proposal::AgentProposal>, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.pending_proposals())
+}
+
+#[tauri::command]
+fn get_story_review_queue(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<writer_agent::kernel::StoryReviewQueueEntry>, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.story_review_queue())
+}
+
+#[tauri::command]
+fn get_writer_agent_trace(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<writer_agent::kernel::WriterAgentTraceSnapshot, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.trace_snapshot(limit.unwrap_or(20).min(100)))
+}
+
+#[tauri::command]
+fn apply_proposal_feedback(
+    state: tauri::State<'_, AppState>,
+    feedback: writer_agent::ProposalFeedback,
+) -> Result<writer_agent::WriterAgentStatus, String> {
+    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    kernel.apply_feedback(feedback)?;
+    Ok(kernel.status())
+}
+
+#[tauri::command]
+fn record_implicit_ghost_rejection(
+    state: tauri::State<'_, AppState>,
+    proposal_id: String,
+    created_at: u64,
+) -> Result<bool, String> {
+    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    kernel.record_implicit_ghost_rejection(&proposal_id, created_at)
+}
+
+#[tauri::command]
+fn approve_writer_operation(
+    state: tauri::State<'_, AppState>,
+    operation: writer_agent::operation::WriterOperation,
+    current_revision: String,
+) -> Result<writer_agent::operation::OperationResult, String> {
+    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    kernel.approve_editor_operation(operation, &current_revision)
+}
+
+fn to_writer_observation(
+    observation: &AgentObservation,
+) -> writer_agent::observation::WriterObservation {
+    let reason = match observation.reason {
+        agent_runtime::AgentObservationReason::UserTyped => {
+            if observation.idle_ms >= 900 {
+                writer_agent::observation::ObservationReason::Idle
+            } else {
+                writer_agent::observation::ObservationReason::Typed
+            }
+        }
+        agent_runtime::AgentObservationReason::SelectionChange => {
+            writer_agent::observation::ObservationReason::Selection
+        }
+        agent_runtime::AgentObservationReason::ChapterSwitch => {
+            writer_agent::observation::ObservationReason::ChapterSwitch
+        }
+        agent_runtime::AgentObservationReason::IdleTick => {
+            writer_agent::observation::ObservationReason::Idle
+        }
+    };
+
+    writer_agent::observation::WriterObservation {
+        id: observation.id.clone(),
+        created_at: observation.created_at,
+        source: writer_agent::observation::ObservationSource::Editor,
+        reason,
+        project_id: "default".to_string(),
+        chapter_title: observation.chapter_title.clone(),
+        chapter_revision: observation.chapter_revision.clone(),
+        cursor: Some(writer_agent::observation::TextRange {
+            from: observation.cursor_position,
+            to: observation.cursor_position,
+        }),
+        selection: observation.selection.as_ref().map(|selection| {
+            writer_agent::observation::TextSelection {
+                from: selection.from,
+                to: selection.to,
+                text: selection.text.clone(),
+            }
+        }),
+        prefix: observation.nearby_text.clone(),
+        suffix: String::new(),
+        paragraph: observation.current_paragraph.clone(),
+        full_text_digest: None,
+        editor_dirty: observation.dirty,
+    }
+}
+
+fn refresh_kernel_canon_from_lorebook(
+    app: &tauri::AppHandle,
+    kernel: &mut writer_agent::WriterAgentKernel,
+) {
+    let Ok(entries) = storage::load_lorebook(app) else {
+        return;
+    };
+
+    for entry in entries {
+        let keyword = entry.keyword.trim();
+        if keyword.is_empty() {
+            continue;
+        }
+
+        let mut attributes = serde_json::Map::new();
+        if let Some(weapon) = extract_weapon_from_lore(&entry.content) {
+            attributes.insert("weapon".to_string(), serde_json::Value::String(weapon));
+        }
+
+        if attributes.is_empty() {
+            continue;
+        }
+
+        let summary: String = entry.content.chars().take(240).collect();
+        let aliases = Vec::<String>::new();
+        let _ = kernel.memory.upsert_canon_entity(
+            "character",
+            keyword,
+            &aliases,
+            &summary,
+            &serde_json::Value::Object(attributes),
+            0.8,
+        );
+    }
+}
+
+fn extract_weapon_from_lore(content: &str) -> Option<String> {
+    if !["武器", "惯用", "用刀", "用剑", "佩刀", "佩剑", "兵器"]
+        .iter()
+        .any(|cue| content.contains(cue))
+    {
+        return None;
+    }
+
+    [
+        "寒影刀",
+        "长剑",
+        "短剑",
+        "匕首",
+        "弓",
+        "枪",
+        "棍",
+        "鞭",
+        "斧",
+        "刀",
+        "剑",
+    ]
+    .iter()
+    .find(|weapon| content.contains(**weapon))
+    .map(|weapon| (*weapon).to_string())
+}
+
+fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) -> String {
+    pack.sources
+        .iter()
+        .map(|source| {
+            format!(
+                "## {:?} (priority {}, {} chars{})\n{}",
+                source.source,
+                source.priority,
+                source.char_count,
+                if source.truncated { ", truncated" } else { "" },
+                source.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn build_writer_observation_from_editor_state(
+    payload: &EditorStatePayload,
+) -> writer_agent::observation::WriterObservation {
+    let cursor = payload
+        .text_cursor_position
+        .unwrap_or_else(|| payload.prefix.chars().count());
+    let paragraph = if payload.paragraph.trim().is_empty() {
+        paragraph_hint(&payload.prefix)
+    } else {
+        payload.paragraph.clone()
+    };
+
+    writer_agent::observation::WriterObservation {
+        id: format!("fim-{}", payload.request_id),
+        created_at: agent_runtime::now_ms(),
+        source: writer_agent::observation::ObservationSource::Editor,
+        reason: writer_agent::observation::ObservationReason::Idle,
+        project_id: "default".to_string(),
+        chapter_title: payload.chapter_title.clone(),
+        chapter_revision: payload.chapter_revision.clone(),
+        cursor: Some(writer_agent::observation::TextRange {
+            from: cursor,
+            to: cursor,
+        }),
+        selection: None,
+        prefix: payload.prefix.clone(),
+        suffix: payload.suffix.clone(),
+        paragraph,
+        full_text_digest: Some(storage::content_revision(&format!(
+            "{}{}",
+            payload.prefix, payload.suffix
+        ))),
+        editor_dirty: payload.editor_dirty.unwrap_or(true),
+    }
+}
+
+#[cfg(test)]
+fn test_editor_state_payload(
+    prefix: &str,
+    suffix: &str,
+    paragraph: &str,
+    cursor_position: usize,
+    text_cursor_position: Option<usize>,
+) -> EditorStatePayload {
+    EditorStatePayload {
+        request_id: "test-request".to_string(),
+        prefix: prefix.to_string(),
+        suffix: suffix.to_string(),
+        cursor_position,
+        text_cursor_position,
+        paragraph: paragraph.to_string(),
+        chapter_title: Some("Chapter-1".to_string()),
+        chapter_revision: Some("rev-1".to_string()),
+        editor_dirty: Some(true),
+    }
+}
+
+fn writer_agent_ghost_messages(
+    observation: &writer_agent::observation::WriterObservation,
+    pack: &writer_agent::context::WritingContextPack,
+) -> Vec<serde_json::Value> {
+    let context = render_writer_context_pack(pack);
+    vec![
+        serde_json::json!({
+            "role": "system",
+            "content": "你是一个中文长篇小说写作 Agent，不是聊天助手。你只负责在光标处提供可直接插入正文的一小段续写。必须尊重已给出的设定、伏笔、风格偏好和光标后文。不要解释，不要 Markdown，不要重复光标前文。输出 1-2 句中文正文。"
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!(
+                "章节: {}\n光标位置: {}\n当前段落:\n{}\n\nContextPack:\n{}\n\n请输出光标处续写正文:",
+                observation.chapter_title.as_deref().unwrap_or("current chapter"),
+                observation.cursor.as_ref().map(|c| c.to).unwrap_or(0),
+                observation.paragraph,
+                context
+            )
+        }),
+    ]
+}
+
+fn source_refs_from_context_pack(pack: &writer_agent::context::WritingContextPack) -> Vec<String> {
+    pack.sources
+        .iter()
+        .map(|source| format!("{:?}", source.source))
+        .collect()
+}
+
+fn render_writer_ledger_snapshot(
+    snapshot: &writer_agent::kernel::WriterAgentLedgerSnapshot,
+) -> String {
+    let canon = snapshot
+        .canon_entities
+        .iter()
+        .take(8)
+        .map(|entity| {
+            format!(
+                "- {} [{}]: {} {}",
+                entity.name, entity.kind, entity.summary, entity.attributes
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let promises = snapshot
+        .open_promises
+        .iter()
+        .take(8)
+        .map(|promise| {
+            format!(
+                "- {} [{}]: {} -> {}",
+                promise.title, promise.kind, promise.description, promise.expected_payoff
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let decisions = snapshot
+        .recent_decisions
+        .iter()
+        .take(8)
+        .map(|decision| {
+            format!(
+                "- {} / {}: {} ({})",
+                decision.scope, decision.title, decision.decision, decision.rationale
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    [
+        ("Canon entities", canon),
+        ("Open promises", promises),
+        ("Recent creative decisions", decisions),
+    ]
+    .into_iter()
+    .filter_map(|(label, content)| {
+        if content.trim().is_empty() {
+            None
+        } else {
+            Some(format!("## {}\n{}", label, content))
+        }
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n")
+}
+
+fn char_tail(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars().rev().take(max_chars).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+fn split_context_for_cursor(
+    context: &str,
+    cursor_position: usize,
+    prefix_chars: usize,
+    suffix_chars: usize,
+) -> (String, String) {
+    let cursor_position = cursor_position.min(context.chars().count());
+    let prefix: String = context.chars().take(cursor_position).collect();
+    let suffix: String = context
+        .chars()
+        .skip(cursor_position)
+        .take(suffix_chars)
+        .collect();
+    (char_tail(&prefix, prefix_chars), suffix)
+}
+
+fn selected_text_range(
+    context: &str,
+    selected_text: &str,
+) -> Option<writer_agent::observation::TextSelection> {
+    let selected = selected_text.trim();
+    if selected.is_empty() {
+        return None;
+    }
+    let (from, to) = find_char_range(context, selected).unwrap_or((0, selected.chars().count()));
+    Some(writer_agent::observation::TextSelection {
+        from,
+        to,
+        text: selected.to_string(),
+    })
+}
+
+fn build_manual_writer_observation(
+    message: &str,
+    context: &str,
+    paragraph: &str,
+    selected_text: &str,
+    payload: Option<&AskAgentContext>,
+) -> writer_agent::observation::WriterObservation {
+    let cursor_position = payload
+        .and_then(|payload| payload.cursor_position)
+        .unwrap_or_else(|| context.chars().count());
+    let chapter_title = payload
+        .and_then(|payload| payload.chapter_title.clone())
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| Some("manual".to_string()));
+    let chapter_revision = payload
+        .and_then(|payload| payload.chapter_revision.clone())
+        .filter(|revision| !revision.trim().is_empty())
+        .or_else(|| Some(storage::content_revision(context)));
+    let paragraph = if paragraph.trim().is_empty() {
+        if selected_text.trim().is_empty() {
+            message.to_string()
+        } else {
+            selected_text.to_string()
+        }
+    } else {
+        paragraph.to_string()
+    };
+    let (prefix, suffix) = split_context_for_cursor(context, cursor_position, 3_000, 1_000);
+
+    writer_agent::observation::WriterObservation {
+        id: format!("manual-{}", agent_runtime::now_ms()),
+        created_at: agent_runtime::now_ms(),
+        source: writer_agent::observation::ObservationSource::ManualRequest,
+        reason: writer_agent::observation::ObservationReason::Explicit,
+        project_id: "default".to_string(),
+        chapter_title,
+        chapter_revision,
+        cursor: Some(writer_agent::observation::TextRange {
+            from: cursor_position,
+            to: cursor_position,
+        }),
+        selection: selected_text_range(context, selected_text),
+        prefix,
+        suffix,
+        paragraph,
+        full_text_digest: Some(storage::content_revision(context)),
+        editor_dirty: payload.and_then(|payload| payload.dirty).unwrap_or(false),
+    }
+}
+
+fn render_manual_agent_system_prompt(
+    memory_context: &str,
+    writer_context: &str,
+    ledger_context: &str,
+    truncated_context: &str,
+    paragraph: &str,
+    selected_text: &str,
+) -> String {
+    format!(
+        "你是 Forge 的中文长篇小说写作 Agent，是作家的第二大脑和并肩创作伙伴，不是普通聊天助手，也不是只会补全文字的写作工具。\n\
+你的任务是理解作者当前意图，结合项目长期记忆、设定、伏笔、风格偏好和当前稿件，给出可执行、可直接用于创作推进的回答。\n\
+如果信息不足，先说明缺口；如果涉及人物、设定、时间线或伏笔，必须优先尊重 WriterAgent ContextPack 与 Ledger，不要随意发明冲突设定。\n\
+回答要具体、短而有用；需要写正文时直接给可用正文，需要分析时给明确判断和下一步。\n\n\
+{}\n\n\
+# WriterAgent ContextPack\n{}\n\n\
+# WriterAgent Ledgers\n{}\n\n\
+# Current draft tail\n\
+\"\"\"\n{}\n\"\"\"\n\n\
+# Focused paragraph\n\
+\"\"\"\n{}\n\"\"\"\n\n\
+# Selected text\n\
+\"\"\"\n{}\n\"\"\"\n\n\
+可使用工具检索 lorebook、outline 和章节资料；在虚构新信息前先查设定。",
+        memory_context,
+        writer_context,
+        ledger_context,
+        truncated_context,
+        paragraph,
+        selected_text
+    )
+}
+
+fn writer_agent_memory_messages(
+    observation: &writer_agent::observation::WriterObservation,
+) -> Vec<serde_json::Value> {
+    let text = observation.prefix.trim();
+    vec![
+        serde_json::json!({
+            "role": "system",
+            "content": "你是中文长篇小说项目的记忆抽取器。只从用户已经写出的正文中抽取值得长期保存的设定 canon 和未回收伏笔 promises。不要发明正文没有的信息。输出严格 JSON，不要 Markdown。JSON schema: {\"canon\":[{\"kind\":\"character|object|place|rule|entity\",\"name\":\"\",\"aliases\":[],\"summary\":\"\",\"attributes\":{},\"confidence\":0.0}],\"promises\":[{\"kind\":\"open_question|object_in_motion|foreshadowing|mystery\",\"title\":\"\",\"description\":\"\",\"introducedChapter\":\"\",\"expectedPayoff\":\"\",\"priority\":0,\"confidence\":0.0}]}。只返回置信度 >=0.55 的条目，最多 canon 5 条、promises 5 条。"
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!(
+                "章节: {}\n当前段落:\n{}\n\n章节文本摘录:\n{}",
+                observation.chapter_title.as_deref().unwrap_or("current chapter"),
+                observation.paragraph,
+                truncate_context(text, 3_500)
+            )
+        }),
+    ]
+}
+
+fn spawn_llm_memory_proposals(
+    app: tauri::AppHandle,
+    observation: writer_agent::observation::WriterObservation,
+) {
+    let Some(api_key) = resolve_api_key() else {
+        return;
+    };
+    let settings = llm_runtime::settings(api_key);
+    let model = settings.model.clone();
+    let messages = writer_agent_memory_messages(&observation);
+
+    tokio::spawn(async move {
+        let value = match llm_runtime::chat_json(&settings, messages, 20).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("Writer Agent LLM memory extraction failed: {}", e);
+                return;
+            }
+        };
+
+        let state = app.state::<AppState>();
+        let proposals = {
+            let mut kernel = match state.writer_kernel.lock() {
+                Ok(kernel) => kernel,
+                Err(e) => {
+                    tracing::error!("Writer kernel lock poisoned: {}", e);
+                    return;
+                }
+            };
+            kernel.create_llm_memory_proposals(observation, value, &model)
+        };
+
+        for proposal in proposals {
+            let _ = app.emit(events::AGENT_PROPOSAL, proposal);
+        }
+    });
+}
+
+fn spawn_llm_ghost_proposal(
+    app: tauri::AppHandle,
+    observation: writer_agent::observation::WriterObservation,
+    context_pack: writer_agent::context::WritingContextPack,
+    render_target: Option<EditorGhostRenderTarget>,
+) {
+    let Some(api_key) = resolve_api_key() else {
+        return;
+    };
+    let settings = llm_runtime::settings(api_key);
+    let model = settings.model.clone();
+    let messages = writer_agent_ghost_messages(&observation, &context_pack);
+
+    tokio::spawn(async move {
+        let target_for_error = render_target.clone();
+        let text = match llm_runtime::chat_text(&settings, messages, false, 12).await {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!("Writer Agent LLM ghost proposal failed: {}", e);
+                if let Some(target) = target_for_error {
+                    let _ = emit_editor_ghost_end(&app, &target, "complete");
+                }
+                return;
+            }
+        };
+
+        if text.trim().is_empty() {
+            if let Some(target) = target_for_error {
+                let _ = emit_editor_ghost_end(&app, &target, "complete");
+            }
+            return;
+        }
+
+        let state = app.state::<AppState>();
+        let proposal = {
+            let mut kernel = match state.writer_kernel.lock() {
+                Ok(kernel) => kernel,
+                Err(e) => {
+                    tracing::error!("Writer kernel lock poisoned: {}", e);
+                    return;
+                }
+            };
+            match kernel.create_llm_ghost_proposal(observation, text, &model) {
+                Ok(proposal) => proposal,
+                Err(e) => {
+                    tracing::warn!("Writer Agent rejected LLM proposal: {}", e);
+                    if let Some(target) = target_for_error {
+                        let _ = emit_editor_ghost_end(&app, &target, "complete");
+                    }
+                    return;
+                }
+            }
+        };
+
+        let _ = app.emit(events::AGENT_PROPOSAL, proposal.clone());
+        if let Some(target) = render_target {
+            let _ = emit_writer_ghost_proposal(&app, &target, &proposal, true, true);
+        }
+    });
+}
+
+#[tauri::command]
 fn agent_observe(
     app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
     observation: AgentObservation,
 ) -> Result<AgentObserveResult, String> {
     let request_id = format!("agent-{}", agent_runtime::now_ms());
     let now = agent_runtime::now_ms();
     let decision = agent_runtime::attention_policy(&observation, now);
+    let observation_id = observation.id.clone();
+
+    let mut emitted_proposal_id = None;
+    if matches!(observation.mode, agent_runtime::AgentMode::Proactive) {
+        let writer_observation = to_writer_observation(&observation);
+        let writer_observation_for_llm = writer_observation.clone();
+        let proposals = {
+            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            refresh_kernel_canon_from_lorebook(&app, &mut kernel);
+            kernel.observe(writer_observation)?
+        };
+        let should_spawn_llm = proposals
+            .iter()
+            .any(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost);
+        let context_pack_for_llm = if should_spawn_llm && resolve_api_key().is_some() {
+            let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            Some(kernel.ghost_context_pack(&writer_observation_for_llm))
+        } else {
+            None
+        };
+
+        for proposal in proposals {
+            emitted_proposal_id.get_or_insert_with(|| proposal.id.clone());
+            app.emit(events::AGENT_PROPOSAL, proposal)
+                .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+        }
+
+        if let Some(context_pack) = context_pack_for_llm {
+            spawn_llm_ghost_proposal(app.clone(), writer_observation_for_llm, context_pack, None);
+        }
+    }
+
+    if emitted_proposal_id.is_some() {
+        return Ok(AgentObserveResult {
+            request_id,
+            observation_id,
+            decision: "writer_proposal".to_string(),
+            reason: decision.reason,
+            suggestion_id: emitted_proposal_id,
+        });
+    }
 
     if !decision.should_suggest {
         return Ok(AgentObserveResult {
             request_id,
-            observation_id: observation.id,
+            observation_id,
             decision: "noop".to_string(),
             reason: decision.reason,
             suggestion_id: None,
@@ -1655,7 +2567,7 @@ fn agent_observe(
 
     Ok(AgentObserveResult {
         request_id,
-        observation_id: observation.id,
+        observation_id,
         decision: "suggestion".to_string(),
         reason: decision.reason,
         suggestion_id: Some(suggestion_id),
@@ -1700,6 +2612,7 @@ async fn ask_agent(
     context: String,
     paragraph: String,
     selected_text: String,
+    context_payload: Option<AskAgentContext>,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
     let api_base =
@@ -1709,6 +2622,37 @@ async fn ask_agent(
 
     let state = app.state::<AppState>();
     let truncated_context = truncate_context(&context, 2000);
+    let manual_observation = build_manual_writer_observation(
+        &message,
+        &context,
+        &paragraph,
+        &selected_text,
+        context_payload.as_ref(),
+    );
+    let (writer_context_pack, writer_context, ledger_context, source_refs) = {
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        refresh_kernel_canon_from_lorebook(&app, &mut kernel);
+        let proposals = kernel.observe(manual_observation.clone())?;
+        for proposal in proposals {
+            app.emit(events::AGENT_PROPOSAL, proposal)
+                .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+        }
+
+        let writer_context_pack = kernel.context_pack_for(
+            writer_agent::context::AgentTask::ManualRequest,
+            &manual_observation,
+            4_500,
+        );
+        let writer_context = render_writer_context_pack(&writer_context_pack);
+        let ledger_context = render_writer_ledger_snapshot(&kernel.ledger_snapshot());
+        let source_refs = source_refs_from_context_pack(&writer_context_pack);
+        (
+            writer_context_pack,
+            writer_context,
+            ledger_context,
+            source_refs,
+        )
+    };
 
     // Check lore / outline availability for intent routing
     let has_lore = storage::load_lorebook(&app)
@@ -1721,21 +2665,19 @@ async fn ask_agent(
     // Build context injection from learned memory
     let memory_context = build_context_injection(&app, &message);
 
-    let system_prompt = format!(
-        "You are a creative writing assistant helping the user write a novel.\n\
-{}\n\
-Current draft (last ~2000 chars):\n\
-\"\"\"\n{}\n\"\"\"\n\
-\n\
-Current paragraph the user is focused on:\n\
-\"\"\"\n{}\n\"\"\"\n\
-\n\
-Selected text:\n\
-\"\"\"\n{}\n\"\"\"\n\
-\n\
-Use the available tools to retrieve information about characters, settings, \
-and lore before inventing new details. Search the lorebook for named entities.",
-        memory_context, truncated_context, paragraph, selected_text
+    let system_prompt = render_manual_agent_system_prompt(
+        &memory_context,
+        &writer_context,
+        &ledger_context,
+        truncated_context,
+        &paragraph,
+        &selected_text,
+    );
+    tracing::debug!(
+        "Manual WriterAgent context: {} sources, {}/{} chars",
+        writer_context_pack.sources.len(),
+        writer_context_pack.total_chars,
+        writer_context_pack.budget_limit
     );
 
     // Build provider
@@ -1809,6 +2751,15 @@ and lore before inventing new details. Search the lorebook for named entities.",
                 let db = lock_hermes(&state)?;
                 let _ = db.log_interaction("assistant", &final_text);
             }
+            {
+                let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+                kernel.record_manual_exchange(
+                    &manual_observation,
+                    &message,
+                    &final_text,
+                    &source_refs,
+                );
+            }
 
             // Background skill extraction
             let app_clone = app.clone();
@@ -1859,7 +2810,9 @@ pub fn run() {
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join("writer_memory.db");
         let writer_memory = writer_agent::memory::WriterMemory::open(&writer_memory_path)
-            .unwrap_or_else(|_| writer_agent::memory::WriterMemory::open(std::path::Path::new(":memory:")).unwrap());
+            .unwrap_or_else(|_| {
+                writer_agent::memory::WriterMemory::open(std::path::Path::new(":memory:")).unwrap()
+            });
         writer_agent::WriterAgentKernel::new("default", writer_memory)
     };
 
@@ -1870,16 +2823,17 @@ pub fn run() {
         .setup(move |app| {
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
             let ah = app.handle().clone();
+            let output_app = ah.clone();
+            event_bus.set_output_handler(std::sync::Arc::new(move |output| {
+                emit_ambient_output(&output_app, output);
+            }));
 
-            event_bus.spawn(
-                std::sync::Arc::new(
-                    ambient_agents::context_fetcher::ContextFetcherAgent {
-                        app: ah.clone(),
-                        cache: cache1,
-                    },
-                ),
-                std::sync::Arc::new(|_| {}),
-            );
+            event_bus.spawn_agent(std::sync::Arc::new(
+                ambient_agents::context_fetcher::ContextFetcherAgent {
+                    app: ah.clone(),
+                    cache: cache1,
+                },
+            ));
 
             app.manage(Mutex::new(event_bus));
             Ok(())
@@ -1901,6 +2855,13 @@ pub fn run() {
             get_agent_domain_profile,
             get_agent_kernel_status,
             get_writer_agent_status,
+            get_writer_agent_ledger,
+            get_writer_agent_pending_proposals,
+            get_story_review_queue,
+            get_writer_agent_trace,
+            apply_proposal_feedback,
+            record_implicit_ghost_rejection,
+            approve_writer_operation,
             get_agent_tools,
             get_lorebook,
             save_lore_entry,
@@ -1958,5 +2919,80 @@ mod tests {
             trim_parallel_draft("```\n林墨停下脚步。\n```"),
             "林墨停下脚步。"
         );
+    }
+
+    #[test]
+    fn manual_observation_uses_char_cursor_and_selection_range() {
+        let context = "林墨拔出寒影刀。\n张三后退一步。";
+        let observation =
+            build_manual_writer_observation("这段有冲突吗", context, "", "寒影刀", None);
+
+        assert_eq!(
+            observation.source,
+            writer_agent::observation::ObservationSource::ManualRequest
+        );
+        assert_eq!(
+            observation.reason,
+            writer_agent::observation::ObservationReason::Explicit
+        );
+        assert_eq!(
+            observation.cursor.unwrap().to,
+            context.chars().count(),
+            "cursor must use character index, not UTF-8 bytes"
+        );
+        let selection = observation.selection.unwrap();
+        assert_eq!(selection.from, 4);
+        assert_eq!(selection.to, 7);
+        assert_eq!(selection.text, "寒影刀");
+        assert_eq!(observation.paragraph, "寒影刀");
+    }
+
+    #[test]
+    fn split_context_for_cursor_keeps_suffix_after_cursor() {
+        let (prefix, suffix) = split_context_for_cursor("甲乙丙丁戊", 3, 2, 2);
+        assert_eq!(prefix, "乙丙");
+        assert_eq!(suffix, "丁戊");
+    }
+
+    #[test]
+    fn html_to_plain_text_keeps_editor_text_without_tags() {
+        let text = html_to_plain_text(
+            "<p>林墨&nbsp;拔出寒影刀。</p><p>张三说：&quot;别动&quot;&amp;后退。</p>",
+        );
+
+        assert_eq!(text, "林墨 拔出寒影刀。\n张三说：\"别动\"&后退。");
+    }
+
+    #[test]
+    fn last_meaningful_paragraph_ignores_short_trailing_lines() {
+        let paragraph = last_meaningful_paragraph("第一段很长。\n短\n最后一段足够长。").unwrap();
+        assert_eq!(paragraph, "最后一段足够长。");
+    }
+
+    #[test]
+    fn editor_state_observation_uses_text_cursor_for_kernel() {
+        let payload = test_editor_state_payload("林墨拔出", "寒影刀", "林墨拔出", 99, Some(4));
+        let observation = build_writer_observation_from_editor_state(&payload);
+
+        assert_eq!(
+            observation.cursor.unwrap().to,
+            4,
+            "WriterAgent coordinates must be plain-text character indexes"
+        );
+        assert_eq!(observation.prefix, "林墨拔出");
+        assert_eq!(observation.suffix, "寒影刀");
+        assert_eq!(
+            observation.reason,
+            writer_agent::observation::ObservationReason::Idle
+        );
+    }
+
+    #[test]
+    fn editor_state_observation_falls_back_to_prefix_char_count() {
+        let payload = test_editor_state_payload("林墨拔出", "", "", 99, None);
+        let observation = build_writer_observation_from_editor_state(&payload);
+
+        assert_eq!(observation.cursor.unwrap().to, "林墨拔出".chars().count());
+        assert!(observation.paragraph.contains("Current paragraph"));
     }
 }

@@ -65,14 +65,16 @@ pub struct TextSelection {
 
 impl WriterObservation {
     pub fn has_selection(&self) -> bool {
-        self.selection.as_ref().map(|s| s.from < s.to).unwrap_or(false)
+        self.selection
+            .as_ref()
+            .map(|s| s.from < s.to)
+            .unwrap_or(false)
     }
 
     pub fn selected_text(&self) -> &str {
-        self.selection.as_ref().map(|s| s.text.as_str()).unwrap_or("")
-    }
-
-    pub fn cursor_position(&self) -> usize {
-        self.cursor.as_ref().map(|c| c.to).unwrap_or(0)
+        self.selection
+            .as_ref()
+            .map(|s| s.text.as_str())
+            .unwrap_or("")
     }
 }

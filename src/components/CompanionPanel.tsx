@@ -2,55 +2,321 @@ import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import type { WriterAgentStatus, AgentProposal, ProposalFeedback } from "../protocol";
+import { Commands, Events } from "../protocol";
+import type {
+  WriterAgentStatus,
+  WriterAgentLedgerSnapshot,
+  AgentProposal,
+  OperationResult,
+  ProposalFeedback,
+  StoryMode,
+  StoryReviewQueueEntry,
+  WriterOperation,
+} from "../protocol";
 
-export const CompanionPanel: React.FC = () => {
+interface CompanionPanelProps {
+  mode: StoryMode;
+  onApplyOperation?: (operation: WriterOperation) => boolean;
+}
+
+function proposalSlotKey(proposal: AgentProposal): string {
+  const target = proposal.target ? `${proposal.target.from}:${proposal.target.to}` : "none";
+  if (proposal.kind === "ghost") {
+    return `${proposal.observationId}|${proposal.kind}|${target}`;
+  }
+
+  const memorySlot = memoryOperationSlot(primaryOperation(proposal));
+  if (memorySlot) return memorySlot;
+
+  const evidence = proposal.evidence[0];
+  const evidenceKey = evidence ? `${evidence.source}:${evidence.reference}` : "";
+  const previewKey = proposal.preview.replace(/\s+/g, " ").slice(0, 80);
+  return `${proposal.observationId}|${proposal.kind}|${target}|${evidenceKey}|${previewKey}`;
+}
+
+function memoryOperationSlot(operation: WriterOperation | undefined): string | null {
+  if (operation?.kind === "canon.upsert_entity") {
+    const entity = operation.entity as { kind?: unknown; name?: unknown };
+    if (typeof entity.kind === "string" && typeof entity.name === "string") {
+      return `memory|canon|${entity.kind}|${entity.name}`;
+    }
+  }
+  if (operation?.kind === "promise.add") {
+    const promise = operation.promise as { kind?: unknown; title?: unknown };
+    if (typeof promise.kind === "string" && typeof promise.title === "string") {
+      return `memory|promise|${promise.kind}|${promise.title}`;
+    }
+  }
+  return null;
+}
+
+function isEnhancedGhost(proposal: AgentProposal): boolean {
+  return proposal.kind === "ghost" && proposal.rationale.includes("LLM增强续写");
+}
+
+function priorityWeight(priority: AgentProposal["priority"]): number {
+  if (priority === "urgent") return 2;
+  if (priority === "normal") return 1;
+  return 0;
+}
+
+function shouldReplaceProposal(existing: AgentProposal, incoming: AgentProposal): boolean {
+  if (isEnhancedGhost(incoming) && !isEnhancedGhost(existing)) return true;
+  if (priorityWeight(incoming.priority) > priorityWeight(existing.priority)) return true;
+  return incoming.confidence > existing.confidence + 0.05;
+}
+
+function isEditorTextOperation(
+  operation: WriterOperation,
+): operation is Extract<WriterOperation, { kind: "text.insert" | "text.replace" }> {
+  return operation.kind === "text.insert" || operation.kind === "text.replace";
+}
+
+function primaryOperation(proposal: AgentProposal): WriterOperation | undefined {
+  return proposal.alternatives?.[0]?.operation ?? proposal.operations[0];
+}
+
+function queuePrimaryOperation(entry: StoryReviewQueueEntry): WriterOperation | undefined {
+  return entry.operations[0];
+}
+
+function severityClass(severity: StoryReviewQueueEntry["severity"]): string {
+  if (severity === "error") return "border-danger/40 bg-danger/10";
+  if (severity === "warning") return "border-accent/30 bg-accent-subtle/20";
+  return "border-border-subtle bg-bg-raised";
+}
+
+function severityBadgeClass(severity: StoryReviewQueueEntry["severity"]): string {
+  if (severity === "error") return "bg-danger/20 text-danger";
+  if (severity === "warning") return "bg-accent-subtle text-accent";
+  return "bg-bg-deep text-text-muted";
+}
+
+function mergeProposal(prev: AgentProposal[], incoming: AgentProposal): AgentProposal[] {
+  const incomingSlot = proposalSlotKey(incoming);
+  const existingIndex = prev.findIndex((proposal) => proposalSlotKey(proposal) === incomingSlot);
+  if (existingIndex < 0) return [incoming, ...prev].slice(0, 20);
+
+  const existing = prev[existingIndex];
+  if (!shouldReplaceProposal(existing, incoming)) return prev;
+
+  const next = prev.filter((_, index) => index !== existingIndex);
+  return [incoming, ...next].slice(0, 20);
+}
+
+export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
   const currentChapter = useAppStore((s) => s.currentChapter);
+  const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
   const agentMode = useAppStore((s) => s.agentMode);
   const isAgentThinking = useAppStore((s) => s.isAgentThinking);
 
   const [status, setStatus] = useState<WriterAgentStatus | null>(null);
+  const [ledger, setLedger] = useState<WriterAgentLedgerSnapshot | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
-  const [activeTab, setActiveTab] = useState<"status" | "promises" | "canon" | "decisions">("status");
+  const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<"status" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [operationError, setOperationError] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
-      const s = await invoke<WriterAgentStatus>("get_writer_agent_status");
-      setStatus(s);
+      const [nextStatus, nextLedger, nextProposals, nextReviewQueue] = await Promise.all([
+        invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
+        invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
+        invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
+        invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
+      ]);
+      setStatus(nextStatus);
+      setLedger(nextLedger);
+      setReviewQueue(nextReviewQueue);
+      setProposals((prev) => {
+        const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
+        return merged.filter((proposal) =>
+          nextProposals.some((pending) => pending.id === proposal.id)
+        );
+      });
     } catch {
       // kernel not initialized yet
     }
   }, []);
 
   useEffect(() => {
-    refreshStatus();
+    const initial = setTimeout(refreshStatus, 0);
     const interval = setInterval(refreshStatus, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [refreshStatus]);
 
   useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     // Listen for new proposals from the kernel
-    const fn = listen<AgentProposal>("agent-proposal", (event) => {
-      setProposals((prev) => [event.payload, ...prev].slice(0, 20));
+    const fn = listen<AgentProposal>(Events.agentProposal, (event) => {
+      setProposals((prev) => mergeProposal(prev, event.payload));
     });
     return () => { fn.then((f) => f()); };
   }, []);
 
-  const handleFeedback = async (proposalId: string, action: ProposalFeedback["action"]) => {
+  const recordFeedback = useCallback(async (
+    proposalId: string,
+    action: ProposalFeedback["action"],
+    finalText?: string,
+    reason?: string,
+  ) => {
     const feedback: ProposalFeedback = {
       proposalId,
       action,
-      createdAt: Date.now(),
+      finalText,
+      reason,
+      createdAt: nowMs,
     };
-    // TODO: invoke apply_feedback command when added to Tauri
-    setProposals((prev) => prev.filter((p) => p.id !== proposalId));
-    refreshStatus();
-  };
+    try {
+      const nextStatus = await invoke<WriterAgentStatus>(Commands.applyProposalFeedback, { feedback });
+      setStatus(nextStatus);
+      setProposals((prev) => prev.filter((p) => p.id !== proposalId));
+      setReviewQueue((prev) => prev.filter((entry) => entry.proposalId !== proposalId));
+      const nextLedger = await invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger);
+      setLedger(nextLedger);
+    } catch (e) {
+      console.error("Proposal feedback failed:", e);
+    }
+  }, [nowMs]);
+
+  const handleFeedback = useCallback(async (proposalId: string, action: ProposalFeedback["action"]) => {
+    await recordFeedback(proposalId, action);
+  }, [recordFeedback]);
+
+  const handleApplyProposal = useCallback(async (proposal: AgentProposal) => {
+    setOperationError(null);
+    const operation = primaryOperation(proposal);
+    if (!operation) {
+      await recordFeedback(proposal.id, "accepted", proposal.preview, "Accepted proposal without executable operation.");
+      return;
+    }
+
+    const currentRevision = currentChapterRevision ?? "";
+
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision,
+      });
+
+      if (!result.success) {
+        const message = result.error?.message ?? "Operation was rejected by the kernel.";
+        setOperationError(message);
+        if (result.error?.code === "conflict") {
+          await recordFeedback(proposal.id, "snoozed", undefined, message);
+        }
+        return;
+      }
+
+      const applied = isEditorTextOperation(operation)
+        ? onApplyOperation?.(operation) ?? false
+        : true;
+      if (!applied) {
+        setOperationError("The editor could not apply this operation.");
+        return;
+      }
+
+      const finalText = isEditorTextOperation(operation) ? operation.text : proposal.preview;
+      await recordFeedback(proposal.id, "accepted", finalText);
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+
+  const handleApplyQueueEntry = useCallback(async (entry: StoryReviewQueueEntry) => {
+    setOperationError(null);
+    const operation = queuePrimaryOperation(entry);
+    if (!operation) {
+      await recordFeedback(entry.proposalId, "accepted", entry.message, "Accepted queue item without executable operation.");
+      return;
+    }
+
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision: currentChapterRevision ?? "",
+      });
+
+      if (!result.success) {
+        const message = result.error?.message ?? "Operation was rejected by the kernel.";
+        setOperationError(message);
+        if (result.error?.code === "conflict") {
+          await recordFeedback(entry.proposalId, "snoozed", undefined, message);
+        }
+        return;
+      }
+
+      const applied = isEditorTextOperation(operation)
+        ? onApplyOperation?.(operation) ?? false
+        : true;
+      if (!applied) {
+        setOperationError("The editor could not apply this operation.");
+        return;
+      }
+
+      const finalText = isEditorTextOperation(operation) ? operation.text : entry.message;
+      await recordFeedback(entry.proposalId, "accepted", finalText);
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+
+  const handleResolvePromise = useCallback(async (promiseId: number) => {
+    setOperationError(null);
+    const operation: WriterOperation = {
+      kind: "promise.resolve",
+      promiseId: String(promiseId),
+      chapter: currentChapter ?? "current chapter",
+    };
+
+    try {
+      const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+        operation,
+        currentRevision: currentChapterRevision ?? "",
+      });
+      if (!result.success) {
+        setOperationError(result.error?.message ?? "Could not resolve this promise.");
+        return;
+      }
+      await refreshStatus();
+    } catch (e) {
+      setOperationError(String(e));
+    }
+  }, [currentChapter, currentChapterRevision, refreshStatus]);
 
   const pendingProposals = proposals.filter((p) => {
-    const age = Date.now() - (p.expiresAt ?? 0);
-    return p.expiresAt === undefined || p.expiresAt === 0 || age < p.expiresAt;
+    return p.expiresAt === undefined || p.expiresAt === 0 || nowMs < p.expiresAt;
   });
+  const visibleReviewQueue = reviewQueue.filter((entry) => (
+    entry.status === "pending"
+    && (entry.expiresAt === undefined || entry.expiresAt === 0 || nowMs < entry.expiresAt)
+  ));
+  const visibleProposals =
+    mode === "write"
+      ? pendingProposals.filter((proposal) => proposal.priority === "urgent").slice(0, 3)
+      : pendingProposals;
+  const availableTabs =
+    mode === "write"
+      ? (["status", "promises", "canon"] as const)
+      : mode === "review"
+        ? (["queue", "promises", "canon", "decisions", "audit"] as const)
+        : (["status", "promises", "canon", "decisions", "audit"] as const);
+  const effectiveTab =
+    mode === "write"
+      ? "status"
+      : mode === "review" && activeTab === "status"
+        ? "queue"
+        : mode !== "review" && activeTab === "queue"
+          ? "status"
+          : activeTab;
 
   return (
     <div className="flex flex-col h-full bg-bg-surface">
@@ -58,7 +324,7 @@ export const CompanionPanel: React.FC = () => {
       <div className="px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center justify-between mb-2">
           <span className="font-display text-sm tracking-wider text-text-primary">
-            Companion
+            {mode === "write" ? "Story Guard" : mode === "review" ? "Story Review" : "Explore Context"}
           </span>
           <span className={`w-2 h-2 rounded-full ${
             isAgentThinking ? "bg-accent animate-pulse" : "bg-success"
@@ -88,28 +354,48 @@ export const CompanionPanel: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex border-b border-border-subtle">
-        {(["status", "promises", "canon", "decisions"] as const).map((tab) => (
+        {availableTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`flex-1 py-2 text-xs tracking-wide transition-colors ${
-              activeTab === tab
+              effectiveTab === tab
                 ? "text-accent border-b border-accent"
                 : "text-text-muted hover:text-text-secondary"
             }`}
           >
-            {tab === "status" ? "状态" : tab === "promises" ? "伏笔" : tab === "canon" ? "设定" : "决策"}
+            {tab === "status"
+              ? "状态"
+              : tab === "queue"
+                ? "队列"
+              : tab === "promises"
+                ? "伏笔"
+                : tab === "canon"
+                  ? "设定"
+                  : tab === "decisions"
+                    ? "决策"
+                    : "审计"}
           </button>
         ))}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {activeTab === "status" && (
+        {effectiveTab === "status" && (
           <div className="space-y-3">
-            {agentMode !== "proactive" && (
+            {mode !== "write" && agentMode !== "proactive" && (
               <div className="p-3 rounded bg-accent-subtle/30 border border-accent/20 text-xs text-text-secondary">
                 Agent is in {agentMode} mode. Switch to Proactive for ambient suggestions.
+              </div>
+            )}
+            {mode === "write" && (
+              <div className="p-2 rounded bg-bg-raised border border-border-subtle text-xs text-text-muted">
+                Write mode keeps the agent quiet. Only urgent story-truth issues surface here.
+              </div>
+            )}
+            {operationError && (
+              <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
+                {operationError}
               </div>
             )}
             <div className="text-xs text-text-muted">
@@ -118,12 +404,12 @@ export const CompanionPanel: React.FC = () => {
                 {currentChapter || "No chapter loaded"}
               </div>
             </div>
-            {pendingProposals.length > 0 && (
+            {visibleProposals.length > 0 && (
               <div>
                 <div className="text-xs text-text-secondary font-medium mb-2">
-                  Pending Proposals ({pendingProposals.length})
+                  {mode === "write" ? "Urgent Story Guards" : "Pending Proposals"} ({visibleProposals.length})
                 </div>
-                {pendingProposals.slice(0, 5).map((p) => (
+                {visibleProposals.slice(0, mode === "write" ? 3 : 5).map((p) => (
                   <div key={p.id} className={`p-2 rounded border mb-1 text-xs ${
                     p.priority === "urgent" ? "border-danger/40 bg-danger/10" :
                     p.priority === "normal" ? "border-accent/30 bg-accent-subtle/20" :
@@ -131,11 +417,18 @@ export const CompanionPanel: React.FC = () => {
                   }`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-text-primary font-medium">{p.kind}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                        p.priority === "urgent" ? "bg-danger/20 text-danger" :
-                        p.priority === "normal" ? "bg-accent-subtle text-accent" :
-                        "bg-bg-raised text-text-muted"
-                      }`}>{p.priority}</span>
+                      <div className="flex items-center gap-1">
+                        {isEnhancedGhost(p) && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-success/10 text-success">
+                            Enhanced
+                          </span>
+                        )}
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          p.priority === "urgent" ? "bg-danger/20 text-danger" :
+                          p.priority === "normal" ? "bg-accent-subtle text-accent" :
+                          "bg-bg-raised text-text-muted"
+                        }`}>{p.priority}</span>
+                      </div>
                     </div>
                     <p className="text-text-muted mb-2">{p.preview}</p>
                     {p.rationale && (
@@ -151,12 +444,18 @@ export const CompanionPanel: React.FC = () => {
                         ))}
                       </div>
                     )}
+                    {primaryOperation(p) && (
+                      <div className="mb-2 rounded bg-bg-deep border border-border-subtle p-1.5 text-[10px] text-text-muted">
+                        {primaryOperation(p)?.kind}
+                        {p.alternatives.length > 1 ? ` · ${p.alternatives.length} branches` : ""}
+                      </div>
+                    )}
                     <div className="flex gap-1">
                       <button
-                        onClick={() => handleFeedback(p.id, "accepted")}
+                        onClick={() => handleApplyProposal(p)}
                         className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
                       >
-                        Accept
+                        Apply
                       </button>
                       <button
                         onClick={() => handleFeedback(p.id, "rejected")}
@@ -178,24 +477,176 @@ export const CompanionPanel: React.FC = () => {
           </div>
         )}
 
-        {activeTab === "promises" && (
-          <div className="text-xs text-text-muted">
-            <p>Open plot promises will appear here as the story develops.</p>
-            <p className="mt-2">Add promises via the kernel API or canon ledger.</p>
+        {effectiveTab === "queue" && (
+          <div className="space-y-2 text-xs">
+            {operationError && (
+              <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
+                {operationError}
+              </div>
+            )}
+            {visibleReviewQueue.length === 0 && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-3 text-text-muted">
+                No story review items waiting.
+              </div>
+            )}
+            {visibleReviewQueue.map((entry) => {
+              const operation = queuePrimaryOperation(entry);
+              return (
+                <div key={entry.id} className={`rounded border p-2 ${severityClass(entry.severity)}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-text-primary">{entry.title}</div>
+                      <div className="mt-0.5 text-[10px] text-text-muted">{entry.category}</div>
+                    </div>
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${severityBadgeClass(entry.severity)}`}>
+                      {entry.severity}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-text-secondary">{entry.message}</p>
+                  {entry.evidence.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {entry.evidence.slice(0, 3).map((evidence, index) => (
+                        <div key={`${entry.id}-${index}`} className="rounded bg-bg-deep border border-border-subtle p-1.5">
+                          <span className="text-[10px] text-text-muted">{evidence.source}: </span>
+                          <span className="text-[10px] text-text-secondary">{evidence.snippet}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {operation && (
+                    <div className="mt-2 rounded bg-bg-deep border border-border-subtle p-1.5 text-[10px] text-text-muted">
+                      {operation.kind}
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <button
+                      onClick={() => handleApplyQueueEntry(entry)}
+                      className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      onClick={() => handleFeedback(entry.proposalId, "rejected")}
+                      className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
+                    >
+                      Ignore
+                    </button>
+                    <button
+                      onClick={() => handleFeedback(entry.proposalId, "snoozed")}
+                      className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
+                    >
+                      Snooze
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {activeTab === "canon" && (
-          <div className="text-xs text-text-muted">
-            <p>Canon risks and entity information will appear here.</p>
-            <p className="mt-2">The Canon Engine monitors for contradictions as you write.</p>
+        {effectiveTab === "promises" && (
+          <div className="space-y-2 text-xs">
+            {(ledger?.openPromises.length ?? 0) === 0 && (
+              <p className="text-text-muted">No open plot promises recorded yet.</p>
+            )}
+            {ledger?.openPromises.map((promise) => (
+              <div key={promise.id} className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">{promise.title}</span>
+                  <span className="text-[10px] text-text-muted">{promise.kind}</span>
+                </div>
+                <p className="mt-1 text-text-secondary">{promise.description}</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="text-[10px] text-text-muted">
+                    {promise.introducedChapter || "unknown"} {"->"} {promise.expectedPayoff || "unset"}
+                  </div>
+                  <button
+                    onClick={() => handleResolvePromise(promise.id)}
+                    className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
+                  >
+                    Resolve
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {activeTab === "decisions" && (
-          <div className="text-xs text-text-muted">
-            <p>Creative decisions are recorded when you accept or reject proposals.</p>
-            <p className="mt-2">This builds a durable record of why the story took each path.</p>
+        {effectiveTab === "canon" && (
+          <div className="space-y-2 text-xs">
+            {(ledger?.canonEntities.length ?? 0) === 0 && (
+              <p className="text-text-muted">No canon entities recorded yet.</p>
+            )}
+            {ledger?.canonEntities.map((entity) => (
+              <div key={`${entity.kind}-${entity.name}`} className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">{entity.name}</span>
+                  <span className="text-[10px] text-text-muted">
+                    {entity.kind} · {Math.round(entity.confidence * 100)}%
+                  </span>
+                </div>
+                {entity.summary && (
+                  <p className="mt-1 line-clamp-3 text-text-secondary">{entity.summary}</p>
+                )}
+                {Object.entries(entity.attributes).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {Object.entries(entity.attributes).map(([key, value]) => (
+                      <span key={key} className="rounded bg-bg-deep px-1.5 py-0.5 text-[10px] text-text-muted">
+                        {key}: {String(value)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {effectiveTab === "decisions" && (
+          <div className="space-y-2 text-xs">
+            {(ledger?.recentDecisions.length ?? 0) === 0 && (
+              <p className="text-text-muted">No creative decisions recorded yet.</p>
+            )}
+            {ledger?.recentDecisions.map((decision) => (
+              <div key={`${decision.createdAt}-${decision.title}`} className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">{decision.title}</span>
+                  <span className="text-[10px] text-text-muted">{decision.decision}</span>
+                </div>
+                <p className="mt-1 text-text-secondary">{decision.rationale || decision.scope}</p>
+                <div className="mt-1 text-[10px] text-text-muted">{decision.scope}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {effectiveTab === "audit" && (
+          <div className="space-y-2 text-xs">
+            {(ledger?.memoryAudit.length ?? 0) === 0 && (
+              <p className="text-text-muted">No memory audit events yet.</p>
+            )}
+            {ledger?.memoryAudit.map((entry) => (
+              <div key={`${entry.proposalId}-${entry.createdAt}`} className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">{entry.title}</span>
+                  <span className="text-[10px] text-text-muted">{entry.action}</span>
+                </div>
+                <div className="mt-1 text-[10px] text-text-muted">
+                  {entry.kind} · {new Date(entry.createdAt).toLocaleString()}
+                </div>
+                {entry.evidence && (
+                  <p className="mt-1 rounded bg-bg-deep border border-border-subtle p-1.5 text-text-secondary">
+                    {entry.evidence}
+                  </p>
+                )}
+                {entry.rationale && (
+                  <p className="mt-1 text-text-muted">{entry.rationale}</p>
+                )}
+                {entry.reason && (
+                  <p className="mt-1 text-text-secondary">Reason: {entry.reason}</p>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

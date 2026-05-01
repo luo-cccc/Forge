@@ -9,13 +9,5 @@ pub mod observation;
 pub mod operation;
 pub mod proposal;
 
-pub use canon::CanonEngine;
-pub use context::{WritingContextPack, ContextBudgetReport, AgentTask, assemble_context_pack};
-pub use diagnostics::{DiagnosticsEngine, DiagnosticResult, DiagnosticSeverity, DiagnosticCategory};
 pub use feedback::ProposalFeedback;
-pub use intent::{IntentEngine, WritingIntent, WritingIntentEstimate, AgentBehavior};
 pub use kernel::{WriterAgentKernel, WriterAgentStatus};
-pub use memory::WriterMemory;
-pub use observation::WriterObservation;
-pub use operation::{WriterOperation, OperationResult};
-pub use proposal::AgentProposal;

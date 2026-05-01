@@ -30,17 +30,11 @@ pub enum WriterOperation {
         severity: AnnotationSeverity,
     },
     #[serde(rename = "canon.upsert_entity")]
-    CanonUpsertEntity {
-        entity: CanonEntityOp,
-    },
+    CanonUpsertEntity { entity: CanonEntityOp },
     #[serde(rename = "canon.upsert_rule")]
-    CanonUpsertRule {
-        rule: CanonRuleOp,
-    },
+    CanonUpsertRule { rule: CanonRuleOp },
     #[serde(rename = "promise.add")]
-    PromiseAdd {
-        promise: PlotPromiseOp,
-    },
+    PromiseAdd { promise: PlotPromiseOp },
     #[serde(rename = "promise.resolve")]
     PromiseResolve {
         #[serde(rename = "promiseId")]
@@ -48,10 +42,7 @@ pub enum WriterOperation {
         chapter: String,
     },
     #[serde(rename = "style.update_preference")]
-    StyleUpdatePreference {
-        key: String,
-        value: String,
-    },
+    StyleUpdatePreference { key: String, value: String },
     #[serde(rename = "outline.update")]
     OutlineUpdate {
         #[serde(rename = "nodeId")]
@@ -117,10 +108,16 @@ pub struct OperationError {
 
 impl OperationError {
     pub fn conflict(msg: &str) -> Self {
-        Self { code: "conflict".into(), message: msg.into() }
+        Self {
+            code: "conflict".into(),
+            message: msg.into(),
+        }
     }
     pub fn invalid(msg: &str) -> Self {
-        Self { code: "invalid".into(), message: msg.into() }
+        Self {
+            code: "invalid".into(),
+            message: msg.into(),
+        }
     }
 }
 
@@ -132,9 +129,16 @@ pub fn execute_text_operation(
     current_revision: &str,
 ) -> Result<(String, String), OperationError> {
     match op {
-        WriterOperation::TextInsert { revision, chapter: _, at, text } => {
+        WriterOperation::TextInsert {
+            revision,
+            chapter: _,
+            at,
+            text,
+        } => {
             if revision != current_revision {
-                return Err(OperationError::conflict("Chapter was modified since the proposal was created"));
+                return Err(OperationError::conflict(
+                    "Chapter was modified since the proposal was created",
+                ));
             }
             let mut chars: Vec<char> = current_content.chars().collect();
             let pos = (*at).min(chars.len());
@@ -144,9 +148,17 @@ pub fn execute_text_operation(
             let new_revision = crate::storage::content_revision(&new_content);
             Ok((new_content, new_revision))
         }
-        WriterOperation::TextReplace { revision, chapter: _, from, to, text } => {
+        WriterOperation::TextReplace {
+            revision,
+            chapter: _,
+            from,
+            to,
+            text,
+        } => {
             if revision != current_revision {
-                return Err(OperationError::conflict("Chapter was modified since the proposal was created"));
+                return Err(OperationError::conflict(
+                    "Chapter was modified since the proposal was created",
+                ));
             }
             let mut chars: Vec<char> = current_content.chars().collect();
             let start = (*from).min(chars.len());
@@ -168,7 +180,9 @@ mod tests {
     #[test]
     fn test_text_insert_updates_revision() {
         let op = WriterOperation::TextInsert {
-            chapter: "ch1".into(), at: 5, text: "hello".into(),
+            chapter: "ch1".into(),
+            at: 5,
+            text: "hello".into(),
             revision: "abc".into(),
         };
         let (content, rev) = execute_text_operation(&op, "1234567890", "abc").unwrap();
@@ -179,7 +193,10 @@ mod tests {
     #[test]
     fn test_text_replace_rejects_wrong_revision() {
         let op = WriterOperation::TextReplace {
-            chapter: "ch1".into(), from: 0, to: 3, text: "x".into(),
+            chapter: "ch1".into(),
+            from: 0,
+            to: 3,
+            text: "x".into(),
             revision: "wrong".into(),
         };
         let result = execute_text_operation(&op, "abcdef", "correct");
@@ -190,7 +207,10 @@ mod tests {
     #[test]
     fn test_text_replace_succeeds_with_correct_revision() {
         let op = WriterOperation::TextReplace {
-            chapter: "ch1".into(), from: 3, to: 6, text: "XYZ".into(),
+            chapter: "ch1".into(),
+            from: 3,
+            to: 6,
+            text: "XYZ".into(),
             revision: "r1".into(),
         };
         let (content, _) = execute_text_operation(&op, "abcdefgh", "r1").unwrap();

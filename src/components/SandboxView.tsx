@@ -93,7 +93,13 @@ export default function SandboxView() {
     setIsLoading(true);
     log(`👤 ${msg}`);
     try {
-      await invoke(Commands.askAgent, { message: msg, context: "", paragraph: "", selectedText: "" });
+      await invoke(Commands.askAgent, {
+        message: msg,
+        context: "",
+        paragraph: "",
+        selectedText: "",
+        contextPayload: null,
+      });
     } catch (e) {
       log(`❌ ${e}`);
       setIsLoading(false);

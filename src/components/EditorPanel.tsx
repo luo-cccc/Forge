@@ -20,6 +20,7 @@ import {
   type EditorStatePayload,
   type ParallelDraft,
   type ParallelDraftPayload,
+  type ProposalFeedback,
   type SemanticLintPayload,
   type StreamChunk,
 } from "../protocol";
@@ -81,6 +82,10 @@ function makeSemanticLintRequestId(): string {
   return `lint-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function textCharPosition(editor: Editor, pos: number): number {
+  return Array.from(editor.state.doc.textBetween(0, pos, "\n")).length;
+}
+
 function sliceAroundCursor(editor: Editor): EditorStatePayload {
   const { from } = editor.state.selection;
   const $from = editor.state.doc.resolve(from);
@@ -95,6 +100,7 @@ function sliceAroundCursor(editor: Editor): EditorStatePayload {
     prefix,
     suffix,
     cursorPosition: from,
+    textCursorPosition: textCharPosition(editor, from),
     paragraph,
   };
 }
@@ -143,10 +149,11 @@ function buildObservation(
   const $from = editor.state.doc.resolve(from);
   const paragraph = editor.state.doc.textBetween($from.start(), $from.end(), " ");
   const fullText = editor.getText();
-  const cursorInText = Math.min(from, fullText.length);
+  const cursorInText = textCharPosition(editor, from);
   const halfWindow = Math.floor(OBSERVATION_WINDOW_CHARS / 2);
+  const fullChars = Array.from(fullText);
   const start = Math.max(0, cursorInText - halfWindow);
-  const end = Math.min(fullText.length, cursorInText + halfWindow);
+  const end = Math.min(fullChars.length, cursorInText + halfWindow);
 
   return {
     id: makeObservationId(),
@@ -156,17 +163,17 @@ function buildObservation(
     chapterTitle,
     chapterRevision: chapterRevision ?? undefined,
     dirty,
-    cursorPosition: from,
+    cursorPosition: cursorInText,
     selection:
       from < to
         ? {
-            from,
-            to,
+            from: textCharPosition(editor, from),
+            to: textCharPosition(editor, to),
             text: limitChars(selectedText, PARAGRAPH_BUDGET_CHARS),
           }
         : undefined,
     currentParagraph: limitChars(paragraph, PARAGRAPH_BUDGET_CHARS),
-    nearbyText: limitChars(fullText.slice(start, end), OBSERVATION_WINDOW_CHARS),
+    nearbyText: limitChars(fullChars.slice(start, end).join(""), OBSERVATION_WINDOW_CHARS),
     recentEditSummary:
       reason === "selection_change"
         ? "Selection changed after user pause."
@@ -175,6 +182,31 @@ function buildObservation(
     snoozedUntil: snoozedUntil ?? undefined,
     outlineChapterTitle: chapterTitle,
   };
+}
+
+type ActiveGhostState = NonNullable<ReturnType<typeof ghostTextPluginKey.getState>>;
+
+async function recordGhostAcceptance(ghost: ActiveGhostState) {
+  if (!ghost.proposalId) return;
+  const candidate = ghost.candidates[ghost.activeIndex];
+  const text = candidate?.text ?? ghost.text;
+  const branch = candidate?.label ? `Accepted inline ghost branch: ${candidate.label}` : "Accepted inline ghost.";
+  const feedback: ProposalFeedback = {
+    proposalId: ghost.proposalId,
+    action: "accepted",
+    finalText: text,
+    reason: branch,
+    createdAt: Date.now(),
+  };
+  await invoke(Commands.applyProposalFeedback, { feedback });
+}
+
+async function recordImplicitGhostRejection(ghost: ActiveGhostState | null | undefined) {
+  if (!ghost?.proposalId) return;
+  await invoke<boolean>(Commands.recordImplicitGhostRejection, {
+    proposalId: ghost.proposalId,
+    createdAt: Date.now(),
+  });
 }
 
 export default function EditorPanel({
@@ -370,14 +402,20 @@ export default function EditorPanel({
     [agentMode, submitObservation],
   );
 
-  const abortGhostRequest = useCallback((requestId?: string | null) => {
+  const abortGhostRequest = useCallback((requestId?: string | null, recordImplicit = false) => {
     if (telemetryTimerRef.current) {
       clearTimeout(telemetryTimerRef.current);
       telemetryTimerRef.current = null;
     }
 
     const activeRequestId = requestId ?? activeGhostRequestIdRef.current;
+    const activeGhost = recordImplicit && editor ? ghostTextPluginKey.getState(editor.state) : null;
     editor?.commands.clearGhostText();
+    if (activeGhost) {
+      void recordImplicitGhostRejection(activeGhost).catch((e) => {
+        console.error("Failed to record implicit ghost rejection:", e);
+      });
+    }
     if (!activeRequestId) return;
     activeGhostRequestIdRef.current = null;
     void invoke(Commands.abortEditorPrediction, { requestId: activeRequestId }).catch((e) => {
@@ -394,6 +432,8 @@ export default function EditorPanel({
       const payload = {
         ...sliceAroundCursor(editor),
         chapterTitle: currentChapter,
+        chapterRevision: currentChapterRevision ?? undefined,
+        editorDirty: isEditorDirty,
       };
       activeGhostRequestIdRef.current = payload.requestId;
 
@@ -404,7 +444,7 @@ export default function EditorPanel({
         console.error("Editor telemetry failed:", e);
       });
     }, EDITOR_TELEMETRY_DEBOUNCE_MS);
-  }, [agentMode, currentChapter, editor]);
+  }, [agentMode, currentChapter, currentChapterRevision, editor, isEditorDirty]);
 
   const scheduleSemanticLint = useCallback(() => {
     if (!editor || agentMode === "off") return;
@@ -467,6 +507,24 @@ export default function EditorPanel({
               : [{ id: "a", label: "A", text: chunk.content }];
           editor.commands.setGhostText({
             requestId: chunk.requestId,
+            proposalId: chunk.proposalId,
+            position: chunk.cursorPosition,
+            text: chunk.content,
+            intent: chunk.intent,
+            candidates,
+            activeIndex: 0,
+          });
+          return;
+        }
+
+        if (chunk.replace) {
+          const candidates =
+            chunk.candidates && chunk.candidates.length > 0
+              ? chunk.candidates
+              : [{ id: "a", label: "A", text: chunk.content }];
+          editor.commands.setGhostText({
+            requestId: chunk.requestId,
+            proposalId: chunk.proposalId,
             position: chunk.cursorPosition,
             text: chunk.content,
             intent: chunk.intent,
@@ -558,7 +616,7 @@ export default function EditorPanel({
     const handler = () => {
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
-      abortGhostRequest();
+      abortGhostRequest(undefined, true);
       editor.commands.clearSemanticLint();
       scheduleEditorTelemetry();
       scheduleSemanticLint();
@@ -609,17 +667,21 @@ export default function EditorPanel({
   useEffect(() => {
     if (!editor) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Tab" && ghostTextPluginKey.getState(editor.state)?.text) {
+      const activeGhost = ghostTextPluginKey.getState(editor.state);
+      if (event.key === "Tab" && activeGhost?.text) {
         event.preventDefault();
         const accepted = editor.commands.acceptGhostText();
         if (accepted) {
           activeGhostRequestIdRef.current = null;
           incrementActionEpoch();
+          void recordGhostAcceptance(activeGhost).catch((e) => {
+            console.error("Failed to record ghost feedback:", e);
+          });
         }
         return;
       }
 
-      if (event.key === "ArrowRight" && ghostTextPluginKey.getState(editor.state)?.text) {
+      if (event.key === "ArrowRight" && activeGhost?.text) {
         event.preventDefault();
         editor.commands.nextGhostCandidate();
         return;
@@ -711,6 +773,12 @@ export default function EditorPanel({
         context: fullText,
         paragraph: "",
         selectedText: "",
+        contextPayload: {
+          chapterTitle: currentChapter,
+          chapterRevision: currentChapterRevision ?? undefined,
+          cursorPosition: textCharPosition(editor, editor.state.selection.from),
+          dirty: isEditorDirty,
+        },
       });
     } catch {
       unlistenChunk();

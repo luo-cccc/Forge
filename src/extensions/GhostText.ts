@@ -5,6 +5,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 export interface GhostTextState {
   requestId: string;
+  proposalId?: string;
   position: number;
   text: string;
   intent?: string;
@@ -21,6 +22,7 @@ export interface GhostTextCandidate {
 interface GhostTextMeta {
   type: "set" | "append" | "clear" | "next";
   requestId?: string;
+  proposalId?: string;
   position?: number;
   text?: string;
   intent?: string;
@@ -149,6 +151,7 @@ const GhostText = Extension.create({
                 : [{ id: "a", label: "A", text: meta.text ?? "" }];
               return {
                 requestId: meta.requestId,
+                proposalId: meta.proposalId,
                 position: meta.position,
                 text: candidates[0]?.text ?? meta.text ?? "",
                 intent: meta.intent,

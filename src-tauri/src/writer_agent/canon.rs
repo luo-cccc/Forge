@@ -1,8 +1,8 @@
 //! CanonEngine — protects story truth.
 //! Detects entity mentions and checks against canon facts.
 
-use serde::{Deserialize, Serialize};
 use super::memory::WriterMemory;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct CanonEngine;
@@ -35,6 +35,8 @@ impl CanonEngine {
             ("握着", "weapon"),
         ];
 
+        let known_names = memory.get_canon_entity_names().unwrap_or_default();
+
         for (action, attr) in &entity_weapon_patterns {
             if let Some(pos) = paragraph.find(action) {
                 let after: String = paragraph[pos + action.len()..].chars().take(20).collect();
@@ -42,10 +44,12 @@ impl CanonEngine {
                 for weapon in &["剑", "刀", "枪", "弓", "匕首", "棍", "鞭", "斧"] {
                     if after.contains(weapon) {
                         // Check canon for nearby entity names
-                        // In production, entity names would come from entity extraction
-                        if let Some(entity_name) = find_entity_before(paragraph, pos) {
+                        if let Some(entity_name) = find_entity_before(paragraph, pos, &known_names)
+                        {
                             if let Ok(facts) = memory.get_canon_facts_for_entity(&entity_name) {
-                                if let Some((_, canon_weapon)) = facts.iter().find(|(k, _)| k == attr) {
+                                if let Some((_, canon_weapon)) =
+                                    facts.iter().find(|(k, _)| k == attr)
+                                {
                                     let conflict = canon_weapon != weapon;
                                     checks.push(CanonCheck {
                                         entity_name,
@@ -66,14 +70,11 @@ impl CanonEngine {
     }
 }
 
-fn find_entity_before(text: &str, pos: usize) -> Option<String> {
+fn find_entity_before(text: &str, pos: usize, known_names: &[String]) -> Option<String> {
     let before: String = text[..pos].chars().collect();
-    // Simple heuristic: find the last capitalized/Chinese name before the action
-    // In production, this would use the entity extraction pipeline
-    let names = ["林墨", "苏晚晴", "林墨拔出"]; // placeholder
-    for name in &names {
+    for name in known_names {
         if before.ends_with(name) || before.contains(name) {
-            return Some(name.to_string());
+            return Some(name.clone());
         }
     }
     None
@@ -94,9 +95,19 @@ mod tests {
     #[test]
     fn test_canon_check_detects_entity_pattern() {
         let m = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
-        m.upsert_canon_entity("character", "林墨", &[], "主角", &serde_json::json!({"weapon": "寒影刀"}), 0.9).unwrap();
+        m.upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.9,
+        )
+        .unwrap();
         let engine = CanonEngine::new();
         let checks = engine.check_paragraph("林墨拔出长剑", &m);
-        assert!(checks.is_empty() || checks.iter().any(|c| c.mentioned_value == "剑"));
+        assert!(checks
+            .iter()
+            .any(|c| c.mentioned_value == "剑" && c.conflict));
     }
 }

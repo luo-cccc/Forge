@@ -3,6 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::memory::WriterMemory;
+use super::observation::WriterObservation;
+
 /// A single context source with its content and budget info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextExcerpt {
@@ -40,6 +43,7 @@ pub enum AgentTask {
     InlineRewrite,
     ProposalEvaluation,
     CanonMaintenance,
+    ManualRequest,
 }
 
 impl AgentTask {
@@ -86,6 +90,15 @@ impl AgentTask {
                 (ContextSource::PromiseSlice, 9, 1000),
                 (ContextSource::OutlineSlice, 8, 1000),
             ],
+            AgentTask::ManualRequest => vec![
+                (ContextSource::SelectedText, 10, 1200),
+                (ContextSource::CursorPrefix, 9, 1400),
+                (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::CanonSlice, 8, 800),
+                (ContextSource::PromiseSlice, 7, 600),
+                (ContextSource::AuthorStyle, 6, 400),
+                (ContextSource::RagExcerpt, 5, 400),
+            ],
         }
     }
 }
@@ -130,7 +143,9 @@ pub fn assemble_context_pack(
     for (source, priority, budget) in &priorities {
         let remaining = total_budget.saturating_sub(used);
         let alloc = (*budget).min(remaining);
-        if alloc == 0 { break; }
+        if alloc == 0 {
+            break;
+        }
 
         if let Some(raw) = source_provider(source.clone()) {
             let (content, truncated) = truncate_to_budget(&raw, alloc);
@@ -169,6 +184,102 @@ pub fn assemble_context_pack(
     }
 }
 
+pub fn assemble_observation_context(
+    task: AgentTask,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+    total_budget: usize,
+) -> WritingContextPack {
+    let canon_slice = build_canon_slice(&observation.paragraph, memory);
+    let promise_slice = build_promise_slice(memory);
+    let author_style = build_style_slice(memory);
+    let selected_text = observation.selected_text().to_string();
+    let cursor_prefix = if observation.prefix.trim().is_empty() {
+        observation.paragraph.clone()
+    } else {
+        observation.prefix.clone()
+    };
+    let cursor_suffix = observation.suffix.clone();
+
+    assemble_context_pack(
+        task,
+        &|source| match source {
+            ContextSource::CursorPrefix => non_empty(cursor_prefix.clone()),
+            ContextSource::CursorSuffix => non_empty(cursor_suffix.clone()),
+            ContextSource::SelectedText => non_empty(selected_text.clone()),
+            ContextSource::CanonSlice => non_empty(canon_slice.clone()),
+            ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
+            ContextSource::AuthorStyle => non_empty(author_style.clone()),
+            _ => None,
+        },
+        total_budget,
+    )
+}
+
+fn non_empty(text: String) -> Option<String> {
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn build_canon_slice(paragraph: &str, memory: &WriterMemory) -> String {
+    let mut lines = Vec::new();
+    if let Ok(entities) = memory.list_canon_entities() {
+        for entity in entities
+            .into_iter()
+            .filter(|entity| paragraph.contains(&entity.name))
+            .take(6)
+        {
+            let attrs = if let Some(map) = entity.attributes.as_object() {
+                map.iter()
+                    .map(|(key, value)| format!("{}={}", key, value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "{} [{}] {} {}",
+                entity.name, entity.kind, entity.summary, attrs
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn build_promise_slice(memory: &WriterMemory) -> String {
+    memory
+        .get_open_promise_summaries()
+        .unwrap_or_default()
+        .into_iter()
+        .take(6)
+        .map(|promise| {
+            format!(
+                "{} [{}]: {} -> {}",
+                promise.title, promise.kind, promise.description, promise.expected_payoff
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_style_slice(memory: &WriterMemory) -> String {
+    memory
+        .list_style_preferences(6)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|pref| {
+            format!(
+                "{}: {} (+{} / -{})",
+                pref.key, pref.value, pref.accepted_count, pref.rejected_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Truncate text to fit budget, preferring sentence boundaries.
 fn truncate_to_budget(text: &str, max_chars: usize) -> (String, bool) {
     if text.chars().count() <= max_chars {
@@ -190,6 +301,7 @@ fn truncate_to_budget(text: &str, max_chars: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::writer_agent::observation::{ObservationReason, ObservationSource};
 
     #[test]
     fn test_ghost_writing_priorities() {
@@ -201,7 +313,9 @@ mod tests {
     #[test]
     fn test_chapter_gen_includes_all_sources() {
         let p = AgentTask::ChapterGeneration.source_priorities();
-        assert!(p.iter().any(|(s, _, _)| *s == ContextSource::PreviousChapter));
+        assert!(p
+            .iter()
+            .any(|(s, _, _)| *s == ContextSource::PreviousChapter));
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::PromiseSlice));
     }
 
@@ -237,5 +351,71 @@ mod tests {
         let ghost_total: usize = ghost.iter().map(|(_, _, b)| b).sum();
         let chapter_total: usize = chapter.iter().map(|(_, _, b)| b).sum();
         assert!(chapter_total > ghost_total * 3);
+    }
+
+    #[test]
+    fn test_manual_request_prioritizes_selection_and_ledgers() {
+        let p = AgentTask::ManualRequest.source_priorities();
+        assert_eq!(p[0].0, ContextSource::SelectedText);
+        assert!(p.iter().any(|(s, _, _)| *s == ContextSource::CanonSlice));
+        assert!(p.iter().any(|(s, _, _)| *s == ContextSource::PromiseSlice));
+        assert!(p.iter().any(|(s, _, _)| *s == ContextSource::AuthorStyle));
+    }
+
+    #[test]
+    fn test_observation_context_includes_relevant_ledgers() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        memory
+            .upsert_canon_entity(
+                "character",
+                "林墨",
+                &[],
+                "主角",
+                &serde_json::json!({ "weapon": "寒影刀" }),
+                0.9,
+            )
+            .unwrap();
+        memory
+            .add_promise("clue", "玉佩", "张三拿走玉佩", "Chapter-1", "Chapter-5", 3)
+            .unwrap();
+        memory
+            .upsert_style_preference("dialogue", "prefers_subtext", true)
+            .unwrap();
+
+        let observation = WriterObservation {
+            id: "obs".into(),
+            created_at: 1,
+            source: ObservationSource::Editor,
+            reason: ObservationReason::Idle,
+            project_id: "default".into(),
+            chapter_title: Some("Chapter-1".into()),
+            chapter_revision: Some("rev".into()),
+            cursor: None,
+            selection: None,
+            prefix: "林墨停在门前。".into(),
+            suffix: String::new(),
+            paragraph: "林墨停在门前。".into(),
+            full_text_digest: None,
+            editor_dirty: true,
+        };
+        let pack =
+            assemble_observation_context(AgentTask::GhostWriting, &observation, &memory, 2_000);
+
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::CursorPrefix));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::CanonSlice));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::PromiseSlice));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::AuthorStyle));
     }
 }
