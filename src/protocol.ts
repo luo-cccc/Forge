@@ -370,3 +370,66 @@ export function extractActions(buffer: string): {
   });
   return { actions, cleanText };
 }
+
+// === Patch Review System (OpenCode apply_patch pattern) ===
+
+export interface TextPatch {
+  id: string;
+  from: number;
+  to: number;
+  replacement: string;
+  description: string;
+  severity: "info" | "warning" | "suggestion";
+  original: string;
+}
+
+export interface PatchSet {
+  patches: TextPatch[];
+  requestId: string;
+  baseText: string;
+  createdAt: number;
+}
+
+export type PatchStatus = "pending" | "accepted" | "rejected";
+
+// === Agent Loop Events (matches Rust AgentLoopEvent) ===
+
+export interface AgentLoopEventPayload {
+  kind: string;
+  intent?: string;
+  tool?: string;
+  args?: unknown;
+  result?: {
+    tool_name: string;
+    error: string | null;
+    duration_ms: number;
+  };
+  content?: string;
+  message?: string;
+  round?: number;
+  before_tokens?: number;
+  after_tokens?: number;
+  compacted_count?: number;
+  rounds?: number;
+  tool_calls?: number;
+  tokens_used?: number;
+}
+
+// === Editor Events for Ambient Agents ===
+
+export interface EditorEventPayload {
+  kind: string;
+  idle_ms?: number;
+  chapter?: string;
+  paragraph?: string;
+  cursor_position?: number;
+  from?: number;
+  to?: number;
+  text?: string;
+  content_length?: number;
+  revision?: string;
+  keywords?: string[];
+  change_summary?: string;
+  full_text_snippet?: string;
+}
+
