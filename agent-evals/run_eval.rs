@@ -628,6 +628,157 @@ fn run_context_decision_slice_eval() -> EvalResult {
     )
 }
 
+fn run_story_contract_context_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation("林墨握着寒影刀，想起那枚玉佩。");
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &obs, 1_500);
+
+    let mut errors = Vec::new();
+    if !pack
+        .sources
+        .iter()
+        .any(|source| source.source == ContextSource::ProjectBrief)
+    {
+        errors.push("missing story contract project brief".to_string());
+    }
+    if !pack.sources.iter().any(|source| {
+        source.source == ContextSource::ProjectBrief && source.content.contains("读者承诺")
+    }) {
+        errors.push("project brief lacks story contract content".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_contract_context_source",
+        format!("sources={} used={}", pack.sources.len(), pack.total_chars),
+        errors,
+    )
+}
+
+fn run_chapter_mission_result_feedback_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨追查玉佩下落。",
+            "玉佩",
+            "提前揭开真相",
+            "下落",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation("林墨发现玉佩的下落，但张三仍没有说出真相。");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    kernel.observe(save).unwrap();
+
+    let ledger = kernel.ledger_snapshot();
+    let mut errors = Vec::new();
+    let mission = ledger.active_chapter_mission.as_ref();
+    if !mission.is_some_and(|mission| mission.status == "completed") {
+        errors.push(format!(
+            "mission was not completed: {:?}",
+            mission.map(|mission| mission.status.as_str())
+        ));
+    }
+    if ledger.recent_chapter_results.is_empty() {
+        errors.push("save did not record chapter result".to_string());
+    }
+    if !ledger
+        .recent_chapter_results
+        .iter()
+        .any(|result| result.new_clues.iter().any(|clue| clue == "玉佩"))
+    {
+        errors.push("chapter result lacks carried clue".to_string());
+    }
+
+    eval_result(
+        "writer_agent:chapter_mission_result_feedback",
+        format!(
+            "mission={} results={}",
+            mission
+                .map(|mission| mission.status.as_str())
+                .unwrap_or("missing"),
+            ledger.recent_chapter_results.len()
+        ),
+        errors,
+    )
+}
+
+fn run_next_beat_context_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "玉佩",
+            "张三拿走玉佩，需要交代下落。",
+            "Chapter-1",
+            "Chapter-4",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter(
+        "林墨发现玉佩的下落，却开始怀疑张三。新的冲突就此埋下。",
+        "Chapter-2",
+    );
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    kernel.observe(save).unwrap();
+
+    let obs = observation_in_chapter("林墨站在门外，没有立刻进去。", "Chapter-3");
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &obs, 2_000);
+    let ledger = kernel.ledger_snapshot();
+
+    let mut errors = Vec::new();
+    if ledger.next_beat.is_none() {
+        errors.push("ledger missing next beat handoff".to_string());
+    }
+    if !ledger.next_beat.as_ref().is_some_and(|beat| {
+        beat.goal.contains("冲突")
+            && beat
+                .carryovers
+                .iter()
+                .any(|carryover| carryover.contains("玉佩"))
+    }) {
+        errors.push("next beat does not carry conflict and promise context".to_string());
+    }
+    if !pack
+        .sources
+        .iter()
+        .any(|source| source.source == ContextSource::NextBeat)
+    {
+        errors.push("ContextPack missing NextBeat source".to_string());
+    }
+    if !pack.sources.iter().any(|source| {
+        source.source == ContextSource::NextBeat && source.content.contains("下一拍目标")
+    }) {
+        errors.push("NextBeat source lacks rendered handoff content".to_string());
+    }
+
+    eval_result(
+        "writer_agent:next_beat_context_handoff",
+        format!(
+            "nextBeat={} sources={}",
+            ledger.next_beat.is_some(),
+            pack.sources.len()
+        ),
+        errors,
+    )
+}
+
 fn run_timeline_contradiction_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1178,6 +1329,9 @@ fn main() {
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
     results.push(run_context_decision_slice_eval());
+    results.push(run_story_contract_context_eval());
+    results.push(run_chapter_mission_result_feedback_eval());
+    results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
     results.push(run_promise_opportunity_apply_eval());
