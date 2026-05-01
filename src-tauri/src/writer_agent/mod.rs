@@ -1,14 +1,19 @@
-pub mod kernel;
-pub mod observation;
-pub mod proposal;
-pub mod operation;
-pub mod feedback;
 pub mod canon;
+pub mod context;
+pub mod feedback;
+pub mod intent;
+pub mod kernel;
 pub mod memory;
+pub mod observation;
+pub mod operation;
+pub mod proposal;
 
+pub use canon::CanonEngine;
+pub use context::{WritingContextPack, ContextBudgetReport, AgentTask, assemble_context_pack};
+pub use feedback::ProposalFeedback;
+pub use intent::{IntentEngine, WritingIntent, WritingIntentEstimate, AgentBehavior};
 pub use kernel::{WriterAgentKernel, WriterAgentStatus};
 pub use memory::WriterMemory;
 pub use observation::WriterObservation;
-pub use proposal::AgentProposal;
 pub use operation::{WriterOperation, OperationResult};
-pub use feedback::ProposalFeedback;
+pub use proposal::AgentProposal;

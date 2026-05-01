@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent-evals",
     "agent-harness-core",
     "src-tauri",
 ]
