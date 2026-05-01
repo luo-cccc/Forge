@@ -52,6 +52,8 @@ pub enum ProposalKind {
     PlotPromise,
     #[serde(rename = "chapter_structure")]
     ChapterStructure,
+    #[serde(rename = "story_contract")]
+    StoryContract,
     Question,
 }
 
@@ -83,6 +85,8 @@ pub enum EvidenceSource {
     StyleLedger,
     #[serde(rename = "promise_ledger")]
     PromiseLedger,
+    #[serde(rename = "story_contract")]
+    StoryContract,
     #[serde(rename = "author_feedback")]
     AuthorFeedback,
 }

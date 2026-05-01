@@ -518,7 +518,7 @@ export interface AgentProposal {
   id: string;
   observationId: string;
   kind: "ghost" | "parallel_draft" | "continuity_warning" | "canon_update"
-    | "style_note" | "plot_promise" | "chapter_structure" | "question";
+    | "style_note" | "plot_promise" | "chapter_structure" | "story_contract" | "question";
   priority: "ambient" | "normal" | "urgent";
   target?: { from: number; to: number };
   preview: string;
@@ -540,7 +540,7 @@ export interface ProposalAlternative {
 }
 
 export interface EvidenceRef {
-  source: "lorebook" | "outline" | "chapter_text" | "canon" | "style_ledger" | "promise_ledger" | "author_feedback";
+  source: "lorebook" | "outline" | "chapter_text" | "canon" | "style_ledger" | "promise_ledger" | "story_contract" | "author_feedback";
   reference: string;
   snippet: string;
 }
@@ -564,6 +564,7 @@ export interface StoryDebtSnapshot {
   chapterTitle?: string;
   total: number;
   openCount: number;
+  contractCount: number;
   canonRiskCount: number;
   promiseCount: number;
   pacingCount: number;
@@ -573,7 +574,7 @@ export interface StoryDebtSnapshot {
 export interface StoryDebtEntry {
   id: string;
   chapterTitle?: string;
-  category: "canon_risk" | "timeline_risk" | "promise" | "pacing" | "memory" | "question";
+  category: "story_contract" | "canon_risk" | "timeline_risk" | "promise" | "pacing" | "memory" | "question";
   severity: "info" | "warning" | "error";
   status: "open" | "snoozed" | "stale";
   title: string;

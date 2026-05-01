@@ -253,6 +253,7 @@ function buildSecondBrainItems(
   proposals: AgentProposal[],
   currentChapter: string,
 ): SecondBrainItem[] {
+  const contractDebt = firstDebt(storyDebt, ["story_contract"]);
   const canonRisk = firstDebt(storyDebt, ["canon_risk", "timeline_risk"]);
   const promiseDebt = firstDebt(storyDebt, ["promise"]);
   const pacingDebt = firstDebt(storyDebt, ["pacing"]);
@@ -281,7 +282,7 @@ function buildSecondBrainItems(
     storyContract.readerPromise.includes("保持主线清晰")
   ));
 
-  const sceneGoal = canonRisk ?? promiseDebt ?? pacingDebt;
+  const sceneGoal = contractDebt ?? canonRisk ?? promiseDebt ?? pacingDebt;
   const sceneValue = sceneGoal
     ? compactLine(sceneGoal.title, "Resolve current story debt", 72)
     : nextBeat
@@ -345,7 +346,9 @@ function buildSecondBrainItems(
       ? compactLine(arcProposal.preview, arcProposal.rationale || "Review current scene movement")
       : "Current arc has no flagged drag or missing beat.";
 
-  const contractValue = hasStoryContract
+  const contractValue = contractDebt
+    ? compactLine(contractDebt.title, "Story contract guard", 72)
+    : hasStoryContract
     ? compactLine(
         storyContract?.readerPromise ||
           storyContract?.mainConflict ||
@@ -355,7 +358,9 @@ function buildSecondBrainItems(
         72,
       )
     : "No story contract";
-  const contractDetail = hasStoryContract
+  const contractDetail = contractDebt
+    ? compactLine(contractDebt.message, "Review book-level boundary before continuing")
+    : hasStoryContract
     ? compactLine(
         [
           storyContract?.genre && `Genre: ${storyContract.genre}`,
@@ -411,7 +416,7 @@ function buildSecondBrainItems(
       label: "Book Contract",
       value: contractValue,
       detail: contractDetail,
-      tone: hasStoryContract && !contractNeedsReview ? "success" : "accent",
+      tone: contractDebt ? "danger" : hasStoryContract && !contractNeedsReview ? "success" : "accent",
     },
     {
       label: "Chapter Mission",
@@ -1097,10 +1102,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     {storyDebt.chapterTitle || currentChapter || "project"}
                   </span>
                 </div>
-                <div className="mt-2 grid grid-cols-4 gap-1 text-center">
+                <div className="mt-2 grid grid-cols-5 gap-1 text-center">
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-text-primary">{storyDebt.openCount}</div>
                     <div className="text-[10px] text-text-muted">open</div>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1">
+                    <div className="font-mono text-danger">{storyDebt.contractCount}</div>
+                    <div className="text-[10px] text-text-muted">contract</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.canonRiskCount}</div>

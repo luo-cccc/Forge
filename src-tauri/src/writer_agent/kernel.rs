@@ -93,6 +93,7 @@ pub struct StoryDebtSnapshot {
     pub chapter_title: Option<String>,
     pub total: usize,
     pub open_count: usize,
+    pub contract_count: usize,
     pub canon_risk_count: usize,
     pub promise_count: usize,
     pub pacing_count: usize,
@@ -118,6 +119,7 @@ pub struct StoryDebtEntry {
 #[derive(Debug, Clone, serde::Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryDebtCategory {
+    StoryContract,
     CanonRisk,
     TimelineRisk,
     Promise,
@@ -328,6 +330,7 @@ impl WriterAgentKernel {
                 &observation.paragraph,
                 paragraph_offset,
                 chapter_id,
+                &observation.project_id,
                 &self.memory,
             ) {
                 proposals.push(diagnostic_to_proposal(
@@ -690,8 +693,13 @@ impl WriterAgentKernel {
         paragraph_offset: usize,
         chapter_id: &str,
     ) -> Vec<DiagnosticResult> {
-        self.diagnostics
-            .diagnose(paragraph, paragraph_offset, chapter_id, &self.memory)
+        self.diagnostics.diagnose(
+            paragraph,
+            paragraph_offset,
+            chapter_id,
+            &self.project_id,
+            &self.memory,
+        )
     }
 
     pub fn apply_feedback(&mut self, feedback: ProposalFeedback) -> Result<(), String> {
@@ -1462,6 +1470,10 @@ impl WriterAgentKernel {
             .iter()
             .filter(|entry| entry.status == StoryDebtStatus::Open)
             .count();
+        let contract_count = entries
+            .iter()
+            .filter(|entry| entry.category == StoryDebtCategory::StoryContract)
+            .count();
         let canon_risk_count = entries
             .iter()
             .filter(|entry| entry.category == StoryDebtCategory::CanonRisk)
@@ -1479,6 +1491,7 @@ impl WriterAgentKernel {
             chapter_title,
             total: entries.len(),
             open_count,
+            contract_count,
             canon_risk_count,
             promise_count,
             pacing_count,
@@ -2179,6 +2192,7 @@ fn review_severity_for_priority(priority: &ProposalPriority) -> StoryReviewSever
 fn review_title_for_proposal(proposal: &AgentProposal) -> String {
     match proposal.kind {
         ProposalKind::ContinuityWarning => "Story truth conflict".to_string(),
+        ProposalKind::StoryContract => "Story contract guard".to_string(),
         ProposalKind::PlotPromise => {
             if proposal
                 .operations
@@ -2322,6 +2336,7 @@ fn story_debt_category_for_review(entry: &StoryReviewQueueEntry) -> StoryDebtCat
                 StoryDebtCategory::CanonRisk
             }
         }
+        ProposalKind::StoryContract => StoryDebtCategory::StoryContract,
         ProposalKind::PlotPromise => StoryDebtCategory::Promise,
         ProposalKind::StyleNote => StoryDebtCategory::Pacing,
         ProposalKind::CanonUpdate => StoryDebtCategory::Memory,
@@ -2608,6 +2623,7 @@ fn diagnostic_to_proposal(
     let kind = match diagnostic.category {
         DiagnosticCategory::UnresolvedPromise => ProposalKind::PlotPromise,
         DiagnosticCategory::CanonConflict => ProposalKind::ContinuityWarning,
+        DiagnosticCategory::StoryContractViolation => ProposalKind::StoryContract,
         DiagnosticCategory::PacingNote => ProposalKind::StyleNote,
         DiagnosticCategory::CharacterVoiceInconsistency => ProposalKind::StyleNote,
         DiagnosticCategory::TimelineIssue => ProposalKind::ContinuityWarning,
@@ -2619,6 +2635,7 @@ fn diagnostic_to_proposal(
             source: match item.source.as_str() {
                 "canon" => EvidenceSource::Canon,
                 "promise" => EvidenceSource::PromiseLedger,
+                "story_contract" => EvidenceSource::StoryContract,
                 "outline" => EvidenceSource::Outline,
                 "style" => EvidenceSource::StyleLedger,
                 _ => EvidenceSource::ChapterText,
@@ -3394,6 +3411,7 @@ fn context_pack_evidence(
             | ContextSource::SelectedText => EvidenceSource::ChapterText,
             ContextSource::CanonSlice => EvidenceSource::Canon,
             ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
+            ContextSource::ProjectBrief => EvidenceSource::StoryContract,
             ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
             ContextSource::OutlineSlice | ContextSource::ChapterMission => EvidenceSource::Outline,

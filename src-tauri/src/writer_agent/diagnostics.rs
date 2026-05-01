@@ -4,7 +4,7 @@
 //! - Unresolved plot promises in current chapter scope
 //! - Timeline inconsistencies
 
-use super::memory::WriterMemory;
+use super::memory::{StoryContractSummary, WriterMemory};
 use super::operation::{AnnotationSeverity, WriterOperation};
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,7 @@ pub enum DiagnosticSeverity {
 pub enum DiagnosticCategory {
     CanonConflict,
     UnresolvedPromise,
+    StoryContractViolation,
     TimelineIssue,
     CharacterVoiceInconsistency,
     PacingNote,
@@ -58,6 +59,7 @@ impl DiagnosticsEngine {
         paragraph: &str,
         paragraph_offset: usize,
         chapter_id: &str,
+        project_id: &str,
         memory: &WriterMemory,
     ) -> Vec<DiagnosticResult> {
         let mut results = Vec::new();
@@ -147,7 +149,35 @@ impl DiagnosticsEngine {
             }
         }
 
-        // 2. Open promises for this chapter
+        // 2. Book-level contract checks.
+        if let Ok(Some(contract)) = memory.get_story_contract(project_id) {
+            for issue in detect_story_contract_violations(paragraph, paragraph_offset, &contract) {
+                results.push(DiagnosticResult {
+                    id: next_id(),
+                    severity: issue.severity,
+                    category: DiagnosticCategory::StoryContractViolation,
+                    message: issue.message,
+                    entity_name: None,
+                    from: issue.from,
+                    to: issue.to,
+                    evidence: vec![DiagnosticEvidence {
+                        source: "story_contract".into(),
+                        reference: issue.reference,
+                        snippet: issue.snippet,
+                    }],
+                    fix_suggestion: Some(issue.fix_suggestion),
+                    operations: vec![WriterOperation::TextAnnotate {
+                        chapter: chapter_id.to_string(),
+                        from: issue.from,
+                        to: issue.to,
+                        message: issue.annotation,
+                        severity: issue.annotation_severity,
+                    }],
+                });
+            }
+        }
+
+        // 3. Open promises for this chapter.
         if let Ok(promises) = memory.get_open_promise_summaries() {
             for promise in &promises {
                 if !is_later_chapter(chapter_id, &promise.introduced_chapter) {
@@ -219,7 +249,7 @@ impl DiagnosticsEngine {
             }
         }
 
-        // 3. Pacing check (paragraph length)
+        // 4. Pacing check (paragraph length).
         if paragraph.chars().count() > 2000 {
             results.push(DiagnosticResult {
                 id: next_id(),
@@ -497,6 +527,130 @@ fn text_contains_any(value: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| value.contains(needle))
 }
 
+struct StoryContractIssue {
+    severity: DiagnosticSeverity,
+    message: String,
+    from: usize,
+    to: usize,
+    reference: String,
+    snippet: String,
+    fix_suggestion: String,
+    annotation: String,
+    annotation_severity: AnnotationSeverity,
+}
+
+fn detect_story_contract_violations(
+    paragraph: &str,
+    paragraph_offset: usize,
+    contract: &StoryContractSummary,
+) -> Vec<StoryContractIssue> {
+    let mut issues = Vec::new();
+
+    if let Some(issue) = detect_structural_boundary_violation(
+        paragraph,
+        paragraph_offset,
+        &contract.structural_boundary,
+    ) {
+        issues.push(issue);
+    }
+
+    issues
+}
+
+fn detect_structural_boundary_violation(
+    paragraph: &str,
+    paragraph_offset: usize,
+    boundary: &str,
+) -> Option<StoryContractIssue> {
+    let boundary = boundary.trim();
+    if boundary.is_empty() || !text_contains_any(boundary, CONTRACT_FORBID_CUES) {
+        return None;
+    }
+    if !text_contains_any(paragraph, CONTRACT_REVEAL_CUES) {
+        return None;
+    }
+
+    let terms = contract_boundary_terms(boundary);
+    let matched = terms
+        .iter()
+        .find_map(|term| match_contract_term(paragraph, term))?;
+    let from = paragraph_offset + matched.0;
+    let to = paragraph_offset + matched.1.max(matched.0 + 1);
+
+    Some(StoryContractIssue {
+        severity: DiagnosticSeverity::Error,
+        message: format!("书级合同违例: 当前段落疑似触碰禁区「{}」", boundary),
+        from,
+        to,
+        reference: "structural_boundary".to_string(),
+        snippet: boundary.to_string(),
+        fix_suggestion: "延后揭示、改成误导线索，或先更新书级合同后再写正文。".to_string(),
+        annotation: format!("疑似违反书级禁区：{}", boundary),
+        annotation_severity: AnnotationSeverity::Error,
+    })
+}
+
+const CONTRACT_FORBID_CUES: &[&str] = &["不得", "不要", "不能", "禁止", "不许", "避免", "禁"];
+const CONTRACT_REVEAL_CUES: &[&str] = &[
+    "真相", "来源", "身份", "秘密", "揭开", "揭露", "揭示", "说出", "坦白", "承认", "原来", "其实",
+    "就是", "来自",
+];
+
+fn contract_boundary_terms(boundary: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for term in meaningful_terms(boundary) {
+        if is_contract_boundary_stop_term(&term) {
+            continue;
+        }
+        push_term(&mut terms, &term);
+    }
+
+    let chars = boundary.chars().collect::<Vec<_>>();
+    for pair in chars.windows(2) {
+        let term = pair.iter().collect::<String>();
+        if term.chars().all(is_term_char)
+            && !is_contract_boundary_stop_term(&term)
+            && !is_stop_term(&term)
+        {
+            push_term(&mut terms, &term);
+        }
+    }
+
+    terms
+}
+
+fn match_contract_term(paragraph: &str, term: &str) -> Option<(usize, usize)> {
+    if let Some(byte_pos) = paragraph.find(term) {
+        let from = byte_to_char_index(paragraph, byte_pos);
+        return Some((from, from + term.chars().count()));
+    }
+
+    if term.chars().count() == 2 {
+        let chars = term.chars().collect::<Vec<_>>();
+        if chars.len() == 2 && paragraph.contains(chars[0]) && paragraph.contains(chars[1]) {
+            let first = paragraph
+                .find(chars[0])
+                .map(|pos| byte_to_char_index(paragraph, pos))?;
+            let second = paragraph
+                .find(chars[1])
+                .map(|pos| byte_to_char_index(paragraph, pos))?;
+            let from = first.min(second);
+            let to = first.max(second) + 1;
+            return Some((from, to));
+        }
+    }
+
+    None
+}
+
+fn is_contract_boundary_stop_term(term: &str) -> bool {
+    const STOP_TERMS: &[&str] = &[
+        "不得", "不要", "不能", "禁止", "不许", "避免", "提前", "泄露", "揭露", "揭示", "揭开",
+        "真相", "来源", "身份", "秘密",
+    ];
+    STOP_TERMS.iter().any(|stop| term.contains(stop))
+}
+
 #[derive(Default)]
 struct PromiseMatch {
     is_match: bool,
@@ -708,7 +862,7 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("林墨拔出一把长剑", 10, "ch3", &m);
+        let results = engine.diagnose("林墨拔出一把长剑", 10, "ch3", "default", &m);
         let conflict = results
             .iter()
             .find(|result| matches!(result.category, DiagnosticCategory::CanonConflict))
@@ -730,7 +884,7 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("林墨拔出寒影刀", 0, "Chapter-3", &m);
+        let results = engine.diagnose("林墨拔出寒影刀", 0, "Chapter-3", "default", &m);
         assert!(!results
             .iter()
             .any(|result| matches!(result.category, DiagnosticCategory::CanonConflict)));
@@ -755,7 +909,7 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("张三把那枚玉佩放回桌上。", 0, "Chapter-3", &m);
+        let results = engine.diagnose("张三把那枚玉佩放回桌上。", 0, "Chapter-3", "default", &m);
         assert!(results
             .iter()
             .any(|result| matches!(result.category, DiagnosticCategory::UnresolvedPromise)));
@@ -774,7 +928,7 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("张三把那枚玉佩放回桌上。", 0, "Chapter-2", &m);
+        let results = engine.diagnose("张三把那枚玉佩放回桌上。", 0, "Chapter-2", "default", &m);
         assert!(!results
             .iter()
             .any(|result| matches!(result.category, DiagnosticCategory::UnresolvedPromise)));
@@ -793,11 +947,45 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("林墨推开门，雨声压住了脚步。", 0, "Chapter-3", &m);
+        let results = engine.diagnose(
+            "林墨推开门，雨声压住了脚步。",
+            0,
+            "Chapter-3",
+            "default",
+            &m,
+        );
         assert!(results.iter().any(|result| {
             matches!(result.category, DiagnosticCategory::UnresolvedPromise)
                 && matches!(result.severity, DiagnosticSeverity::Warning)
         }));
+    }
+
+    #[test]
+    fn test_story_contract_boundary_violation_warns() {
+        let m = test_memory();
+        m.ensure_story_contract_seed(
+            "default",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+        let engine = DiagnosticsEngine::new();
+        let results = engine.diagnose(
+            "张三终于说出真相：玉佩其实来自禁地。",
+            0,
+            "Chapter-2",
+            "default",
+            &m,
+        );
+        let warning = results
+            .iter()
+            .find(|result| matches!(result.category, DiagnosticCategory::StoryContractViolation))
+            .unwrap();
+        assert!(warning.message.contains("书级合同违例"));
+        assert_eq!(warning.evidence[0].source, "story_contract");
     }
 
     #[test]
@@ -813,7 +1001,13 @@ mod tests {
         )
         .unwrap();
         let engine = DiagnosticsEngine::new();
-        let results = engine.diagnose("张三推门而入，说道：“我回来了。”", 0, "Chapter-5", &m);
+        let results = engine.diagnose(
+            "张三推门而入，说道：“我回来了。”",
+            0,
+            "Chapter-5",
+            "default",
+            &m,
+        );
         assert!(results
             .iter()
             .any(|result| matches!(result.category, DiagnosticCategory::TimelineIssue)));
@@ -824,7 +1018,7 @@ mod tests {
         let m = test_memory();
         let engine = DiagnosticsEngine::new();
         let long = "x".repeat(2001);
-        let results = engine.diagnose(&long, 0, "ch1", &m);
+        let results = engine.diagnose(&long, 0, "ch1", "default", &m);
         assert!(results
             .iter()
             .any(|r| matches!(r.category, DiagnosticCategory::PacingNote)));

@@ -4,7 +4,7 @@
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::intent::{AgentBehavior, IntentEngine, WritingIntent};
-use agent_writer_lib::writer_agent::kernel::StoryReviewQueueStatus;
+use agent_writer_lib::writer_agent::kernel::{StoryDebtCategory, StoryReviewQueueStatus};
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
@@ -661,6 +661,61 @@ fn run_story_contract_context_eval() -> EvalResult {
     eval_result(
         "writer_agent:story_contract_context_source",
         format!("sources={} used={}", pack.sources.len(), pack.total_chars),
+        errors,
+    )
+}
+
+fn run_story_contract_guard_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "张三终于说出真相：玉佩其实来自禁地。",
+            "Chapter-2",
+        ))
+        .unwrap();
+    let debt = kernel.story_debt_snapshot();
+
+    let mut errors = Vec::new();
+    let guard = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::StoryContract);
+    if guard.is_none() {
+        errors.push("missing story contract guard proposal".to_string());
+    }
+    if !guard.is_some_and(|proposal| {
+        proposal
+            .evidence
+            .iter()
+            .any(|evidence| evidence.source == EvidenceSource::StoryContract)
+            && proposal
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::TextAnnotate { .. }))
+    }) {
+        errors.push(
+            "story contract guard lacks contract evidence or annotation operation".to_string(),
+        );
+    }
+    if !debt.entries.iter().any(|entry| {
+        entry.category == StoryDebtCategory::StoryContract && entry.title.contains("contract")
+    }) {
+        errors.push("story contract guard did not enter story debt".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_contract_guard_story_debt",
+        format!("proposals={} debt={}", proposals.len(), debt.total),
         errors,
     )
 }
@@ -1330,6 +1385,7 @@ fn main() {
     results.push(run_context_budget_trace_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
+    results.push(run_story_contract_guard_eval());
     results.push(run_chapter_mission_result_feedback_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
