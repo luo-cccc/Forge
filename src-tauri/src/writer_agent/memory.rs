@@ -5,7 +5,7 @@
 use rusqlite::{Connection, Result as SqlResult};
 use serde::Serialize;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS canon_facts (
     value TEXT NOT NULL,
     source_ref TEXT DEFAULT '',
     confidence REAL DEFAULT 0.5,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS canon_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    source_ref TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -124,6 +135,8 @@ CREATE INDEX IF NOT EXISTS idx_canon_name ON canon_entities(name);
 CREATE INDEX IF NOT EXISTS idx_canon_kind ON canon_entities(kind);
 CREATE INDEX IF NOT EXISTS idx_canon_fact_entity ON canon_facts(entity_id);
 CREATE INDEX IF NOT EXISTS idx_canon_fact_key ON canon_facts(key);
+CREATE INDEX IF NOT EXISTS idx_canon_rule_category ON canon_rules(category);
+CREATE INDEX IF NOT EXISTS idx_canon_rule_status ON canon_rules(status);
 CREATE INDEX IF NOT EXISTS idx_promise_status ON plot_promises(status);
 CREATE INDEX IF NOT EXISTS idx_feedback_proposal ON proposal_feedback(proposal_id);
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
@@ -145,6 +158,15 @@ pub struct CanonEntitySummary {
     pub summary: String,
     pub attributes: serde_json::Value,
     pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonRuleSummary {
+    pub rule: String,
+    pub category: String,
+    pub priority: i32,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -404,6 +426,50 @@ impl WriterMemory {
                 summary: row.get(2)?,
                 attributes,
                 confidence: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn upsert_canon_rule(
+        &self,
+        rule: &str,
+        category: &str,
+        priority: i32,
+        source_ref: &str,
+    ) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO canon_rules (rule, category, priority, source_ref, status, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'active', datetime('now'))
+             ON CONFLICT(rule) DO UPDATE SET
+                category=excluded.category,
+                priority=excluded.priority,
+                source_ref=excluded.source_ref,
+                status='active',
+                updated_at=datetime('now')",
+            rusqlite::params![rule, category, priority, source_ref],
+        )?;
+        self.conn.query_row(
+            "SELECT id FROM canon_rules WHERE rule=?1",
+            rusqlite::params![rule],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn list_canon_rules(&self, limit: usize) -> rusqlite::Result<Vec<CanonRuleSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT rule, category, priority, status
+             FROM canon_rules
+             WHERE status = 'active'
+             ORDER BY priority DESC, updated_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            Ok(CanonRuleSummary {
+                rule: row.get(0)?,
+                category: row.get(1)?,
+                priority: row.get(2)?,
+                status: row.get(3)?,
             })
         })?;
         rows.collect()
@@ -881,6 +947,33 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
 
     ensure_column(
         conn,
+        "canon_rules",
+        "source_ref",
+        "source_ref TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "canon_rules",
+        "status",
+        "status TEXT DEFAULT 'active'",
+    )?;
+    ensure_column(
+        conn,
+        "canon_rules",
+        "created_at",
+        "created_at TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "canon_rules",
+        "updated_at",
+        "updated_at TEXT DEFAULT ''",
+    )?;
+    backfill_empty_timestamp(conn, "canon_rules", "created_at")?;
+    backfill_empty_timestamp(conn, "canon_rules", "updated_at")?;
+
+    ensure_column(
+        conn,
         "plot_promises",
         "description",
         "description TEXT DEFAULT ''",
@@ -1085,6 +1178,21 @@ mod tests {
         assert_eq!(facts, vec![("weapon".to_string(), "剑".to_string())]);
         let entities = m.list_canon_entities().unwrap();
         assert_eq!(entities[0].name, "主角");
+    }
+
+    #[test]
+    fn test_canon_rule_upsert() {
+        let m = memory();
+        let id = m
+            .upsert_canon_rule("林墨绝不主动弃刀。", "character_rule", 7, "test")
+            .unwrap();
+        assert!(id > 0);
+        m.upsert_canon_rule("林墨绝不主动弃刀。", "combat_rule", 9, "test2")
+            .unwrap();
+        let rules = m.list_canon_rules(10).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].category, "combat_rule");
+        assert_eq!(rules[0].priority, 9);
     }
 
     #[test]

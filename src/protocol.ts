@@ -710,6 +710,13 @@ export interface CanonEntitySummary {
   confidence: number;
 }
 
+export interface CanonRuleSummary {
+  rule: string;
+  category: string;
+  priority: number;
+  status: string;
+}
+
 export interface PlotPromiseSummary {
   id: number;
   kind: string;
@@ -741,6 +748,7 @@ export interface MemoryAuditEntry {
 
 export interface WriterAgentLedgerSnapshot {
   canonEntities: CanonEntitySummary[];
+  canonRules: CanonRuleSummary[];
   openPromises: PlotPromiseSummary[];
   recentDecisions: CreativeDecisionSummary[];
   memoryAudit: MemoryAuditEntry[];

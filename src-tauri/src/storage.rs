@@ -19,6 +19,7 @@ const HERMES_DIAGNOSTIC_TABLES: &[&str] = &[
 const WRITER_MEMORY_DIAGNOSTIC_TABLES: &[&str] = &[
     "canon_entities",
     "canon_facts",
+    "canon_rules",
     "plot_promises",
     "style_preferences",
     "creative_decisions",
@@ -518,6 +519,61 @@ pub fn update_outline_status(
     }
     save_outline(app, &nodes)?;
     Ok(nodes)
+}
+
+pub fn patch_outline_node(
+    app: &tauri::AppHandle,
+    chapter_title: String,
+    patch: serde_json::Value,
+) -> Result<Vec<OutlineNode>, String> {
+    let mut nodes = load_outline(app)?;
+    apply_outline_patch(&mut nodes, &chapter_title, &patch)?;
+    save_outline(app, &nodes)?;
+    Ok(nodes)
+}
+
+fn apply_outline_patch(
+    nodes: &mut [OutlineNode],
+    chapter_title: &str,
+    patch: &serde_json::Value,
+) -> Result<(), String> {
+    let patch = patch
+        .as_object()
+        .ok_or_else(|| "outline patch must be an object".to_string())?;
+    let node = nodes
+        .iter_mut()
+        .find(|node| node.chapter_title == chapter_title)
+        .ok_or_else(|| format!("Outline node '{}' not found", chapter_title))?;
+
+    for (key, value) in patch {
+        match key.as_str() {
+            "chapterTitle" | "chapter_title" => {
+                let next = value
+                    .as_str()
+                    .ok_or_else(|| "outline chapterTitle must be a string".to_string())?
+                    .trim();
+                if next.is_empty() {
+                    return Err("outline chapterTitle cannot be empty".to_string());
+                }
+                node.chapter_title = next.to_string();
+            }
+            "summary" => {
+                node.summary = value
+                    .as_str()
+                    .ok_or_else(|| "outline summary must be a string".to_string())?
+                    .to_string();
+            }
+            "status" => {
+                node.status = value
+                    .as_str()
+                    .ok_or_else(|| "outline status must be a string".to_string())?
+                    .to_string();
+            }
+            other => return Err(format!("Unsupported outline patch field '{}'", other)),
+        }
+    }
+
+    Ok(())
 }
 
 pub fn reorder_outline_nodes(
@@ -1062,6 +1118,34 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].chapter_title, "第一章");
+    }
+
+    #[test]
+    fn patch_outline_node_updates_allowed_fields() {
+        let mut nodes = vec![OutlineNode {
+            chapter_title: "第一章".to_string(),
+            summary: "旧".to_string(),
+            status: "draft".to_string(),
+        }];
+        let patch = serde_json::json!({"summary": "新", "status": "done"});
+
+        apply_outline_patch(&mut nodes, "第一章", &patch).unwrap();
+
+        assert_eq!(nodes[0].summary, "新");
+        assert_eq!(nodes[0].status, "done");
+    }
+
+    #[test]
+    fn patch_outline_node_rejects_unknown_fields() {
+        let mut nodes = vec![OutlineNode {
+            chapter_title: "第一章".to_string(),
+            summary: "旧".to_string(),
+            status: "draft".to_string(),
+        }];
+
+        let err = apply_outline_patch(&mut nodes, "第一章", &serde_json::json!({"notes": "x"}))
+            .unwrap_err();
+        assert!(err.contains("Unsupported outline patch field"));
     }
 
     #[test]

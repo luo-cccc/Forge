@@ -2108,12 +2108,39 @@ fn record_implicit_ghost_rejection(
 
 #[tauri::command]
 fn approve_writer_operation(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     operation: writer_agent::operation::WriterOperation,
     current_revision: String,
 ) -> Result<writer_agent::operation::OperationResult, String> {
+    if let writer_agent::operation::WriterOperation::OutlineUpdate { node_id, patch } = &operation {
+        return approve_outline_update_operation(&app, operation.clone(), node_id, patch.clone());
+    }
+
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     kernel.approve_editor_operation(operation, &current_revision)
+}
+
+fn approve_outline_update_operation(
+    app: &tauri::AppHandle,
+    operation: writer_agent::operation::WriterOperation,
+    node_id: &str,
+    patch: serde_json::Value,
+) -> Result<writer_agent::operation::OperationResult, String> {
+    match storage::patch_outline_node(app, node_id.to_string(), patch) {
+        Ok(_) => Ok(writer_agent::operation::OperationResult {
+            success: true,
+            operation,
+            error: None,
+            revision_after: None,
+        }),
+        Err(e) => Ok(writer_agent::operation::OperationResult {
+            success: false,
+            operation,
+            error: Some(writer_agent::operation::OperationError::invalid(&e)),
+            revision_after: None,
+        }),
+    }
 }
 
 fn to_writer_observation(

@@ -256,6 +256,14 @@ fn build_canon_slice(paragraph: &str, memory: &WriterMemory) -> String {
             ));
         }
     }
+    if let Ok(rules) = memory.list_canon_rules(6) {
+        for rule in rules {
+            lines.push(format!(
+                "RULE [{} p{}]: {}",
+                rule.category, rule.priority, rule.rule
+            ));
+        }
+    }
     lines.join("\n")
 }
 

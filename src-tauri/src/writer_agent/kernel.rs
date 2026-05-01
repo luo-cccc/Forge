@@ -35,6 +35,7 @@ pub struct WriterAgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct WriterAgentLedgerSnapshot {
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
+    pub canon_rules: Vec<super::memory::CanonRuleSummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
     pub recent_decisions: Vec<super::memory::CreativeDecisionSummary>,
     pub memory_audit: Vec<super::memory::MemoryAuditSummary>,
@@ -922,6 +923,31 @@ impl WriterAgentKernel {
                     }),
                 }
             }
+            WriterOperation::TextAnnotate {
+                chapter,
+                from,
+                to,
+                message,
+                severity,
+            } => {
+                let source = format!("text:{}:{}-{}", chapter, from, to);
+                self.memory
+                    .record_decision(
+                        chapter,
+                        &format!("Annotation: {:?}", severity),
+                        "annotated_text",
+                        &[],
+                        message,
+                        &[source],
+                    )
+                    .map_err(|e| format!("annotation: {}", e))?;
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
             WriterOperation::CanonUpsertEntity { entity } => {
                 self.memory
                     .upsert_canon_entity(
@@ -961,6 +987,32 @@ impl WriterAgentKernel {
                         &[],
                         &rationale,
                         &[format!("canon:{}:{}", entity, attribute)],
+                    )
+                    .ok();
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
+            WriterOperation::CanonUpsertRule { rule } => {
+                self.memory
+                    .upsert_canon_rule(
+                        &rule.rule,
+                        &rule.category,
+                        rule.priority,
+                        "writer_operation",
+                    )
+                    .map_err(|e| format!("canon rule: {}", e))?;
+                self.memory
+                    .record_decision(
+                        self.active_chapter.as_deref().unwrap_or("project"),
+                        &format!("Canon rule: {}", rule.category),
+                        "upserted_canon_rule",
+                        &[],
+                        &rule.rule,
+                        &[format!("canon_rule:{}", rule.category)],
                     )
                     .ok();
                 Ok(OperationResult {
@@ -1089,10 +1141,33 @@ impl WriterAgentKernel {
                     revision_after: None,
                 })
             }
-            _ => Ok(OperationResult {
+            WriterOperation::StyleUpdatePreference { key, value } => {
+                self.memory
+                    .upsert_style_preference(key, value, true)
+                    .map_err(|e| format!("style preference: {}", e))?;
+                self.memory
+                    .record_decision(
+                        self.active_chapter.as_deref().unwrap_or("project"),
+                        &format!("Style preference: {}", key),
+                        "updated_style_preference",
+                        &[],
+                        value,
+                        &[format!("style:{}", key)],
+                    )
+                    .ok();
+                Ok(OperationResult {
+                    success: true,
+                    operation,
+                    error: None,
+                    revision_after: None,
+                })
+            }
+            WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
                 success: false,
                 operation,
-                error: Some(super::operation::OperationError::invalid("not implemented")),
+                error: Some(super::operation::OperationError::invalid(
+                    "outline.update requires project storage runtime",
+                )),
                 revision_after: None,
             }),
         }
@@ -1277,6 +1352,7 @@ impl WriterAgentKernel {
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
         WriterAgentLedgerSnapshot {
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
+            canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
             open_promises: self.memory.get_open_promise_summaries().unwrap_or_default(),
             recent_decisions: self.memory.list_recent_decisions(20).unwrap_or_default(),
             memory_audit: self.memory.list_memory_audit(30).unwrap_or_default(),
@@ -2815,6 +2891,93 @@ mod tests {
             .unwrap();
         assert!(!conflict.success);
         assert_eq!(conflict.error.unwrap().code, "conflict");
+    }
+
+    #[test]
+    fn execute_operation_records_annotation_without_text_revision() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let result = kernel
+            .execute_operation(
+                WriterOperation::TextAnnotate {
+                    chapter: "Chapter-1".to_string(),
+                    from: 1,
+                    to: 4,
+                    message: "这里与设定冲突".to_string(),
+                    severity: crate::writer_agent::operation::AnnotationSeverity::Warning,
+                },
+                "",
+                "",
+            )
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.revision_after.is_none());
+        assert_eq!(kernel.ledger_snapshot().recent_decisions.len(), 1);
+    }
+
+    #[test]
+    fn execute_operation_upserts_canon_rule_and_style_preference() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+
+        let rule = kernel
+            .execute_operation(
+                WriterOperation::CanonUpsertRule {
+                    rule: crate::writer_agent::operation::CanonRuleOp {
+                        rule: "林墨不会主动弃刀。".to_string(),
+                        category: "character_rule".to_string(),
+                        priority: 8,
+                    },
+                },
+                "",
+                "",
+            )
+            .unwrap();
+        assert!(rule.success);
+
+        let style = kernel
+            .execute_operation(
+                WriterOperation::StyleUpdatePreference {
+                    key: "dialogue".to_string(),
+                    value: "prefers_subtext".to_string(),
+                },
+                "",
+                "",
+            )
+            .unwrap();
+        assert!(style.success);
+
+        let ledger = kernel.ledger_snapshot();
+        assert_eq!(ledger.canon_rules.len(), 1);
+        assert_eq!(ledger.canon_rules[0].priority, 8);
+        let preferences = kernel.memory.list_style_preferences(10).unwrap();
+        assert!(preferences
+            .iter()
+            .any(|pref| pref.key == "dialogue" && pref.value == "prefers_subtext"));
+    }
+
+    #[test]
+    fn pure_kernel_rejects_outline_update_without_project_runtime() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let result = kernel
+            .execute_operation(
+                WriterOperation::OutlineUpdate {
+                    node_id: "Chapter-1".to_string(),
+                    patch: serde_json::json!({"summary": "new"}),
+                },
+                "",
+                "",
+            )
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result
+            .error
+            .unwrap()
+            .message
+            .contains("project storage runtime"));
     }
 
     #[test]

@@ -925,9 +925,20 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
         {effectiveTab === "canon" && (
           <div className="space-y-2 text-xs">
-            {(ledger?.canonEntities.length ?? 0) === 0 && (
-              <p className="text-text-muted">No canon entities recorded yet.</p>
+            {(ledger?.canonEntities.length ?? 0) === 0 && (ledger?.canonRules.length ?? 0) === 0 && (
+              <p className="text-text-muted">No canon entities or rules recorded yet.</p>
             )}
+            {ledger?.canonRules.map((rule) => (
+              <div key={`${rule.category}-${rule.rule}`} className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">{rule.category}</span>
+                  <span className="text-[10px] text-text-muted">
+                    p{rule.priority} · {rule.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-text-secondary">{rule.rule}</p>
+              </div>
+            ))}
             {ledger?.canonEntities.map((entity) => (
               <div key={`${entity.kind}-${entity.name}`} className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="flex items-center justify-between gap-2">
