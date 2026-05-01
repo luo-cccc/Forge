@@ -2484,6 +2484,7 @@ fn context_pack_evidence(
             | ContextSource::SelectedText => EvidenceSource::ChapterText,
             ContextSource::CanonSlice => EvidenceSource::Canon,
             ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
+            ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
             ContextSource::OutlineSlice => EvidenceSource::Outline,
             _ => EvidenceSource::ChapterText,

@@ -24,6 +24,7 @@ pub enum ContextSource {
     AuthorStyle,
     CanonSlice,
     PromiseSlice,
+    DecisionSlice,
     OutlineSlice,
     RagExcerpt,
     CursorPrefix,
@@ -54,6 +55,7 @@ impl AgentTask {
                 (ContextSource::CursorSuffix, 9, 400),
                 (ContextSource::CanonSlice, 8, 600),
                 (ContextSource::PromiseSlice, 7, 400),
+                (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::OutlineSlice, 6, 500),
                 (ContextSource::AuthorStyle, 5, 300),
                 (ContextSource::RagExcerpt, 4, 400),
@@ -61,6 +63,7 @@ impl AgentTask {
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 10, 300),
                 (ContextSource::CanonSlice, 10, 800),
+                (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::OutlineSlice, 9, 500),
                 (ContextSource::RagExcerpt, 8, 600),
             ],
@@ -68,6 +71,7 @@ impl AgentTask {
                 (ContextSource::OutlineSlice, 10, 6000),
                 (ContextSource::PreviousChapter, 9, 5000),
                 (ContextSource::PromiseSlice, 8, 4000),
+                (ContextSource::DecisionSlice, 8, 2000),
                 (ContextSource::CanonSlice, 7, 4000),
                 (ContextSource::AuthorStyle, 6, 2000),
                 (ContextSource::RagExcerpt, 5, 4000),
@@ -78,16 +82,19 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 9, 500),
                 (ContextSource::CursorSuffix, 8, 500),
                 (ContextSource::CanonSlice, 7, 400),
+                (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::AuthorStyle, 6, 300),
             ],
             AgentTask::ProposalEvaluation => vec![
                 (ContextSource::CanonSlice, 10, 500),
                 (ContextSource::PromiseSlice, 9, 300),
+                (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::AuthorStyle, 8, 300),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 10, 2000),
                 (ContextSource::PromiseSlice, 9, 1000),
+                (ContextSource::DecisionSlice, 9, 800),
                 (ContextSource::OutlineSlice, 8, 1000),
             ],
             AgentTask::ManualRequest => vec![
@@ -96,6 +103,7 @@ impl AgentTask {
                 (ContextSource::CursorSuffix, 8, 500),
                 (ContextSource::CanonSlice, 8, 800),
                 (ContextSource::PromiseSlice, 7, 600),
+                (ContextSource::DecisionSlice, 7, 500),
                 (ContextSource::AuthorStyle, 6, 400),
                 (ContextSource::RagExcerpt, 5, 400),
             ],
@@ -192,6 +200,7 @@ pub fn assemble_observation_context(
 ) -> WritingContextPack {
     let canon_slice = build_canon_slice(&observation.paragraph, memory);
     let promise_slice = build_promise_slice(memory);
+    let decision_slice = build_decision_slice(memory);
     let author_style = build_style_slice(memory);
     let selected_text = observation.selected_text().to_string();
     let cursor_prefix = if observation.prefix.trim().is_empty() {
@@ -209,6 +218,7 @@ pub fn assemble_observation_context(
             ContextSource::SelectedText => non_empty(selected_text.clone()),
             ContextSource::CanonSlice => non_empty(canon_slice.clone()),
             ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
+            ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
             ContextSource::AuthorStyle => non_empty(author_style.clone()),
             _ => None,
         },
@@ -274,6 +284,21 @@ fn build_style_slice(memory: &WriterMemory) -> String {
             format!(
                 "{}: {} (+{} / -{})",
                 pref.key, pref.value, pref.accepted_count, pref.rejected_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_decision_slice(memory: &WriterMemory) -> String {
+    memory
+        .list_recent_decisions(6)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|decision| {
+            format!(
+                "{} [{}]: {}",
+                decision.title, decision.decision, decision.rationale
             )
         })
         .collect::<Vec<_>>()
@@ -359,6 +384,7 @@ mod tests {
         assert_eq!(p[0].0, ContextSource::SelectedText);
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::CanonSlice));
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::PromiseSlice));
+        assert!(p.iter().any(|(s, _, _)| *s == ContextSource::DecisionSlice));
         assert!(p.iter().any(|(s, _, _)| *s == ContextSource::AuthorStyle));
     }
 
@@ -380,6 +406,16 @@ mod tests {
             .unwrap();
         memory
             .upsert_style_preference("dialogue", "prefers_subtext", true)
+            .unwrap();
+        memory
+            .record_decision(
+                "Chapter-1",
+                "林墨不主动解释",
+                "accepted",
+                &[],
+                "保持克制，不用大段自白。",
+                &[],
+            )
             .unwrap();
 
         let observation = WriterObservation {
@@ -413,6 +449,10 @@ mod tests {
             .sources
             .iter()
             .any(|s| s.source == ContextSource::PromiseSlice));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|s| s.source == ContextSource::DecisionSlice));
         assert!(pack
             .sources
             .iter()

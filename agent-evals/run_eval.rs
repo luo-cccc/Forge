@@ -533,6 +533,43 @@ fn run_context_budget_eval() -> EvalResult {
     )
 }
 
+fn run_context_decision_slice_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .record_decision(
+            "Chapter-1",
+            "林墨不主动解释",
+            "accepted",
+            &[],
+            "保持克制，不用大段自白。",
+            &[],
+        )
+        .unwrap();
+    let kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation("林墨看向张三，把快到嘴边的话又咽了回去。");
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &obs, 1_200);
+
+    let mut errors = Vec::new();
+    if !pack
+        .sources
+        .iter()
+        .any(|source| source.source == ContextSource::DecisionSlice)
+    {
+        errors.push("missing recent decision slice".to_string());
+    }
+    if !pack.sources.iter().any(|source| {
+        source.source == ContextSource::DecisionSlice && source.content.contains("不用大段自白")
+    }) {
+        errors.push("decision slice lacks recorded rationale".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_includes_recent_decisions",
+        format!("sources={} used={}", pack.sources.len(), pack.total_chars),
+        errors,
+    )
+}
+
 fn run_timeline_contradiction_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1081,6 +1118,7 @@ fn main() {
     results.push(run_multi_ghost_eval());
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
+    results.push(run_context_decision_slice_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
     results.push(run_promise_opportunity_apply_eval());
