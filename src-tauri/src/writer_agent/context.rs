@@ -121,6 +121,44 @@ impl AgentTask {
             ],
         }
     }
+
+    pub fn required_source_budgets(&self) -> Vec<(ContextSource, usize)> {
+        match self {
+            AgentTask::GhostWriting => vec![
+                (ContextSource::CursorPrefix, 240),
+                (ContextSource::CanonSlice, 180),
+                (ContextSource::PromiseSlice, 140),
+            ],
+            AgentTask::ContinuityDiagnostic => vec![
+                (ContextSource::CursorPrefix, 160),
+                (ContextSource::CanonSlice, 240),
+            ],
+            AgentTask::ChapterGeneration => vec![
+                (ContextSource::OutlineSlice, 1_000),
+                (ContextSource::PreviousChapter, 800),
+                (ContextSource::PromiseSlice, 600),
+                (ContextSource::CanonSlice, 600),
+            ],
+            AgentTask::InlineRewrite => vec![
+                (ContextSource::SelectedText, 400),
+                (ContextSource::CursorPrefix, 160),
+            ],
+            AgentTask::ProposalEvaluation => vec![
+                (ContextSource::CanonSlice, 180),
+                (ContextSource::DecisionSlice, 120),
+            ],
+            AgentTask::CanonMaintenance => vec![
+                (ContextSource::CanonSlice, 600),
+                (ContextSource::PromiseSlice, 240),
+            ],
+            AgentTask::ManualRequest => vec![
+                (ContextSource::SelectedText, 300),
+                (ContextSource::CursorPrefix, 300),
+                (ContextSource::CanonSlice, 220),
+                (ContextSource::PromiseSlice, 180),
+            ],
+        }
+    }
 }
 
 /// The assembled context for an agent action.
@@ -159,36 +197,103 @@ pub fn assemble_context_pack(
     let mut sources = Vec::new();
     let mut used = 0usize;
     let mut source_reports = Vec::new();
+    let mut raw_sources = Vec::new();
 
-    for (source, priority, budget) in &priorities {
+    for (source, priority, budget) in priorities {
+        if let Some(raw) = source_provider(source.clone()) {
+            raw_sources.push(SourceDraft {
+                source,
+                priority,
+                requested: budget,
+                raw,
+                required_budget: 0,
+                consumed: 0,
+            });
+        }
+    }
+
+    for (required_source, required_budget) in task.required_source_budgets() {
+        if let Some(draft) = raw_sources
+            .iter_mut()
+            .find(|draft| draft.source == required_source)
+        {
+            draft.required_budget = required_budget.min(draft.requested);
+        }
+    }
+
+    for draft in raw_sources
+        .iter_mut()
+        .filter(|draft| draft.required_budget > 0)
+    {
         let remaining = total_budget.saturating_sub(used);
-        let alloc = (*budget).min(remaining);
+        let alloc = draft.required_budget.min(remaining);
         if alloc == 0 {
             break;
         }
 
-        if let Some(raw) = source_provider(source.clone()) {
-            let (content, truncated) = truncate_to_budget(&raw, alloc);
-            let char_count = content.chars().count();
-            used += char_count;
+        let content = char_window(&draft.raw, draft.consumed, alloc);
+        let char_count = content.chars().count();
+        if char_count == 0 {
+            continue;
+        }
+        draft.consumed += char_count;
+        used += char_count;
+        sources.push(ContextExcerpt {
+            source: draft.source.clone(),
+            content,
+            char_count,
+            truncated: draft.raw.chars().count() > draft.consumed,
+            priority: draft.priority,
+            evidence_ref: None,
+        });
+    }
 
-            source_reports.push(SourceReport {
-                source: format!("{:?}", source),
-                requested: *budget,
-                provided: char_count,
-                truncated,
-            });
+    for draft in raw_sources.iter_mut() {
+        let remaining = total_budget.saturating_sub(used);
+        let requested_remaining = draft.requested.saturating_sub(draft.consumed);
+        let alloc = requested_remaining.min(remaining);
+        if alloc == 0 {
+            continue;
+        }
 
+        let content = char_window(&draft.raw, draft.consumed, alloc);
+        let char_count = content.chars().count();
+        if char_count == 0 {
+            continue;
+        }
+        draft.consumed += char_count;
+        used += char_count;
+
+        if let Some(existing) = sources
+            .iter_mut()
+            .find(|source| source.source == draft.source)
+        {
+            existing.content.push_str(&content);
+            existing.char_count += char_count;
+            existing.truncated = draft.raw.chars().count() > draft.consumed;
+        } else {
             sources.push(ContextExcerpt {
-                source: source.clone(),
+                source: draft.source.clone(),
                 content,
                 char_count,
-                truncated,
-                priority: *priority,
+                truncated: draft.raw.chars().count() > draft.consumed,
+                priority: draft.priority,
                 evidence_ref: None,
             });
         }
     }
+
+    for draft in raw_sources {
+        if draft.consumed > 0 {
+            source_reports.push(SourceReport {
+                source: format!("{:?}", draft.source),
+                requested: draft.requested,
+                provided: draft.consumed,
+                truncated: draft.raw.chars().count() > draft.consumed,
+            });
+        }
+    }
+    sources.sort_by(|left, right| right.priority.cmp(&left.priority));
 
     WritingContextPack {
         task,
@@ -202,6 +307,15 @@ pub fn assemble_context_pack(
         },
         sources,
     }
+}
+
+struct SourceDraft {
+    source: ContextSource,
+    priority: u8,
+    requested: usize,
+    raw: String,
+    required_budget: usize,
+    consumed: usize,
 }
 
 pub fn assemble_observation_context(
@@ -253,6 +367,11 @@ fn non_empty(text: String) -> Option<String> {
     } else {
         Some(text)
     }
+}
+
+fn char_window(text: &str, start: usize, max_chars: usize) -> String {
+    let remaining = text.chars().skip(start).collect::<String>();
+    truncate_to_budget(&remaining, max_chars).0
 }
 
 fn build_canon_slice(paragraph: &str, memory: &WriterMemory) -> String {
@@ -386,6 +505,39 @@ mod tests {
         let pack = assemble_context_pack(AgentTask::GhostWriting, &provider, 500);
         assert!(pack.total_chars <= 500);
         assert!(!pack.sources.is_empty());
+    }
+
+    #[test]
+    fn test_required_sources_survive_tight_budget() {
+        let provider = |s: ContextSource| -> Option<String> {
+            match s {
+                ContextSource::CursorPrefix => Some("长前文。".repeat(500)),
+                ContextSource::CanonSlice => Some("林墨 weapon=寒影刀".repeat(20)),
+                ContextSource::PromiseSlice => Some("玉佩仍未交代下落。".repeat(20)),
+                ContextSource::DecisionSlice => Some("保持克制，不用大段自白。".repeat(20)),
+                _ => None,
+            }
+        };
+        let pack = assemble_context_pack(AgentTask::GhostWriting, &provider, 620);
+
+        assert!(pack.total_chars <= 620);
+        assert!(pack
+            .sources
+            .iter()
+            .any(|source| source.source == ContextSource::CursorPrefix));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|source| source.source == ContextSource::CanonSlice));
+        assert!(pack
+            .sources
+            .iter()
+            .any(|source| source.source == ContextSource::PromiseSlice));
+        assert!(pack
+            .budget_report
+            .source_reports
+            .iter()
+            .any(|report| report.source == "CanonSlice" && report.provided > 0));
     }
 
     #[test]
