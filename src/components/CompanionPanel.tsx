@@ -9,6 +9,7 @@ import type {
   AgentProposal,
   OperationResult,
   ProposalFeedback,
+  ProjectStorageDiagnostics,
   StoryMode,
   StoryDebtSnapshot,
   StoryDebtEntry,
@@ -117,6 +118,20 @@ function severityBadgeClass(severity: StoryReviewQueueEntry["severity"]): string
   return "bg-bg-deep text-text-muted";
 }
 
+function storageStatusClass(status: string): string {
+  if (status === "ok") return "text-success";
+  if (status === "missing") return "text-text-muted";
+  if (status === "error") return "text-danger";
+  return "text-accent";
+}
+
+function formatBytes(bytes?: number): string {
+  if (bytes === undefined) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function mergeProposal(prev: AgentProposal[], incoming: AgentProposal): AgentProposal[] {
   const incomingSlot = proposalSlotKey(incoming);
   const existingIndex = prev.findIndex((proposal) => proposalSlotKey(proposal) === incomingSlot);
@@ -137,6 +152,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
   const [status, setStatus] = useState<WriterAgentStatus | null>(null);
   const [ledger, setLedger] = useState<WriterAgentLedgerSnapshot | null>(null);
+  const [storageDiagnostics, setStorageDiagnostics] = useState<ProjectStorageDiagnostics | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
@@ -153,6 +169,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
       ]);
+      invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
+        .then(setStorageDiagnostics)
+        .catch(() => setStorageDiagnostics(null));
       setStatus(nextStatus);
       setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
@@ -503,6 +522,68 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 {currentChapter || "No chapter loaded"}
               </div>
             </div>
+            {storageDiagnostics && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2 text-xs">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Project Storage</span>
+                  <span className={storageDiagnostics.healthy ? "text-success" : "text-danger"}>
+                    {storageDiagnostics.healthy ? "healthy" : "needs attention"}
+                  </span>
+                </div>
+                <div className="mb-2 min-w-0 text-[10px] text-text-muted">
+                  <div className="truncate" title={storageDiagnostics.projectDataDir}>
+                    {storageDiagnostics.projectName} · {storageDiagnostics.projectId}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {storageDiagnostics.files.map((file) => (
+                    <div key={file.label} className="flex items-center justify-between gap-2">
+                      <span className="truncate text-text-secondary" title={file.path}>
+                        {file.label}
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                        {file.recordCount ?? "-"} · {formatBytes(file.bytes)}
+                      </span>
+                      <span className={`shrink-0 text-[10px] ${storageStatusClass(file.status)}`}>
+                        {file.status}
+                      </span>
+                    </div>
+                  ))}
+                  {storageDiagnostics.databases.map((db) => (
+                    <div key={db.label} className="border-t border-border-subtle pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-text-secondary" title={db.path}>
+                          {db.label}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                          v{db.userVersion ?? "-"} · {formatBytes(db.bytes)}
+                        </span>
+                        <span className={`shrink-0 text-[10px] ${storageStatusClass(db.status)}`}>
+                          {db.status}
+                        </span>
+                      </div>
+                      {db.tableCounts.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {db.tableCounts.slice(0, 5).map((table) => (
+                            <span key={`${db.label}-${table.table}`} className="rounded bg-bg-deep px-1 py-0.5 text-[10px] text-text-muted">
+                              {table.table}: {table.rows}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {[...storageDiagnostics.files, ...storageDiagnostics.databases]
+                  .filter((item) => item.error)
+                  .slice(0, 2)
+                  .map((item) => (
+                    <div key={`${item.label}-error`} className="mt-2 rounded border border-danger/30 bg-danger/10 p-1.5 text-[10px] text-danger">
+                      {item.label}: {item.error}
+                    </div>
+                  ))}
+              </div>
+            )}
             {visibleProposals.length > 0 && (
               <div>
                 <div className="text-xs text-text-secondary font-medium mb-2">

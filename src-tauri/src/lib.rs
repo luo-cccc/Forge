@@ -21,9 +21,6 @@ use chapter_generation::{
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
 
 const KEYRING_SERVICE: &str = "agent-writer";
-const HERMES_DB_FILENAME: &str = "hermes_memory.db";
-const WRITER_MEMORY_DB_FILENAME: &str = "writer_memory.db";
-
 mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
@@ -211,10 +208,10 @@ fn active_project_db_path(
 }
 
 fn open_app_hermes_db(app: &tauri::AppHandle) -> Result<HermesDB, String> {
-    let path = active_project_db_path(app, HERMES_DB_FILENAME)?;
-    let app_data_legacy = storage::app_data_dir(app)?.join(HERMES_DB_FILENAME);
+    let path = active_project_db_path(app, storage::HERMES_DB_FILENAME)?;
+    let app_data_legacy = storage::app_data_dir(app)?.join(storage::HERMES_DB_FILENAME);
     migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
-    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(HERMES_DB_FILENAME))?;
+    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(storage::HERMES_DB_FILENAME))?;
     HermesDB::open(&path).map_err(|e| {
         format!(
             "Failed to open Hermes memory DB at '{}': {}",
@@ -228,10 +225,13 @@ fn open_app_writer_kernel(
     app: &tauri::AppHandle,
 ) -> Result<writer_agent::WriterAgentKernel, String> {
     let project_id = storage::active_project_id(app)?;
-    let path = active_project_db_path(app, WRITER_MEMORY_DB_FILENAME)?;
-    let app_data_legacy = storage::app_data_dir(app)?.join(WRITER_MEMORY_DB_FILENAME);
+    let path = active_project_db_path(app, storage::WRITER_MEMORY_DB_FILENAME)?;
+    let app_data_legacy = storage::app_data_dir(app)?.join(storage::WRITER_MEMORY_DB_FILENAME);
     migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
-    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(WRITER_MEMORY_DB_FILENAME))?;
+    migrate_legacy_db_if_needed(
+        &path,
+        legacy_workspace_db_path(storage::WRITER_MEMORY_DB_FILENAME),
+    )?;
     let memory = writer_agent::memory::WriterMemory::open(&path).map_err(|e| {
         format!(
             "Failed to open writer memory DB at '{}': {}",
@@ -1983,6 +1983,13 @@ fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, 
 }
 
 #[tauri::command]
+fn get_project_storage_diagnostics(
+    app: tauri::AppHandle,
+) -> Result<storage::ProjectStorageDiagnostics, String> {
+    storage::project_storage_diagnostics(&app)
+}
+
+#[tauri::command]
 fn get_writer_agent_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<writer_agent::WriterAgentStatus, String> {
@@ -2966,6 +2973,7 @@ pub fn run() {
             agent_observe,
             get_agent_domain_profile,
             get_agent_kernel_status,
+            get_project_storage_diagnostics,
             get_writer_agent_status,
             get_writer_agent_ledger,
             get_writer_agent_pending_proposals,

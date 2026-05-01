@@ -17,6 +17,7 @@ export const Commands = {
   generateChapterAutonomous: "generate_chapter_autonomous",
   getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",
+  getProjectStorageDiagnostics: "get_project_storage_diagnostics",
   getWriterAgentLedger: "get_writer_agent_ledger",
   getWriterAgentPendingProposals: "get_writer_agent_pending_proposals",
   getWriterAgentStatus: "get_writer_agent_status",
@@ -626,6 +627,44 @@ export interface WriterAgentStatus {
   openPromiseCount: number;
   pendingProposals: number;
   totalFeedbackEvents: number;
+}
+
+export interface ProjectStorageDiagnostics {
+  projectId: string;
+  projectName: string;
+  appDataDir: string;
+  projectDataDir: string;
+  checkedAt: number;
+  healthy: boolean;
+  files: StorageFileDiagnostic[];
+  databases: SqliteDatabaseDiagnostic[];
+}
+
+export interface StorageFileDiagnostic {
+  label: string;
+  path: string;
+  exists: boolean;
+  bytes?: number;
+  recordCount?: number;
+  status: string;
+  error?: string;
+}
+
+export interface SqliteDatabaseDiagnostic {
+  label: string;
+  path: string;
+  exists: boolean;
+  bytes?: number;
+  userVersion?: number;
+  quickCheck?: string;
+  tableCounts: SqliteTableCount[];
+  status: string;
+  error?: string;
+}
+
+export interface SqliteTableCount {
+  table: string;
+  rows: number;
 }
 
 export interface CanonEntitySummary {

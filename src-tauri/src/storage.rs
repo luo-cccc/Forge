@@ -1,5 +1,32 @@
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+
+pub const HERMES_DB_FILENAME: &str = "hermes_memory.db";
+pub const WRITER_MEMORY_DB_FILENAME: &str = "writer_memory.db";
+
+const HERMES_DIAGNOSTIC_TABLES: &[&str] = &[
+    "session_history",
+    "user_drift_profile",
+    "hierarchical_summaries",
+    "agent_skills",
+    "character_state",
+    "plot_thread",
+    "world_rule",
+];
+
+const WRITER_MEMORY_DIAGNOSTIC_TABLES: &[&str] = &[
+    "canon_entities",
+    "canon_facts",
+    "plot_promises",
+    "style_preferences",
+    "creative_decisions",
+    "proposal_feedback",
+    "memory_audit_events",
+    "writer_observation_trace",
+    "writer_proposal_trace",
+    "writer_feedback_trace",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoreEntry {
@@ -26,6 +53,52 @@ pub struct OutlineNode {
 pub struct ProjectManifest {
     pub id: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectStorageDiagnostics {
+    pub project_id: String,
+    pub project_name: String,
+    pub app_data_dir: String,
+    pub project_data_dir: String,
+    pub checked_at: u64,
+    pub healthy: bool,
+    pub files: Vec<StorageFileDiagnostic>,
+    pub databases: Vec<SqliteDatabaseDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageFileDiagnostic {
+    pub label: String,
+    pub path: String,
+    pub exists: bool,
+    pub bytes: Option<u64>,
+    pub record_count: Option<usize>,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteDatabaseDiagnostic {
+    pub label: String,
+    pub path: String,
+    pub exists: bool,
+    pub bytes: Option<u64>,
+    pub user_version: Option<i64>,
+    pub quick_check: Option<String>,
+    pub table_counts: Vec<SqliteTableCount>,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteTableCount {
+    pub table: String,
+    pub rows: u64,
 }
 
 pub fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -420,6 +493,231 @@ pub fn brain_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> 
     Ok(target)
 }
 
+pub fn project_storage_diagnostics(
+    app: &tauri::AppHandle,
+) -> Result<ProjectStorageDiagnostics, String> {
+    let manifest = active_project_manifest(app)?;
+    let app_data_dir = app_data_dir(app)?;
+    let project_data_dir = active_project_data_dir(app)?;
+    let chapters_dir = project_dir(app)?;
+
+    let files = vec![
+        diagnose_json_array_file::<LoreEntry>("lorebook", &lorebook_path(app)?),
+        diagnose_json_array_file::<OutlineNode>("outline", &outline_path(app)?),
+        diagnose_json_array_file::<agent_harness_core::vector_db::Chunk>(
+            "project_brain",
+            &brain_path(app)?,
+        ),
+        diagnose_chapters_directory(&chapters_dir),
+    ];
+    let databases = vec![
+        diagnose_sqlite_database(
+            "hermes_memory",
+            &project_data_dir.join(HERMES_DB_FILENAME),
+            HERMES_DIAGNOSTIC_TABLES,
+        ),
+        diagnose_sqlite_database(
+            "writer_memory",
+            &project_data_dir.join(WRITER_MEMORY_DB_FILENAME),
+            WRITER_MEMORY_DIAGNOSTIC_TABLES,
+        ),
+    ];
+    let healthy = files.iter().all(|file| file.status != "error")
+        && databases.iter().all(|db| db.status == "ok");
+
+    Ok(ProjectStorageDiagnostics {
+        project_id: manifest.id,
+        project_name: manifest.name,
+        app_data_dir: app_data_dir.to_string_lossy().to_string(),
+        project_data_dir: project_data_dir.to_string_lossy().to_string(),
+        checked_at: unix_time_ms(),
+        healthy,
+        files,
+        databases,
+    })
+}
+
+fn diagnose_json_array_file<T: for<'de> Deserialize<'de>>(
+    label: &str,
+    path: &std::path::Path,
+) -> StorageFileDiagnostic {
+    let mut diagnostic = base_file_diagnostic(label, path);
+    if !diagnostic.exists {
+        diagnostic.status = "missing".to_string();
+        return diagnostic;
+    }
+
+    match std::fs::read_to_string(path) {
+        Ok(data) => match serde_json::from_str::<Vec<T>>(&data) {
+            Ok(rows) => {
+                diagnostic.record_count = Some(rows.len());
+                diagnostic.status = "ok".to_string();
+            }
+            Err(e) => {
+                diagnostic.status = "error".to_string();
+                diagnostic.error = Some(format!("JSON parse failed: {}", e));
+            }
+        },
+        Err(e) => {
+            diagnostic.status = "error".to_string();
+            diagnostic.error = Some(format!("Read failed: {}", e));
+        }
+    }
+
+    diagnostic
+}
+
+fn diagnose_chapters_directory(path: &std::path::Path) -> StorageFileDiagnostic {
+    let mut diagnostic = base_file_diagnostic("chapters", path);
+    if !diagnostic.exists {
+        diagnostic.status = "missing".to_string();
+        return diagnostic;
+    }
+    if !path.is_dir() {
+        diagnostic.status = "error".to_string();
+        diagnostic.error = Some("Expected a directory".to_string());
+        return diagnostic;
+    }
+
+    match std::fs::read_dir(path) {
+        Ok(entries) => {
+            let mut count = 0usize;
+            let mut bytes = 0u64;
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.extension().map(|e| e == "md").unwrap_or(false) {
+                    count += 1;
+                    if let Ok(metadata) = entry.metadata() {
+                        bytes = bytes.saturating_add(metadata.len());
+                    }
+                }
+            }
+            diagnostic.record_count = Some(count);
+            diagnostic.bytes = Some(bytes);
+            diagnostic.status = "ok".to_string();
+        }
+        Err(e) => {
+            diagnostic.status = "error".to_string();
+            diagnostic.error = Some(format!("Read directory failed: {}", e));
+        }
+    }
+
+    diagnostic
+}
+
+fn diagnose_sqlite_database(
+    label: &str,
+    path: &std::path::Path,
+    tables: &[&str],
+) -> SqliteDatabaseDiagnostic {
+    let mut diagnostic = SqliteDatabaseDiagnostic {
+        label: label.to_string(),
+        path: path.to_string_lossy().to_string(),
+        exists: path.exists(),
+        bytes: file_size(path),
+        user_version: None,
+        quick_check: None,
+        table_counts: vec![],
+        status: "unknown".to_string(),
+        error: None,
+    };
+    if !diagnostic.exists {
+        diagnostic.status = "missing".to_string();
+        diagnostic.error = Some("Database file is missing".to_string());
+        return diagnostic;
+    }
+
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY;
+    let conn = match Connection::open_with_flags(path, flags) {
+        Ok(conn) => conn,
+        Err(e) => {
+            diagnostic.status = "error".to_string();
+            diagnostic.error = Some(format!("Open failed: {}", e));
+            return diagnostic;
+        }
+    };
+
+    diagnostic.user_version = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .ok();
+    match conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0)) {
+        Ok(result) => diagnostic.quick_check = Some(result),
+        Err(e) => {
+            diagnostic.status = "error".to_string();
+            diagnostic.error = Some(format!("quick_check failed: {}", e));
+            return diagnostic;
+        }
+    }
+
+    for table in tables {
+        match sqlite_table_row_count(&conn, table) {
+            Ok(Some(rows)) => diagnostic.table_counts.push(SqliteTableCount {
+                table: (*table).to_string(),
+                rows,
+            }),
+            Ok(None) => {}
+            Err(e) => {
+                diagnostic.status = "error".to_string();
+                diagnostic.error = Some(format!("Count failed for '{}': {}", table, e));
+                return diagnostic;
+            }
+        }
+    }
+
+    if diagnostic.quick_check.as_deref() == Some("ok") {
+        diagnostic.status = "ok".to_string();
+    } else {
+        diagnostic.status = "error".to_string();
+        diagnostic.error = diagnostic
+            .quick_check
+            .as_ref()
+            .map(|check| format!("SQLite quick_check reported '{}'", check));
+    }
+    diagnostic
+}
+
+fn sqlite_table_row_count(conn: &Connection, table: &str) -> rusqlite::Result<Option<u64>> {
+    if !sqlite_table_exists(conn, table)? {
+        return Ok(None);
+    }
+    let count: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })?;
+    Ok(Some(count.max(0) as u64))
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        rusqlite::params![table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn base_file_diagnostic(label: &str, path: &std::path::Path) -> StorageFileDiagnostic {
+    StorageFileDiagnostic {
+        label: label.to_string(),
+        path: path.to_string_lossy().to_string(),
+        exists: path.exists(),
+        bytes: file_size(path),
+        record_count: None,
+        status: "unknown".to_string(),
+        error: None,
+    }
+}
+
+fn file_size(path: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|metadata| metadata.len())
+}
+
+fn unix_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 pub fn rename_chapter_file(
     app: &tauri::AppHandle,
     old_name: String,
@@ -487,5 +785,51 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].chapter_title, "第一章");
+    }
+
+    #[test]
+    fn diagnose_json_array_file_reports_parse_errors() {
+        let path = temp_path("bad-lorebook.json");
+        std::fs::write(&path, "{not json").unwrap();
+
+        let diagnostic = diagnose_json_array_file::<LoreEntry>("lorebook", &path);
+
+        assert_eq!(diagnostic.status, "error");
+        assert!(diagnostic.error.unwrap().contains("JSON parse failed"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn diagnose_sqlite_database_reports_version_and_counts() {
+        let path = temp_path("writer-memory.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "PRAGMA user_version = 7;
+                CREATE TABLE canon_entities (id INTEGER PRIMARY KEY, name TEXT);
+                INSERT INTO canon_entities (name) VALUES ('林墨'), ('张三');",
+            )
+            .unwrap();
+        }
+
+        let diagnostic =
+            diagnose_sqlite_database("writer_memory", &path, &["canon_entities", "missing_table"]);
+
+        assert_eq!(diagnostic.status, "ok");
+        assert_eq!(diagnostic.user_version, Some(7));
+        assert_eq!(diagnostic.quick_check.as_deref(), Some("ok"));
+        assert_eq!(diagnostic.table_counts[0].table, "canon_entities");
+        assert_eq!(diagnostic.table_counts[0].rows, 2);
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let unique = unix_time_ms();
+        std::env::temp_dir().join(format!(
+            "forge-storage-test-{}-{}-{}",
+            std::process::id(),
+            unique,
+            name
+        ))
     }
 }
