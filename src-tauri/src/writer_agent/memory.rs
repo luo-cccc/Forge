@@ -310,6 +310,16 @@ pub struct ChapterResultSummary {
     pub created_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NextBeatSummary {
+    pub chapter_title: String,
+    pub goal: String,
+    pub carryovers: Vec<String>,
+    pub blockers: Vec<String>,
+    pub source_refs: Vec<String>,
+}
+
 impl ChapterMissionSummary {
     pub fn is_empty(&self) -> bool {
         [
@@ -356,6 +366,22 @@ impl ChapterResultSummary {
         push_list_line(&mut lines, "伏笔变化", &self.promise_updates);
         push_list_line(&mut lines, "设定变化", &self.canon_updates);
         push_contract_line(&mut lines, "来源", &self.source_ref);
+        lines.join("\n")
+    }
+}
+
+impl NextBeatSummary {
+    pub fn is_empty(&self) -> bool {
+        self.goal.trim().is_empty() && self.carryovers.is_empty() && self.blockers.is_empty()
+    }
+
+    pub fn render_for_context(&self) -> String {
+        let mut lines = Vec::new();
+        push_contract_line(&mut lines, "接力章节", &self.chapter_title);
+        push_contract_line(&mut lines, "下一拍目标", &self.goal);
+        push_list_line(&mut lines, "需要接住", &self.carryovers);
+        push_list_line(&mut lines, "阻塞/风险", &self.blockers);
+        push_list_line(&mut lines, "依据", &self.source_refs);
         lines.join("\n")
     }
 }

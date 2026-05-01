@@ -261,6 +261,7 @@ function buildSecondBrainItems(
   const openPromise = ledger?.openPromises[0];
   const canonRule = ledger?.canonRules[0];
   const storyContract = ledger?.storyContract;
+  const nextBeat = ledger?.nextBeat;
   const latestResult =
     (currentChapter
       ? ledger?.recentChapterResults.find((result) => result.chapterTitle === currentChapter)
@@ -283,6 +284,8 @@ function buildSecondBrainItems(
   const sceneGoal = canonRisk ?? promiseDebt ?? pacingDebt;
   const sceneValue = sceneGoal
     ? compactLine(sceneGoal.title, "Resolve current story debt", 72)
+    : nextBeat
+      ? compactLine(nextBeat.goal, "Continue the next beat", 72)
     : decision
       ? compactLine(decision.title, "Continue current decision", 72)
       : currentChapter
@@ -290,6 +293,16 @@ function buildSecondBrainItems(
         : "No chapter loaded";
   const sceneDetail = sceneGoal
     ? compactLine(sceneGoal.message, "Review the active story issue")
+    : nextBeat
+      ? compactLine(
+          [
+            nextBeat.carryovers[0] && `Carry: ${nextBeat.carryovers[0]}`,
+            nextBeat.blockers[0] && `Block: ${nextBeat.blockers[0]}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          `Next beat for ${nextBeat.chapterTitle}`,
+        )
     : decision
       ? compactLine(decision.rationale || decision.scope, "Follow the latest creative decision")
       : "Keep drafting while preserving canon and unresolved promises.";
@@ -416,7 +429,7 @@ function buildSecondBrainItems(
       label: "Scene Goal",
       value: sceneValue,
       detail: sceneDetail,
-      tone: sceneGoal ? "accent" : "neutral",
+      tone: sceneGoal || nextBeat ? "accent" : "neutral",
     },
     {
       label: "Open Promise",

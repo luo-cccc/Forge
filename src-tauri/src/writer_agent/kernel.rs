@@ -15,7 +15,7 @@ use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
     ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextSourceBudgetTrace,
-    ManualAgentTurnSummary, StoryContractSummary, WriterMemory,
+    ManualAgentTurnSummary, NextBeatSummary, StoryContractSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -44,6 +44,7 @@ pub struct WriterAgentLedgerSnapshot {
     pub active_chapter_mission: Option<super::memory::ChapterMissionSummary>,
     pub chapter_missions: Vec<super::memory::ChapterMissionSummary>,
     pub recent_chapter_results: Vec<super::memory::ChapterResultSummary>,
+    pub next_beat: Option<super::memory::NextBeatSummary>,
     pub canon_entities: Vec<super::memory::CanonEntitySummary>,
     pub canon_rules: Vec<super::memory::CanonRuleSummary>,
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
@@ -1486,28 +1487,39 @@ impl WriterAgentKernel {
     }
 
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
+        let active_chapter_mission = self.active_chapter.as_deref().and_then(|chapter| {
+            self.memory
+                .get_chapter_mission(&self.project_id, chapter)
+                .ok()
+                .flatten()
+        });
+        let recent_chapter_results = self
+            .memory
+            .list_recent_chapter_results(&self.project_id, 20)
+            .unwrap_or_default();
+        let open_promises = self.memory.get_open_promise_summaries().unwrap_or_default();
+        let next_beat = derive_next_beat(
+            self.active_chapter.as_deref(),
+            active_chapter_mission.as_ref(),
+            &recent_chapter_results,
+            &open_promises,
+        );
+
         WriterAgentLedgerSnapshot {
             story_contract: self
                 .memory
                 .get_story_contract(&self.project_id)
                 .unwrap_or_default(),
-            active_chapter_mission: self.active_chapter.as_deref().and_then(|chapter| {
-                self.memory
-                    .get_chapter_mission(&self.project_id, chapter)
-                    .ok()
-                    .flatten()
-            }),
+            active_chapter_mission,
             chapter_missions: self
                 .memory
                 .list_chapter_missions(&self.project_id, 50)
                 .unwrap_or_default(),
-            recent_chapter_results: self
-                .memory
-                .list_recent_chapter_results(&self.project_id, 20)
-                .unwrap_or_default(),
+            recent_chapter_results,
+            next_beat,
             canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
             canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
-            open_promises: self.memory.get_open_promise_summaries().unwrap_or_default(),
+            open_promises,
             recent_decisions: self.memory.list_recent_decisions(20).unwrap_or_default(),
             memory_audit: self.memory.list_memory_audit(30).unwrap_or_default(),
         }
@@ -1757,6 +1769,122 @@ fn chapter_result_from_observation(
             .collect(),
         source_ref: format!("chapter_save:{}:{}", chapter_title, chapter_revision),
         created_at: observation.created_at,
+    }
+}
+
+pub(crate) fn derive_next_beat(
+    active_chapter: Option<&str>,
+    active_mission: Option<&ChapterMissionSummary>,
+    recent_results: &[ChapterResultSummary],
+    open_promises: &[super::memory::PlotPromiseSummary],
+) -> Option<NextBeatSummary> {
+    let latest_result = recent_results.first()?;
+    let chapter_title = active_chapter
+        .or_else(|| active_mission.map(|mission| mission.chapter_title.as_str()))
+        .unwrap_or(latest_result.chapter_title.as_str())
+        .to_string();
+
+    let mut carryovers = Vec::new();
+    push_unique_lines(
+        &mut carryovers,
+        latest_result.new_conflicts.iter().cloned(),
+        3,
+    );
+    push_unique_lines(
+        &mut carryovers,
+        latest_result.promise_updates.iter().cloned(),
+        5,
+    );
+    push_unique_lines(
+        &mut carryovers,
+        latest_result
+            .new_clues
+            .iter()
+            .map(|clue| format!("继续处理线索: {}", clue)),
+        6,
+    );
+    push_unique_lines(
+        &mut carryovers,
+        open_promises
+            .iter()
+            .take(3)
+            .map(|promise| format!("未回收伏笔: {}", promise.title)),
+        7,
+    );
+
+    let mut blockers = Vec::new();
+    if let Some(mission) = active_mission {
+        match mission.status.as_str() {
+            "drifted" => blockers.push(format!("上一轮任务偏离: {}", mission.must_not)),
+            "needs_review" => blockers.push("上一轮任务与结果匹配度低，需要人工复核。".to_string()),
+            "in_progress" => blockers.push("上一轮任务只完成部分，需要继续接住。".to_string()),
+            _ => {}
+        }
+    }
+
+    let goal = next_beat_goal(active_mission, latest_result, &carryovers);
+    let source_refs = [latest_result.source_ref.clone()]
+        .into_iter()
+        .chain(active_mission.map(|mission| mission.source_ref.clone()))
+        .filter(|source| !source.trim().is_empty())
+        .collect::<Vec<_>>();
+
+    let next = NextBeatSummary {
+        chapter_title,
+        goal,
+        carryovers,
+        blockers,
+        source_refs,
+    };
+    if next.is_empty() {
+        None
+    } else {
+        Some(next)
+    }
+}
+
+fn next_beat_goal(
+    active_mission: Option<&ChapterMissionSummary>,
+    latest_result: &ChapterResultSummary,
+    carryovers: &[String],
+) -> String {
+    if let Some(mission) = active_mission {
+        if mission.status == "drifted" {
+            return format!("先修正任务偏离，再回到本章任务: {}", mission.mission);
+        }
+        if mission.status == "needs_review" {
+            return format!("复核本章任务是否还成立: {}", mission.mission);
+        }
+        if mission.status != "completed" && !mission.mission.trim().is_empty() {
+            return mission.mission.clone();
+        }
+    }
+
+    if let Some(conflict) = latest_result.new_conflicts.first() {
+        format!("承接上一章冲突后果: {}", conflict)
+    } else if let Some(carryover) = carryovers.first() {
+        carryover.clone()
+    } else if let Some(clue) = latest_result.new_clues.first() {
+        format!("让线索产生新的选择或代价: {}", clue)
+    } else {
+        format!("承接上一章结果: {}", latest_result.summary)
+    }
+}
+
+fn push_unique_lines<I>(target: &mut Vec<String>, lines: I, max_len: usize)
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = target.iter().cloned().collect::<HashSet<_>>();
+    for line in lines {
+        let line = line.trim().to_string();
+        if line.is_empty() || !seen.insert(line.clone()) {
+            continue;
+        }
+        target.push(line);
+        if target.len() >= max_len {
+            break;
+        }
     }
 }
 
@@ -4090,6 +4218,42 @@ mod tests {
             .recent_decisions
             .iter()
             .any(|decision| decision.decision == "mission_status:drifted"));
+    }
+
+    #[test]
+    fn ledger_snapshot_derives_next_beat_from_latest_result_and_promises() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        memory
+            .add_promise(
+                "object_in_motion",
+                "玉佩",
+                "张三拿走玉佩",
+                "Chapter-1",
+                "Chapter-3",
+                4,
+            )
+            .unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs = observation("林墨发现玉佩的下落，却开始怀疑张三。新的冲突就此埋下。");
+        obs.reason = ObservationReason::Save;
+        obs.source = ObservationSource::ChapterSave;
+        obs.chapter_title = Some("Chapter-2".to_string());
+
+        kernel.observe(obs).unwrap();
+
+        let next_beat = kernel
+            .ledger_snapshot()
+            .next_beat
+            .expect("next beat should be derived from saved result");
+        assert!(next_beat.goal.contains("冲突"));
+        assert!(next_beat
+            .carryovers
+            .iter()
+            .any(|line| line.contains("玉佩")));
+        assert!(next_beat
+            .source_refs
+            .iter()
+            .any(|source| source.contains("chapter_save:Chapter-2")));
     }
 
     #[test]

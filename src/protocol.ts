@@ -759,6 +759,14 @@ export interface ChapterResultSummary {
   createdAt: number;
 }
 
+export interface NextBeatSummary {
+  chapterTitle: string;
+  goal: string;
+  carryovers: string[];
+  blockers: string[];
+  sourceRefs: string[];
+}
+
 export interface MemoryAuditEntry {
   proposalId: string;
   kind: string;
@@ -775,6 +783,7 @@ export interface WriterAgentLedgerSnapshot {
   activeChapterMission?: ChapterMissionSummary | null;
   chapterMissions: ChapterMissionSummary[];
   recentChapterResults: ChapterResultSummary[];
+  nextBeat?: NextBeatSummary | null;
   canonEntities: CanonEntitySummary[];
   canonRules: CanonRuleSummary[];
   openPromises: PlotPromiseSummary[];
