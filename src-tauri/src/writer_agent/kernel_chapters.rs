@@ -1,18 +1,15 @@
 //! Chapter result processing, mission calibration, and text analysis helpers.
 //! Extracted from kernel.rs.
 
-use super::context::{AgentTask, ContextExcerpt, ContextSource, WritingContextPack};
 use super::kernel::{
     extract_new_canon_entities, extract_plot_promises, sentence_snippet, split_sentences,
 };
 use super::memory::ContextBudgetTrace;
-use super::memory::{
-    CanonEntitySummary, ChapterMissionSummary, ChapterResultSummary, NextBeatSummary, WriterMemory,
-};
-use super::observation::{ObservationReason, ObservationSource, WriterObservation};
+use super::memory::{ChapterMissionSummary, ChapterResultSummary, NextBeatSummary, WriterMemory};
+use super::observation::WriterObservation;
 use super::operation::WriterOperation;
 use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub(crate) fn proposal_id(session_id: &str, counter: u64) -> String {
     format!("prop_{}_{}", session_id, counter)

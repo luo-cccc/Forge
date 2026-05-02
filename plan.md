@@ -28,13 +28,13 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
 - Command boundary audit 已覆盖 47 个 Tauri commands，并进入 `npm run verify`。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、67/67 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、84/84 writer evals。
 
 ### 当前剩余核心矛盾
 
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
-- 已有第一批产品场景 eval，但还没有达到“10 个真实长篇场景”的目标，仍不足以证明真实作者价值。
+- `agent-evals/src/product_scenarios.rs` 已集中承载 10 个真实长篇产品场景 eval；下一步要继续提升场景真实性和失败解释质量，而不是只堆数量。
 - `src-tauri/src/lib.rs` 和 `writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
 
 ## 2. 总体原则
@@ -356,7 +356,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 验收标准：
 
-- 新增 `agent-evals` 场景不少于 10 个。
+- 新增 `agent-evals` 场景不少于 10 个。（已完成：`agent-evals/src/product_scenarios.rs` 当前集中 10 个长篇产品场景）
 - 每个 eval 都输出：
   - expected behavior
   - actual behavior
@@ -376,7 +376,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 - chapter mission completion rate
 - manual ask converted-to-operation rate
 
-当前状态：第一版已完成。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。剩余工作是保留更长的 session 历史，并提供 debug/inspector 趋势视图。
+当前状态：工程第一版已完成，但产品验证不能按完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。剩余工作是保留更长的 session 历史、提供 debug/inspector 趋势视图，并用真实连续写作场景证明这些指标与作者价值相关。
 
 验收标准：
 
@@ -682,7 +682,7 @@ agent-evals/src/
 
 中期完成定义：
 
-- 连续多章 scenario eval 通过。
+- 连续多章 scenario eval 通过，并至少覆盖 10 个长篇产品场景。
 - Agent 能稳定追踪承诺、角色状态、物件去向、章节任务。
 - 作者可以相信它不会乱改设定、乱污染记忆、乱覆盖正文。
 - 手动聊天不再是主路径。
@@ -693,6 +693,6 @@ agent-evals/src/
 
 ## 14. 最薄弱的一根弦
 
-只要旧聊天 loop 仍能绕过统一 Writer Agent Kernel，Forge 就还不是 Cursor 式写作 agent。
+只要作者价值没有被连续真实写作场景证明，工程 eval 再漂亮也只能说明系统没坏，不能说明产品成立。
 
-只要作者价值没有被连续写作场景证明，工程 eval 再漂亮也只能说明系统没坏，不能说明产品成立。
+只要 Companion 的默认体验仍让作者感觉像在操作一个工具，而不是被一个可靠的第二作家托住，Forge 就还没有真正进入 Cursor 式写作 agent。

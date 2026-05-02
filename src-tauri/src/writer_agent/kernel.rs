@@ -8,8 +8,7 @@ use agent_harness_core::agent_loop::EventCallback;
 use agent_harness_core::provider::{LlmMessage, Provider};
 use agent_harness_core::{
     default_writing_tool_registry, AgentLoop, AgentLoopConfig, EffectiveToolInventory,
-    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolFilter, ToolHandler,
-    ToolPolicyContract, ToolSideEffectLevel,
+    RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolHandler,
 };
 use agent_harness_core::{PermissionMode, PermissionPolicy};
 
@@ -25,13 +24,11 @@ use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
     ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextRecallSummary,
-    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, PromiseKind,
-    StoryContractQuality, StoryContractSummary, WriterMemory,
+    ContextSourceBudgetTrace, ManualAgentTurnSummary, PromiseKind, StoryContractQuality,
+    WriterMemory,
 };
 use super::observation::WriterObservation;
-use super::operation::{
-    execute_text_operation, CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation,
-};
+use super::operation::{CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation};
 use super::proposal::{
     AgentProposal, EvidenceRef, EvidenceSource, ProposalAlternative, ProposalKind, ProposalPriority,
 };

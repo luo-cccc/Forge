@@ -1,8 +1,8 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    ambient::EditorEvent, default_writing_tool_registry, hermes_memory::HermesDB,
-    provider::openai_compat::OpenAiCompatProvider, writing_domain_profile, AgentLoopEvent,
+    ambient::EditorEvent, hermes_memory::HermesDB, provider::openai_compat::OpenAiCompatProvider,
+    AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -15,7 +15,7 @@ mod manual_agent;
 mod storage;
 mod tool_bridge;
 pub mod writer_agent;
-use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
+use agent_runtime::{AgentObservation, AgentObserveResult};
 use chapter_generation::{
     ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
     PipelineTerminal, SaveMode,

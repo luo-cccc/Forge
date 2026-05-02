@@ -5,10 +5,8 @@ use super::context::AgentTask;
 use super::memory::{
     ChapterMissionSummary, StoryContractQuality, StoryContractSummary, WriterMemory,
 };
-use super::operation::{AnnotationSeverity, WriterOperation};
-use agent_harness_core::{
-    FeedbackContract, TaskBelief, TaskScope, ToolFilter, ToolPolicyContract, ToolSideEffectLevel,
-};
+use super::operation::WriterOperation;
+use agent_harness_core::{FeedbackContract, ToolFilter, ToolPolicyContract, ToolSideEffectLevel};
 
 pub(crate) fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {
     match task {

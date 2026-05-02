@@ -23,7 +23,7 @@ P1 is in progress:
 - Promise Ledger now classifies promise kinds including plot promise, emotional debt, object whereabouts, character commitment, mystery clue, and relationship tension.
 - Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency.
 - Companion Panel write mode remains quiet and now summarizes acceptance/save health instead of exposing raw operation traces.
-- `agent-evals` includes a first 5-chapter scenario plus character conflict, style continuity, mission drift, and ghost quality-confidence checks. More scenario fixtures are still needed before P1 can be called complete.
+- `agent-evals` now includes 10 long-form product scenario checks in `agent-evals/src/product_scenarios.rs`, covering multi-chapter promise tracking, result feedback handoff, payoff timing, resolved-promise quieting, object whereabouts, mission drift, canon guardrails, style feedback, decision metrics, and context explainability. More realistic fixtures are still needed before product value can be called proven.
 
 ## What Is Solid Now
 
@@ -66,7 +66,7 @@ The expected local baseline is:
 
 - `cargo test -p agent-writer`: 153 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 61/61 passing
+- `cargo run -p agent-evals`: 84/84 passing
 - `npm run check:p2`: 9/9 passing
 - `npm run check:audit`: 47 commands, 0 issues
 - `npm run lint`: passing
@@ -89,6 +89,6 @@ The expected local baseline is:
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions (P1).
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
-- Product validation still needs a broader scenario suite: the first 5-chapter fixture exists, but the plan target is at least 10 realistic long-form scenarios (P1).
+- Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
 - `kernel.rs`, `lib.rs`, and `agent-evals/src/evals.rs` still need modular splitting (P2).

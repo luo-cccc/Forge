@@ -1,6 +1,5 @@
 //! Writer agent Tauri commands — status, ledger, proposals, feedback.
 
-use crate::agent_runtime;
 use crate::AppState;
 
 #[tauri::command]

@@ -6,9 +6,7 @@ use super::kernel_helpers::{
     validate_story_contract_summary,
 };
 use super::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
-use super::operation::{
-    execute_text_operation, CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation,
-};
+use super::operation::{execute_text_operation, OperationResult, WriterOperation};
 
 pub(crate) fn execute_writer_operation(
     memory: &mut WriterMemory,
