@@ -13,7 +13,7 @@ use agent_writer_lib::writer_agent::kernel::{
     WriterAgentRunRequest, WriterAgentStreamMode, WriterAgentTask,
 };
 use agent_writer_lib::writer_agent::memory::{
-    StoryContractQuality, StoryContractSummary, WriterMemory,
+    PromiseKind, StoryContractQuality, StoryContractSummary, WriterMemory,
 };
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
@@ -2710,6 +2710,62 @@ fn run_promise_last_seen_context_eval() -> EvalResult {
     )
 }
 
+fn run_promise_kind_classification_eval() -> EvalResult {
+    let mut errors = Vec::new();
+
+    let kinds = vec![
+        ("plot_promise", PromiseKind::PlotPromise, "medium"),
+        ("emotional_debt", PromiseKind::EmotionalDebt, "medium"),
+        ("object_whereabouts", PromiseKind::ObjectWhereabouts, "high"),
+        (
+            "character_commitment",
+            PromiseKind::CharacterCommitment,
+            "medium",
+        ),
+        ("mystery_clue", PromiseKind::MysteryClue, "high"),
+        (
+            "relationship_tension",
+            PromiseKind::RelationshipTension,
+            "medium",
+        ),
+        ("unknown_type", PromiseKind::Other, "low"),
+    ];
+
+    for (input, expected_kind, expected_risk) in &kinds {
+        let kind = PromiseKind::from_kind_str(input);
+        if kind != *expected_kind {
+            errors.push(format!(
+                "kind {} classified as {:?}, expected {:?}",
+                input, kind, expected_kind
+            ));
+        }
+        let risk = kind.default_risk();
+        if risk != *expected_risk {
+            errors.push(format!(
+                "kind {:?} default_risk={}, expected {}",
+                kind, risk, expected_risk
+            ));
+        }
+        if kind.as_kind_str() != *input && *expected_kind != PromiseKind::Other {
+            errors.push(format!(
+                "kind {:?} roundtrip as_kind_str={}",
+                kind,
+                kind.as_kind_str()
+            ));
+        }
+    }
+
+    if PromiseKind::default() != PromiseKind::PlotPromise {
+        errors.push("default PromiseKind should be PlotPromise".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_kind_classification",
+        format!("{} kinds verified", kinds.len()),
+        errors,
+    )
+}
+
 fn run_story_review_queue_promise_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -3375,6 +3431,7 @@ fn main() {
     results.push(run_promise_abandon_operation_eval());
     results.push(run_promise_resolve_operation_eval());
     results.push(run_promise_last_seen_context_eval());
+    results.push(run_promise_kind_classification_eval());
     results.push(run_story_review_queue_promise_eval());
     results.push(run_story_debt_snapshot_eval());
     results.push(run_story_debt_priority_eval());

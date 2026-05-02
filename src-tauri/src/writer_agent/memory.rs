@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS plot_promises (
     expected_payoff TEXT DEFAULT '',
     status TEXT DEFAULT 'open',
     priority INTEGER DEFAULT 0,
+    risk_level TEXT DEFAULT 'medium',
+    related_entities_json TEXT DEFAULT '[]',
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -281,6 +283,60 @@ pub struct StylePreferenceSummary {
     pub value: String,
     pub accepted_count: i64,
     pub rejected_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromiseKind {
+    PlotPromise,
+    EmotionalDebt,
+    ObjectWhereabouts,
+    CharacterCommitment,
+    MysteryClue,
+    RelationshipTension,
+    #[serde(other)]
+    Other,
+}
+
+impl Default for PromiseKind {
+    fn default() -> Self {
+        PromiseKind::PlotPromise
+    }
+}
+
+impl PromiseKind {
+    pub fn from_kind_str(kind: &str) -> Self {
+        match kind {
+            "plot_promise" => PromiseKind::PlotPromise,
+            "emotional_debt" => PromiseKind::EmotionalDebt,
+            "object_whereabouts" => PromiseKind::ObjectWhereabouts,
+            "character_commitment" => PromiseKind::CharacterCommitment,
+            "mystery_clue" => PromiseKind::MysteryClue,
+            "relationship_tension" => PromiseKind::RelationshipTension,
+            _ => PromiseKind::Other,
+        }
+    }
+
+    pub fn as_kind_str(&self) -> &'static str {
+        match self {
+            PromiseKind::PlotPromise => "plot_promise",
+            PromiseKind::EmotionalDebt => "emotional_debt",
+            PromiseKind::ObjectWhereabouts => "object_whereabouts",
+            PromiseKind::CharacterCommitment => "character_commitment",
+            PromiseKind::MysteryClue => "mystery_clue",
+            PromiseKind::RelationshipTension => "relationship_tension",
+            PromiseKind::Other => "other",
+        }
+    }
+
+    pub fn default_risk(&self) -> &'static str {
+        match self {
+            PromiseKind::ObjectWhereabouts | PromiseKind::MysteryClue => "high",
+            PromiseKind::RelationshipTension | PromiseKind::EmotionalDebt => "medium",
+            PromiseKind::CharacterCommitment | PromiseKind::PlotPromise => "medium",
+            PromiseKind::Other => "low",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2247,6 +2303,18 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "chapter_result_snapshots",
         "created_at",
         "created_at INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "risk_level",
+        "risk_level TEXT DEFAULT 'medium'",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "related_entities_json",
+        "related_entities_json TEXT DEFAULT '[]'",
     )?;
 
     Ok(())
