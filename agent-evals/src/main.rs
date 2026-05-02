@@ -182,6 +182,8 @@ fn main() {
     results.push(run_ghost_quality_confidence_eval());
     results.push(run_promise_object_cross_chapter_tracking_eval());
     results.push(run_canon_false_positive_suppression_eval());
+    results.push(run_context_mandatory_sources_survive_tight_budget_eval());
+    results.push(run_story_debt_priority_ordering_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
