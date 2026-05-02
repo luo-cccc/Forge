@@ -634,6 +634,57 @@ fn run_context_window_guard_eval() -> EvalResult {
     )
 }
 
+fn run_compaction_latest_user_anchor_eval() -> EvalResult {
+    let messages = vec![
+        eval_llm_message("user", "旧请求：分析第一章"),
+        eval_llm_message("assistant", "旧回答：第一章节奏偏慢"),
+        eval_llm_message("user", "ACTIVE TASK: 继续写第七章的审讯场景"),
+        eval_llm_message("assistant", "我正在查看上下文"),
+        eval_llm_message("assistant", "准备续写"),
+    ];
+    let anchored = agent_harness_core::anchor_latest_user_message(&messages, 4);
+    let safe = agent_harness_core::find_safe_boundary(&messages, anchored);
+    let preserved = &messages[safe..];
+
+    let mut errors = Vec::new();
+    if anchored != 2 {
+        errors.push(format!(
+            "latest user anchor should move cut to 2, got {}",
+            anchored
+        ));
+    }
+    if !preserved.iter().any(|message| {
+        message.role == "user"
+            && message
+                .content
+                .as_deref()
+                .is_some_and(|content| content.contains("ACTIVE TASK"))
+    }) {
+        errors.push("latest user task was not preserved in compaction tail".to_string());
+    }
+
+    eval_result(
+        "agent_harness:compaction_preserves_latest_user_task",
+        format!(
+            "anchored={} safe={} preserved={}",
+            anchored,
+            safe,
+            preserved.len()
+        ),
+        errors,
+    )
+}
+
+fn eval_llm_message(role: &str, content: &str) -> agent_harness_core::provider::LlmMessage {
+    agent_harness_core::provider::LlmMessage {
+        role: role.to_string(),
+        content: Some(content.to_string()),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    }
+}
+
 fn run_tool_permission_guard_eval() -> EvalResult {
     let registry = agent_harness_core::default_writing_tool_registry();
     let mut executor = agent_harness_core::ToolExecutor::new(registry, EvalToolHandler);
@@ -2238,6 +2289,7 @@ fn main() {
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
     results.push(run_context_window_guard_eval());
+    results.push(run_compaction_latest_user_anchor_eval());
     results.push(run_tool_permission_guard_eval());
     results.push(run_effective_tool_inventory_eval());
     results.push(run_result_feedback_tight_budget_eval());

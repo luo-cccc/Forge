@@ -108,6 +108,21 @@ pub fn find_safe_boundary(messages: &[LlmMessage], desired_cut: usize) -> usize 
     extended.min(messages.len())
 }
 
+/// Keep the latest user request in the preserved tail so compaction never turns
+/// the active task into passive summary background.
+pub fn anchor_latest_user_message(messages: &[LlmMessage], cut: usize) -> usize {
+    let boundary = cut.min(messages.len());
+    let Some(last_user_index) = messages.iter().rposition(|message| message.role == "user") else {
+        return boundary;
+    };
+
+    if last_user_index >= boundary {
+        boundary
+    } else {
+        last_user_index
+    }
+}
+
 /// Estimate tokens in a collection of messages.
 /// Rough heuristic: 1 token ≈ 3 chars for CJK-heavy text + 8 token per-message overhead.
 pub fn estimate_message_tokens(messages: &[LlmMessage]) -> u64 {
@@ -170,7 +185,8 @@ pub async fn compact_messages<P: Provider>(
     }
 
     let cut = total.saturating_sub(config.preserve_recent);
-    let safe_cut = find_safe_boundary(messages, cut);
+    let anchored_cut = anchor_latest_user_message(messages, cut);
+    let safe_cut = find_safe_boundary(messages, anchored_cut);
 
     let to_compact = &messages[..safe_cut];
     let preserved = &messages[safe_cut..];
@@ -235,6 +251,7 @@ pub async fn compact_messages<P: Provider>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     fn make_msg(role: &str, content: &str) -> LlmMessage {
         LlmMessage {
@@ -257,6 +274,48 @@ mod tests {
             tool_calls,
             tool_call_id: call_id.map(|s| s.into()),
             name: None,
+        }
+    }
+
+    struct SummaryProvider;
+
+    #[async_trait]
+    impl Provider for SummaryProvider {
+        fn name(&self) -> &str {
+            "summary-provider"
+        }
+
+        fn models(&self) -> Vec<String> {
+            vec!["summary-model".to_string()]
+        }
+
+        async fn stream_call(
+            &self,
+            _request: LlmRequest,
+            _on_event: Box<dyn Fn(crate::provider::StreamEvent) + Send + Sync>,
+        ) -> Result<crate::provider::LlmResponse, String> {
+            self.call(_request).await
+        }
+
+        async fn call(&self, _request: LlmRequest) -> Result<crate::provider::LlmResponse, String> {
+            Ok(crate::provider::LlmResponse {
+                content: Some("summary".to_string()),
+                tool_calls: None,
+                finish_reason: "stop".to_string(),
+                usage: None,
+            })
+        }
+
+        async fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+            Ok(Vec::new())
+        }
+
+        fn estimate_tokens(&self, messages: &[LlmMessage]) -> u64 {
+            estimate_message_tokens(messages)
+        }
+
+        async fn health_check(&self) -> Result<(), String> {
+            Ok(())
         }
     }
 
@@ -294,6 +353,53 @@ mod tests {
             "boundary should extend past the tool result, got {}",
             boundary
         );
+    }
+
+    #[test]
+    fn latest_user_anchor_moves_cut_back_when_active_task_would_be_summarized() {
+        let messages = vec![
+            make_msg("user", "old request"),
+            make_msg("assistant", "old answer"),
+            make_msg("user", "ACTIVE TASK"),
+            make_msg("assistant", "working"),
+            make_msg("assistant", "still working"),
+        ];
+
+        assert_eq!(anchor_latest_user_message(&messages, 4), 2);
+        assert_eq!(anchor_latest_user_message(&messages, 2), 2);
+    }
+
+    #[tokio::test]
+    async fn compaction_preserves_latest_user_request_in_tail() {
+        let messages = vec![
+            make_msg("user", "old request"),
+            make_msg("assistant", "old answer"),
+            make_msg("user", "ACTIVE TASK: continue chapter 7"),
+            make_msg("assistant", "I am checking context"),
+            make_msg("assistant", "I am drafting now"),
+        ];
+
+        let (compacted, report) = compact_messages(
+            &messages,
+            &CompactionConfig {
+                preserve_recent: 1,
+                trigger_fraction: 0.70,
+                max_summary_tokens: 200,
+                context_limit_tokens: 8_000,
+            },
+            &SummaryProvider,
+        )
+        .await
+        .expect("compaction succeeds");
+
+        assert_eq!(report.compacted_count, 2);
+        assert!(compacted.iter().any(|message| {
+            message.role == "user"
+                && message
+                    .content
+                    .as_deref()
+                    .is_some_and(|content| content.contains("ACTIVE TASK"))
+        }));
     }
 
     #[test]

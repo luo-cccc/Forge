@@ -25,8 +25,8 @@ pub mod vector_db;
 pub use agent_loop::{AgentLoop, AgentLoopConfig, AgentLoopEvent};
 pub use ambient::{AgentOutput, AmbientAgent, AmbientEventBus, EditorEvent};
 pub use compaction::{
-    compact_messages, estimate_message_tokens, find_safe_boundary, should_compact,
-    CompactionConfig, CompactionResult,
+    anchor_latest_user_message, compact_messages, estimate_message_tokens, find_safe_boundary,
+    should_compact, CompactionConfig, CompactionResult,
 };
 pub use config::HarnessConfig;
 pub use context_pack::{
