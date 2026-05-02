@@ -2605,7 +2605,7 @@ fn extract_weapon_from_lore(content: &str) -> Option<String> {
     .map(|weapon| (*weapon).to_string())
 }
 
-fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) -> String {
+pub(crate) fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) -> String {
     writer_agent::kernel::render_context_pack_for_prompt(pack)
 }
 
@@ -2690,7 +2690,7 @@ fn writer_agent_ghost_messages(
     ]
 }
 
-fn writer_agent_inline_operation_messages(
+pub(crate) fn writer_agent_inline_operation_messages(
     message: &str,
     observation: &writer_agent::observation::WriterObservation,
     pack: &writer_agent::context::WritingContextPack,
@@ -2746,6 +2746,7 @@ async fn run_inline_writer_operation(
         context_payload.as_ref(),
         &project_id,
     );
+
     let (context_pack, local_proposals) = {
         let state = app.state::<AppState>();
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
@@ -2758,21 +2759,28 @@ async fn run_inline_writer_operation(
         (context_pack, local_proposals)
     };
 
+    let messages = writer_agent_inline_operation_messages(&message, &observation, &context_pack);
+    let draft = crate::llm_runtime::chat_text(&settings, messages, false, 30).await?;
+
+    let (proposal, operation) = {
+        let state = app.state::<AppState>();
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        let proposal =
+            kernel.create_inline_operation_proposal(observation, &message, draft, &model)?;
+        let operation = proposal
+            .operations
+            .first()
+            .cloned()
+            .ok_or_else(|| {
+                "inline operation proposal did not include an operation".to_string()
+            })?;
+        (proposal, operation)
+    };
+
     for proposal in local_proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)
             .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
     }
-
-    let messages = writer_agent_inline_operation_messages(&message, &observation, &context_pack);
-    let draft = llm_runtime::chat_text(&settings, messages, false, 30).await?;
-    let proposal = {
-        let state = app.state::<AppState>();
-        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-        kernel.create_inline_operation_proposal(observation.clone(), &message, draft, &model)?
-    };
-    let Some(operation) = proposal.operations.first().cloned() else {
-        return Err("Inline operation proposal did not include an operation".to_string());
-    };
 
     app.emit(events::AGENT_PROPOSAL, proposal.clone())
         .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
