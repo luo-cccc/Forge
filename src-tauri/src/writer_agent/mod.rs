@@ -4,6 +4,7 @@ pub mod diagnostics;
 pub mod feedback;
 pub mod intent;
 pub mod kernel;
+pub mod kernel_prompts;
 pub mod memory;
 pub mod observation;
 pub mod operation;
