@@ -11,5 +11,7 @@ path = "run_eval.rs"
 [dependencies]
 agent-harness-core = { path = "../agent-harness-core" }
 agent-writer = { path = "../src-tauri" }
+async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }

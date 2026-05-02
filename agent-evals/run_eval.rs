@@ -634,6 +634,58 @@ fn run_context_window_guard_eval() -> EvalResult {
     )
 }
 
+fn run_tool_permission_guard_eval() -> EvalResult {
+    let registry = agent_harness_core::default_writing_tool_registry();
+    let mut executor = agent_harness_core::ToolExecutor::new(registry, EvalToolHandler);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let execution = runtime.block_on(async {
+        executor
+            .execute(
+                "generate_chapter_draft",
+                serde_json::json!({ "chapter": "Chapter-1" }),
+            )
+            .await
+    });
+
+    let mut errors = Vec::new();
+    if !execution.output.is_null() {
+        errors.push("approval-required write tool reached handler output".to_string());
+    }
+    if !execution
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("requires explicit approval"))
+    {
+        errors.push(format!(
+            "write tool was not blocked by approval guard: {:?}",
+            execution.error
+        ));
+    }
+
+    eval_result(
+        "agent_harness:tool_permission_blocks_approval_write",
+        format!(
+            "tool={} error={}",
+            execution.tool_name,
+            execution.error.clone().unwrap_or_default()
+        ),
+        errors,
+    )
+}
+
+struct EvalToolHandler;
+
+#[async_trait::async_trait]
+impl agent_harness_core::ToolHandler for EvalToolHandler {
+    async fn execute(
+        &self,
+        tool_name: &str,
+        _args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"reachedHandler": true, "tool": tool_name}))
+    }
+}
+
 fn run_result_feedback_tight_budget_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -2113,6 +2165,7 @@ fn main() {
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
     results.push(run_context_window_guard_eval());
+    results.push(run_tool_permission_guard_eval());
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
