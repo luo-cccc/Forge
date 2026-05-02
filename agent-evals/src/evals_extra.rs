@@ -313,6 +313,7 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
         introduced_chapter: "Ch1".to_string(),
         expected_payoff: "Ch5".to_string(),
         priority: 3,
+        related_entities: vec![],
     };
     match validate_promise_candidate(&vague_promise) {
         MemoryCandidateQuality::Vague { .. } => {}
@@ -327,6 +328,7 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
         introduced_chapter: "Chapter-1".to_string(),
         expected_payoff: "Chapter-5".to_string(),
         priority: 5,
+        related_entities: vec!["张三".to_string(), "玉佩".to_string()],
     };
     match validate_promise_candidate(&valid_promise) {
         MemoryCandidateQuality::Acceptable => {}
@@ -339,6 +341,38 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
     eval_result(
         "writer_agent:memory_candidate_quality_validation",
         format!("4 candidates validated"),
+        errors,
+    )
+}
+
+pub fn run_promise_related_entities_extraction_eval() -> EvalResult {
+    let mut obs = observation("张三带走了林墨的玉佩，从此下落不明。");
+    obs.chapter_title = Some("Chapter-3".to_string());
+    let promises = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "张三带走了林墨的玉佩，从此下落不明。",
+        &obs,
+    );
+
+    let mut errors = Vec::new();
+    if promises.is_empty() {
+        errors.push("no promises extracted".to_string());
+    } else {
+        let p = &promises[0];
+        if p.related_entities.is_empty() || p.related_entities[0] == "unknown" {
+            errors.push(format!(
+                "related_entities should contain named entities, got: {:?}",
+                p.related_entities
+            ));
+        }
+    }
+
+    eval_result(
+        "writer_agent:promise_related_entities_extraction",
+        format!(
+            "promises={} entities={:?}",
+            promises.len(),
+            promises.first().map(|p| &p.related_entities)
+        ),
         errors,
     )
 }

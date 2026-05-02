@@ -1580,13 +1580,14 @@ impl WriterAgentKernel {
             }
             WriterOperation::PromiseAdd { promise } => {
                 self.memory
-                    .add_promise(
+                    .add_promise_with_entities(
                         &promise.kind,
                         &promise.title,
                         &promise.description,
                         &promise.introduced_chapter,
                         &promise.expected_payoff,
                         promise.priority,
+                        &promise.related_entities,
                     )
                     .map_err(|e| format!("promise: {}", e))?;
                 Ok(OperationResult {
@@ -3551,6 +3552,7 @@ pub fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec
             PromiseKind::CharacterCommitment | PromiseKind::EmotionalDebt => 4,
             _ => 3,
         };
+        let related = extract_related_entities(&sentence);
         promises.push(PlotPromiseOp {
             kind: kind.as_kind_str().to_string(),
             title,
@@ -3561,6 +3563,7 @@ pub fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec
                 .unwrap_or_else(|| "current chapter".to_string()),
             expected_payoff: "后续章节回收或解释".to_string(),
             priority,
+            related_entities: related,
         });
     }
     promises
@@ -3699,6 +3702,7 @@ fn llm_memory_candidates_from_value(
                     .and_then(|v| v.as_i64())
                     .unwrap_or(3)
                     .clamp(0, 10) as i32,
+                related_entities: vec![],
             }));
         }
     }
@@ -3780,6 +3784,30 @@ fn should_keep_entity(name: &str, known: &[String], existing: &[CanonEntityOp]) 
         && !existing.iter().any(|item| item.name == name)
 }
 
+fn extract_related_entities(sentence: &str) -> Vec<String> {
+    let mut entities = Vec::new();
+    for marker in [
+        "林墨",
+        "张三",
+        "玉佩",
+        "长刀",
+        "戒指",
+        "密信",
+        "钥匙",
+        "令牌",
+        "黑衣人",
+        "旧门",
+    ] {
+        if sentence.contains(marker) {
+            entities.push(marker.to_string());
+        }
+    }
+    if entities.is_empty() {
+        entities.push("unknown".to_string());
+    }
+    entities.truncate(3);
+    entities
+}
 fn contains_promise_cue(sentence: &str) -> bool {
     [
         "还没",

@@ -964,9 +964,38 @@ impl WriterMemory {
         self.conn.execute(
             "INSERT INTO plot_promises
              (kind, title, description, introduced_chapter, introduced_ref, last_seen_chapter,
-              last_seen_ref, expected_payoff, priority)
-             VALUES (?1, ?2, ?3, ?4, '', ?4, '', ?5, ?6)",
+              last_seen_ref, expected_payoff, priority, related_entities_json)
+             VALUES (?1, ?2, ?3, ?4, '', ?4, '', ?5, ?6, '[]')",
             rusqlite::params![kind, title, description, chapter, payoff, priority],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn add_promise_with_entities(
+        &self,
+        kind: &str,
+        title: &str,
+        description: &str,
+        chapter: &str,
+        payoff: &str,
+        priority: i32,
+        related_entities: &[String],
+    ) -> rusqlite::Result<i64> {
+        let entities_json = serde_json::to_string(related_entities).unwrap_or_default();
+        self.conn.execute(
+            "INSERT INTO plot_promises
+             (kind, title, description, introduced_chapter, introduced_ref, last_seen_chapter,
+              last_seen_ref, expected_payoff, priority, related_entities_json)
+             VALUES (?1, ?2, ?3, ?4, '', ?4, '', ?5, ?6, ?7)",
+            rusqlite::params![
+                kind,
+                title,
+                description,
+                chapter,
+                payoff,
+                priority,
+                entities_json
+            ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }

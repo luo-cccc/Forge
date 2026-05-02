@@ -113,6 +113,7 @@ pub struct PlotPromiseOp {
     pub introduced_chapter: String,
     pub expected_payoff: String,
     pub priority: i32,
+    pub related_entities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

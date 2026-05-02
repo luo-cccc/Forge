@@ -28,7 +28,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
 - Command boundary audit 已覆盖 47 个 Tauri commands，并进入 `npm run verify`。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、61/61 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、67/67 writer evals。
 
 ### 当前剩余核心矛盾
 
