@@ -1407,6 +1407,44 @@ impl WriterAgentKernel {
         operation: WriterOperation,
         current_revision: &str,
     ) -> Result<OperationResult, String> {
+        self.approve_editor_operation_with_approval(operation, current_revision, None)
+    }
+
+    pub fn approve_editor_operation_with_approval(
+        &mut self,
+        operation: WriterOperation,
+        current_revision: &str,
+        approval: Option<&super::operation::OperationApproval>,
+    ) -> Result<OperationResult, String> {
+        if approval_required_for_operation(&operation)
+            && !approval.is_some_and(|context| context.is_valid_for_write())
+        {
+            return Ok(OperationResult {
+                success: false,
+                operation,
+                error: Some(super::operation::OperationError::approval_required(
+                    "Write-capable operations require an explicit surfaced approval context",
+                )),
+                revision_after: None,
+            });
+        }
+
+        if let Some(context) = approval {
+            self.memory
+                .record_decision(
+                    self.active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Approved operation: {}", operation_kind_label(&operation)),
+                    "approved_writer_operation",
+                    &[],
+                    &format!(
+                        "{} approved from {}: {}",
+                        context.actor, context.source, context.reason
+                    ),
+                    &approval_sources(context),
+                )
+                .ok();
+        }
+
         match &operation {
             WriterOperation::TextInsert { revision, .. }
             | WriterOperation::TextReplace { revision, .. } => {
@@ -2711,6 +2749,54 @@ fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {
             required_tool_tags: vec!["project".to_string()],
         },
     }
+}
+
+fn approval_required_for_operation(operation: &WriterOperation) -> bool {
+    matches!(
+        operation,
+        WriterOperation::CanonUpsertEntity { .. }
+            | WriterOperation::CanonUpdateAttribute { .. }
+            | WriterOperation::CanonUpsertRule { .. }
+            | WriterOperation::PromiseAdd { .. }
+            | WriterOperation::PromiseResolve { .. }
+            | WriterOperation::PromiseDefer { .. }
+            | WriterOperation::PromiseAbandon { .. }
+            | WriterOperation::StyleUpdatePreference { .. }
+            | WriterOperation::StoryContractUpsert { .. }
+            | WriterOperation::ChapterMissionUpsert { .. }
+            | WriterOperation::OutlineUpdate { .. }
+    )
+}
+
+fn operation_kind_label(operation: &WriterOperation) -> &'static str {
+    match operation {
+        WriterOperation::TextInsert { .. } => "text.insert",
+        WriterOperation::TextReplace { .. } => "text.replace",
+        WriterOperation::TextAnnotate { .. } => "text.annotate",
+        WriterOperation::CanonUpsertEntity { .. } => "canon.upsert_entity",
+        WriterOperation::CanonUpdateAttribute { .. } => "canon.update_attribute",
+        WriterOperation::CanonUpsertRule { .. } => "canon.upsert_rule",
+        WriterOperation::PromiseAdd { .. } => "promise.add",
+        WriterOperation::PromiseResolve { .. } => "promise.resolve",
+        WriterOperation::PromiseDefer { .. } => "promise.defer",
+        WriterOperation::PromiseAbandon { .. } => "promise.abandon",
+        WriterOperation::StyleUpdatePreference { .. } => "style.update_preference",
+        WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
+        WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
+        WriterOperation::OutlineUpdate { .. } => "outline.update",
+    }
+}
+
+fn approval_sources(context: &super::operation::OperationApproval) -> Vec<String> {
+    let mut sources = vec![format!("approval:{}", context.source)];
+    if let Some(proposal_id) = context
+        .proposal_id
+        .as_ref()
+        .filter(|id| !id.trim().is_empty())
+    {
+        sources.push(format!("proposal:{}", proposal_id));
+    }
+    sources
 }
 
 fn feedback_contract_for_task(task: &AgentTask) -> FeedbackContract {
@@ -4141,6 +4227,17 @@ mod tests {
         }
     }
 
+    fn test_approval(source: &str) -> crate::writer_agent::operation::OperationApproval {
+        crate::writer_agent::operation::OperationApproval {
+            source: source.to_string(),
+            actor: "author".to_string(),
+            reason: "test approval".to_string(),
+            proposal_id: Some("proposal-test".to_string()),
+            surfaced_to_user: true,
+            created_at: now_ms(),
+        }
+    }
+
     #[test]
     fn observe_emits_intent_proposal_and_feedback_records_decision() {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
@@ -4209,6 +4306,24 @@ mod tests {
     }
 
     #[test]
+    fn approve_editor_operation_requires_context_for_memory_writes() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let result = kernel
+            .approve_editor_operation(
+                WriterOperation::StyleUpdatePreference {
+                    key: "dialogue".to_string(),
+                    value: "prefers_subtext".to_string(),
+                },
+                "",
+            )
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap().code, "approval_required");
+    }
+
+    #[test]
     fn execute_operation_records_annotation_without_text_revision() {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         let mut kernel = WriterAgentKernel::new("default", memory);
@@ -4237,7 +4352,7 @@ mod tests {
         let mut kernel = WriterAgentKernel::new("default", memory);
 
         let rule = kernel
-            .execute_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::CanonUpsertRule {
                     rule: crate::writer_agent::operation::CanonRuleOp {
                         rule: "林墨不会主动弃刀。".to_string(),
@@ -4246,19 +4361,19 @@ mod tests {
                     },
                 },
                 "",
-                "",
+                Some(&test_approval("canon_test")),
             )
             .unwrap();
         assert!(rule.success);
 
         let style = kernel
-            .execute_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::StyleUpdatePreference {
                     key: "dialogue".to_string(),
                     value: "prefers_subtext".to_string(),
                 },
                 "",
-                "",
+                Some(&test_approval("style_test")),
             )
             .unwrap();
         assert!(style.success);
@@ -4277,13 +4392,13 @@ mod tests {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         let mut kernel = WriterAgentKernel::new("default", memory);
         let result = kernel
-            .execute_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::OutlineUpdate {
                     node_id: "Chapter-1".to_string(),
                     patch: serde_json::json!({"summary": "new"}),
                 },
                 "",
-                "",
+                Some(&test_approval("outline_test")),
             )
             .unwrap();
 
@@ -5056,7 +5171,11 @@ mod tests {
             .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
             .unwrap();
         let result = kernel
-            .approve_editor_operation(proposal.operations[0].clone(), "")
+            .approve_editor_operation_with_approval(
+                proposal.operations[0].clone(),
+                "",
+                Some(&test_approval("memory_candidate")),
+            )
             .unwrap();
 
         assert!(result.success);
@@ -5082,12 +5201,13 @@ mod tests {
             .unwrap();
         let mut kernel = WriterAgentKernel::new("default", memory);
         let result = kernel
-            .approve_editor_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::PromiseResolve {
                     promise_id: promise_id.to_string(),
                     chapter: "Chapter-4".to_string(),
                 },
                 "",
+                Some(&test_approval("promise_test")),
             )
             .unwrap();
 
@@ -5100,7 +5220,7 @@ mod tests {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         let mut kernel = WriterAgentKernel::new("novel-a", memory);
         let result = kernel
-            .approve_editor_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::StoryContractUpsert {
                     contract: crate::writer_agent::operation::StoryContractOp {
                         project_id: "novel-a".to_string(),
@@ -5115,6 +5235,7 @@ mod tests {
                     },
                 },
                 "",
+                Some(&test_approval("contract_test")),
             )
             .unwrap();
 
@@ -5131,7 +5252,7 @@ mod tests {
         let mut kernel = WriterAgentKernel::new("novel-a", memory);
         kernel.active_chapter = Some("第一章".to_string());
         let result = kernel
-            .approve_editor_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::ChapterMissionUpsert {
                     mission: crate::writer_agent::operation::ChapterMissionOp {
                         project_id: "novel-a".to_string(),
@@ -5145,6 +5266,7 @@ mod tests {
                     },
                 },
                 "",
+                Some(&test_approval("mission_test")),
             )
             .unwrap();
 

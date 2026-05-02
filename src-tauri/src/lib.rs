@@ -2413,13 +2413,20 @@ fn approve_writer_operation(
     state: tauri::State<'_, AppState>,
     operation: writer_agent::operation::WriterOperation,
     current_revision: String,
+    approval: Option<writer_agent::operation::OperationApproval>,
 ) -> Result<writer_agent::operation::OperationResult, String> {
     if let writer_agent::operation::WriterOperation::OutlineUpdate { node_id, patch } = &operation {
-        return approve_outline_update_operation(&app, operation.clone(), node_id, patch.clone());
+        return approve_outline_update_operation(
+            &app,
+            operation.clone(),
+            node_id,
+            patch.clone(),
+            approval.as_ref(),
+        );
     }
 
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.approve_editor_operation(operation, &current_revision)
+    kernel.approve_editor_operation_with_approval(operation, &current_revision, approval.as_ref())
 }
 
 fn approve_outline_update_operation(
@@ -2427,7 +2434,19 @@ fn approve_outline_update_operation(
     operation: writer_agent::operation::WriterOperation,
     node_id: &str,
     patch: serde_json::Value,
+    approval: Option<&writer_agent::operation::OperationApproval>,
 ) -> Result<writer_agent::operation::OperationResult, String> {
+    if !approval.is_some_and(|context| context.is_valid_for_write()) {
+        return Ok(writer_agent::operation::OperationResult {
+            success: false,
+            operation,
+            error: Some(writer_agent::operation::OperationError::approval_required(
+                "outline.update requires an explicit surfaced approval context",
+            )),
+            revision_after: None,
+        });
+    }
+
     match storage::patch_outline_node(app, node_id.to_string(), patch) {
         Ok(_) => Ok(writer_agent::operation::OperationResult {
             success: true,

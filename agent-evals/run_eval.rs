@@ -13,7 +13,7 @@ use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
 };
-use agent_writer_lib::writer_agent::operation::WriterOperation;
+use agent_writer_lib::writer_agent::operation::{OperationApproval, WriterOperation};
 use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind, ProposalPriority};
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 use serde::Serialize;
@@ -75,6 +75,17 @@ fn eval_result(fixture: &str, actual: String, errors: Vec<String>) -> EvalResult
         passed: errors.is_empty(),
         actual,
         errors,
+    }
+}
+
+fn eval_approval(source: &str) -> OperationApproval {
+    OperationApproval {
+        source: source.to_string(),
+        actor: "eval_author".to_string(),
+        reason: "eval simulates an author accepting a surfaced operation".to_string(),
+        proposal_id: Some(format!("eval-proposal-{}", now_ms())),
+        surfaced_to_user: true,
+        created_at: now_ms(),
     }
 }
 
@@ -261,7 +272,13 @@ fn run_canon_conflict_update_canon_eval() -> EvalResult {
             vec!["missing canon.update_attribute operation".to_string()],
         );
     };
-    let result = kernel.approve_editor_operation(operation, "").unwrap();
+    let result = kernel
+        .approve_editor_operation_with_approval(
+            operation,
+            "",
+            Some(&eval_approval("canon_conflict_update")),
+        )
+        .unwrap();
     if !result.success {
         errors.push(format!(
             "canon update failed: {}",
@@ -1823,7 +1840,13 @@ fn run_promise_opportunity_apply_eval() -> EvalResult {
         );
     };
 
-    let result = kernel.approve_editor_operation(operation, "").unwrap();
+    let result = kernel
+        .approve_editor_operation_with_approval(
+            operation,
+            "",
+            Some(&eval_approval("promise_opportunity_apply")),
+        )
+        .unwrap();
     if !result.success {
         errors.push(format!(
             "resolve operation failed: {}",
@@ -1922,13 +1945,14 @@ fn run_promise_defer_operation_eval() -> EvalResult {
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
     let result = kernel
-        .approve_editor_operation(
+        .approve_editor_operation_with_approval(
             WriterOperation::PromiseDefer {
                 promise_id: promise_id.to_string(),
                 chapter: "Chapter-3".to_string(),
                 expected_payoff: "Chapter-5".to_string(),
             },
             "",
+            Some(&eval_approval("promise_defer")),
         )
         .unwrap();
 
@@ -1988,13 +2012,14 @@ fn run_promise_abandon_operation_eval() -> EvalResult {
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
     let result = kernel
-        .approve_editor_operation(
+        .approve_editor_operation_with_approval(
             WriterOperation::PromiseAbandon {
                 promise_id: promise_id.to_string(),
                 chapter: "Chapter-3".to_string(),
                 reason: "Author cut this thread during restructuring.".to_string(),
             },
             "",
+            Some(&eval_approval("promise_abandon")),
         )
         .unwrap();
 
@@ -2043,12 +2068,13 @@ fn run_promise_resolve_operation_eval() -> EvalResult {
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
     let result = kernel
-        .approve_editor_operation(
+        .approve_editor_operation_with_approval(
             WriterOperation::PromiseResolve {
                 promise_id: promise_id.to_string(),
                 chapter: "Chapter-4".to_string(),
             },
             "",
+            Some(&eval_approval("promise_resolve")),
         )
         .unwrap();
 

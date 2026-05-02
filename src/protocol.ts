@@ -640,6 +640,15 @@ export interface OperationResult {
   revisionAfter?: string;
 }
 
+export interface OperationApproval {
+  source: string;
+  actor: string;
+  reason: string;
+  proposalId?: string;
+  surfacedToUser: boolean;
+  createdAt: number;
+}
+
 export interface ProposalFeedback {
   proposalId: string;
   action: "accepted" | "rejected" | "edited" | "snoozed" | "explained";

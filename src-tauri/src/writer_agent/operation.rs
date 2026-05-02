@@ -154,6 +154,26 @@ pub struct OperationResult {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OperationApproval {
+    pub source: String,
+    pub actor: String,
+    pub reason: String,
+    pub proposal_id: Option<String>,
+    pub surfaced_to_user: bool,
+    pub created_at: u64,
+}
+
+impl OperationApproval {
+    pub fn is_valid_for_write(&self) -> bool {
+        !self.source.trim().is_empty()
+            && !self.actor.trim().is_empty()
+            && !self.reason.trim().is_empty()
+            && self.surfaced_to_user
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OperationError {
     pub code: String,
     pub message: String,
@@ -169,6 +189,13 @@ impl OperationError {
     pub fn invalid(msg: &str) -> Self {
         Self {
             code: "invalid".into(),
+            message: msg.into(),
+        }
+    }
+
+    pub fn approval_required(msg: &str) -> Self {
+        Self {
+            code: "approval_required".into(),
             message: msg.into(),
         }
     }

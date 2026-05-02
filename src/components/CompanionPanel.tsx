@@ -9,6 +9,7 @@ import type {
   AgentProposal,
   BackupTarget,
   FileBackupInfo,
+  OperationApproval,
   OperationResult,
   ProposalFeedback,
   ProjectStorageDiagnostics,
@@ -112,6 +113,21 @@ function operationLabel(operation: WriterOperation): string {
   if (operation.kind === "text.replace") return "Apply Fix";
   if (operation.kind === "text.insert") return "Insert";
   return "Apply";
+}
+
+function operationApproval(
+  source: string,
+  reason: string,
+  proposalId?: string,
+): OperationApproval {
+  return {
+    source,
+    actor: "author",
+    reason,
+    proposalId,
+    surfacedToUser: true,
+    createdAt: Date.now(),
+  };
 }
 
 function nextChapterLabel(chapter?: string | null): string {
@@ -775,6 +791,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision,
+        approval: operationApproval(
+          "companion_proposal",
+          `Author applied proposal: ${proposal.kind}`,
+          proposal.id,
+        ),
       });
 
       if (!result.success) {
@@ -810,6 +831,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
+        approval: operationApproval(
+          "story_review_queue",
+          `Author applied review queue item: ${entry.category}`,
+          entry.proposalId,
+        ),
       });
 
       if (!result.success) {
@@ -843,6 +869,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
+        approval: operationApproval("story_review_queue", feedbackReason, entry.proposalId),
       });
       if (!result.success) {
         setOperationError(result.error?.message ?? "Operation was rejected by the kernel.");
@@ -867,6 +894,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
+        approval: operationApproval(
+          "promise_ledger",
+          `Author updated promise ledger: ${operation.kind}`,
+        ),
       });
       if (!result.success) {
         setOperationError(result.error?.message ?? "Could not update this promise.");
@@ -888,6 +919,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
+        approval: operationApproval("story_debt", feedbackReason, entry.relatedReviewIds[0]),
       });
       if (!result.success) {
         setOperationError(result.error?.message ?? "Could not apply this story debt action.");
@@ -969,6 +1001,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
           operation,
           currentRevision: currentChapterRevision ?? "",
+          approval: operationApproval(
+            "foundation_editor",
+            `Author saved foundation memory: ${operation.kind}`,
+          ),
         });
         if (!result.success) {
           throw new Error(result.error?.message ?? "Foundation operation was rejected by the kernel.");

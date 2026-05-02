@@ -18,6 +18,7 @@ import {
   type EditorSemanticLint,
   type EditorStatePayload,
   type InlineWriterOperationEvent,
+  type OperationApproval,
   type ParallelDraft,
   type ParallelDraftPayload,
   type ProposalFeedback,
@@ -146,6 +147,21 @@ function previewInlineWriterOperation(
   }
 
   return false;
+}
+
+function operationApproval(
+  source: string,
+  reason: string,
+  proposalId?: string,
+): OperationApproval {
+  return {
+    source,
+    actor: "author",
+    reason,
+    proposalId,
+    surfacedToUser: true,
+    createdAt: Date.now(),
+  };
 }
 
 function sliceAroundCursor(editor: Editor): EditorStatePayload {
@@ -836,6 +852,11 @@ export default function EditorPanel({
             }>(Commands.approveWriterOperation, {
               operation,
               currentRevision: liveRevision,
+              approval: operationApproval(
+                "inline_command_preview",
+                `Author requested inline command: ${command}`,
+                event.payload.proposal.id,
+              ),
             });
             cleanup();
             if (!result.success) {
