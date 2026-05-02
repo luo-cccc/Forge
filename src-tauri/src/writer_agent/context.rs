@@ -249,6 +249,76 @@ pub struct SourceReport {
     pub truncation_reason: Option<String>,
 }
 
+impl WritingContextPack {
+    /// Human-readable explanation of which sources were included, truncated, or excluded and why.
+    pub fn explain(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "ContextPack for {:?}: {} chars / {} budget ({} wasted)",
+            self.task, self.total_chars, self.budget_limit, self.budget_report.wasted
+        ));
+        lines.push(format!("{} sources included:", self.sources.len()));
+        for source in &self.sources {
+            let trunc_note = if source.truncated { " [TRUNCATED]" } else { "" };
+            lines.push(format!(
+                "  - {:?} (priority {}, {} chars{})",
+                source.source, source.priority, source.char_count, trunc_note
+            ));
+        }
+        let included_sources: Vec<_> = self
+            .sources
+            .iter()
+            .map(|s| format!("{:?}", s.source))
+            .collect();
+        let all_known = [
+            "CursorPrefix",
+            "ChapterMission",
+            "NextBeat",
+            "ResultFeedback",
+            "ProjectBrief",
+            "CanonSlice",
+            "PromiseSlice",
+            "DecisionSlice",
+            "OutlineSlice",
+            "CursorSuffix",
+            "AuthorStyle",
+            "RagExcerpt",
+        ];
+        let excluded: Vec<_> = all_known
+            .iter()
+            .filter(|name| !included_sources.iter().any(|s| s == *name))
+            .collect();
+        if !excluded.is_empty() {
+            lines.push(format!(
+                "Excluded sources: {}",
+                excluded
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        for report in &self.budget_report.source_reports {
+            if report.truncated {
+                lines.push(format!(
+                    "  {:?} truncated: requested {} chars, provided {} chars ({})",
+                    report.source,
+                    report.requested,
+                    report.provided,
+                    report
+                        .truncation_reason
+                        .as_deref()
+                        .unwrap_or("budget exhausted")
+                ));
+            }
+        }
+        lines.join(
+            "
+",
+        )
+    }
+}
+
 /// Assembles a ContextPack under strict budget constraints.
 pub fn assemble_context_pack(
     task: AgentTask,

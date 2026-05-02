@@ -188,6 +188,7 @@ fn main() {
     results.push(run_memory_candidate_quality_validation_eval());
     results.push(run_promise_related_entities_extraction_eval());
     results.push(run_promise_dedup_against_existing_eval());
+    results.push(run_context_pack_explainability_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
