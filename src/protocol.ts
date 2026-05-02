@@ -793,12 +793,14 @@ export interface WriterAgentLedgerSnapshot {
   openPromises: PlotPromiseSummary[];
   recentDecisions: CreativeDecisionSummary[];
   memoryAudit: MemoryAuditEntry[];
+  contextRecalls: ContextRecallSummary[];
 }
 
 export interface WriterAgentTraceSnapshot {
   recentObservations: WriterObservationTrace[];
   recentProposals: WriterProposalTrace[];
   recentFeedback: WriterFeedbackTrace[];
+  contextRecalls: ContextRecallSummary[];
 }
 
 export interface WriterObservationTrace {
@@ -843,6 +845,17 @@ export interface WriterFeedbackTrace {
   action: string;
   reason?: string;
   createdAt: number;
+}
+
+export interface ContextRecallSummary {
+  source: string;
+  reference: string;
+  snippet: string;
+  recallCount: number;
+  firstRecalledAt: number;
+  lastRecalledAt: number;
+  lastObservationId: string;
+  lastProposalId: string;
 }
 
 export const WriterAgentCommands = {

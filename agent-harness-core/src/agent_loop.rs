@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use crate::compaction::{compact_messages, should_compact, CompactionConfig};
+use crate::context_window_guard::{
+    evaluate_context_window, ContextWindowInfo, ContextWindowSource,
+};
 use crate::provider::{LlmMessage, LlmRequest, Provider, StreamEvent};
 use crate::router::{classify_intent, Intent};
 use crate::tool_executor::{ToolExecution, ToolExecutor, ToolHandler};
@@ -46,6 +49,7 @@ pub enum AgentLoopEvent {
 pub struct AgentLoopConfig {
     pub max_rounds: u32,
     pub system_prompt: String,
+    pub context_limit_tokens: Option<u64>,
 }
 
 impl Default for AgentLoopConfig {
@@ -53,6 +57,7 @@ impl Default for AgentLoopConfig {
         Self {
             max_rounds: 10,
             system_prompt: String::new(),
+            context_limit_tokens: None,
         }
     }
 }
@@ -165,6 +170,35 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
                 system: Some(self.config.system_prompt.clone()),
                 stream: true,
             };
+            let requested_output_tokens = request.max_tokens.unwrap_or(4096) as u64;
+            let guard = evaluate_context_window(
+                ContextWindowInfo {
+                    tokens: self
+                        .config
+                        .context_limit_tokens
+                        .unwrap_or_else(|| self.provider.context_window_tokens()),
+                    reference_tokens: None,
+                    source: if self.config.context_limit_tokens.is_some() {
+                        ContextWindowSource::Env
+                    } else {
+                        ContextWindowSource::ModelMetadata
+                    },
+                },
+                self.estimate_tokens(),
+                requested_output_tokens,
+            );
+            if guard.should_block {
+                let message = guard
+                    .message
+                    .unwrap_or_else(|| "Model context window too small".to_string());
+                self.emit(AgentLoopEvent::Error {
+                    message: message.clone(),
+                });
+                return Err(message);
+            }
+            if let Some(message) = guard.message.filter(|_| guard.should_warn) {
+                self.emit(AgentLoopEvent::Error { message });
+            }
 
             // Call LLM with streaming — forward text chunks to UI
             let event_cb = self.on_event.clone();
@@ -339,6 +373,7 @@ mod tests {
             AgentLoopConfig {
                 max_rounds: 3,
                 system_prompt: "You are a test agent.".into(),
+                context_limit_tokens: None,
             },
             provider,
             registry,

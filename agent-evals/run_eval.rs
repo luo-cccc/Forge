@@ -591,6 +591,49 @@ fn run_context_budget_trace_eval() -> EvalResult {
     eval_result("writer_agent:context_budget_trace", actual, errors)
 }
 
+fn run_context_window_guard_eval() -> EvalResult {
+    let messages = vec![agent_harness_core::provider::LlmMessage {
+        role: "user".to_string(),
+        content: Some("风".repeat(12_000)),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    }];
+    let guard = agent_harness_core::evaluate_context_window(
+        agent_harness_core::ContextWindowInfo {
+            tokens: 4_096,
+            reference_tokens: None,
+            source: agent_harness_core::ContextWindowSource::Env,
+        },
+        agent_harness_core::context_window_guard::estimate_request_tokens(&messages, None),
+        512,
+    );
+
+    let mut errors = Vec::new();
+    if !guard.should_block {
+        errors.push("oversized prompt did not block against small context window".to_string());
+    }
+    if !guard
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("too small"))
+    {
+        errors.push("guard message does not explain context window failure".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_window_guard_blocks_small_model",
+        format!(
+            "ctx={} estimated={} output={} block={}",
+            guard.tokens,
+            guard.estimated_input_tokens,
+            guard.requested_output_tokens,
+            guard.should_block
+        ),
+        errors,
+    )
+}
+
 fn run_result_feedback_tight_budget_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -1950,6 +1993,58 @@ fn run_guard_trace_evidence_eval() -> EvalResult {
     )
 }
 
+fn run_context_recall_tracking_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation("林墨拔出长剑，指向门外的人。"))
+        .unwrap();
+    let warning = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::ContinuityWarning);
+    let trace = kernel.trace_snapshot(10);
+    let ledger = kernel.ledger_snapshot();
+
+    let mut errors = Vec::new();
+    if warning.is_none() {
+        errors.push("missing continuity warning proposal".to_string());
+    }
+    if !trace.context_recalls.iter().any(|recall| {
+        warning.is_some_and(|proposal| recall.last_proposal_id == proposal.id)
+            && recall.source == "Canon"
+            && recall.snippet.contains("寒影刀")
+    }) {
+        errors.push("trace context recall missing surfaced canon evidence".to_string());
+    }
+    if !ledger
+        .context_recalls
+        .iter()
+        .any(|recall| recall.source == "Canon" && recall.recall_count >= 1)
+    {
+        errors.push("ledger context recalls did not expose canon recall".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_recall_tracks_surfaced_evidence",
+        format!(
+            "proposals={} recalls={}",
+            proposals.len(),
+            trace.context_recalls.len()
+        ),
+        errors,
+    )
+}
+
 fn main() {
     let mut results = Vec::new();
     results.extend(run_intent_eval());
@@ -1961,6 +2056,7 @@ fn main() {
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
+    results.push(run_context_window_guard_eval());
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
@@ -1985,6 +2081,7 @@ fn main() {
     results.push(run_story_debt_snapshot_eval());
     results.push(run_story_debt_priority_eval());
     results.push(run_guard_trace_evidence_eval());
+    results.push(run_context_recall_tracking_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

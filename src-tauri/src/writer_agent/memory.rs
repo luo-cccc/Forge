@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -177,6 +177,20 @@ CREATE TABLE IF NOT EXISTS writer_feedback_trace (
     created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS writer_context_recalls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    reference TEXT NOT NULL,
+    snippet TEXT DEFAULT '',
+    recall_count INTEGER DEFAULT 0,
+    first_recalled_at INTEGER NOT NULL,
+    last_recalled_at INTEGER NOT NULL,
+    last_observation_id TEXT DEFAULT '',
+    last_proposal_id TEXT DEFAULT '',
+    UNIQUE(project_id, source, reference)
+);
+
 CREATE TABLE IF NOT EXISTS manual_agent_turns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL,
@@ -208,6 +222,8 @@ CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observatio
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_trace_created_at ON writer_feedback_trace(created_at);
+CREATE INDEX IF NOT EXISTS idx_context_recalls_project_last ON writer_context_recalls(project_id, last_recalled_at);
+CREATE INDEX IF NOT EXISTS idx_context_recalls_project_count ON writer_context_recalls(project_id, recall_count);
 CREATE INDEX IF NOT EXISTS idx_manual_agent_turns_project_created_at ON manual_agent_turns(project_id, created_at);
 "#;
 
@@ -503,6 +519,19 @@ pub struct FeedbackTraceSummary {
     pub action: String,
     pub reason: Option<String>,
     pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextRecallSummary {
+    pub source: String,
+    pub reference: String,
+    pub snippet: String,
+    pub recall_count: u64,
+    pub first_recalled_at: u64,
+    pub last_recalled_at: u64,
+    pub last_observation_id: String,
+    pub last_proposal_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1419,6 +1448,79 @@ impl WriterMemory {
         Ok(())
     }
 
+    pub fn record_context_recalls(
+        &self,
+        project_id: &str,
+        proposal_id: &str,
+        observation_id: &str,
+        evidence: &[super::proposal::EvidenceRef],
+        recalled_at: u64,
+    ) -> rusqlite::Result<()> {
+        for evidence in evidence
+            .iter()
+            .filter(|entry| !entry.reference.trim().is_empty() || !entry.snippet.trim().is_empty())
+        {
+            let source = format!("{:?}", evidence.source);
+            let reference = if evidence.reference.trim().is_empty() {
+                snippet_for_storage(&evidence.snippet, 80)
+            } else {
+                evidence.reference.trim().to_string()
+            };
+            let snippet = snippet_for_storage(&evidence.snippet, 240);
+            self.conn.execute(
+                "INSERT INTO writer_context_recalls
+                 (project_id, source, reference, snippet, recall_count, first_recalled_at, last_recalled_at, last_observation_id, last_proposal_id)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, ?6, ?7)
+                 ON CONFLICT(project_id, source, reference) DO UPDATE SET
+                    snippet=excluded.snippet,
+                    recall_count=writer_context_recalls.recall_count + 1,
+                    last_recalled_at=excluded.last_recalled_at,
+                    last_observation_id=excluded.last_observation_id,
+                    last_proposal_id=excluded.last_proposal_id",
+                rusqlite::params![
+                    project_id,
+                    source,
+                    reference,
+                    snippet,
+                    recalled_at as i64,
+                    observation_id,
+                    proposal_id,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn list_context_recalls(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<ContextRecallSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source, reference, snippet, recall_count, first_recalled_at, last_recalled_at, last_observation_id, last_proposal_id
+             FROM writer_context_recalls
+             WHERE project_id=?1
+             ORDER BY recall_count DESC, last_recalled_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project_id, limit as i64], |row| {
+            let recall_count: i64 = row.get(3)?;
+            let first_recalled_at: i64 = row.get(4)?;
+            let last_recalled_at: i64 = row.get(5)?;
+            Ok(ContextRecallSummary {
+                source: row.get(0)?,
+                reference: row.get(1)?,
+                snippet: row.get(2)?,
+                recall_count: recall_count.max(0) as u64,
+                first_recalled_at: first_recalled_at.max(0) as u64,
+                last_recalled_at: last_recalled_at.max(0) as u64,
+                last_observation_id: row.get(6)?,
+                last_proposal_id: row.get(7)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     pub fn list_observation_traces(
         &self,
         limit: usize,
@@ -1781,6 +1883,24 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "expires_at",
         "expires_at INTEGER",
     )?;
+    ensure_column(
+        conn,
+        "writer_context_recalls",
+        "snippet",
+        "snippet TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "writer_context_recalls",
+        "last_observation_id",
+        "last_observation_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "writer_context_recalls",
+        "last_proposal_id",
+        "last_proposal_id TEXT DEFAULT ''",
+    )?;
 
     ensure_column(
         conn,
@@ -2056,6 +2176,14 @@ fn string_vec_json(values: &[String]) -> String {
 
 fn string_vec_from_json(value: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
+}
+
+fn snippet_for_storage(text: &str, max_chars: usize) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    normalized.chars().take(max_chars).collect()
 }
 
 fn backfill_empty_timestamp(conn: &Connection, table: &str, column: &str) -> SqlResult<()> {
@@ -2342,6 +2470,39 @@ mod tests {
             m.list_feedback_traces(5).unwrap()[0].reason.as_deref(),
             Some("fits")
         );
+    }
+
+    #[test]
+    fn test_context_recall_records_only_surfaced_evidence() {
+        let m = memory();
+        let evidence = vec![
+            crate::writer_agent::proposal::EvidenceRef {
+                source: crate::writer_agent::proposal::EvidenceSource::ChapterMission,
+                reference: "Chapter-2:mission".to_string(),
+                snippet: "本章必须推进玉佩线索。".to_string(),
+            },
+            crate::writer_agent::proposal::EvidenceRef {
+                source: crate::writer_agent::proposal::EvidenceSource::Canon,
+                reference: "林墨.weapon".to_string(),
+                snippet: "林墨惯用寒影刀。".to_string(),
+            },
+        ];
+        m.record_context_recalls("novel-a", "prop_1", "obs_1", &evidence, 10)
+            .unwrap();
+        m.record_context_recalls("novel-a", "prop_2", "obs_2", &evidence[..1], 20)
+            .unwrap();
+
+        let recalls = m.list_context_recalls("novel-a", 10).unwrap();
+
+        assert_eq!(recalls.len(), 2);
+        assert_eq!(recalls[0].source, "ChapterMission");
+        assert_eq!(recalls[0].reference, "Chapter-2:mission");
+        assert_eq!(recalls[0].recall_count, 2);
+        assert_eq!(recalls[0].first_recalled_at, 10);
+        assert_eq!(recalls[0].last_recalled_at, 20);
+        assert_eq!(recalls[0].last_proposal_id, "prop_2");
+        assert_eq!(recalls[1].reference, "林墨.weapon");
+        assert_eq!(recalls[1].recall_count, 1);
     }
 
     #[test]

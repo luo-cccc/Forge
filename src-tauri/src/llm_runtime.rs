@@ -1,3 +1,4 @@
+use agent_harness_core::provider::LlmMessage;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
@@ -40,12 +41,68 @@ pub fn client(timeout_secs: u64) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
+fn estimate_json_message_tokens(messages: &[serde_json::Value]) -> u64 {
+    let converted = messages
+        .iter()
+        .map(|message| LlmMessage {
+            role: message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("user")
+                .to_string(),
+            content: message
+                .get("content")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        })
+        .collect::<Vec<_>>();
+    agent_harness_core::context_window_guard::estimate_request_tokens(&converted, None)
+}
+
+fn guard_chat_request(
+    settings: &LlmSettings,
+    messages: &[serde_json::Value],
+    requested_output_tokens: u64,
+) -> Result<(), String> {
+    guard_chat_request_with_info(
+        agent_harness_core::resolve_context_window_info(&settings.model),
+        messages,
+        requested_output_tokens,
+    )
+}
+
+fn guard_chat_request_with_info(
+    info: agent_harness_core::ContextWindowInfo,
+    messages: &[serde_json::Value],
+    requested_output_tokens: u64,
+) -> Result<(), String> {
+    let guard = agent_harness_core::evaluate_context_window(
+        info,
+        estimate_json_message_tokens(messages),
+        requested_output_tokens,
+    );
+    if guard.should_block {
+        Err(guard
+            .message
+            .unwrap_or_else(|| "Model context window too small".to_string()))
+    } else {
+        if let Some(message) = guard.message.filter(|_| guard.should_warn) {
+            tracing::warn!("{}", message);
+        }
+        Ok(())
+    }
+}
+
 pub async fn chat_text(
     settings: &LlmSettings,
     messages: Vec<serde_json::Value>,
     json_mode: bool,
     timeout_secs: u64,
 ) -> Result<String, String> {
+    guard_chat_request(settings, &messages, 4_096)?;
     let client = client(timeout_secs)?;
     let mut payload = serde_json::json!({
         "model": settings.model,
@@ -144,6 +201,7 @@ pub async fn stream_chat(
     timeout_secs: u64,
     mut on_delta: impl FnMut(String) -> Result<StreamControl, String>,
 ) -> Result<String, String> {
+    guard_chat_request(settings, &messages, 4_096)?;
     let client = client(timeout_secs)?;
     let resp = client
         .post(endpoint(&settings.api_base, "chat/completions"))
@@ -203,4 +261,51 @@ pub async fn stream_chat(
     }
 
     Ok(full)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_settings() -> LlmSettings {
+        LlmSettings {
+            api_key: "sk-test".to_string(),
+            api_base: "https://openrouter.ai/api/v1".to_string(),
+            model: "deepseek/deepseek-v4-flash".to_string(),
+            embedding_model: "text-embedding-3-small".to_string(),
+        }
+    }
+
+    #[test]
+    fn guard_allows_default_openrouter_model_for_small_prompt() {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": "林墨拔出寒影刀。"
+        })];
+
+        assert!(guard_chat_request(&test_settings(), &messages, 512).is_ok());
+    }
+
+    #[test]
+    fn guard_blocks_when_prompt_exceeds_configured_context() {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": "风".repeat(12_000)
+        })];
+        let result = guard_chat_request_with_info(
+            agent_harness_core::context_window_guard::ContextWindowInfo {
+                tokens: 4_096,
+                reference_tokens: None,
+                source: agent_harness_core::context_window_guard::ContextWindowSource::Env,
+            },
+            &messages,
+            512,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .as_deref()
+            .is_some_and(|message| message.contains("too small")));
+    }
 }

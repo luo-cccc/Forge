@@ -3,6 +3,7 @@ pub mod ambient;
 pub mod compaction;
 pub mod config;
 pub mod context_pack;
+pub mod context_window_guard;
 pub mod credential_pool;
 pub mod domain;
 pub mod hermes_memory;
@@ -31,6 +32,10 @@ pub use config::HarnessConfig;
 pub use context_pack::{
     char_count, truncate_text_report, ContextBudgetReport, ContextPacker, ContextSourceReport,
     PackedContext,
+};
+pub use context_window_guard::{
+    evaluate_context_window, guard_request, resolve_context_window_info, ContextWindowGuard,
+    ContextWindowInfo, ContextWindowSource,
 };
 pub use credential_pool::{CredentialPool, CredentialRegistry, PoolStrategy, PooledCredential};
 pub use domain::{writing_domain_profile, AgentDomainProfile, ContextPriority, DomainCapability};

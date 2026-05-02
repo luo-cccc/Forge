@@ -14,8 +14,9 @@ use super::diagnostics::{
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
-    ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextSourceBudgetTrace,
-    ManualAgentTurnSummary, NextBeatSummary, StoryContractSummary, WriterMemory,
+    ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextRecallSummary,
+    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, StoryContractSummary,
+    WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -50,6 +51,7 @@ pub struct WriterAgentLedgerSnapshot {
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
     pub recent_decisions: Vec<super::memory::CreativeDecisionSummary>,
     pub memory_audit: Vec<super::memory::MemoryAuditSummary>,
+    pub context_recalls: Vec<ContextRecallSummary>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -144,6 +146,7 @@ pub struct WriterAgentTraceSnapshot {
     pub recent_observations: Vec<WriterObservationTrace>,
     pub recent_proposals: Vec<WriterProposalTrace>,
     pub recent_feedback: Vec<WriterFeedbackTrace>,
+    pub context_recalls: Vec<ContextRecallSummary>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -947,6 +950,15 @@ impl WriterAgentKernel {
                 created_at,
             )
             .ok();
+        self.memory
+            .record_context_recalls(
+                &self.project_id,
+                &proposal.id,
+                &proposal.observation_id,
+                &proposal.evidence,
+                created_at,
+            )
+            .ok();
         Some(proposal)
     }
 
@@ -1556,6 +1568,10 @@ impl WriterAgentKernel {
             open_promises,
             recent_decisions: self.memory.list_recent_decisions(20).unwrap_or_default(),
             memory_audit: self.memory.list_memory_audit(30).unwrap_or_default(),
+            context_recalls: self
+                .memory
+                .list_context_recalls(&self.project_id, 30)
+                .unwrap_or_default(),
         }
     }
 
@@ -1650,6 +1666,10 @@ impl WriterAgentKernel {
                     })
                     .collect()
             },
+            context_recalls: self
+                .memory
+                .list_context_recalls(&self.project_id, limit)
+                .unwrap_or_default(),
         }
     }
 
@@ -4344,6 +4364,42 @@ mod tests {
             .iter()
             .any(|e| e.source == EvidenceSource::PromiseLedger));
         assert!(ghost.preview.contains("旧事") || ghost.preview.contains("兵器"));
+    }
+
+    #[test]
+    fn observe_records_context_recalls_from_surfaced_evidence() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        memory
+            .upsert_canon_entity(
+                "character",
+                "林墨",
+                &[],
+                "主角",
+                &serde_json::json!({ "weapon": "寒影刀" }),
+                0.9,
+            )
+            .unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let proposals = kernel
+            .observe(observation("林墨拔出长剑，指向门外的人。"))
+            .unwrap();
+        let warning = proposals
+            .iter()
+            .find(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+            .expect("continuity warning should exist");
+
+        let trace = kernel.trace_snapshot(10);
+        let ledger = kernel.ledger_snapshot();
+
+        assert!(trace.context_recalls.iter().any(|recall| {
+            recall.source == "Canon"
+                && recall.last_proposal_id == warning.id
+                && recall.snippet.contains("寒影刀")
+        }));
+        assert!(ledger
+            .context_recalls
+            .iter()
+            .any(|recall| recall.source == "Canon"));
     }
 
     #[test]

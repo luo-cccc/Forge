@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 
+use crate::context_window_guard::{guard_request, resolve_context_window_info};
 use crate::retry::{backoff_duration, ErrorClass};
 
 use super::{LlmMessage, LlmRequest, LlmResponse, Provider, StreamEvent, UsageInfo};
@@ -221,6 +222,19 @@ impl Provider for OpenAiCompatProvider {
         request: LlmRequest,
         on_event: Box<dyn Fn(StreamEvent) + Send + Sync>,
     ) -> Result<LlmResponse, String> {
+        let requested_output_tokens = request.max_tokens.unwrap_or(4096) as u64;
+        let guard = guard_request(
+            &self.model,
+            &request.messages,
+            request.system.as_deref(),
+            requested_output_tokens,
+        );
+        if guard.should_block {
+            return Err(guard
+                .message
+                .unwrap_or_else(|| "Model context window too small".to_string()));
+        }
+
         let messages = Self::build_api_messages(&request);
 
         let mut body = serde_json::json!({
@@ -308,6 +322,10 @@ impl Provider for OpenAiCompatProvider {
             .iter()
             .map(|m| (m.content.as_ref().map(|c| c.chars().count()).unwrap_or(0) as u64) / 3 + 8)
             .sum()
+    }
+
+    fn context_window_tokens(&self) -> u64 {
+        resolve_context_window_info(&self.model).tokens
     }
 
     async fn health_check(&self) -> Result<(), String> {

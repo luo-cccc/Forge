@@ -3273,6 +3273,9 @@ async fn ask_agent(
         AgentLoopConfig {
             max_rounds: 10,
             system_prompt,
+            context_limit_tokens: Some(
+                agent_harness_core::resolve_context_window_info(&model).tokens,
+            ),
         },
         provider,
         registry,

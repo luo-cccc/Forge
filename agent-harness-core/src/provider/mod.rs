@@ -32,6 +32,11 @@ pub trait Provider: Send + Sync {
     /// Estimate token count for messages. Provider-specific heuristic.
     fn estimate_tokens(&self, messages: &[LlmMessage]) -> u64;
 
+    /// Model context window metadata used for preflight guards.
+    fn context_window_tokens(&self) -> u64 {
+        crate::context_window_guard::DEFAULT_CONTEXT_WINDOW_TOKENS
+    }
+
     /// Check connectivity and API key validity.
     async fn health_check(&self) -> Result<(), String>;
 }

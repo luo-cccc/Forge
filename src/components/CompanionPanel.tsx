@@ -1381,8 +1381,35 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
         {effectiveTab === "audit" && (
           <div className="space-y-2 text-xs">
-            {(trace?.recentProposals.length ?? 0) === 0 && (ledger?.memoryAudit.length ?? 0) === 0 && (
+            {(trace?.recentProposals.length ?? 0) === 0 &&
+              (ledger?.memoryAudit.length ?? 0) === 0 &&
+              (trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) === 0 && (
               <p className="text-text-muted">No agent audit events yet.</p>
+            )}
+            {((trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) > 0) && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Context Recall</span>
+                  <span className="text-[10px] text-text-muted">
+                    {trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0} tracked
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {(trace?.contextRecalls ?? ledger?.contextRecalls ?? []).slice(0, 6).map((recall) => (
+                    <div key={`${recall.source}-${recall.reference}`} className="rounded border border-border-subtle bg-bg-deep p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-text-secondary" title={recall.reference}>
+                          {recall.source} · {recall.reference}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-accent">
+                          x{recall.recallCount}
+                        </span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[10px] text-text-muted">{recall.snippet}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {(trace?.recentProposals.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
