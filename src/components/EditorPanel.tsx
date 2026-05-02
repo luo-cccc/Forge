@@ -24,9 +24,12 @@ import {
   type SemanticLintPayload,
   type WriterOperation,
 } from "../protocol";
-import AIPreviewMark from "../extensions/AIPreviewMark";
 import CommentMark from "../extensions/CommentMark";
 import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
+import InlinePreview, {
+  inlinePreviewPluginKey,
+  type InlinePreviewState,
+} from "../extensions/InlinePreview";
 import SemanticLint from "../extensions/SemanticLint";
 import EntityAnchor from "../extensions/EntityAnchor";
 import LorebookDrawer from "./LorebookDrawer";
@@ -106,31 +109,39 @@ function docPositionFromTextCharIndex(editor: Editor, targetCharIndex: number): 
   return Math.max(0, Math.min(position, editor.state.doc.content.size));
 }
 
-function applyInlineWriterOperation(editor: Editor, operation: WriterOperation): boolean {
+function previewInlineWriterOperation(
+  editor: Editor,
+  operation: WriterOperation,
+  proposalId: string,
+): boolean {
   if (operation.kind === "text.insert") {
     const at = docPositionFromTextCharIndex(editor, operation.at);
-    editor
-      .chain()
-      .focus()
-      .insertContentAt(at, operation.text)
-      .setTextSelection({ from: at, to: at + operation.text.length })
-      .setMark("aiPreview")
-      .setTextSelection(at + operation.text.length)
-      .run();
+    editor.commands.setInlinePreview({
+      id: `${proposalId}-${Date.now()}`,
+      proposalId,
+      kind: operation.kind,
+      from: at,
+      to: at,
+      text: operation.text,
+      chapter: operation.chapter,
+      revision: operation.revision,
+    });
     return true;
   }
 
   if (operation.kind === "text.replace") {
     const from = docPositionFromTextCharIndex(editor, operation.from);
     const to = docPositionFromTextCharIndex(editor, operation.to);
-    editor
-      .chain()
-      .focus()
-      .insertContentAt({ from, to }, operation.text)
-      .setTextSelection({ from, to: from + operation.text.length })
-      .setMark("aiPreview")
-      .setTextSelection(from + operation.text.length)
-      .run();
+    editor.commands.setInlinePreview({
+      id: `${proposalId}-${Date.now()}`,
+      proposalId,
+      kind: operation.kind,
+      from,
+      to,
+      text: operation.text,
+      chapter: operation.chapter,
+      revision: operation.revision,
+    });
     return true;
   }
 
@@ -281,8 +292,7 @@ export default function EditorPanel({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [bubbleThinking, setBubbleThinking] = useState(false);
-  const [inlineDone, setInlineDone] = useState(false);
-  const [inlineProposalId, setInlineProposalId] = useState<string | null>(null);
+  const [inlinePreview, setInlinePreview] = useState<InlinePreviewState | null>(null);
   const [saveIndicator, setSaveIndicator] = useState<string | null>(null);
   const [entityHover, setEntityHover] = useState<EntityHoverState | null>(null);
   const [parallelDraftsOpen, setParallelDraftsOpen] = useState(false);
@@ -292,9 +302,9 @@ export default function EditorPanel({
   const editor = useEditor({
     extensions: [
       StarterKit,
-      AIPreviewMark,
       CommentMark,
       GhostText,
+      InlinePreview,
       SemanticLint,
       EntityAnchor,
       PatchMark,
@@ -682,6 +692,9 @@ export default function EditorPanel({
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
       abortGhostRequest(undefined, true);
+      if (!inlinePreviewPluginKey.getState(editor.state)) {
+        setInlinePreview(null);
+      }
       editor.commands.clearSemanticLint();
       scheduleEditorTelemetry();
       scheduleSemanticLint();
@@ -837,10 +850,14 @@ export default function EditorPanel({
               return;
             }
 
-            const applied = applyInlineWriterOperation(editorRef.current, operation);
+            const applied = previewInlineWriterOperation(
+              editorRef.current,
+              operation,
+              event.payload.proposal.id,
+            );
             if (applied) {
-              setInlineProposalId(event.payload.proposal.id);
-              setInlineDone(true);
+              const preview = inlinePreviewPluginKey.getState(editorRef.current.state);
+              setInlinePreview(preview ?? null);
               incrementActionEpoch();
             }
           } catch (e) {
@@ -886,51 +903,71 @@ export default function EditorPanel({
 
   const handleAccept = useCallback(() => {
     if (!editor) return;
-    const rangesToClear: { from: number; to: number }[] = [];
-    editor.state.doc.descendants((node, pos) => {
-      if (node.marks?.some((m) => m.type.name === "aiPreview")) {
-        rangesToClear.push({ from: pos, to: pos + node.nodeSize });
-      }
-    });
-    editor.chain().focus();
-    for (const r of rangesToClear) {
-      editor
-        .chain()
-        .setTextSelection({ from: r.from, to: r.to })
-        .unsetMark("aiPreview")
-        .run();
+    const preview = inlinePreviewPluginKey.getState(editor.state);
+    if (!preview) {
+      setInlinePreview(null);
+      return;
     }
-    setInlineDone(false);
-    if (inlineProposalId) {
+    if (preview.chapter !== currentChapterRef.current) {
+      editor.commands.clearInlinePreview();
+      setInlinePreview(null);
+      console.error("Inline preview discarded because chapter changed.");
+      return;
+    }
+
+    const applied = editor.commands.applyInlinePreview();
+    if (!applied) return;
+    setInlinePreview(null);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    const content = editor.getHTML();
+    const chapterAtSave = currentChapterRef.current;
+    const sequenceAtSave = editSequenceRef.current;
+    void (async () => {
+      try {
+        const revision = await invoke<string>(Commands.saveChapter, { title: chapterAtSave, content });
+        const isStillCurrent =
+          editSequenceRef.current === sequenceAtSave &&
+          currentChapterRef.current === chapterAtSave &&
+          editor.getHTML() === content;
+        if (isStillCurrent) {
+          setCurrentChapterRevision(revision);
+          currentChapterRevisionRef.current = revision;
+          setIsEditorDirty(false);
+        }
+      } catch (e) {
+        setIsEditorDirty(true);
+        console.error("Failed to save accepted inline operation:", e);
+        return;
+      }
+
+      if (!preview.proposalId) return;
       const feedback: ProposalFeedback = {
-        proposalId: inlineProposalId,
+        proposalId: preview.proposalId,
         action: "accepted",
-        reason: "Accepted inline typed operation preview.",
+        finalText: preview.text,
+        reason: "Accepted inline typed operation preview after save.",
         createdAt: Date.now(),
       };
-      void invoke(Commands.applyProposalFeedback, { feedback }).catch((e) => {
+      try {
+        await invoke(Commands.applyProposalFeedback, { feedback });
+      } catch (e) {
         console.error("Failed to record inline operation feedback:", e);
-      });
-      setInlineProposalId(null);
-    }
-  }, [editor, inlineProposalId]);
+      }
+    })();
+  }, [editor, setCurrentChapterRevision, setIsEditorDirty]);
 
   const handleReject = useCallback(() => {
     if (!editor) return;
-    const rangesToDelete: { from: number; to: number }[] = [];
-    editor.state.doc.descendants((node, pos) => {
-      if (node.marks?.some((m) => m.type.name === "aiPreview")) {
-        rangesToDelete.push({ from: pos, to: pos + node.nodeSize });
-      }
-    });
-    for (let i = rangesToDelete.length - 1; i >= 0; i--) {
-      const r = rangesToDelete[i];
-      editor.chain().focus().deleteRange({ from: r.from, to: r.to }).run();
-    }
-    setInlineDone(false);
-    if (inlineProposalId) {
+    const preview = inlinePreviewPluginKey.getState(editor.state);
+    editor.commands.clearInlinePreview();
+    setInlinePreview(null);
+    if (preview?.proposalId) {
       const feedback: ProposalFeedback = {
-        proposalId: inlineProposalId,
+        proposalId: preview.proposalId,
         action: "rejected",
         reason: "Rejected inline typed operation preview.",
         createdAt: Date.now(),
@@ -938,9 +975,8 @@ export default function EditorPanel({
       void invoke(Commands.applyProposalFeedback, { feedback }).catch((e) => {
         console.error("Failed to record inline operation rejection:", e);
       });
-      setInlineProposalId(null);
     }
-  }, [editor, inlineProposalId]);
+  }, [editor]);
 
   const handleAcceptSuggestion = useCallback(
     (suggestion: AgentSuggestion) => {
@@ -1002,7 +1038,7 @@ export default function EditorPanel({
   );
 
   useEffect(() => {
-    if (!editor || !inlineDone) return;
+    if (!editor || !inlinePreview) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -1014,7 +1050,7 @@ export default function EditorPanel({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [editor, inlineDone, handleAccept, handleReject]);
+  }, [editor, inlinePreview, handleAccept, handleReject]);
 
   const btnActive = (active: boolean) =>
     active ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary";
@@ -1131,7 +1167,7 @@ export default function EditorPanel({
             onStop={() => {}}
           />
         )}
-        {inlineDone && (
+        {inlinePreview && (
           <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-bg-raised border border-accent rounded-sm px-3 py-2 shadow-lg z-40">
             <span className="text-xs text-accent">AI Preview</span>
             <span className="w-px h-4 bg-border-subtle" />

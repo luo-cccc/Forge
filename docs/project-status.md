@@ -27,12 +27,14 @@ Forge is a Cursor-style writing agent for novels, not a generic writing tool. Th
 - Frontend API-key handling does not expose the stored raw key.
 - Recent save-flow hardening prevents accepted text feedback from being recorded before text is durably saved.
 - Recent editor hardening prevents stale autosaves from marking newer edits clean, blocks wrong-chapter inline operations, and stops chapter switching if current chapter save fails.
+- Storage writes now use per-target write guards and unique temporary files instead of a shared `.tmp` path, reducing concurrent autosave/generation/restore collision risk.
+- Inline AI operations now render as decoration-based previews and only enter manuscript text after acceptance and a successful save.
 
 ## Current Verification Baseline
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 147 passing
+- `cargo test -p agent-writer`: 148 passing
 - `cargo run -p agent-evals`: 46/46 passing
 - `npm run check:p2`: 8/8 passing
 - `npm run lint`: passing
@@ -51,8 +53,6 @@ The expected local baseline is:
 ## Remaining Gaps
 
 - `src-tauri/src/lib.rs` is still too large and should be split into command modules after the save-flow risks are fully closed.
-- `atomic_write` still uses a fixed `.tmp` path; it needs unique temp files and preferably per-target write locking before heavy concurrent generation is trusted.
-- Inline AI preview still uses document marks; a decoration-based preview would better separate "suggested" text from "accepted manuscript" text.
-- `ask_agent` and legacy manual request paths still need more routing through the persistent Writer Agent Kernel.
+- `ask_agent` manual requests now create WriterObservations, run Writer Agent Kernel observation, use ManualRequest context packs, persist manual exchanges, and then execute through the older agent loop; the remaining gap is retiring that execution layer once the kernel can own the full run loop.
 - Story Contract and Chapter Mission authoring/editing UX is still early compared with the underlying memory model.
 - Tool policy should continue moving from "inventory visible" toward end-to-end approval semantics for every write-capable path.

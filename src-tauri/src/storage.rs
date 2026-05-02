@@ -1,10 +1,16 @@
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Condvar, Mutex, OnceLock};
 use tauri::Manager;
 
 pub const HERMES_DB_FILENAME: &str = "hermes_memory.db";
 pub const WRITER_MEMORY_DB_FILENAME: &str = "writer_memory.db";
 const MAX_FILE_BACKUPS: usize = 20;
+static ACTIVE_WRITE_LOCKS: OnceLock<(Mutex<HashSet<PathBuf>>, Condvar)> = OnceLock::new();
+static ATOMIC_WRITE_TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const HERMES_DIAGNOSTIC_TABLES: &[&str] = &[
     "session_history",
@@ -949,14 +955,92 @@ fn safe_chapter_file_path(
     Ok(dir.join(path))
 }
 
-pub fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), String> {
+pub fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
+    let _guard = acquire_write_guard(path)?;
     backup_existing_file(path)?;
-    let tmp = path.with_extension("tmp");
+    let tmp = unique_atomic_tmp_path(path)?;
     std::fs::write(&tmp, content).map_err(|e| format!("Write tmp failed: {}", e))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("Atomic rename failed: {}", e))
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("Atomic rename failed: {}", e));
+    }
+    Ok(())
 }
 
-fn backup_existing_file(path: &std::path::Path) -> Result<(), String> {
+struct FileWriteGuard {
+    path: PathBuf,
+}
+
+impl Drop for FileWriteGuard {
+    fn drop(&mut self) {
+        let (mutex, cvar) = write_locks();
+        if let Ok(mut active) = mutex.lock() {
+            active.remove(&self.path);
+            cvar.notify_all();
+        }
+    }
+}
+
+fn write_locks() -> &'static (Mutex<HashSet<PathBuf>>, Condvar) {
+    ACTIVE_WRITE_LOCKS.get_or_init(|| (Mutex::new(HashSet::new()), Condvar::new()))
+}
+
+fn acquire_write_guard(path: &Path) -> Result<FileWriteGuard, String> {
+    let key = write_lock_key(path);
+    let (mutex, cvar) = write_locks();
+    let mut active = mutex
+        .lock()
+        .map_err(|e| format!("Storage write lock poisoned: {}", e))?;
+    while active.contains(&key) {
+        active = cvar
+            .wait(active)
+            .map_err(|e| format!("Storage write lock poisoned: {}", e))?;
+    }
+    active.insert(key.clone());
+    Ok(FileWriteGuard { path: key })
+}
+
+fn write_lock_key(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        if let Ok(parent) = parent.canonicalize() {
+            return parent.join(file_name);
+        }
+    }
+    path.to_path_buf()
+}
+
+fn unique_atomic_tmp_path(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path '{}' has no parent directory", path.display()))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("Path '{}' has no filename", path.display()))?
+        .to_string_lossy();
+    for _ in 0..100 {
+        let sequence = ATOMIC_WRITE_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_name = format!(
+            ".{}.{}.{}.{}.tmp",
+            file_name,
+            std::process::id(),
+            unix_time_ms(),
+            sequence
+        );
+        let tmp = parent.join(tmp_name);
+        if !tmp.exists() {
+            return Ok(tmp);
+        }
+    }
+    Err(format!(
+        "Could not allocate a unique tmp file for '{}'",
+        path.display()
+    ))
+}
+
+fn backup_existing_file(path: &Path) -> Result<(), String> {
     if !path.exists() || path.is_dir() {
         return Ok(());
     }
@@ -1228,6 +1312,7 @@ mod tests {
         atomic_write(&path, "new").unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert!(!path.with_extension("tmp").exists());
         let backup_dir = backup_dir_for(&path).unwrap();
         let backups = std::fs::read_dir(&backup_dir)
             .unwrap()
@@ -1236,7 +1321,48 @@ mod tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), "old");
         let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir_all(backup_dir.parent().unwrap());
+        let _ = std::fs::remove_dir_all(backup_dir);
+    }
+
+    #[test]
+    fn atomic_write_serializes_concurrent_writes_to_same_target() {
+        let path = temp_path("concurrent-chapter.md");
+        std::fs::write(&path, "base").unwrap();
+
+        let handles = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    atomic_write(&path, &format!("content-{i}")).unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let final_content = std::fs::read_to_string(&path).unwrap();
+        assert!(final_content.starts_with("content-"));
+        assert!(!path.with_extension("tmp").exists());
+        let parent = path.parent().unwrap();
+        let leaked_tmp = std::fs::read_dir(parent).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains("concurrent-chapter.md")
+                && entry
+                    .path()
+                    .extension()
+                    .map(|ext| ext == "tmp")
+                    .unwrap_or(false)
+        });
+        assert!(!leaked_tmp);
+        let backup_dir = backup_dir_for(&path).unwrap();
+        let backup_count = std::fs::read_dir(&backup_dir).unwrap().flatten().count();
+        assert!(backup_count <= MAX_FILE_BACKUPS);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(backup_dir);
     }
 
     #[test]
@@ -1255,7 +1381,7 @@ mod tests {
         assert!(backups[0].id.ends_with("outline.json"));
         assert_eq!(backups[0].bytes, 2);
         let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

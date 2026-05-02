@@ -49,6 +49,28 @@ body {
   color: color-mix(in srgb, var(--color-success) 45%, var(--color-text-muted));
 }
 
+.inline-ai-preview {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 72%, transparent);
+  background: color-mix(in srgb, var(--color-accent-subtle) 72%, transparent);
+  color: var(--color-accent);
+  white-space: pre-wrap;
+}
+
+.inline-ai-preview-insert {
+  padding: 0 2px;
+}
+
+.inline-ai-preview-replacement {
+  margin-left: 2px;
+  padding: 0 2px;
+}
+
+.inline-ai-preview-target {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  text-decoration-line: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-danger) 72%, transparent);
+}
+
 .semantic-lint {
   cursor: help;
   text-decoration-line: underline;
