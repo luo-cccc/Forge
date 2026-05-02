@@ -756,7 +756,7 @@ impl WriterAgentKernel {
             .flat_map(|proposal| proposal.operations.clone())
             .collect::<Vec<_>>();
         let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
-        let task_packet = build_task_packet_for_observation(
+        let mut task_packet = build_task_packet_for_observation(
             &self.project_id,
             &self.session_id,
             task.clone(),
@@ -771,6 +771,21 @@ impl WriterAgentKernel {
             format!("{:?}", task),
             task_packet.clone(),
         );
+
+        if request.task == WriterAgentTask::ChapterGeneration {
+            let quality = self.contract_quality();
+            if quality <= StoryContractQuality::Vague {
+                task_packet.beliefs.push(TaskBelief {
+                    subject: "Story Contract Quality".to_string(),
+                    statement: format!(
+                        "StoryContract quality is {:?}: generated chapter may lack story-level grounding. Consider strengthening the Story Contract in settings.",
+                        quality
+                    ),
+                    confidence: 0.9f32,
+                    source: Some("story_contract_quality_gate".to_string()),
+                });
+            }
+        }
 
         let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);
         let registry = default_writing_tool_registry();
@@ -2080,6 +2095,15 @@ impl WriterAgentKernel {
             pacing_count,
             entries,
         }
+    }
+
+    fn contract_quality(&self) -> StoryContractQuality {
+        self.memory
+            .get_story_contract(&self.project_id)
+            .ok()
+            .flatten()
+            .map(|contract| contract.quality())
+            .unwrap_or(StoryContractQuality::Missing)
     }
 
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
