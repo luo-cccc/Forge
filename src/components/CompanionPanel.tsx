@@ -23,7 +23,14 @@ import type {
 
 interface CompanionPanelProps {
   mode: StoryMode;
-  onApplyOperation?: (operation: WriterOperation) => boolean;
+  onApplyOperation?: (operation: WriterOperation) => Promise<ApplyOperationResult>;
+}
+
+interface ApplyOperationResult {
+  applied: boolean;
+  saved: boolean;
+  revision?: string;
+  error?: string;
 }
 
 function proposalSlotKey(proposal: AgentProposal): string {
@@ -589,6 +596,23 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     return () => clearInterval(interval);
   }, []);
 
+  const applyApprovedOperation = useCallback(async (operation: WriterOperation): Promise<boolean> => {
+    if (!isEditorTextOperation(operation)) return true;
+
+    const result = await onApplyOperation?.(operation);
+    if (!result?.applied) {
+      setOperationError(result?.error ?? "The editor could not apply this operation.");
+      return false;
+    }
+
+    if (!result.saved) {
+      setOperationError(result.error ?? "The editor applied this operation, but it was not saved. Feedback was not recorded.");
+      return false;
+    }
+
+    return true;
+  }, [onApplyOperation]);
+
   useEffect(() => {
     // Listen for new proposals from the kernel
     const fn = listen<AgentProposal>(Events.agentProposal, (event) => {
@@ -653,11 +677,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = isEditorTextOperation(operation)
-        ? onApplyOperation?.(operation) ?? false
-        : true;
+      const applied = await applyApprovedOperation(operation);
       if (!applied) {
-        setOperationError("The editor could not apply this operation.");
         return;
       }
 
@@ -666,7 +687,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
 
   const handleApplyQueueEntry = useCallback(async (entry: StoryReviewQueueEntry) => {
     setOperationError(null);
@@ -691,11 +712,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = isEditorTextOperation(operation)
-        ? onApplyOperation?.(operation) ?? false
-        : true;
+      const applied = await applyApprovedOperation(operation);
       if (!applied) {
-        setOperationError("The editor could not apply this operation.");
         return;
       }
 
@@ -704,7 +722,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
 
   const handleApplyQueueOperation = useCallback(async (
     entry: StoryReviewQueueEntry,
@@ -722,11 +740,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = isEditorTextOperation(operation)
-        ? onApplyOperation?.(operation) ?? false
-        : true;
+      const applied = await applyApprovedOperation(operation);
       if (!applied) {
-        setOperationError("The editor could not apply this operation.");
         return;
       }
 
@@ -735,7 +750,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapterRevision, onApplyOperation, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
 
   const handlePromiseLedgerOperation = useCallback(async (operation: WriterOperation) => {
     setOperationError(null);
@@ -770,11 +785,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = isEditorTextOperation(operation)
-        ? onApplyOperation?.(operation) ?? false
-        : true;
+      const applied = await applyApprovedOperation(operation);
       if (!applied) {
-        setOperationError("The editor could not apply this operation.");
         return;
       }
 
@@ -788,7 +800,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapterRevision, onApplyOperation, recordFeedback, refreshStatus]);
+  }, [applyApprovedOperation, currentChapterRevision, recordFeedback, refreshStatus]);
 
 
   const handleIgnoreDebtEntry = useCallback(async (entry: StoryDebtEntry) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useAppStore } from "../store";
 import { Commands, Events, type ChapterGenerationEvent, type ProjectFileRestored } from "../protocol";
 
 interface OutlineNode {
@@ -21,6 +22,9 @@ export default function OutlinePanel() {
   const [summary, setSummary] = useState("");
   const [generating, setGenerating] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const currentChapter = useAppStore((s) => s.currentChapter);
+  const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
+  const isEditorDirty = useAppStore((s) => s.isEditorDirty);
 
   const refresh = useCallback(async () => {
     try {
@@ -125,6 +129,11 @@ export default function OutlinePanel() {
       await invoke(Commands.batchGenerateChapter, {
         chapterTitle: node.chapter_title,
         summary: node.summary,
+        frontendState: {
+          openChapterTitle: currentChapter,
+          openChapterRevision: currentChapterRevision ?? undefined,
+          dirty: isEditorDirty,
+        },
       });
     } catch (e) {
       console.error("Failed to start generation:", e);

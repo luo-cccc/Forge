@@ -14,6 +14,13 @@ interface SelectionState {
   text: string;
 }
 
+interface ApplyWriterOperationResult {
+  applied: boolean;
+  saved: boolean;
+  revision?: string;
+  error?: string;
+}
+
 function docPositionFromTextCharIndex(editor: Editor, targetCharIndex: number): number {
   const target = Math.max(0, Math.min(targetCharIndex, Array.from(editor.getText()).length));
   let low = 0;
@@ -127,9 +134,21 @@ function App() {
     }
   }, []);
 
-  const handleApplyWriterOperation = useCallback((operation: WriterOperation): boolean => {
+  const handleApplyWriterOperation = useCallback(async (
+    operation: WriterOperation,
+  ): Promise<ApplyWriterOperationResult> => {
     const editor = editorRef.current;
-    if (!editor) return false;
+    if (!editor) {
+      return { applied: false, saved: false, error: "Editor is not ready." };
+    }
+
+    if ("chapter" in operation && operation.chapter !== currentChapter) {
+      return {
+        applied: false,
+        saved: false,
+        error: `Operation targets ${operation.chapter}, but the open chapter is ${currentChapter}.`,
+      };
+    }
 
     switch (operation.kind) {
       case "text.insert": {
@@ -140,8 +159,7 @@ function App() {
           .insertContentAt(at, operation.text)
           .setTextSelection(at + operation.text.length)
           .run();
-        setIsEditorDirty(true);
-        return true;
+        break;
       }
       case "text.replace": {
         const from = docPositionFromTextCharIndex(editor, operation.from);
@@ -152,13 +170,24 @@ function App() {
           .insertContentAt({ from, to }, operation.text)
           .setTextSelection(from + operation.text.length)
           .run();
-        setIsEditorDirty(true);
-        return true;
+        break;
       }
       default:
-        return false;
+        return { applied: false, saved: false, error: `Unsupported operation kind: ${operation.kind}` };
     }
-  }, [setIsEditorDirty]);
+
+    setIsEditorDirty(true);
+    const content = editor.getHTML();
+    try {
+      const revision = await invoke<string>(Commands.saveChapter, { title: currentChapter, content });
+      setCurrentChapterRevision(revision);
+      setIsEditorDirty(false);
+      return { applied: true, saved: true, revision };
+    } catch (e) {
+      setIsEditorDirty(true);
+      return { applied: true, saved: false, error: `Save failed: ${String(e)}` };
+    }
+  }, [currentChapter, setCurrentChapterRevision, setIsEditorDirty]);
 
   useEffect(() => {
     const handleRestored = async (event: Event) => {

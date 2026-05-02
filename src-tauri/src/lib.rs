@@ -18,7 +18,8 @@ mod tool_bridge;
 pub mod writer_agent;
 use agent_runtime::{AgentObservation, AgentObserveResult, AgentToolDescriptor};
 use chapter_generation::{
-    ChapterGenerationEvent, GenerateChapterAutonomousPayload, PipelineTerminal, SaveMode,
+    ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
+    PipelineTerminal, SaveMode,
 };
 use storage::{ChapterInfo, LoreEntry, OutlineNode};
 use writer_agent::memory::ManualAgentTurnSummary;
@@ -1617,6 +1618,7 @@ async fn batch_generate_chapter(
     app: tauri::AppHandle,
     chapter_title: String,
     summary: String,
+    frontend_state: Option<FrontendChapterStateSnapshot>,
 ) -> Result<(), String> {
     let api_key = require_api_key()?;
     let settings = llm_runtime::settings(api_key);
@@ -1642,7 +1644,7 @@ async fn batch_generate_chapter(
             target_chapter_number: None,
             user_instruction: format!("帮我写《{}》这一章的完整初稿。", title_clone),
             budget: None,
-            frontend_state: None,
+            frontend_state,
             save_mode: SaveMode::ReplaceIfClean,
             chapter_summary_override: Some(summary),
         };
