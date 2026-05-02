@@ -3450,3 +3450,62 @@ pub fn run_mission_drift_flag_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_ghost_quality_confidence_eval() -> EvalResult {
+    let mut errors = Vec::new();
+
+    // Missing contract → confidence heavily penalized
+    let missing_mem = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let conf_missing =
+        agent_writer_lib::writer_agent::kernel::ghost_confidence(0.8, &missing_mem, "test");
+    if conf_missing >= 0.6 {
+        errors.push(format!(
+            "missing contract ghost confidence {} should be < 0.6",
+            conf_missing
+        ));
+    }
+
+    // Vague contract → confidence reduced
+    let vague_mem = WriterMemory::open(Path::new(":memory:")).unwrap();
+    vague_mem
+        .ensure_story_contract_seed("test", "T", "G", "short", "vague", "")
+        .unwrap();
+    let conf_vague =
+        agent_writer_lib::writer_agent::kernel::ghost_confidence(0.8, &vague_mem, "test");
+    if conf_vague >= 0.8 {
+        errors.push(format!(
+            "vague contract ghost confidence {} should be < 0.8",
+            conf_vague
+        ));
+    }
+
+    // Usable contract → confidence unchanged (base ~0.8 caps at 0.9)
+    let usable_mem = WriterMemory::open(Path::new(":memory:")).unwrap();
+    usable_mem
+        .ensure_story_contract_seed(
+            "test",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相，在复仇与守护之间做最终选择。",
+            "林墨必须在复仇和守护之间做艰难选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let conf_usable =
+        agent_writer_lib::writer_agent::kernel::ghost_confidence(0.8, &usable_mem, "test");
+    if conf_usable < 0.75 || conf_usable > 0.91 {
+        errors.push(format!(
+            "usable contract ghost confidence {} should be near 0.8",
+            conf_usable
+        ));
+    }
+
+    eval_result(
+        "writer_agent:ghost_quality_confidence",
+        format!(
+            "missing={:.2} vague={:.2} usable={:.2}",
+            conf_missing, conf_vague, conf_usable
+        ),
+        errors,
+    )
+}

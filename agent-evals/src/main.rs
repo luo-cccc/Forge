@@ -176,6 +176,7 @@ fn main() {
     results.push(run_character_conflict_flag_eval());
     results.push(run_style_continuity_learning_eval());
     results.push(run_mission_drift_flag_eval());
+    results.push(run_ghost_quality_confidence_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

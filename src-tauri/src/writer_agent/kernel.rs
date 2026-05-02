@@ -904,7 +904,7 @@ impl WriterAgentKernel {
             evidence: context_pack_evidence(&context_pack, &observation),
             risks: vec!["LLM draft should be reviewed before keeping.".into()],
             alternatives: vec![],
-            confidence: (intent.confidence.max(0.65) as f64).min(0.9),
+            confidence: ghost_confidence(intent.confidence, &self.memory, &self.project_id),
             expires_at: Some(observation.created_at + 60_000),
         };
 
@@ -3458,6 +3458,22 @@ fn validate_chapter_mission_summary(mission: &ChapterMissionSummary) -> Option<S
     }
 
     None
+}
+
+pub fn ghost_confidence(intent_confidence: f32, memory: &WriterMemory, project_id: &str) -> f64 {
+    let base = (intent_confidence.max(0.65f32) as f64).min(0.9);
+    let quality = memory
+        .get_story_contract(project_id)
+        .ok()
+        .flatten()
+        .map(|contract| contract.quality())
+        .unwrap_or(StoryContractQuality::Missing);
+    match quality {
+        StoryContractQuality::Missing => base * 0.5,
+        StoryContractQuality::Vague => base * 0.7,
+        StoryContractQuality::Usable => base,
+        StoryContractQuality::Strong => (base + 0.05).min(0.95),
+    }
 }
 
 fn normalize_chapter_mission_status(status: &str) -> String {
