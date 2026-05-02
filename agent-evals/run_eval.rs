@@ -1293,6 +1293,89 @@ fn run_story_contract_context_eval() -> EvalResult {
     )
 }
 
+fn run_foundation_write_validation_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let contract_result = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StoryContractUpsert {
+                contract: agent_writer_lib::writer_agent::operation::StoryContractOp {
+                    project_id: "eval".to_string(),
+                    title: "寒影录".to_string(),
+                    genre: "玄幻".to_string(),
+                    target_reader: "".to_string(),
+                    reader_promise: "爽文".to_string(),
+                    first_30_chapter_promise: "".to_string(),
+                    main_conflict: "复仇".to_string(),
+                    structural_boundary: "".to_string(),
+                    tone_contract: "".to_string(),
+                },
+            },
+            "",
+            Some(&eval_approval("foundation_validation")),
+        )
+        .unwrap();
+    let mission_result = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::ChapterMissionUpsert {
+                mission: agent_writer_lib::writer_agent::operation::ChapterMissionOp {
+                    project_id: "eval".to_string(),
+                    chapter_title: "Chapter-1".to_string(),
+                    mission: "打架".to_string(),
+                    must_include: "".to_string(),
+                    must_not: "剧透".to_string(),
+                    expected_ending: "".to_string(),
+                    status: "in_progress".to_string(),
+                    source_ref: "eval".to_string(),
+                },
+            },
+            "",
+            Some(&eval_approval("foundation_validation")),
+        )
+        .unwrap();
+    let ledger = kernel.ledger_snapshot();
+
+    let mut errors = Vec::new();
+    if contract_result.success {
+        errors.push("incomplete story contract was accepted".to_string());
+    }
+    if !contract_result
+        .error
+        .as_ref()
+        .is_some_and(|error| error.code == "invalid" && error.message.contains("Story Contract"))
+    {
+        errors.push(format!(
+            "story contract validation error was not explicit: {:?}",
+            contract_result.error
+        ));
+    }
+    if mission_result.success {
+        errors.push("vague chapter mission was accepted".to_string());
+    }
+    if !mission_result
+        .error
+        .as_ref()
+        .is_some_and(|error| error.code == "invalid" && error.message.contains("Chapter Mission"))
+    {
+        errors.push(format!(
+            "chapter mission validation error was not explicit: {:?}",
+            mission_result.error
+        ));
+    }
+    if ledger.story_contract.is_some() || ledger.active_chapter_mission.is_some() {
+        errors.push("invalid foundation writes polluted the ledger snapshot".to_string());
+    }
+
+    eval_result(
+        "writer_agent:foundation_write_validation",
+        format!(
+            "contract={} mission={}",
+            contract_result.success, mission_result.success
+        ),
+        errors,
+    )
+}
+
 fn run_story_contract_guard_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -2873,6 +2956,7 @@ fn main() {
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
+    results.push(run_foundation_write_validation_eval());
     results.push(run_story_contract_guard_eval());
     results.push(run_story_contract_negated_guard_eval());
     results.push(run_chapter_mission_result_feedback_eval());

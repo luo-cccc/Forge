@@ -33,14 +33,15 @@ Forge is a Cursor-style writing agent for novels, not a generic writing tool. Th
 - Write-capable WriterOperations for memory, promises, foundation, canon, and outline now require surfaced approval context and record an approval decision before execution.
 - Legacy direct file-write commands for chapters, lore, outline, backup restore, and chapter rename now record Writer Agent audit decisions after successful writes.
 - Manual `ask_agent` requests now run the old execution loop under the Writer Agent ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
+- Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs.
 
 ## Current Verification Baseline
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 149 passing
+- `cargo test -p agent-writer`: 151 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 47/47 passing
+- `cargo run -p agent-evals`: 48/48 passing
 - `npm run check:p2`: 8/8 passing
 - `npm run lint`: passing
 - `npm run build`: passing

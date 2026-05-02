@@ -1335,6 +1335,14 @@ impl WriterAgentKernel {
                     tone_contract: contract.tone_contract.clone(),
                     updated_at: String::new(),
                 };
+                if let Some(error) = validate_story_contract_summary(&summary) {
+                    return Ok(OperationResult {
+                        success: false,
+                        operation,
+                        error: Some(super::operation::OperationError::invalid(&error)),
+                        revision_after: None,
+                    });
+                }
                 self.memory
                     .upsert_story_contract(&summary)
                     .map_err(|e| format!("story contract: {}", e))?;
@@ -1356,6 +1364,7 @@ impl WriterAgentKernel {
                 })
             }
             WriterOperation::ChapterMissionUpsert { mission } => {
+                let normalized_status = normalize_chapter_mission_status(&mission.status);
                 let summary = ChapterMissionSummary {
                     id: 0,
                     project_id: mission.project_id.clone(),
@@ -1364,10 +1373,18 @@ impl WriterAgentKernel {
                     must_include: mission.must_include.clone(),
                     must_not: mission.must_not.clone(),
                     expected_ending: mission.expected_ending.clone(),
-                    status: mission.status.clone(),
+                    status: normalized_status,
                     source_ref: mission.source_ref.clone(),
                     updated_at: String::new(),
                 };
+                if let Some(error) = validate_chapter_mission_summary(&summary) {
+                    return Ok(OperationResult {
+                        success: false,
+                        operation,
+                        error: Some(super::operation::OperationError::invalid(&error)),
+                        revision_after: None,
+                    });
+                }
                 self.memory
                     .upsert_chapter_mission(&summary)
                     .map_err(|e| format!("chapter mission: {}", e))?;
@@ -2777,6 +2794,113 @@ fn approval_required_for_operation(operation: &WriterOperation) -> bool {
             | WriterOperation::ChapterMissionUpsert { .. }
             | WriterOperation::OutlineUpdate { .. }
     )
+}
+
+fn validate_story_contract_summary(contract: &StoryContractSummary) -> Option<String> {
+    let mut missing = Vec::new();
+    for (label, value) in [
+        ("title", contract.title.as_str()),
+        ("genre", contract.genre.as_str()),
+        ("target_reader", contract.target_reader.as_str()),
+        ("reader_promise", contract.reader_promise.as_str()),
+        (
+            "first_30_chapter_promise",
+            contract.first_30_chapter_promise.as_str(),
+        ),
+        ("main_conflict", contract.main_conflict.as_str()),
+        ("structural_boundary", contract.structural_boundary.as_str()),
+        ("tone_contract", contract.tone_contract.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            missing.push(label);
+        }
+    }
+
+    if !missing.is_empty() {
+        return Some(format!(
+            "Story Contract is missing required fields: {}",
+            missing.join(", ")
+        ));
+    }
+
+    for (label, value, min_chars) in [
+        ("reader_promise", contract.reader_promise.as_str(), 8),
+        (
+            "first_30_chapter_promise",
+            contract.first_30_chapter_promise.as_str(),
+            8,
+        ),
+        ("main_conflict", contract.main_conflict.as_str(), 8),
+        (
+            "structural_boundary",
+            contract.structural_boundary.as_str(),
+            8,
+        ),
+        ("tone_contract", contract.tone_contract.as_str(), 6),
+    ] {
+        if value.trim().chars().count() < min_chars {
+            return Some(format!(
+                "Story Contract field '{}' is too vague; write a concrete, checkable statement.",
+                label
+            ));
+        }
+    }
+
+    None
+}
+
+fn validate_chapter_mission_summary(mission: &ChapterMissionSummary) -> Option<String> {
+    let mut missing = Vec::new();
+    for (label, value) in [
+        ("chapter_title", mission.chapter_title.as_str()),
+        ("mission", mission.mission.as_str()),
+        ("must_include", mission.must_include.as_str()),
+        ("must_not", mission.must_not.as_str()),
+        ("expected_ending", mission.expected_ending.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            missing.push(label);
+        }
+    }
+
+    if !missing.is_empty() {
+        return Some(format!(
+            "Chapter Mission is missing required fields: {}",
+            missing.join(", ")
+        ));
+    }
+
+    for (label, value, min_chars) in [
+        ("mission", mission.mission.as_str(), 8),
+        ("must_include", mission.must_include.as_str(), 6),
+        ("must_not", mission.must_not.as_str(), 6),
+        ("expected_ending", mission.expected_ending.as_str(), 8),
+    ] {
+        if value.trim().chars().count() < min_chars {
+            return Some(format!(
+                "Chapter Mission field '{}' is too vague; write a concrete, checkable statement.",
+                label
+            ));
+        }
+    }
+
+    let allowed_status = ["in_progress", "needs_review", "completed", "drifted"];
+    if !allowed_status.contains(&mission.status.as_str()) {
+        return Some(format!(
+            "Chapter Mission status '{}' is invalid.",
+            mission.status
+        ));
+    }
+
+    None
+}
+
+fn normalize_chapter_mission_status(status: &str) -> String {
+    match status.trim() {
+        "" | "draft" | "active" => "in_progress".to_string(),
+        "in_progress" | "needs_review" | "completed" | "drifted" => status.trim().to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn operation_kind_label(operation: &WriterOperation) -> &'static str {
@@ -5258,6 +5382,35 @@ mod tests {
     }
 
     #[test]
+    fn story_contract_operation_rejects_incomplete_foundation() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("novel-a", memory);
+        let result = kernel
+            .approve_editor_operation_with_approval(
+                WriterOperation::StoryContractUpsert {
+                    contract: crate::writer_agent::operation::StoryContractOp {
+                        project_id: "novel-a".to_string(),
+                        title: "寒影录".to_string(),
+                        genre: "玄幻".to_string(),
+                        target_reader: "".to_string(),
+                        reader_promise: "爽文".to_string(),
+                        first_30_chapter_promise: "".to_string(),
+                        main_conflict: "复仇".to_string(),
+                        structural_boundary: "".to_string(),
+                        tone_contract: "".to_string(),
+                    },
+                },
+                "",
+                Some(&test_approval("contract_test")),
+            )
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap().code, "invalid");
+        assert!(kernel.ledger_snapshot().story_contract.is_none());
+    }
+
+    #[test]
     fn chapter_mission_operation_updates_ledger_snapshot() {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         let mut kernel = WriterAgentKernel::new("novel-a", memory);
@@ -5288,6 +5441,43 @@ mod tests {
             ledger.active_chapter_mission.unwrap().mission,
             "林墨发现玉佩线索。"
         );
+        assert_eq!(
+            kernel
+                .ledger_snapshot()
+                .active_chapter_mission
+                .unwrap()
+                .status,
+            "in_progress"
+        );
+    }
+
+    #[test]
+    fn chapter_mission_operation_rejects_vague_foundation() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("novel-a", memory);
+        kernel.active_chapter = Some("第一章".to_string());
+        let result = kernel
+            .approve_editor_operation_with_approval(
+                WriterOperation::ChapterMissionUpsert {
+                    mission: crate::writer_agent::operation::ChapterMissionOp {
+                        project_id: "novel-a".to_string(),
+                        chapter_title: "第一章".to_string(),
+                        mission: "打架".to_string(),
+                        must_include: "".to_string(),
+                        must_not: "剧透".to_string(),
+                        expected_ending: "".to_string(),
+                        status: "in_progress".to_string(),
+                        source_ref: "test".to_string(),
+                    },
+                },
+                "",
+                Some(&test_approval("mission_test")),
+            )
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap().code, "invalid");
+        assert!(kernel.ledger_snapshot().active_chapter_mission.is_none());
     }
 
     #[test]

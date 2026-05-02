@@ -1393,6 +1393,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
         {effectiveTab === "foundation" && (
           <div className="space-y-3 text-xs">
+            {operationError && (
+              <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
+                {operationError}
+              </div>
+            )}
             <div className="rounded border border-border-subtle bg-bg-raised p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
