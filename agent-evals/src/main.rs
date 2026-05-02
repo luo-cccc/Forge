@@ -1,7 +1,9 @@
 mod evals;
+mod evals_extra;
 mod fixtures;
 
 use crate::evals::*;
+use crate::evals_extra::*;
 use crate::fixtures::*;
 
 use agent_writer_lib::writer_agent::memory::WriterMemory;
@@ -178,6 +180,8 @@ fn main() {
     results.push(run_style_continuity_learning_eval());
     results.push(run_mission_drift_flag_eval());
     results.push(run_ghost_quality_confidence_eval());
+    results.push(run_promise_object_cross_chapter_tracking_eval());
+    results.push(run_canon_false_positive_suppression_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
