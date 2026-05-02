@@ -189,6 +189,9 @@ fn main() {
     results.push(run_promise_related_entities_extraction_eval());
     results.push(run_promise_dedup_against_existing_eval());
     results.push(run_context_pack_explainability_eval());
+    results.push(run_end_to_end_ghost_pipeline_eval());
+    results.push(run_end_to_end_contract_guard_eval());
+    results.push(run_end_to_end_mission_drift_detection_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
