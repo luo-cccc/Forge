@@ -360,6 +360,12 @@ use commands::outline::{
     update_outline_status,
 };
 use commands::settings::{check_api_key, set_api_key};
+use commands::writer_agent::{
+    apply_proposal_feedback, get_agent_domain_profile, get_agent_kernel_status, get_agent_tools,
+    get_effective_agent_tool_inventory, get_story_debt_snapshot, get_story_review_queue,
+    get_writer_agent_ledger, get_writer_agent_pending_proposals, get_writer_agent_status,
+    get_writer_agent_trace, record_implicit_ghost_rejection, record_writer_operation_durable_save,
+};
 use manual_agent::{
     lock_manual_agent_history, manual_agent_history_messages, merge_manual_agent_history,
     ManualAgentHistory, ManualAgentTurn, MANUAL_AGENT_HISTORY_MAX_CHARS,
@@ -607,7 +613,7 @@ struct ChapterGenerationStart {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AgentKernelStatus {
+pub(crate) struct AgentKernelStatus {
     tool_generation: u64,
     tool_count: usize,
     effective_tool_count: usize,
@@ -2113,47 +2119,6 @@ fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, Str
 }
 
 #[tauri::command]
-fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
-    Ok(agent_runtime::registered_tools())
-}
-
-#[tauri::command]
-fn get_effective_agent_tool_inventory() -> Result<agent_harness_core::EffectiveToolInventory, String>
-{
-    Ok(agent_runtime::effective_tool_inventory())
-}
-
-#[tauri::command]
-fn get_agent_kernel_status() -> Result<AgentKernelStatus, String> {
-    let registry = default_writing_tool_registry();
-    let tools = registry.list();
-    let inventory = agent_runtime::effective_tool_inventory();
-    let domain = writing_domain_profile();
-
-    Ok(AgentKernelStatus {
-        tool_generation: registry.generation(),
-        tool_count: tools.len(),
-        effective_tool_count: inventory.allowed.len(),
-        blocked_tool_count: inventory.blocked.len(),
-        model_callable_tool_count: inventory.openai_callable_allowed_count(),
-        approval_required_tool_count: tools.iter().filter(|tool| tool.requires_approval).count(),
-        write_tool_count: tools
-            .iter()
-            .filter(|tool| tool.side_effect_level == agent_harness_core::ToolSideEffectLevel::Write)
-            .count(),
-        domain_id: domain.id,
-        capability_count: domain.capabilities.len(),
-        quality_gate_count: domain.quality_gates.len(),
-        trace_enabled: true,
-    })
-}
-
-#[tauri::command]
-fn get_agent_domain_profile() -> Result<agent_harness_core::AgentDomainProfile, String> {
-    Ok(writing_domain_profile())
-}
-
-#[tauri::command]
 fn get_project_storage_diagnostics(
     app: tauri::AppHandle,
 ) -> Result<storage::ProjectStorageDiagnostics, String> {
@@ -2185,75 +2150,6 @@ fn restore_file_backup(
         &[format!("backup:{}:{}", label, backup_id)],
     );
     Ok(())
-}
-
-#[tauri::command]
-fn get_writer_agent_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<writer_agent::WriterAgentStatus, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.status())
-}
-
-#[tauri::command]
-fn get_writer_agent_ledger(
-    state: tauri::State<'_, AppState>,
-) -> Result<writer_agent::kernel::WriterAgentLedgerSnapshot, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.ledger_snapshot())
-}
-
-#[tauri::command]
-fn get_writer_agent_pending_proposals(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<writer_agent::proposal::AgentProposal>, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.pending_proposals())
-}
-
-#[tauri::command]
-fn get_story_review_queue(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<writer_agent::kernel::StoryReviewQueueEntry>, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.story_review_queue())
-}
-
-#[tauri::command]
-fn get_story_debt_snapshot(
-    state: tauri::State<'_, AppState>,
-) -> Result<writer_agent::kernel::StoryDebtSnapshot, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.story_debt_snapshot())
-}
-
-#[tauri::command]
-fn get_writer_agent_trace(
-    state: tauri::State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<writer_agent::kernel::WriterAgentTraceSnapshot, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    Ok(kernel.trace_snapshot(limit.unwrap_or(20).min(100)))
-}
-
-#[tauri::command]
-fn apply_proposal_feedback(
-    state: tauri::State<'_, AppState>,
-    feedback: writer_agent::ProposalFeedback,
-) -> Result<writer_agent::WriterAgentStatus, String> {
-    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.apply_feedback(feedback)?;
-    Ok(kernel.status())
-}
-
-#[tauri::command]
-fn record_implicit_ghost_rejection(
-    state: tauri::State<'_, AppState>,
-    proposal_id: String,
-    created_at: u64,
-) -> Result<bool, String> {
-    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.record_implicit_ghost_rejection(&proposal_id, created_at)
 }
 
 #[tauri::command]
@@ -2318,17 +2214,6 @@ fn approve_writer_operation(
 
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     kernel.approve_editor_operation_with_approval(operation, &current_revision, approval.as_ref())
-}
-
-#[tauri::command]
-fn record_writer_operation_durable_save(
-    state: tauri::State<'_, AppState>,
-    proposal_id: Option<String>,
-    operation: writer_agent::operation::WriterOperation,
-    save_result: String,
-) -> Result<(), String> {
-    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.record_operation_durable_save(proposal_id, operation, save_result)
 }
 
 fn approve_outline_update_operation(
