@@ -6,6 +6,7 @@ pub mod intent;
 pub mod kernel;
 pub mod kernel_helpers;
 pub mod kernel_prompts;
+pub mod kernel_review;
 pub mod memory;
 pub mod observation;
 pub mod operation;
