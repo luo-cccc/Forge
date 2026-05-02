@@ -375,6 +375,9 @@ export default function EditorPanel({
   const semanticLintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeGhostRequestIdRef = useRef<string | null>(null);
   const activeSemanticLintRequestIdRef = useRef<string | null>(null);
+  const currentChapterRef = useRef(currentChapter);
+  const currentChapterRevisionRef = useRef<string | null>(currentChapterRevision);
+  const editSequenceRef = useRef(0);
   const lastEditAtRef = useRef(0);
   const lastObservationKeyRef = useRef("");
   const lastSemanticLintKeyRef = useRef("");
@@ -382,6 +385,14 @@ export default function EditorPanel({
   useEffect(() => {
     lastEditAtRef.current = Date.now();
   }, []);
+
+  useEffect(() => {
+    currentChapterRef.current = currentChapter;
+  }, [currentChapter]);
+
+  useEffect(() => {
+    currentChapterRevisionRef.current = currentChapterRevision;
+  }, [currentChapterRevision]);
 
   useEffect(() => {
     if (agentMode === "off" || !editor) return;
@@ -666,6 +677,8 @@ export default function EditorPanel({
   useEffect(() => {
     if (!editor) return;
     const handler = () => {
+      const editSequence = editSequenceRef.current + 1;
+      editSequenceRef.current = editSequence;
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
       abortGhostRequest(undefined, true);
@@ -676,9 +689,18 @@ export default function EditorPanel({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
         const content = editor.getHTML();
+        const chapterAtSave = currentChapterRef.current;
+        const sequenceAtSave = editSequence;
         try {
-          const revision = await invoke<string>(Commands.saveChapter, { title: currentChapter, content });
+          const revision = await invoke<string>(Commands.saveChapter, { title: chapterAtSave, content });
+          const isLatestSave =
+            editSequenceRef.current === sequenceAtSave &&
+            currentChapterRef.current === chapterAtSave &&
+            editor.getHTML() === content;
+          if (!isLatestSave) return;
+
           setCurrentChapterRevision(revision);
+          currentChapterRevisionRef.current = revision;
           setIsEditorDirty(false);
           const now = new Date();
           setSaveIndicator(
@@ -756,6 +778,8 @@ export default function EditorPanel({
     if (!editor) return;
     const editorRef = { current: editor };
     const requestId = `inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestChapter = currentChapter;
+    const requestRevision = currentChapterRevision ?? "";
 
     setIsInlineRequest(true);
     setBubbleThinking(true);
@@ -779,12 +803,26 @@ export default function EditorPanel({
         unlistenInline();
         void (async () => {
           try {
+            const operation = event.payload.operation;
+            const liveChapter = currentChapterRef.current;
+            const liveRevision = currentChapterRevisionRef.current ?? "";
+            if (
+              !("chapter" in operation) ||
+              operation.chapter !== requestChapter ||
+              operation.chapter !== liveChapter ||
+              liveRevision !== requestRevision
+            ) {
+              cleanup();
+              console.error("Inline writer operation discarded because chapter context changed.");
+              return;
+            }
+
             const result = await invoke<{
               success: boolean;
               error?: { code: string; message: string };
             }>(Commands.approveWriterOperation, {
-              operation: event.payload.operation,
-              currentRevision: currentChapterRevision ?? "",
+              operation,
+              currentRevision: liveRevision,
             });
             cleanup();
             if (!result.success) {
@@ -794,7 +832,12 @@ export default function EditorPanel({
               );
               return;
             }
-            const applied = applyInlineWriterOperation(editorRef.current, event.payload.operation);
+            if (currentChapterRef.current !== requestChapter) {
+              console.error("Inline writer operation discarded before apply because chapter changed.");
+              return;
+            }
+
+            const applied = applyInlineWriterOperation(editorRef.current, operation);
             if (applied) {
               setInlineProposalId(event.payload.proposal.id);
               setInlineDone(true);

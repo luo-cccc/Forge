@@ -86,6 +86,8 @@ function App() {
           setIsEditorDirty(false);
         } catch (e) {
           console.error("Auto-save failed:", e);
+          setIsEditorDirty(true);
+          return;
         }
       }
       try {
