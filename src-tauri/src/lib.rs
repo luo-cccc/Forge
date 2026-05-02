@@ -5,7 +5,7 @@ use agent_harness_core::{
     default_writing_tool_registry,
     hermes_memory::HermesDB,
     provider::{openai_compat::OpenAiCompatProvider, LlmMessage},
-    writing_domain_profile, AgentLoop, AgentLoopConfig, AgentLoopEvent,
+    writing_domain_profile, AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -923,6 +923,7 @@ struct EditorStatePayload {
 struct EditorGhostChunk {
     request_id: String,
     proposal_id: Option<String>,
+    operation: Option<writer_agent::operation::WriterOperation>,
     cursor_position: usize,
     content: String,
     intent: Option<String>,
@@ -1145,6 +1146,7 @@ fn emit_writer_ghost_proposal(
         EditorGhostChunk {
             request_id: target.request_id.clone(),
             proposal_id: Some(proposal.id.clone()),
+            operation: proposal.operations.first().cloned(),
             cursor_position: target.cursor_position,
             content,
             intent: ghost_intent_label(proposal),
@@ -1241,6 +1243,7 @@ fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::Agent
                 EditorGhostChunk {
                     request_id: request_id_value.clone(),
                     proposal_id: None,
+                    operation: None,
                     cursor_position: position,
                     content,
                     intent: None,
@@ -1287,6 +1290,7 @@ fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::Agent
                 EditorGhostChunk {
                     request_id: request_id_value.clone(),
                     proposal_id: None,
+                    operation: None,
                     cursor_position: position,
                     content,
                     intent: Some(intent),
@@ -2544,17 +2548,70 @@ fn approve_writer_operation(
     approval: Option<writer_agent::operation::OperationApproval>,
 ) -> Result<writer_agent::operation::OperationResult, String> {
     if let writer_agent::operation::WriterOperation::OutlineUpdate { node_id, patch } = &operation {
-        return approve_outline_update_operation(
+        {
+            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            let preflight = kernel.approve_editor_operation_with_approval(
+                operation.clone(),
+                &current_revision,
+                approval.as_ref(),
+            )?;
+            if !preflight
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code == "invalid")
+            {
+                return Ok(preflight);
+            }
+        }
+        let result = approve_outline_update_operation(
             &app,
             operation.clone(),
             node_id,
             patch.clone(),
             approval.as_ref(),
-        );
+        )?;
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        if !result.success {
+            let save_result = result
+                .error
+                .as_ref()
+                .map(|error| format!("{}:{}", error.code, error.message))
+                .unwrap_or_else(|| "outline_storage:failed".to_string());
+            kernel.record_operation_durable_save(
+                approval
+                    .as_ref()
+                    .and_then(|context| context.proposal_id.clone()),
+                operation,
+                save_result,
+            )?;
+            return Ok(result);
+        }
+        if let Some(context) = approval
+            .as_ref()
+            .filter(|context| context.is_valid_for_write())
+        {
+            kernel.record_operation_durable_save(
+                context.proposal_id.clone(),
+                operation,
+                "outline_storage:ok".to_string(),
+            )?;
+        }
+        return Ok(result);
     }
 
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     kernel.approve_editor_operation_with_approval(operation, &current_revision, approval.as_ref())
+}
+
+#[tauri::command]
+fn record_writer_operation_durable_save(
+    state: tauri::State<'_, AppState>,
+    proposal_id: Option<String>,
+    operation: writer_agent::operation::WriterOperation,
+    save_result: String,
+) -> Result<(), String> {
+    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    kernel.record_operation_durable_save(proposal_id, operation, save_result)
 }
 
 fn approve_outline_update_operation(
@@ -2708,56 +2765,7 @@ fn extract_weapon_from_lore(content: &str) -> Option<String> {
 }
 
 fn render_writer_context_pack(pack: &writer_agent::context::WritingContextPack) -> String {
-    let budget = &pack.budget_report;
-    let source_report = if budget.source_reports.is_empty() {
-        "- no source budgets consumed".to_string()
-    } else {
-        budget
-            .source_reports
-            .iter()
-            .map(|report| {
-                format!(
-                    "- {}: requested {}, provided {}, truncated {}, reason: {}{}",
-                    report.source,
-                    report.requested,
-                    report.provided,
-                    report.truncated,
-                    report.reason,
-                    report
-                        .truncation_reason
-                        .as_ref()
-                        .map(|reason| format!(", truncation: {}", reason))
-                        .unwrap_or_default()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let rendered_sources = pack
-        .sources
-        .iter()
-        .map(|source| {
-            format!(
-                "## {:?} (priority {}, {} chars{})\n{}",
-                source.source,
-                source.priority,
-                source.char_count,
-                if source.truncated { ", truncated" } else { "" },
-                source.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    format!(
-        "# ContextPack Budget\n\
-task: {:?}\n\
-used/budget: {}/{}\n\
-wasted: {}\n\
-sources:\n{}\n\n\
-# ContextPack Sources\n{}",
-        pack.task, budget.used, budget.total_budget, budget.wasted, source_report, rendered_sources
-    )
+    writer_agent::kernel::render_context_pack_for_prompt(pack)
 }
 
 fn build_writer_observation_from_editor_state(
@@ -2869,13 +2877,6 @@ fn writer_agent_inline_operation_messages(
     ]
 }
 
-fn source_refs_from_context_pack(pack: &writer_agent::context::WritingContextPack) -> Vec<String> {
-    pack.sources
-        .iter()
-        .map(|source| format!("{:?}", source.source))
-        .collect()
-}
-
 fn ask_agent_request_id(context_payload: Option<&AskAgentContext>) -> String {
     context_payload
         .and_then(|payload| payload.request_id.clone())
@@ -2945,63 +2946,6 @@ async fn run_inline_writer_operation(
     .map_err(|e| format!("Failed to emit inline writer operation: {}", e))?;
 
     Ok(())
-}
-
-fn render_writer_ledger_snapshot(
-    snapshot: &writer_agent::kernel::WriterAgentLedgerSnapshot,
-) -> String {
-    let canon = snapshot
-        .canon_entities
-        .iter()
-        .take(8)
-        .map(|entity| {
-            format!(
-                "- {} [{}]: {} {}",
-                entity.name, entity.kind, entity.summary, entity.attributes
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let promises = snapshot
-        .open_promises
-        .iter()
-        .take(8)
-        .map(|promise| {
-            format!(
-                "- {} [{}]: {} -> {}",
-                promise.title, promise.kind, promise.description, promise.expected_payoff
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let decisions = snapshot
-        .recent_decisions
-        .iter()
-        .take(8)
-        .map(|decision| {
-            format!(
-                "- {} / {}: {} ({})",
-                decision.scope, decision.title, decision.decision, decision.rationale
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    [
-        ("Canon entities", canon),
-        ("Open promises", promises),
-        ("Recent creative decisions", decisions),
-    ]
-    .into_iter()
-    .filter_map(|(label, content)| {
-        if content.trim().is_empty() {
-            None
-        } else {
-            Some(format!("## {}\n{}", label, content))
-        }
-    })
-    .collect::<Vec<_>>()
-    .join("\n\n")
 }
 
 fn char_tail(text: &str, max_chars: usize) -> String {
@@ -3091,38 +3035,6 @@ fn build_manual_writer_observation(
         full_text_digest: Some(storage::content_revision(context)),
         editor_dirty: payload.and_then(|payload| payload.dirty).unwrap_or(false),
     }
-}
-
-fn render_manual_agent_system_prompt(
-    memory_context: &str,
-    writer_context: &str,
-    ledger_context: &str,
-    truncated_context: &str,
-    paragraph: &str,
-    selected_text: &str,
-) -> String {
-    format!(
-        "你是 Forge 的中文长篇小说写作 Agent，是作家的第二大脑和并肩创作伙伴，不是普通聊天助手，也不是只会补全文字的写作工具。\n\
-你的任务是理解作者当前意图，结合项目长期记忆、设定、伏笔、风格偏好和当前稿件，给出可执行、可直接用于创作推进的回答。\n\
-如果信息不足，先说明缺口；如果涉及人物、设定、时间线或伏笔，必须优先尊重 WriterAgent ContextPack 与 Ledger，不要随意发明冲突设定。\n\
-回答要具体、短而有用；需要写正文时直接给可用正文，需要分析时给明确判断和下一步。\n\n\
-{}\n\n\
-# WriterAgent ContextPack\n{}\n\n\
-# WriterAgent Ledgers\n{}\n\n\
-# Current draft tail\n\
-\"\"\"\n{}\n\"\"\"\n\n\
-# Focused paragraph\n\
-\"\"\"\n{}\n\"\"\"\n\n\
-# Selected text\n\
-\"\"\"\n{}\n\"\"\"\n\n\
-可使用工具检索 lorebook、outline 和章节资料；在虚构新信息前先查设定。",
-        memory_context,
-        writer_context,
-        ledger_context,
-        truncated_context,
-        paragraph,
-        selected_text
-    )
 }
 
 fn manual_agent_history_messages(history: &[ManualAgentTurn]) -> Vec<LlmMessage> {
@@ -3471,13 +3383,11 @@ async fn ask_agent(
     }
 
     let api_key = require_api_key()?;
-    let api_base =
-        std::env::var("OPENAI_API_BASE").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
-    let model =
-        std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "deepseek/deepseek-v4-flash".into());
+    let settings = llm_runtime::settings(api_key);
+    let model = settings.model.clone();
 
     let state = app.state::<AppState>();
-    let truncated_context = truncate_context(&context, 2000);
+    let truncated_context = truncate_context(&context, 2000).to_string();
     let project_id = storage::active_project_id(&app)?;
     let runtime_manual_history = {
         let history = lock_manual_agent_history(&state)?;
@@ -3512,86 +3422,54 @@ async fn ask_agent(
         context_payload.as_ref(),
         &project_id,
     );
-    let (writer_context_pack, writer_context, ledger_context, source_refs) = {
+    let (mut prepared_run, emitted_proposals, _has_lore, _has_outline) = {
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
         refresh_kernel_canon_from_lorebook(&app, &mut kernel);
-        let proposals = kernel.observe(manual_observation.clone())?;
-        for proposal in proposals {
-            app.emit(events::AGENT_PROPOSAL, proposal)
-                .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
-        }
-
-        let writer_context_pack = kernel.context_pack_for_default(
-            writer_agent::context::AgentTask::ManualRequest,
-            &manual_observation,
-        );
-        let writer_context = render_writer_context_pack(&writer_context_pack);
-        let ledger_context = render_writer_ledger_snapshot(&kernel.ledger_snapshot());
-        let source_refs = source_refs_from_context_pack(&writer_context_pack);
-        (
-            writer_context_pack,
-            writer_context,
-            ledger_context,
-            source_refs,
-        )
+        let request = writer_agent::kernel::WriterAgentRunRequest {
+            task: writer_agent::kernel::WriterAgentTask::ManualRequest,
+            observation: manual_observation.clone(),
+            user_instruction: message.clone(),
+            frontend_state: writer_agent::kernel::WriterAgentFrontendState {
+                truncated_context,
+                paragraph: paragraph.clone(),
+                selected_text: selected_text.clone(),
+                memory_context: build_context_injection(&app, &message),
+                has_lore: storage::load_lorebook(&app)
+                    .map(|l| !l.is_empty())
+                    .unwrap_or(false),
+                has_outline: storage::load_outline(&app)
+                    .map(|o| !o.is_empty())
+                    .unwrap_or(false),
+            },
+            approval_mode: writer_agent::kernel::WriterAgentApprovalMode::SurfaceProposals,
+            stream_mode: writer_agent::kernel::WriterAgentStreamMode::Text,
+            manual_history: manual_agent_history_messages(&manual_history),
+        };
+        let has_lore = request.frontend_state.has_lore;
+        let has_outline = request.frontend_state.has_outline;
+        let provider = std::sync::Arc::new(OpenAiCompatProvider::new(
+            &settings.api_base,
+            &settings.api_key,
+            &settings.model,
+        ));
+        let prepared = kernel.prepare_task_run(
+            request,
+            provider,
+            tool_bridge::TauriToolBridge { app: app.clone() },
+            &model,
+        )?;
+        let proposals = prepared.proposals().to_vec();
+        (prepared, proposals, has_lore, has_outline)
     };
 
-    // Check lore / outline availability for intent routing
-    let has_lore = storage::load_lorebook(&app)
-        .map(|l| !l.is_empty())
-        .unwrap_or(false);
-    let has_outline = storage::load_outline(&app)
-        .map(|o| !o.is_empty())
-        .unwrap_or(false);
-
-    // Build context injection from learned memory
-    let memory_context = build_context_injection(&app, &message);
-
-    let system_prompt = render_manual_agent_system_prompt(
-        &memory_context,
-        &writer_context,
-        &ledger_context,
-        truncated_context,
-        &paragraph,
-        &selected_text,
-    );
-    tracing::debug!(
-        "Manual WriterAgent context: {} sources, {}/{} chars",
-        writer_context_pack.sources.len(),
-        writer_context_pack.total_chars,
-        writer_context_pack.budget_limit
-    );
-
-    // Build provider
-    let provider = std::sync::Arc::new(OpenAiCompatProvider::new(&api_base, &api_key, &model));
-
-    // Build tool registry + bridge
-    let registry = default_writing_tool_registry();
-    let bridge = tool_bridge::TauriToolBridge { app: app.clone() };
-
-    // Build agent loop
-    let mut agent = AgentLoop::new(
-        AgentLoopConfig {
-            max_rounds: 10,
-            system_prompt,
-            context_limit_tokens: Some(
-                agent_harness_core::resolve_context_window_info(&model).tokens,
-            ),
-            tool_filter: Some(writer_agent::kernel::tool_filter_for_task(
-                writer_agent::context::AgentTask::ManualRequest,
-            )),
-        },
-        provider,
-        registry,
-        bridge,
-    );
-    agent
-        .messages
-        .extend(manual_agent_history_messages(&manual_history));
+    for proposal in emitted_proposals {
+        app.emit(events::AGENT_PROPOSAL, proposal)
+            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+    }
 
     // Wire events to Tauri frontend
     let app_handle = app.clone();
-    agent.set_event_callback(std::sync::Arc::new(move |event| match event {
+    prepared_run.set_event_callback(std::sync::Arc::new(move |event| match event {
         AgentLoopEvent::Intent { intent } => {
             let _ = app_handle.emit(
                 events::AGENT_CHAIN_OF_THOUGHT,
@@ -3632,11 +3510,10 @@ async fn ask_agent(
         let _ = db.log_interaction("user", &message);
     }
 
-    agent.add_user_message(message.clone());
-
-    // Run the agent loop
-    match agent.run(&message, has_lore, has_outline).await {
-        Ok(final_text) => {
+    let run_request = prepared_run.request().clone();
+    match prepared_run.run().await {
+        Ok(run_result) => {
+            let final_text = run_result.answer.clone();
             // Log assistant response to Hermes memory
             {
                 let db = lock_hermes(&state)?;
@@ -3644,12 +3521,7 @@ async fn ask_agent(
             }
             {
                 let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-                kernel.record_manual_exchange(
-                    &manual_observation,
-                    &message,
-                    &final_text,
-                    &source_refs,
-                )?;
+                kernel.record_run_completion(&run_request, &run_result)?;
             }
             {
                 let mut history = lock_manual_agent_history(&state)?;
@@ -3660,7 +3532,7 @@ async fn ask_agent(
                     chapter_title: manual_observation.chapter_title.clone(),
                     user: message,
                     assistant: final_text,
-                    source_refs,
+                    source_refs: run_result.source_refs,
                 });
             }
 
@@ -3749,6 +3621,7 @@ pub fn run() {
             apply_proposal_feedback,
             record_implicit_ghost_rejection,
             approve_writer_operation,
+            record_writer_operation_durable_save,
             get_agent_tools,
             get_effective_agent_tool_inventory,
             get_lorebook,

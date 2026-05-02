@@ -5,6 +5,7 @@ export const Commands = {
   agentObserve: "agent_observe",
   applyProposalFeedback: "apply_proposal_feedback",
   approveWriterOperation: "approve_writer_operation",
+  recordWriterOperationDurableSave: "record_writer_operation_durable_save",
   askAgent: "ask_agent",
   generateParallelDrafts: "generate_parallel_drafts",
   askProjectBrain: "ask_project_brain",
@@ -108,6 +109,7 @@ export interface SemanticLintPayload {
 export interface EditorGhostChunk {
   requestId: string;
   proposalId?: string;
+  operation?: WriterOperation;
   cursorPosition: number;
   content: string;
   intent?: string;
@@ -649,6 +651,12 @@ export interface OperationApproval {
   createdAt: number;
 }
 
+export interface RecordOperationDurableSavePayload {
+  proposalId?: string;
+  operation: WriterOperation;
+  saveResult: string;
+}
+
 export interface ProposalFeedback {
   proposalId: string;
   action: "accepted" | "rejected" | "edited" | "snoozed" | "explained";
@@ -859,7 +867,20 @@ export interface WriterAgentTraceSnapshot {
   taskPackets: WriterTaskPacketTrace[];
   recentProposals: WriterProposalTrace[];
   recentFeedback: WriterFeedbackTrace[];
+  operationLifecycle: WriterOperationLifecycleTrace[];
   contextRecalls: ContextRecallSummary[];
+}
+
+export interface WriterOperationLifecycleTrace {
+  proposalId?: string | null;
+  operationKind: string;
+  sourceTask?: string | null;
+  approvalSource?: string | null;
+  affectedScope?: string | null;
+  state: "proposed" | "approved" | "applied" | "durably_saved" | "feedback_recorded" | "rejected" | string;
+  saveResult?: string | null;
+  feedbackResult?: string | null;
+  createdAt: number;
 }
 
 export interface WriterTaskPacketTrace {
@@ -982,5 +1003,6 @@ export const WriterAgentCommands = {
   agentObserve: "agent_observe",
   applyProposalFeedback: "apply_proposal_feedback",
   approveWriterOperation: "approve_writer_operation",
+  recordWriterOperationDurableSave: "record_writer_operation_durable_save",
   recordImplicitGhostRejection: "record_implicit_ghost_rejection",
 } as const;

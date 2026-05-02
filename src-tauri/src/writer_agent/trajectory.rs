@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use super::kernel::{
-    WriterAgentTraceSnapshot, WriterFeedbackTrace, WriterObservationTrace, WriterProposalTrace,
-    WriterTaskPacketTrace,
+    WriterAgentTraceSnapshot, WriterFeedbackTrace, WriterObservationTrace,
+    WriterOperationLifecycleTrace, WriterProposalTrace, WriterTaskPacketTrace,
 };
 use super::memory::ContextRecallSummary;
 
@@ -121,6 +121,23 @@ pub fn export_trace_snapshot(
             },
         );
     }
+    for lifecycle in &snapshot.operation_lifecycle {
+        seq += 1;
+        push_event(
+            &mut lines,
+            TrajectoryEvent {
+                trace_schema: TRAJECTORY_SCHEMA,
+                schema_version: SCHEMA_VERSION,
+                trace_id: &trace_id,
+                project_id,
+                session_id,
+                seq,
+                event_type: "writer.operation_lifecycle",
+                ts_ms: lifecycle.created_at,
+                data: lifecycle,
+            },
+        );
+    }
     for recall in &snapshot.context_recalls {
         seq += 1;
         push_event(
@@ -189,6 +206,7 @@ fn _assert_trace_types(
     _task_packet: &WriterTaskPacketTrace,
     _proposal: &WriterProposalTrace,
     _feedback: &WriterFeedbackTrace,
+    _lifecycle: &WriterOperationLifecycleTrace,
     _recall: &ContextRecallSummary,
 ) {
 }
@@ -215,6 +233,7 @@ mod tests {
                 reason: Some("fits".to_string()),
                 created_at: 20,
             }],
+            operation_lifecycle: Vec::new(),
             context_recalls: Vec::new(),
         };
 

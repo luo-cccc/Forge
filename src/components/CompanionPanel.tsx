@@ -36,6 +36,19 @@ interface ApplyOperationResult {
   error?: string;
 }
 
+async function recordOperationDurableSave(
+  proposalId: string | undefined,
+  operation: WriterOperation,
+  saveResult: string,
+) {
+  if (!proposalId) return;
+  await invoke(Commands.recordWriterOperationDurableSave, {
+    proposalId,
+    operation,
+    saveResult,
+  });
+}
+
 function proposalSlotKey(proposal: AgentProposal): string {
   const target = proposal.target ? `${proposal.target.from}:${proposal.target.to}` : "none";
   if (proposal.kind === "ghost") {
@@ -721,7 +734,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     return () => clearInterval(interval);
   }, []);
 
-  const applyApprovedOperation = useCallback(async (operation: WriterOperation): Promise<boolean> => {
+  const applyApprovedOperation = useCallback(async (
+    operation: WriterOperation,
+    proposalId?: string,
+  ): Promise<boolean> => {
     if (!isEditorTextOperation(operation)) return true;
 
     const result = await onApplyOperation?.(operation);
@@ -735,6 +751,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       return false;
     }
 
+    await recordOperationDurableSave(
+      proposalId,
+      operation,
+      result.revision ? `editor_save:${result.revision}` : "editor_save:ok",
+    );
     return true;
   }, [onApplyOperation]);
 
@@ -807,7 +828,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = await applyApprovedOperation(operation);
+      const applied = await applyApprovedOperation(operation, proposal.id);
       if (!applied) {
         return;
       }
@@ -847,7 +868,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = await applyApprovedOperation(operation);
+      const applied = await applyApprovedOperation(operation, entry.proposalId);
       if (!applied) {
         return;
       }
@@ -876,7 +897,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = await applyApprovedOperation(operation);
+      const applied = await applyApprovedOperation(operation, entry.proposalId);
       if (!applied) {
         return;
       }
@@ -926,7 +947,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         return;
       }
 
-      const applied = await applyApprovedOperation(operation);
+      const applied = await applyApprovedOperation(operation, entry.relatedReviewIds[0]?.replace(/^review_/, ""));
       if (!applied) {
         return;
       }

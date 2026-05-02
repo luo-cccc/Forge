@@ -5,6 +5,7 @@ const steps = [
   ["npm", ["run", "lint"]],
   ["npm", ["run", "build"]],
   ["npm", ["run", "check:p2"]],
+  ["npm", ["run", "check:audit"]],
   [isWindows ? "cargo.exe" : "cargo", ["fmt", "--all", "--", "--check"]],
   [isWindows ? "cargo.exe" : "cargo", ["test", "-p", "agent-harness-core"]],
   [isWindows ? "cargo.exe" : "cargo", ["test", "-p", "agent-writer"]],

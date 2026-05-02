@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "check:p2": "node scripts/check-p2-companion.cjs",
+    "check:audit": "node scripts/check-command-audit.cjs",
     "clean:reports": "node scripts/clean-eval-reports.cjs",
     "lint": "eslint .",
     "preview": "vite preview",

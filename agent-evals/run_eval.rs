@@ -8,7 +8,10 @@ use agent_writer_lib::chapter_generation::{
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::intent::{AgentBehavior, IntentEngine, WritingIntent};
-use agent_writer_lib::writer_agent::kernel::{StoryDebtCategory, StoryReviewQueueStatus};
+use agent_writer_lib::writer_agent::kernel::{
+    StoryDebtCategory, StoryReviewQueueStatus, WriterAgentApprovalMode, WriterAgentFrontendState,
+    WriterAgentRunRequest, WriterAgentStreamMode, WriterAgentTask,
+};
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
@@ -352,8 +355,13 @@ fn run_canon_conflict_apply_eval() -> EvalResult {
         );
     };
 
+    let mut approval = eval_approval("canon_conflict_apply");
+    approval.proposal_id = proposals
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+        .map(|proposal| proposal.id.clone());
     let result = kernel
-        .execute_operation(operation, "林墨拔出长剑，指向门外的人。", "rev-1")
+        .approve_editor_operation_with_approval(operation, "rev-1", Some(&approval))
         .unwrap();
     if !result.success {
         errors.push(format!(
@@ -823,13 +831,8 @@ fn run_manual_request_tool_boundary_eval() -> EvalResult {
     let policy = agent_harness_core::PermissionPolicy::new(
         agent_harness_core::PermissionMode::WorkspaceWrite,
     );
-    let filter = agent_harness_core::ToolFilter {
-        intent: None,
-        include_requires_approval: false,
-        include_disabled: false,
-        max_side_effect_level: Some(agent_harness_core::ToolSideEffectLevel::ProviderCall),
-        required_tags: vec!["project".to_string()],
-    };
+    let filter =
+        agent_writer_lib::writer_agent::kernel::tool_filter_for_task(AgentTask::ManualRequest);
     let inventory = registry.effective_inventory(&filter, &policy);
     let model_tool_names: Vec<String> = inventory
         .to_openai_tools()
@@ -881,6 +884,252 @@ fn run_manual_request_tool_boundary_eval() -> EvalResult {
             inventory.allowed.len(),
             model_tool_names.join(",")
         ),
+        errors,
+    )
+}
+
+fn run_manual_request_kernel_owns_run_loop_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "玉佩线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "这段接下来应该怎么推进？".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            paragraph: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o-mini");
+    let trace = kernel.trace_snapshot(10);
+    let packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "ManualRequest");
+
+    let mut errors = Vec::new();
+    if let Err(error) = &prepared {
+        errors.push(format!("kernel failed to prepare manual run: {}", error));
+    }
+    if packet.is_none() {
+        errors.push("manual request did not create kernel task packet before run loop".to_string());
+    }
+    if !packet.is_some_and(|packet| {
+        packet.packet.intent == Some(agent_harness_core::Intent::Chat)
+            && packet.max_side_effect_level == "ProviderCall"
+            && !packet.packet.tool_policy.allow_approval_required
+            && packet
+                .packet
+                .feedback
+                .memory_writes
+                .iter()
+                .any(|write| write == "manual_agent_turn")
+    }) {
+        errors.push(
+            "manual request packet does not own chat intent/tool/feedback policy".to_string(),
+        );
+    }
+    if let Ok(prepared) = &prepared {
+        let names = prepared
+            .proposals()
+            .iter()
+            .map(|proposal| proposal.id.clone())
+            .collect::<Vec<_>>();
+        if !names.is_empty() && trace.recent_proposals.is_empty() {
+            errors.push("prepared run proposals were not registered in kernel trace".to_string());
+        }
+    }
+
+    eval_result(
+        "writer_agent:manual_request_kernel_owns_run_loop",
+        format!(
+            "prepared={} taskPackets={}",
+            prepared.is_ok(),
+            trace.task_packets.len()
+        ),
+        errors,
+    )
+}
+
+fn run_operation_feedback_requires_durable_save_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation("林墨停在旧门前，风从裂开的门缝里钻出来。"),
+            "他终于听见门后有人低声念出了他的名字。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let mut approval = eval_approval("eval_text_accept");
+    approval.proposal_id = Some(proposal.id.clone());
+
+    let approved = kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: Some("他终于听见门后有人低声念出了他的名字。".to_string()),
+            reason: Some("accepted before save should not teach memory".to_string()),
+            created_at: now_ms(),
+        })
+        .unwrap();
+
+    let mut errors = Vec::new();
+    if !approved.success {
+        errors.push(format!(
+            "text operation approval failed: {:?}",
+            approved.error
+        ));
+    }
+    if kernel
+        .memory
+        .list_style_preferences(20)
+        .unwrap()
+        .iter()
+        .any(|preference| preference.key == "accepted_Ghost")
+    {
+        errors.push("accepted ghost preference was written before durable save".to_string());
+    }
+
+    kernel
+        .record_operation_durable_save(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-2".to_string(),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: Some("他终于听见门后有人低声念出了他的名字。".to_string()),
+            reason: Some("accepted after save may teach memory".to_string()),
+            created_at: now_ms(),
+        })
+        .unwrap();
+
+    if !kernel
+        .memory
+        .list_style_preferences(20)
+        .unwrap()
+        .iter()
+        .any(|preference| preference.key == "accepted_Ghost")
+    {
+        errors.push("accepted ghost preference was not written after durable save".to_string());
+    }
+
+    eval_result(
+        "writer_agent:operation_feedback_requires_durable_save",
+        format!("approved={} errors={}", approved.success, errors.len()),
+        errors,
+    )
+}
+
+fn run_write_operation_lifecycle_trace_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation("林墨停在旧门前，风从裂开的门缝里钻出来。"),
+            "他终于听见门后有人低声念出了他的名字。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let mut approval = eval_approval("eval_lifecycle");
+    approval.proposal_id = Some(proposal.id.clone());
+
+    kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    kernel
+        .record_operation_durable_save(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-2".to_string(),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: None,
+            reason: Some("trace lifecycle".to_string()),
+            created_at: now_ms(),
+        })
+        .unwrap();
+
+    let trace = kernel.trace_snapshot(20);
+    let states = trace
+        .operation_lifecycle
+        .iter()
+        .filter(|entry| entry.proposal_id.as_deref() == Some(proposal.id.as_str()))
+        .map(|entry| format!("{:?}", entry.state))
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    for expected in [
+        "Proposed",
+        "Approved",
+        "Applied",
+        "DurablySaved",
+        "FeedbackRecorded",
+    ] {
+        if !states.iter().any(|state| state == expected) {
+            errors.push(format!("missing lifecycle state {}", expected));
+        }
+    }
+    if !trace.operation_lifecycle.iter().any(|entry| {
+        entry.proposal_id.as_deref() == Some(proposal.id.as_str())
+            && entry.operation_kind == "text.insert"
+            && entry.source_task.as_deref() == Some("Ghost")
+            && entry.approval_source.as_deref() == Some("eval_lifecycle")
+            && entry
+                .affected_scope
+                .as_deref()
+                .is_some_and(|scope| scope.contains("Chapter-1"))
+            && entry
+                .save_result
+                .as_deref()
+                .is_some_and(|save| save.contains("rev-2"))
+    }) {
+        errors.push("lifecycle trace lacks operation metadata".to_string());
+    }
+
+    eval_result(
+        "writer_agent:write_operation_lifecycle_trace",
+        format!("states={}", states.join(",")),
         errors,
     )
 }
@@ -2951,6 +3200,9 @@ fn main() {
     results.push(run_tool_permission_guard_eval());
     results.push(run_effective_tool_inventory_eval());
     results.push(run_manual_request_tool_boundary_eval());
+    results.push(run_manual_request_kernel_owns_run_loop_eval());
+    results.push(run_operation_feedback_requires_durable_save_eval());
+    results.push(run_write_operation_lifecycle_trace_eval());
     results.push(run_task_packet_foundation_eval());
     results.push(run_chapter_generation_task_packet_eval());
     results.push(run_result_feedback_tight_budget_eval());

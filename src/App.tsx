@@ -184,9 +184,21 @@ function App() {
       const revision = await invoke<string>(Commands.saveChapter, { title: currentChapter, content });
       setCurrentChapterRevision(revision);
       setIsEditorDirty(false);
+      await invoke(Commands.recordWriterOperationDurableSave, {
+        proposalId: undefined,
+        operation,
+        saveResult: `editor_save:${revision}`,
+      });
       return { applied: true, saved: true, revision };
     } catch (e) {
       setIsEditorDirty(true);
+      await invoke(Commands.recordWriterOperationDurableSave, {
+        proposalId: undefined,
+        operation,
+        saveResult: `editor_save_failed:${String(e)}`,
+      }).catch((error) => {
+        console.error("Failed to record operation save failure:", error);
+      });
       return { applied: true, saved: false, error: `Save failed: ${String(e)}` };
     }
   }, [currentChapter, setCurrentChapterRevision, setIsEditorDirty]);

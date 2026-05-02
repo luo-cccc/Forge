@@ -2,10 +2,12 @@ import { Extension, type RawCommands } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import type { WriterOperation } from "../protocol";
 
 export interface GhostTextState {
   requestId: string;
   proposalId?: string;
+  operation?: WriterOperation;
   position: number;
   text: string;
   intent?: string;
@@ -23,6 +25,7 @@ interface GhostTextMeta {
   type: "set" | "append" | "clear" | "next";
   requestId?: string;
   proposalId?: string;
+  operation?: WriterOperation;
   position?: number;
   text?: string;
   intent?: string;
@@ -152,6 +155,7 @@ const GhostText = Extension.create({
               return {
                 requestId: meta.requestId,
                 proposalId: meta.proposalId,
+                operation: meta.operation,
                 position: meta.position,
                 text: candidates[0]?.text ?? meta.text ?? "",
                 intent: meta.intent,

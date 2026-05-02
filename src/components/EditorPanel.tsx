@@ -264,6 +264,43 @@ function buildObservation(
 
 type ActiveGhostState = NonNullable<ReturnType<typeof ghostTextPluginKey.getState>>;
 
+async function recordOperationDurableSave(
+  proposalId: string | undefined,
+  operation: WriterOperation | undefined,
+  saveResult: string,
+) {
+  if (!proposalId || !operation) return;
+  await invoke(Commands.recordWriterOperationDurableSave, {
+    proposalId,
+    operation,
+    saveResult,
+  });
+}
+
+function writerOperationFromInlinePreview(
+  preview: InlinePreviewState,
+  editor: Editor,
+): WriterOperation {
+  if (preview.kind === "text.insert") {
+    return {
+      kind: "text.insert",
+      chapter: preview.chapter,
+      at: textCharPosition(editor, preview.to),
+      text: preview.text,
+      revision: preview.revision,
+    };
+  }
+
+  return {
+    kind: "text.replace",
+    chapter: preview.chapter,
+    from: textCharPosition(editor, preview.from),
+    to: textCharPosition(editor, preview.to),
+    text: preview.text,
+    revision: preview.revision,
+  };
+}
+
 async function recordGhostAcceptance(ghost: ActiveGhostState) {
   if (!ghost.proposalId) return;
   const candidate = ghost.candidates[ghost.activeIndex];
@@ -404,6 +441,7 @@ export default function EditorPanel({
   const currentChapterRef = useRef(currentChapter);
   const currentChapterRevisionRef = useRef<string | null>(currentChapterRevision);
   const editSequenceRef = useRef(0);
+  const pendingGhostFeedbackRef = useRef<ActiveGhostState | null>(null);
   const lastEditAtRef = useRef(0);
   const lastObservationKeyRef = useRef("");
   const lastSemanticLintKeyRef = useRef("");
@@ -597,6 +635,7 @@ export default function EditorPanel({
           editor.commands.setGhostText({
             requestId: chunk.requestId,
             proposalId: chunk.proposalId,
+            operation: chunk.operation,
             position: chunk.cursorPosition,
             text: chunk.content,
             intent: chunk.intent,
@@ -614,6 +653,7 @@ export default function EditorPanel({
           editor.commands.setGhostText({
             requestId: chunk.requestId,
             proposalId: chunk.proposalId,
+            operation: chunk.operation,
             position: chunk.cursorPosition,
             text: chunk.content,
             intent: chunk.intent,
@@ -731,6 +771,23 @@ export default function EditorPanel({
           setCurrentChapterRevision(revision);
           currentChapterRevisionRef.current = revision;
           setIsEditorDirty(false);
+          const activeGhost = pendingGhostFeedbackRef.current;
+          if (activeGhost?.operation && activeGhost.proposalId) {
+            void recordOperationDurableSave(
+              activeGhost.proposalId,
+              activeGhost.operation,
+              `editor_auto_save:${revision}`,
+            )
+              .then(() => {
+                if (pendingGhostFeedbackRef.current?.proposalId === activeGhost.proposalId) {
+                  pendingGhostFeedbackRef.current = null;
+                }
+                return recordGhostAcceptance(activeGhost);
+              })
+              .catch((e) => {
+                console.error("Failed to record ghost operation lifecycle:", e);
+              });
+          }
           const now = new Date();
           setSaveIndicator(
             `Saved at ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
@@ -773,13 +830,18 @@ export default function EditorPanel({
       const activeGhost = ghostTextPluginKey.getState(editor.state);
       if (event.key === "Tab" && activeGhost?.text) {
         event.preventDefault();
+        const acceptedGhost = activeGhost;
         const accepted = editor.commands.acceptGhostText();
         if (accepted) {
           activeGhostRequestIdRef.current = null;
           incrementActionEpoch();
-          void recordGhostAcceptance(activeGhost).catch((e) => {
-            console.error("Failed to record ghost feedback:", e);
-          });
+          if (!acceptedGhost.operation) {
+            void recordGhostAcceptance(acceptedGhost).catch((e) => {
+              console.error("Failed to record ghost feedback:", e);
+            });
+          } else {
+            pendingGhostFeedbackRef.current = acceptedGhost;
+          }
         }
         return;
       }
@@ -948,8 +1010,10 @@ export default function EditorPanel({
     const chapterAtSave = currentChapterRef.current;
     const sequenceAtSave = editSequenceRef.current;
     void (async () => {
+      let savedRevision: string;
       try {
         const revision = await invoke<string>(Commands.saveChapter, { title: chapterAtSave, content });
+        savedRevision = revision;
         const isStillCurrent =
           editSequenceRef.current === sequenceAtSave &&
           currentChapterRef.current === chapterAtSave &&
@@ -962,10 +1026,22 @@ export default function EditorPanel({
       } catch (e) {
         setIsEditorDirty(true);
         console.error("Failed to save accepted inline operation:", e);
+        await recordOperationDurableSave(
+          preview.proposalId,
+          writerOperationFromInlinePreview(preview, editor),
+          `editor_save_failed:${String(e)}`,
+        ).catch((error) => {
+          console.error("Failed to record inline operation save failure:", error);
+        });
         return;
       }
 
       if (!preview.proposalId) return;
+      await recordOperationDurableSave(
+        preview.proposalId,
+        writerOperationFromInlinePreview(preview, editor),
+        `editor_save:${savedRevision}`,
+      );
       const feedback: ProposalFeedback = {
         proposalId: preview.proposalId,
         action: "accepted",

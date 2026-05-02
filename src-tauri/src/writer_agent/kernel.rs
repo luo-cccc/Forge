@@ -2,11 +2,16 @@
 //! proposals, memory, canon, and feedback.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use agent_harness_core::agent_loop::EventCallback;
+use agent_harness_core::provider::{LlmMessage, Provider};
 use agent_harness_core::{
-    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolFilter,
+    default_writing_tool_registry, AgentLoop, AgentLoopConfig, EffectiveToolInventory,
+    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolFilter, ToolHandler,
     ToolPolicyContract, ToolSideEffectLevel,
 };
+use agent_harness_core::{PermissionMode, PermissionPolicy};
 
 use super::canon::CanonEngine;
 use super::context::{
@@ -152,6 +157,7 @@ pub struct WriterAgentTraceSnapshot {
     pub task_packets: Vec<WriterTaskPacketTrace>,
     pub recent_proposals: Vec<WriterProposalTrace>,
     pub recent_feedback: Vec<WriterFeedbackTrace>,
+    pub operation_lifecycle: Vec<WriterOperationLifecycleTrace>,
     pub context_recalls: Vec<ContextRecallSummary>,
 }
 
@@ -206,6 +212,170 @@ pub struct WriterFeedbackTrace {
     pub created_at: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterOperationLifecycleState {
+    Proposed,
+    Approved,
+    Applied,
+    DurablySaved,
+    FeedbackRecorded,
+    Rejected,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterOperationLifecycleTrace {
+    pub proposal_id: Option<String>,
+    pub operation_kind: String,
+    pub source_task: Option<String>,
+    pub approval_source: Option<String>,
+    pub affected_scope: Option<String>,
+    pub state: WriterOperationLifecycleState,
+    pub save_result: Option<String>,
+    pub feedback_result: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterAgentTask {
+    ManualRequest,
+    InlineRewrite,
+    GhostWriting,
+    ChapterGeneration,
+    ContinuityDiagnostic,
+    CanonMaintenance,
+    ProposalEvaluation,
+}
+
+impl WriterAgentTask {
+    pub fn as_agent_task(&self) -> AgentTask {
+        match self {
+            WriterAgentTask::ManualRequest => AgentTask::ManualRequest,
+            WriterAgentTask::InlineRewrite => AgentTask::InlineRewrite,
+            WriterAgentTask::GhostWriting => AgentTask::GhostWriting,
+            WriterAgentTask::ChapterGeneration => AgentTask::ChapterGeneration,
+            WriterAgentTask::ContinuityDiagnostic => AgentTask::ContinuityDiagnostic,
+            WriterAgentTask::CanonMaintenance => AgentTask::CanonMaintenance,
+            WriterAgentTask::ProposalEvaluation => AgentTask::ProposalEvaluation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterAgentApprovalMode {
+    ReadOnly,
+    SurfaceProposals,
+    ApprovedWrites,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterAgentStreamMode {
+    None,
+    Text,
+}
+
+#[derive(Debug, Clone)]
+pub struct WriterAgentRunRequest {
+    pub task: WriterAgentTask,
+    pub observation: WriterObservation,
+    pub user_instruction: String,
+    pub frontend_state: WriterAgentFrontendState,
+    pub approval_mode: WriterAgentApprovalMode,
+    pub stream_mode: WriterAgentStreamMode,
+    pub manual_history: Vec<LlmMessage>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WriterAgentFrontendState {
+    pub truncated_context: String,
+    pub paragraph: String,
+    pub selected_text: String,
+    pub memory_context: String,
+    pub has_lore: bool,
+    pub has_outline: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterAgentRunResult {
+    pub answer: String,
+    pub proposals: Vec<AgentProposal>,
+    pub operations: Vec<WriterOperation>,
+    pub task_packet: TaskPacket,
+    pub context_pack_summary: WriterAgentContextPackSummary,
+    pub tool_inventory: EffectiveToolInventory,
+    pub trace_refs: Vec<String>,
+    pub source_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterAgentContextPackSummary {
+    pub task: AgentTask,
+    pub source_count: usize,
+    pub total_chars: usize,
+    pub budget_limit: usize,
+    pub source_refs: Vec<String>,
+}
+
+pub struct WriterAgentPreparedRun<P: Provider, H: ToolHandler> {
+    request: WriterAgentRunRequest,
+    agent: AgentLoop<P, H>,
+    proposals: Vec<AgentProposal>,
+    operations: Vec<WriterOperation>,
+    task_packet: TaskPacket,
+    context_pack_summary: WriterAgentContextPackSummary,
+    tool_inventory: EffectiveToolInventory,
+    source_refs: Vec<String>,
+    trace_refs: Vec<String>,
+}
+
+impl<P, H> WriterAgentPreparedRun<P, H>
+where
+    P: Provider,
+    H: ToolHandler,
+{
+    pub fn set_event_callback(&mut self, cb: EventCallback) {
+        self.agent.set_event_callback(cb);
+    }
+
+    pub fn request(&self) -> &WriterAgentRunRequest {
+        &self.request
+    }
+
+    pub fn proposals(&self) -> &[AgentProposal] {
+        &self.proposals
+    }
+
+    pub async fn run(mut self) -> Result<WriterAgentRunResult, String> {
+        self.agent
+            .add_user_message(self.request.user_instruction.clone());
+        let answer = self
+            .agent
+            .run(
+                &self.request.user_instruction,
+                self.request.frontend_state.has_lore,
+                self.request.frontend_state.has_outline,
+            )
+            .await?;
+        self.trace_refs.push(self.task_packet.id.clone());
+        Ok(WriterAgentRunResult {
+            answer,
+            proposals: self.proposals,
+            operations: self.operations,
+            task_packet: self.task_packet,
+            context_pack_summary: self.context_pack_summary,
+            tool_inventory: self.tool_inventory,
+            trace_refs: self.trace_refs,
+            source_refs: self.source_refs,
+        })
+    }
+}
+
 pub struct WriterAgentKernel {
     pub project_id: String,
     pub session_id: String,
@@ -218,6 +388,7 @@ pub struct WriterAgentKernel {
     proposal_context_budgets: HashMap<String, ContextBudgetTrace>,
     task_packets: Vec<WriterTaskPacketTrace>,
     feedback_events: Vec<ProposalFeedback>,
+    operation_lifecycle: Vec<WriterOperationLifecycleTrace>,
     superseded_proposals: HashSet<String>,
     suppressed_slots: Vec<SuppressedProposalSlot>,
     ignored_ghost_slots: Vec<IgnoredGhostSlot>,
@@ -257,6 +428,7 @@ impl WriterAgentKernel {
             proposal_context_budgets: HashMap::new(),
             task_packets: Vec::new(),
             feedback_events: Vec::new(),
+            operation_lifecycle: Vec::new(),
             superseded_proposals: HashSet::new(),
             suppressed_slots: Vec::new(),
             ignored_ghost_slots: Vec::new(),
@@ -535,18 +707,129 @@ impl WriterAgentKernel {
                 created_at: crate::agent_runtime::now_ms(),
             })
             .map_err(|e| e.to_string())?;
-        let context_pack = self.context_pack_for_default(AgentTask::ManualRequest, observation);
-        self.record_task_packet_for(
-            AgentTask::ManualRequest,
-            observation,
+        Ok(())
+    }
+
+    pub fn prepare_task_run<P, H>(
+        &mut self,
+        request: WriterAgentRunRequest,
+        provider: Arc<P>,
+        handler: H,
+        model: &str,
+    ) -> Result<WriterAgentPreparedRun<P, H>, String>
+    where
+        P: Provider + 'static,
+        H: ToolHandler + 'static,
+    {
+        let task = request.task.as_agent_task();
+        let proposals = self.observe(request.observation.clone())?;
+        let operations = proposals
+            .iter()
+            .flat_map(|proposal| proposal.operations.clone())
+            .collect::<Vec<_>>();
+        let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
+        let task_packet = build_task_packet_for_observation(
+            &self.project_id,
+            &self.session_id,
+            task.clone(),
+            &request.observation,
             &context_pack,
-            "Answer the author's explicit request as a writing partner using current manuscript context and ledgers.",
-            vec![
-                "Answer directly addresses the author's request.".to_string(),
-                "Durable decisions or preferences are recorded when the response changes project state."
-                    .to_string(),
-            ],
+            &objective_for_run_task(&request.task),
+            success_criteria_for_run_task(&request.task),
         );
+        task_packet.validate().map_err(|error| error.to_string())?;
+        self.push_task_packet_trace(
+            request.observation.id.clone(),
+            format!("{:?}", task),
+            task_packet.clone(),
+        );
+
+        let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);
+        let registry = default_writing_tool_registry();
+        let tool_inventory = registry.effective_inventory(
+            &tool_filter,
+            &PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+        );
+        let source_refs = source_refs_from_context_pack(&context_pack);
+        let context_pack_summary = WriterAgentContextPackSummary {
+            task: task.clone(),
+            source_count: context_pack.sources.len(),
+            total_chars: context_pack.total_chars,
+            budget_limit: context_pack.budget_limit,
+            source_refs: source_refs.clone(),
+        };
+        let system_prompt = render_run_system_prompt(&request, &context_pack, self);
+        tracing::debug!(
+            "WriterAgent {:?} ContextPack: {} sources, {}/{} chars",
+            task,
+            context_pack.sources.len(),
+            context_pack.total_chars,
+            context_pack.budget_limit
+        );
+
+        let mut agent = AgentLoop::new(
+            AgentLoopConfig {
+                max_rounds: 10,
+                system_prompt,
+                context_limit_tokens: Some(
+                    agent_harness_core::resolve_context_window_info(model).tokens,
+                ),
+                tool_filter: Some(tool_filter),
+            },
+            provider,
+            registry,
+            handler,
+        );
+        agent.messages.extend(request.manual_history.clone());
+
+        Ok(WriterAgentPreparedRun {
+            request,
+            agent,
+            proposals,
+            operations,
+            task_packet,
+            context_pack_summary,
+            tool_inventory,
+            source_refs,
+            trace_refs: vec![],
+        })
+    }
+
+    pub async fn run_task<P, H>(
+        &mut self,
+        request: WriterAgentRunRequest,
+        provider: Arc<P>,
+        handler: H,
+        model: &str,
+        on_event: Option<EventCallback>,
+    ) -> Result<WriterAgentRunResult, String>
+    where
+        P: Provider + 'static,
+        H: ToolHandler + 'static,
+    {
+        let completion_request = request.clone();
+        let mut prepared = self.prepare_task_run(request, provider, handler, model)?;
+        if let Some(callback) = on_event {
+            prepared.set_event_callback(callback);
+        }
+        let result = prepared.run().await?;
+        self.record_run_completion(&completion_request, &result)?;
+        Ok(result)
+    }
+
+    pub fn record_run_completion(
+        &mut self,
+        request: &WriterAgentRunRequest,
+        result: &WriterAgentRunResult,
+    ) -> Result<(), String> {
+        if request.task == WriterAgentTask::ManualRequest {
+            self.record_manual_exchange(
+                &request.observation,
+                &request.user_instruction,
+                &result.answer,
+                &result.source_refs,
+            )?;
+        }
         Ok(())
     }
 
@@ -778,6 +1061,21 @@ impl WriterAgentKernel {
     }
 
     pub fn apply_feedback(&mut self, feedback: ProposalFeedback) -> Result<(), String> {
+        let proposal = self
+            .proposals
+            .iter()
+            .find(|p| p.id == feedback.proposal_id)
+            .cloned();
+        let positive_feedback_ready = proposal
+            .as_ref()
+            .map(|prop| !feedback.is_positive() || self.proposal_positive_feedback_ready(prop))
+            .unwrap_or(true);
+        let feedback_result = if feedback.is_positive() && !positive_feedback_ready {
+            Some("deferred:missing_durable_save".to_string())
+        } else {
+            Some("recorded".to_string())
+        };
+
         self.memory
             .record_feedback(
                 &feedback.proposal_id,
@@ -793,8 +1091,8 @@ impl WriterAgentKernel {
             )
             .map_err(|e| format!("feedback: {}", e))?;
 
-        if feedback.is_positive() {
-            if let Some(prop) = self.proposals.iter().find(|p| p.id == feedback.proposal_id) {
+        if feedback.is_positive() && positive_feedback_ready {
+            if let Some(prop) = proposal.as_ref() {
                 record_memory_candidate_feedback(&self.memory, prop, true);
                 record_memory_audit_event(&self.memory, prop, &feedback);
                 self.memory
@@ -819,47 +1117,44 @@ impl WriterAgentKernel {
                     )
                     .ok();
             }
-        } else if let Some(prop) = self.proposals.iter().find(|p| p.id == feedback.proposal_id) {
-            let action = match feedback.action {
-                FeedbackAction::Rejected => "rejected",
-                FeedbackAction::Edited => "edited",
-                FeedbackAction::Snoozed => "snoozed",
-                FeedbackAction::Explained => "explained",
-                FeedbackAction::Accepted => "accepted",
-            };
-            if feedback.is_negative() || matches!(feedback.action, FeedbackAction::Edited) {
-                record_memory_candidate_feedback(&self.memory, prop, false);
-                record_memory_audit_event(&self.memory, prop, &feedback);
-                self.memory
-                    .record_decision(
-                        self.active_chapter.as_deref().unwrap_or("project"),
-                        &format!("{:?}", prop.kind),
-                        action,
-                        &[],
-                        feedback.reason.as_deref().unwrap_or(&prop.rationale),
-                        &prop
-                            .evidence
-                            .iter()
-                            .map(|e| e.reference.clone())
-                            .collect::<Vec<_>>(),
-                    )
-                    .ok();
-            }
-            if prop.kind == ProposalKind::Ghost
-                && matches!(feedback.action, FeedbackAction::Explained)
-            {
-                self.memory
-                    .upsert_style_preference("ignored_ghost", &prop.rationale, false)
-                    .ok();
+        } else if !feedback.is_positive() {
+            if let Some(prop) = proposal.as_ref() {
+                let action = match feedback.action {
+                    FeedbackAction::Rejected => "rejected",
+                    FeedbackAction::Edited => "edited",
+                    FeedbackAction::Snoozed => "snoozed",
+                    FeedbackAction::Explained => "explained",
+                    FeedbackAction::Accepted => "accepted",
+                };
+                if feedback.is_negative() || matches!(feedback.action, FeedbackAction::Edited) {
+                    record_memory_candidate_feedback(&self.memory, prop, false);
+                    record_memory_audit_event(&self.memory, prop, &feedback);
+                    self.memory
+                        .record_decision(
+                            self.active_chapter.as_deref().unwrap_or("project"),
+                            &format!("{:?}", prop.kind),
+                            action,
+                            &[],
+                            feedback.reason.as_deref().unwrap_or(&prop.rationale),
+                            &prop
+                                .evidence
+                                .iter()
+                                .map(|e| e.reference.clone())
+                                .collect::<Vec<_>>(),
+                        )
+                        .ok();
+                }
+                if prop.kind == ProposalKind::Ghost
+                    && matches!(feedback.action, FeedbackAction::Explained)
+                {
+                    self.memory
+                        .upsert_style_preference("ignored_ghost", &prop.rationale, false)
+                        .ok();
+                }
             }
         }
 
-        if let Some(prop) = self
-            .proposals
-            .iter()
-            .find(|p| p.id == feedback.proposal_id)
-            .cloned()
-        {
+        if let Some(prop) = proposal.as_ref() {
             self.suppress_slot_after_feedback(&prop, &feedback);
         }
 
@@ -877,6 +1172,24 @@ impl WriterAgentKernel {
                 &format!("feedback:{:?}", feedback.action),
             )
             .ok();
+
+        if let Some(prop) = proposal.as_ref() {
+            for operation in prop
+                .operations
+                .iter()
+                .filter(|operation| operation_is_write_capable(operation))
+            {
+                self.push_operation_lifecycle(
+                    Some(prop.id.clone()),
+                    operation,
+                    WriterOperationLifecycleState::FeedbackRecorded,
+                    None,
+                    None,
+                    feedback_result.clone(),
+                    feedback.created_at,
+                );
+            }
+        }
 
         self.feedback_events.push(feedback);
         Ok(())
@@ -1019,6 +1332,21 @@ impl WriterAgentKernel {
                 created_at,
             )
             .ok();
+        for operation in proposal
+            .operations
+            .iter()
+            .filter(|operation| operation_is_write_capable(operation))
+        {
+            self.push_operation_lifecycle(
+                Some(proposal.id.clone()),
+                operation,
+                WriterOperationLifecycleState::Proposed,
+                None,
+                None,
+                None,
+                created_at,
+            );
+        }
         Some(proposal)
     }
 
@@ -1066,7 +1394,31 @@ impl WriterAgentKernel {
         current_content: &str,
         current_revision: &str,
     ) -> Result<OperationResult, String> {
-        match &operation {
+        if operation_is_write_capable(&operation) {
+            let result = OperationResult {
+                success: false,
+                operation,
+                error: Some(super::operation::OperationError::approval_required(
+                    "Write-capable operations require an explicit surfaced approval context",
+                )),
+                revision_after: None,
+            };
+            self.record_operation_result_lifecycle(&result, None, None);
+            return Ok(result);
+        }
+
+        let result = self.execute_operation_inner(operation, current_content, current_revision)?;
+        self.record_operation_result_lifecycle(&result, None, None);
+        Ok(result)
+    }
+
+    fn execute_operation_inner(
+        &mut self,
+        operation: WriterOperation,
+        current_content: &str,
+        current_revision: &str,
+    ) -> Result<OperationResult, String> {
+        let result: Result<OperationResult, String> = match &operation {
             WriterOperation::TextInsert { .. } | WriterOperation::TextReplace { .. } => {
                 match execute_text_operation(&operation, current_content, current_revision) {
                     Ok((_new_content, new_revision)) => Ok(OperationResult {
@@ -1336,32 +1688,33 @@ impl WriterAgentKernel {
                     updated_at: String::new(),
                 };
                 if let Some(error) = validate_story_contract_summary(&summary) {
-                    return Ok(OperationResult {
+                    Ok(OperationResult {
                         success: false,
                         operation,
                         error: Some(super::operation::OperationError::invalid(&error)),
                         revision_after: None,
-                    });
+                    })
+                } else {
+                    self.memory
+                        .upsert_story_contract(&summary)
+                        .map_err(|e| format!("story contract: {}", e))?;
+                    self.memory
+                        .record_decision(
+                            "project",
+                            "Story contract",
+                            "updated_story_contract",
+                            &[],
+                            &summary.render_for_context(),
+                            &[format!("story_contract:{}", summary.project_id)],
+                        )
+                        .ok();
+                    Ok(OperationResult {
+                        success: true,
+                        operation,
+                        error: None,
+                        revision_after: None,
+                    })
                 }
-                self.memory
-                    .upsert_story_contract(&summary)
-                    .map_err(|e| format!("story contract: {}", e))?;
-                self.memory
-                    .record_decision(
-                        "project",
-                        "Story contract",
-                        "updated_story_contract",
-                        &[],
-                        &summary.render_for_context(),
-                        &[format!("story_contract:{}", summary.project_id)],
-                    )
-                    .ok();
-                Ok(OperationResult {
-                    success: true,
-                    operation,
-                    error: None,
-                    revision_after: None,
-                })
             }
             WriterOperation::ChapterMissionUpsert { mission } => {
                 let normalized_status = normalize_chapter_mission_status(&mission.status);
@@ -1378,35 +1731,36 @@ impl WriterAgentKernel {
                     updated_at: String::new(),
                 };
                 if let Some(error) = validate_chapter_mission_summary(&summary) {
-                    return Ok(OperationResult {
+                    Ok(OperationResult {
                         success: false,
                         operation,
                         error: Some(super::operation::OperationError::invalid(&error)),
                         revision_after: None,
-                    });
+                    })
+                } else {
+                    self.memory
+                        .upsert_chapter_mission(&summary)
+                        .map_err(|e| format!("chapter mission: {}", e))?;
+                    self.memory
+                        .record_decision(
+                            &summary.chapter_title,
+                            "Chapter mission",
+                            "updated_chapter_mission",
+                            &[],
+                            &summary.render_for_context(),
+                            &[format!(
+                                "chapter_mission:{}:{}",
+                                summary.project_id, summary.chapter_title
+                            )],
+                        )
+                        .ok();
+                    Ok(OperationResult {
+                        success: true,
+                        operation,
+                        error: None,
+                        revision_after: None,
+                    })
                 }
-                self.memory
-                    .upsert_chapter_mission(&summary)
-                    .map_err(|e| format!("chapter mission: {}", e))?;
-                self.memory
-                    .record_decision(
-                        &summary.chapter_title,
-                        "Chapter mission",
-                        "updated_chapter_mission",
-                        &[],
-                        &summary.render_for_context(),
-                        &[format!(
-                            "chapter_mission:{}:{}",
-                            summary.project_id, summary.chapter_title
-                        )],
-                    )
-                    .ok();
-                Ok(OperationResult {
-                    success: true,
-                    operation,
-                    error: None,
-                    revision_after: None,
-                })
             }
             WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
                 success: false,
@@ -1416,7 +1770,8 @@ impl WriterAgentKernel {
                 )),
                 revision_after: None,
             }),
-        }
+        };
+        result
     }
 
     pub fn approve_editor_operation(
@@ -1433,17 +1788,18 @@ impl WriterAgentKernel {
         current_revision: &str,
         approval: Option<&super::operation::OperationApproval>,
     ) -> Result<OperationResult, String> {
-        if approval_required_for_operation(&operation)
-            && !approval.is_some_and(|context| context.is_valid_for_write())
-        {
-            return Ok(OperationResult {
+        let requires_approval = operation_is_write_capable(&operation);
+        if requires_approval && !approval.is_some_and(|context| context.is_valid_for_write()) {
+            let result = OperationResult {
                 success: false,
                 operation,
                 error: Some(super::operation::OperationError::approval_required(
                     "Write-capable operations require an explicit surfaced approval context",
                 )),
                 revision_after: None,
-            });
+            };
+            self.record_operation_result_lifecycle(&result, approval, None);
+            return Ok(result);
         }
 
         if let Some(context) = approval {
@@ -1462,29 +1818,80 @@ impl WriterAgentKernel {
                 .ok();
         }
 
-        match &operation {
+        if requires_approval {
+            self.push_operation_lifecycle(
+                approval.and_then(|context| context.proposal_id.clone()),
+                &operation,
+                WriterOperationLifecycleState::Approved,
+                approval.map(|context| context.source.clone()),
+                None,
+                None,
+                now_ms(),
+            );
+        }
+
+        let result = match &operation {
             WriterOperation::TextInsert { revision, .. }
             | WriterOperation::TextReplace { revision, .. } => {
                 if revision != current_revision {
-                    return Ok(OperationResult {
+                    Ok(OperationResult {
                         success: false,
                         operation,
                         error: Some(super::operation::OperationError::conflict(
                             "Proposal is stale; the chapter changed since it was created",
                         )),
                         revision_after: None,
-                    });
+                    })
+                } else {
+                    Ok(OperationResult {
+                        success: true,
+                        operation,
+                        error: None,
+                        revision_after: Some(current_revision.to_string()),
+                    })
                 }
-
-                Ok(OperationResult {
-                    success: true,
-                    operation,
-                    error: None,
-                    revision_after: Some(current_revision.to_string()),
-                })
             }
-            _ => self.execute_operation(operation, "", current_revision),
+            _ => self.execute_operation_inner(operation, "", current_revision),
+        }?;
+        self.record_operation_result_lifecycle(&result, approval, None);
+        Ok(result)
+    }
+
+    pub fn record_operation_durable_save(
+        &mut self,
+        proposal_id: Option<String>,
+        operation: WriterOperation,
+        save_result: String,
+    ) -> Result<(), String> {
+        if !operation_is_write_capable(&operation) {
+            return Ok(());
         }
+
+        let normalized = if save_result.trim().is_empty() {
+            "saved".to_string()
+        } else {
+            save_result
+        };
+        let state = if save_result_is_success(&normalized) {
+            WriterOperationLifecycleState::DurablySaved
+        } else {
+            WriterOperationLifecycleState::Rejected
+        };
+        let resolved_proposal_id =
+            proposal_id.or_else(|| self.proposal_id_for_operation(&operation));
+        let approval_source = resolved_proposal_id
+            .as_deref()
+            .and_then(|id| self.latest_approval_source_for_operation(id, &operation));
+        self.push_operation_lifecycle(
+            resolved_proposal_id,
+            &operation,
+            state,
+            approval_source,
+            Some(normalized),
+            None,
+            now_ms(),
+        );
+        Ok(())
     }
 
     pub fn status(&self) -> WriterAgentStatus {
@@ -1788,6 +2195,13 @@ impl WriterAgentKernel {
                     })
                     .collect()
             },
+            operation_lifecycle: self
+                .operation_lifecycle
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect(),
             context_recalls: self
                 .memory
                 .list_context_recalls(&self.project_id, limit)
@@ -1859,6 +2273,155 @@ impl WriterAgentKernel {
             foundation_complete: coverage.is_complete(),
             packet,
         });
+    }
+
+    fn push_operation_lifecycle(
+        &mut self,
+        proposal_id: Option<String>,
+        operation: &WriterOperation,
+        state: WriterOperationLifecycleState,
+        approval_source: Option<String>,
+        save_result: Option<String>,
+        feedback_result: Option<String>,
+        created_at: u64,
+    ) {
+        self.operation_lifecycle
+            .push(WriterOperationLifecycleTrace {
+                source_task: proposal_id
+                    .as_deref()
+                    .and_then(|id| self.proposals.iter().find(|proposal| proposal.id == id))
+                    .map(|proposal| format!("{:?}", proposal.kind)),
+                proposal_id,
+                operation_kind: operation_kind_label(operation).to_string(),
+                approval_source,
+                affected_scope: operation_affected_scope(operation),
+                state,
+                save_result,
+                feedback_result,
+                created_at,
+            });
+    }
+
+    fn record_operation_result_lifecycle(
+        &mut self,
+        result: &OperationResult,
+        approval: Option<&super::operation::OperationApproval>,
+        save_result_override: Option<String>,
+    ) {
+        if !operation_is_write_capable(&result.operation) {
+            return;
+        }
+
+        let proposal_id = approval
+            .and_then(|context| context.proposal_id.clone())
+            .or_else(|| self.proposal_id_for_operation(&result.operation));
+        let approval_source = approval.map(|context| context.source.clone());
+        let save_result = save_result_override.or_else(|| {
+            result
+                .error
+                .as_ref()
+                .map(|error| format!("{}:{}", error.code, error.message))
+        });
+        let state = if result.success {
+            WriterOperationLifecycleState::Applied
+        } else {
+            WriterOperationLifecycleState::Rejected
+        };
+        self.push_operation_lifecycle(
+            proposal_id.clone(),
+            &result.operation,
+            state,
+            approval_source.clone(),
+            save_result.clone(),
+            None,
+            now_ms(),
+        );
+
+        if result.success && operation_has_kernel_durable_save(&result.operation) {
+            self.push_operation_lifecycle(
+                proposal_id,
+                &result.operation,
+                WriterOperationLifecycleState::DurablySaved,
+                approval_source,
+                Some("kernel_write:ok".to_string()),
+                None,
+                now_ms(),
+            );
+        }
+    }
+
+    fn proposal_positive_feedback_ready(&self, proposal: &AgentProposal) -> bool {
+        proposal
+            .operations
+            .iter()
+            .filter(|operation| operation_is_write_capable(operation))
+            .all(|operation| {
+                if operation_requires_durable_save(operation) {
+                    self.lifecycle_has_state(
+                        &proposal.id,
+                        operation,
+                        WriterOperationLifecycleState::DurablySaved,
+                    )
+                } else {
+                    self.lifecycle_has_state(
+                        &proposal.id,
+                        operation,
+                        WriterOperationLifecycleState::Applied,
+                    ) || self.lifecycle_has_state(
+                        &proposal.id,
+                        operation,
+                        WriterOperationLifecycleState::DurablySaved,
+                    )
+                }
+            })
+    }
+
+    fn proposal_id_for_operation(&self, operation: &WriterOperation) -> Option<String> {
+        let kind = operation_kind_label(operation);
+        let scope = operation_affected_scope(operation);
+        self.proposals.iter().rev().find_map(|proposal| {
+            proposal
+                .operations
+                .iter()
+                .any(|candidate| {
+                    operation_kind_label(candidate) == kind
+                        && operation_affected_scope(candidate) == scope
+                })
+                .then(|| proposal.id.clone())
+        })
+    }
+
+    fn lifecycle_has_state(
+        &self,
+        proposal_id: &str,
+        operation: &WriterOperation,
+        state: WriterOperationLifecycleState,
+    ) -> bool {
+        self.operation_lifecycle.iter().any(|trace| {
+            trace.proposal_id.as_deref() == Some(proposal_id)
+                && trace.operation_kind == operation_kind_label(operation)
+                && trace.affected_scope == operation_affected_scope(operation)
+                && trace.state == state
+        })
+    }
+
+    fn latest_approval_source_for_operation(
+        &self,
+        proposal_id: &str,
+        operation: &WriterOperation,
+    ) -> Option<String> {
+        let kind = operation_kind_label(operation);
+        let scope = operation_affected_scope(operation);
+        self.operation_lifecycle
+            .iter()
+            .rev()
+            .find(|trace| {
+                trace.proposal_id.as_deref() == Some(proposal_id)
+                    && trace.operation_kind == kind
+                    && trace.affected_scope == scope
+                    && trace.state == WriterOperationLifecycleState::Approved
+            })
+            .and_then(|trace| trace.approval_source.clone())
     }
 
     fn proposal_state(&self, proposal: &AgentProposal, now: u64) -> String {
@@ -2779,10 +3342,325 @@ pub fn tool_filter_for_task(task: AgentTask) -> ToolFilter {
     }
 }
 
+pub fn tool_filter_for_run_request(
+    task: AgentTask,
+    approval_mode: &WriterAgentApprovalMode,
+) -> ToolFilter {
+    let mut filter = tool_filter_for_task(task);
+    if matches!(approval_mode, WriterAgentApprovalMode::ApprovedWrites) {
+        filter.include_requires_approval = true;
+    }
+    filter
+}
+
+pub fn render_context_pack_for_prompt(pack: &WritingContextPack) -> String {
+    let budget = &pack.budget_report;
+    let source_report = if budget.source_reports.is_empty() {
+        "- no source budgets consumed".to_string()
+    } else {
+        budget
+            .source_reports
+            .iter()
+            .map(|report| {
+                format!(
+                    "- {}: requested {}, provided {}, truncated {}, reason: {}{}",
+                    report.source,
+                    report.requested,
+                    report.provided,
+                    report.truncated,
+                    report.reason,
+                    report
+                        .truncation_reason
+                        .as_ref()
+                        .map(|reason| format!(", truncation: {}", reason))
+                        .unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let rendered_sources = pack
+        .sources
+        .iter()
+        .map(|source| {
+            format!(
+                "## {:?} (priority {}, {} chars{})\n{}",
+                source.source,
+                source.priority,
+                source.char_count,
+                if source.truncated { ", truncated" } else { "" },
+                source.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    format!(
+        "# ContextPack Budget\n\
+task: {:?}\n\
+used/budget: {}/{}\n\
+wasted: {}\n\
+sources:\n{}\n\n\
+# ContextPack Sources\n{}",
+        pack.task, budget.used, budget.total_budget, budget.wasted, source_report, rendered_sources
+    )
+}
+
+pub fn source_refs_from_context_pack(pack: &WritingContextPack) -> Vec<String> {
+    pack.sources
+        .iter()
+        .map(|source| format!("{:?}", source.source))
+        .collect()
+}
+
+fn render_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+    kernel: &WriterAgentKernel,
+) -> String {
+    match request.task {
+        WriterAgentTask::ManualRequest => {
+            render_manual_run_system_prompt(request, context_pack, &kernel.ledger_snapshot())
+        }
+        WriterAgentTask::InlineRewrite => render_inline_run_system_prompt(request, context_pack),
+        WriterAgentTask::GhostWriting => render_ghost_run_system_prompt(request, context_pack),
+        WriterAgentTask::ChapterGeneration => {
+            render_chapter_generation_run_system_prompt(request, context_pack)
+        }
+        WriterAgentTask::ContinuityDiagnostic
+        | WriterAgentTask::CanonMaintenance
+        | WriterAgentTask::ProposalEvaluation => {
+            render_diagnostic_run_system_prompt(request, context_pack)
+        }
+    }
+}
+
+fn render_manual_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+    ledger: &WriterAgentLedgerSnapshot,
+) -> String {
+    format!(
+        "你是 Forge 的中文长篇小说写作 Agent，是作家的第二大脑和并肩创作伙伴，不是普通聊天助手，也不是只会补全文字的写作工具。\n\
+你的任务是理解作者当前意图，结合项目长期记忆、设定、伏笔、风格偏好和当前稿件，给出可执行、可直接用于创作推进的回答。\n\
+如果信息不足，先说明缺口；如果涉及人物、设定、时间线或伏笔，必须优先尊重 WriterAgent ContextPack 与 Ledger，不要随意发明冲突设定。\n\
+回答要具体、短而有用；需要写正文时直接给可用正文，需要分析时给明确判断和下一步。\n\
+如果建议会改变正文、canon、promise、outline 或长期记忆，只能提出可审查建议，不要声称已经写入。\n\n\
+{}\n\n\
+# WriterAgent ContextPack\n{}\n\n\
+# WriterAgent Ledgers\n{}\n\n\
+# Current draft tail\n\"\"\"\n{}\n\"\"\"\n\n\
+# Focused paragraph\n\"\"\"\n{}\n\"\"\"\n\n\
+# Selected text\n\"\"\"\n{}\n\"\"\"\n\n\
+可使用工具检索 lorebook、outline 和章节资料；在虚构新信息前先查设定。",
+        request.frontend_state.memory_context,
+        render_context_pack_for_prompt(context_pack),
+        render_ledger_snapshot_for_prompt(ledger),
+        request.frontend_state.truncated_context,
+        request.frontend_state.paragraph,
+        request.frontend_state.selected_text,
+    )
+}
+
+fn render_inline_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+) -> String {
+    format!(
+        "你是 Forge 的 Cursor 式中文小说写作 Agent。你只为当前光标生成可执行的正文改写或插入文本，不聊天，不解释，不输出 Markdown，不输出 XML action 标签。必须尊重 ContextPack、设定、伏笔和光标后文。\n\n\
+作者指令: {}\n\
+章节: {}\n\
+选中文本:\n{}\n\n\
+ContextPack:\n{}",
+        request.user_instruction,
+        request
+            .observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
+        request.observation.selected_text(),
+        render_context_pack_for_prompt(context_pack)
+    )
+}
+
+fn render_ghost_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+) -> String {
+    format!(
+        "你是一个中文长篇小说写作 Agent，不是聊天助手。你只负责在光标处提供可直接插入正文的一小段续写。必须尊重已给出的设定、伏笔、风格偏好和光标后文。不要解释，不要 Markdown，不要重复光标前文。输出 1-2 句中文正文。\n\n\
+章节: {}\n光标位置: {}\n当前段落:\n{}\n\nContextPack:\n{}",
+        request
+            .observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
+        request
+            .observation
+            .cursor
+            .as_ref()
+            .map(|cursor| cursor.to)
+            .unwrap_or(0),
+        request.observation.paragraph,
+        render_context_pack_for_prompt(context_pack)
+    )
+}
+
+fn render_chapter_generation_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+) -> String {
+    format!(
+        "你是 Forge 的长篇小说章节生成 Agent。根据 Chapter Mission、Story Contract、Promise Ledger、Canon 和 Result Feedback 写当前章草稿。不要覆盖既有正文；如信息不足，先说明缺口和风险。\n\n\
+作者指令: {}\n\
+章节: {}\n\n\
+ContextPack:\n{}",
+        request.user_instruction,
+        request
+            .observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
+        render_context_pack_for_prompt(context_pack)
+    )
+}
+
+fn render_diagnostic_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+) -> String {
+    format!(
+        "你是 Forge 的小说连续性和设定诊断 Agent。只基于提供的证据指出风险、缺口和可审查建议；不要自动改写正文或长期记忆。\n\n\
+作者指令: {}\n\
+章节: {}\n\n\
+ContextPack:\n{}",
+        request.user_instruction,
+        request
+            .observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
+        render_context_pack_for_prompt(context_pack)
+    )
+}
+
+fn render_ledger_snapshot_for_prompt(snapshot: &WriterAgentLedgerSnapshot) -> String {
+    let canon = snapshot
+        .canon_entities
+        .iter()
+        .take(8)
+        .map(|entity| {
+            format!(
+                "- {} [{}]: {} {}",
+                entity.name, entity.kind, entity.summary, entity.attributes
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let promises = snapshot
+        .open_promises
+        .iter()
+        .take(8)
+        .map(|promise| {
+            format!(
+                "- {} [{}]: {} -> {}",
+                promise.title, promise.kind, promise.description, promise.expected_payoff
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let decisions = snapshot
+        .recent_decisions
+        .iter()
+        .take(8)
+        .map(|decision| {
+            format!(
+                "- {} / {}: {} ({})",
+                decision.scope, decision.title, decision.decision, decision.rationale
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    [
+        ("Canon entities", canon),
+        ("Open promises", promises),
+        ("Recent creative decisions", decisions),
+    ]
+    .into_iter()
+    .filter_map(|(label, content)| {
+        if content.trim().is_empty() {
+            None
+        } else {
+            Some(format!("## {}\n{}", label, content))
+        }
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n")
+}
+
+fn objective_for_run_task(task: &WriterAgentTask) -> String {
+    match task {
+        WriterAgentTask::ManualRequest => {
+            "Answer the author's explicit request as a writing partner using current manuscript context and ledgers.".to_string()
+        }
+        WriterAgentTask::InlineRewrite => {
+            "Produce a constrained inline rewrite or insertion that can be reviewed as a typed operation.".to_string()
+        }
+        WriterAgentTask::GhostWriting => {
+            "Continue from the current cursor while preserving chapter mission, canon, and open promises.".to_string()
+        }
+        WriterAgentTask::ChapterGeneration => {
+            "Generate chapter prose grounded in story contract, mission, promises, canon, and prior result feedback.".to_string()
+        }
+        WriterAgentTask::ContinuityDiagnostic => {
+            "Diagnose continuity, canon, mission, and promise risks using explicit evidence.".to_string()
+        }
+        WriterAgentTask::CanonMaintenance => {
+            "Maintain canon candidates and conflicts without writing durable memory unless approved.".to_string()
+        }
+        WriterAgentTask::ProposalEvaluation => {
+            "Evaluate a surfaced proposal against current evidence and feedback history.".to_string()
+        }
+    }
+}
+
+fn success_criteria_for_run_task(task: &WriterAgentTask) -> Vec<String> {
+    match task {
+        WriterAgentTask::ManualRequest => vec![
+            "Answer directly addresses the author's request.".to_string(),
+            "Canon, promise, mission, and story contract constraints are respected.".to_string(),
+            "Any state-changing suggestion remains reviewable instead of being applied implicitly."
+                .to_string(),
+        ],
+        WriterAgentTask::InlineRewrite => vec![
+            "Output is limited to the selected range or cursor insertion point.".to_string(),
+            "The rewrite remains compatible with context after the cursor.".to_string(),
+        ],
+        WriterAgentTask::GhostWriting => vec![
+            "Continuation fits the local paragraph without forcing a broad rewrite.".to_string(),
+            "Continuation does not introduce canon or promise-ledger conflicts.".to_string(),
+        ],
+        WriterAgentTask::ChapterGeneration => vec![
+            "Chapter draft follows the active chapter mission.".to_string(),
+            "Draft records risks around weak story contract or unresolved promises.".to_string(),
+            "No durable write is implied without explicit approval and save.".to_string(),
+        ],
+        WriterAgentTask::ContinuityDiagnostic
+        | WriterAgentTask::CanonMaintenance
+        | WriterAgentTask::ProposalEvaluation => vec![
+            "Findings cite evidence from context or ledgers.".to_string(),
+            "Recommendations are reviewable and do not mutate project state directly.".to_string(),
+        ],
+    }
+}
+
 fn approval_required_for_operation(operation: &WriterOperation) -> bool {
     matches!(
         operation,
-        WriterOperation::CanonUpsertEntity { .. }
+        WriterOperation::TextInsert { .. }
+            | WriterOperation::TextReplace { .. }
+            | WriterOperation::CanonUpsertEntity { .. }
             | WriterOperation::CanonUpdateAttribute { .. }
             | WriterOperation::CanonUpsertRule { .. }
             | WriterOperation::PromiseAdd { .. }
@@ -2794,6 +3672,35 @@ fn approval_required_for_operation(operation: &WriterOperation) -> bool {
             | WriterOperation::ChapterMissionUpsert { .. }
             | WriterOperation::OutlineUpdate { .. }
     )
+}
+
+fn operation_is_write_capable(operation: &WriterOperation) -> bool {
+    approval_required_for_operation(operation)
+}
+
+fn operation_requires_durable_save(operation: &WriterOperation) -> bool {
+    operation_is_write_capable(operation)
+}
+
+fn operation_has_kernel_durable_save(operation: &WriterOperation) -> bool {
+    operation_is_write_capable(operation)
+        && !matches!(
+            operation,
+            WriterOperation::TextInsert { .. }
+                | WriterOperation::TextReplace { .. }
+                | WriterOperation::OutlineUpdate { .. }
+        )
+}
+
+fn save_result_is_success(save_result: &str) -> bool {
+    let value = save_result.trim().to_ascii_lowercase();
+    value.is_empty()
+        || value == "saved"
+        || value == "ok"
+        || value == "success"
+        || value.ends_with(":ok")
+        || value.contains("save:")
+        || value.contains("saved")
 }
 
 fn validate_story_contract_summary(contract: &StoryContractSummary) -> Option<String> {
@@ -2919,6 +3826,51 @@ fn operation_kind_label(operation: &WriterOperation) -> &'static str {
         WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
         WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
         WriterOperation::OutlineUpdate { .. } => "outline.update",
+    }
+}
+
+fn operation_affected_scope(operation: &WriterOperation) -> Option<String> {
+    match operation {
+        WriterOperation::TextInsert { chapter, at, .. } => {
+            Some(format!("chapter:{}@{}", chapter, at))
+        }
+        WriterOperation::TextReplace {
+            chapter, from, to, ..
+        } => Some(format!("chapter:{}:{}-{}", chapter, from, to)),
+        WriterOperation::TextAnnotate {
+            chapter, from, to, ..
+        } => Some(format!("chapter:{}:{}-{}", chapter, from, to)),
+        WriterOperation::CanonUpsertEntity { entity } => {
+            Some(format!("canon:{}:{}", entity.kind, entity.name))
+        }
+        WriterOperation::CanonUpdateAttribute {
+            entity, attribute, ..
+        } => Some(format!("canon:{}:{}", entity, attribute)),
+        WriterOperation::CanonUpsertRule { rule } => Some(format!("canon_rule:{}", rule.category)),
+        WriterOperation::PromiseAdd { promise } => Some(format!("promise:new:{}", promise.title)),
+        WriterOperation::PromiseResolve {
+            promise_id,
+            chapter,
+        }
+        | WriterOperation::PromiseDefer {
+            promise_id,
+            chapter,
+            ..
+        }
+        | WriterOperation::PromiseAbandon {
+            promise_id,
+            chapter,
+            ..
+        } => Some(format!("promise:{}:{}", promise_id, chapter)),
+        WriterOperation::StyleUpdatePreference { key, .. } => Some(format!("style:{}", key)),
+        WriterOperation::StoryContractUpsert { contract } => {
+            Some(format!("story_contract:{}", contract.project_id))
+        }
+        WriterOperation::ChapterMissionUpsert { mission } => Some(format!(
+            "chapter_mission:{}:{}",
+            mission.project_id, mission.chapter_title
+        )),
+        WriterOperation::OutlineUpdate { node_id, .. } => Some(format!("outline:{}", node_id)),
     }
 }
 
@@ -3998,6 +4950,21 @@ fn dedupe_memory_candidates(candidates: Vec<MemoryCandidate>) -> Vec<MemoryCandi
     deduped
 }
 
+#[cfg(test)]
+fn proposal_feedback(
+    proposal_id: String,
+    action: FeedbackAction,
+    reason: Option<String>,
+) -> ProposalFeedback {
+    ProposalFeedback {
+        proposal_id,
+        action,
+        final_text: None,
+        reason,
+        created_at: now_ms(),
+    }
+}
+
 fn split_sentences(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
@@ -4363,11 +5330,18 @@ mod tests {
     }
 
     fn test_approval(source: &str) -> crate::writer_agent::operation::OperationApproval {
+        test_approval_for_proposal(source, "proposal-test")
+    }
+
+    fn test_approval_for_proposal(
+        source: &str,
+        proposal_id: &str,
+    ) -> crate::writer_agent::operation::OperationApproval {
         crate::writer_agent::operation::OperationApproval {
             source: source.to_string(),
             actor: "author".to_string(),
             reason: "test approval".to_string(),
-            proposal_id: Some("proposal-test".to_string()),
+            proposal_id: Some(proposal_id.to_string()),
             surfaced_to_user: true,
             created_at: now_ms(),
         }
@@ -4391,7 +5365,26 @@ mod tests {
         assert!(proposals
             .iter()
             .any(|proposal| proposal.rationale.contains("ContextPack")));
-        let proposal_id = proposals[0].id.clone();
+        let proposal = proposals
+            .iter()
+            .find(|proposal| proposal.kind == ProposalKind::Ghost)
+            .unwrap();
+        let operation = proposal.operations[0].clone();
+        kernel
+            .approve_editor_operation_with_approval(
+                operation.clone(),
+                "rev",
+                Some(&test_approval_for_proposal("ghost_feedback", &proposal.id)),
+            )
+            .unwrap();
+        kernel
+            .record_operation_durable_save(
+                Some(proposal.id.clone()),
+                operation,
+                "editor_save:rev-2".to_string(),
+            )
+            .unwrap();
+        let proposal_id = proposal.id.clone();
         kernel
             .apply_feedback(ProposalFeedback {
                 proposal_id,
@@ -4405,7 +5398,11 @@ mod tests {
         let status = kernel.status();
         assert_eq!(status.total_feedback_events, 1);
         assert_eq!(status.pending_proposals, 0);
-        assert_eq!(kernel.ledger_snapshot().recent_decisions.len(), 1);
+        assert!(kernel
+            .ledger_snapshot()
+            .recent_decisions
+            .iter()
+            .any(|decision| decision.decision == "accepted"));
     }
 
     #[test]
@@ -4413,7 +5410,7 @@ mod tests {
         let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         let mut kernel = WriterAgentKernel::new("default", memory);
         let ok = kernel
-            .approve_editor_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::TextInsert {
                     chapter: "Chapter-1".to_string(),
                     at: 3,
@@ -4421,12 +5418,13 @@ mod tests {
                     revision: "rev-1".to_string(),
                 },
                 "rev-1",
+                Some(&test_approval("text_revision")),
             )
             .unwrap();
         assert!(ok.success);
 
         let conflict = kernel
-            .approve_editor_operation(
+            .approve_editor_operation_with_approval(
                 WriterOperation::TextInsert {
                     chapter: "Chapter-1".to_string(),
                     at: 3,
@@ -4434,6 +5432,7 @@ mod tests {
                     revision: "rev-1".to_string(),
                 },
                 "rev-2",
+                Some(&test_approval("text_revision")),
             )
             .unwrap();
         assert!(!conflict.success);
@@ -4479,6 +5478,84 @@ mod tests {
         assert!(result.success);
         assert!(result.revision_after.is_none());
         assert_eq!(kernel.ledger_snapshot().recent_decisions.len(), 1);
+    }
+
+    #[test]
+    fn execute_operation_rejects_write_without_approval_context() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let result = kernel
+            .execute_operation(
+                WriterOperation::TextInsert {
+                    chapter: "Chapter-1".to_string(),
+                    at: 0,
+                    text: "续写".to_string(),
+                    revision: "rev-1".to_string(),
+                },
+                "",
+                "rev-1",
+            )
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap().code, "approval_required");
+    }
+
+    #[test]
+    fn accepted_text_feedback_requires_durable_save() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let proposal = kernel
+            .create_llm_ghost_proposal(
+                observation("林墨停在旧门前，风从裂开的门缝里钻出来。"),
+                "他终于听见门后有人低声念出了他的名字。".to_string(),
+                "test-model",
+            )
+            .unwrap();
+        let operation = proposal.operations[0].clone();
+
+        kernel
+            .approve_editor_operation_with_approval(
+                operation.clone(),
+                "rev",
+                Some(&test_approval_for_proposal("ghost", &proposal.id)),
+            )
+            .unwrap();
+        kernel
+            .apply_feedback(proposal_feedback(
+                proposal.id.clone(),
+                FeedbackAction::Accepted,
+                None,
+            ))
+            .unwrap();
+        assert!(!kernel
+            .memory
+            .list_style_preferences(20)
+            .unwrap()
+            .iter()
+            .any(|preference| preference.key == "accepted_Ghost"));
+
+        kernel
+            .record_operation_durable_save(
+                Some(proposal.id.clone()),
+                operation,
+                "editor_save:rev-2".to_string(),
+            )
+            .unwrap();
+        kernel
+            .apply_feedback(proposal_feedback(
+                proposal.id.clone(),
+                FeedbackAction::Accepted,
+                None,
+            ))
+            .unwrap();
+
+        assert!(kernel
+            .memory
+            .list_style_preferences(20)
+            .unwrap()
+            .iter()
+            .any(|preference| preference.key == "accepted_Ghost"));
     }
 
     #[test]
@@ -5620,14 +6697,38 @@ mod tests {
             .into_iter()
             .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
             .unwrap();
+        let proposal_id = proposal.id.clone();
         kernel
             .apply_feedback(ProposalFeedback {
-                proposal_id: proposal.id,
+                proposal_id: proposal_id.clone(),
                 action: FeedbackAction::Accepted,
                 final_text: None,
                 reason: None,
                 created_at: now_ms(),
             })
+            .unwrap();
+
+        let preferences = kernel.memory.list_style_preferences(20).unwrap();
+        assert!(!preferences.iter().any(|preference| {
+            preference
+                .key
+                .contains("memory_extract:memory|canon|character|沈照")
+        }));
+
+        let approval = test_approval_for_proposal("memory_candidate", &proposal_id);
+        kernel
+            .approve_editor_operation_with_approval(
+                proposal.operations[0].clone(),
+                "",
+                Some(&approval),
+            )
+            .unwrap();
+        kernel
+            .apply_feedback(proposal_feedback(
+                proposal_id,
+                FeedbackAction::Accepted,
+                None,
+            ))
             .unwrap();
 
         let preferences = kernel.memory.list_style_preferences(20).unwrap();
@@ -5652,6 +6753,13 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+            .unwrap();
+        kernel
+            .approve_editor_operation_with_approval(
+                proposal.operations[0].clone(),
+                "",
+                Some(&test_approval_for_proposal("memory_audit", &proposal.id)),
+            )
             .unwrap();
         kernel
             .apply_feedback(ProposalFeedback {
@@ -5694,6 +6802,13 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+                .unwrap();
+            kernel
+                .approve_editor_operation_with_approval(
+                    proposal.operations[0].clone(),
+                    "",
+                    Some(&test_approval_for_proposal("memory_audit", &proposal.id)),
+                )
                 .unwrap();
             kernel
                 .apply_feedback(ProposalFeedback {
