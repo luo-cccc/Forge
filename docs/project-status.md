@@ -29,6 +29,7 @@ Forge is a Cursor-style writing agent for novels, not a generic writing tool. Th
 - Recent editor hardening prevents stale autosaves from marking newer edits clean, blocks wrong-chapter inline operations, and stops chapter switching if current chapter save fails.
 - Storage writes now use per-target write guards and unique temporary files instead of a shared `.tmp` path, reducing concurrent autosave/generation/restore collision risk.
 - Inline AI operations now render as decoration-based previews and only enter manuscript text after acceptance and a successful save.
+- Story Contract and current Chapter Mission now have a Foundation editing surface in the Companion Panel; saves go through typed WriterOperations into Writer Agent memory.
 
 ## Current Verification Baseline
 
@@ -54,5 +55,5 @@ The expected local baseline is:
 
 - `src-tauri/src/lib.rs` is still too large and should be split into command modules after the save-flow risks are fully closed.
 - `ask_agent` manual requests now create WriterObservations, run Writer Agent Kernel observation, use ManualRequest context packs, persist manual exchanges, and then execute through the older agent loop; the remaining gap is retiring that execution layer once the kernel can own the full run loop.
-- Story Contract and Chapter Mission authoring/editing UX is still early compared with the underlying memory model.
+- Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions.
 - Tool policy should continue moving from "inventory visible" toward end-to-end approval semantics for every write-capable path.

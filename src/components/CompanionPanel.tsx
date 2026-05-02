@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
@@ -16,6 +16,8 @@ import type {
   StoryDebtSnapshot,
   StoryDebtEntry,
   StoryReviewQueueEntry,
+  StoryContractSummary,
+  ChapterMissionSummary,
   WriterAgentTraceSnapshot,
   WriterProposalTrace,
   WriterOperation,
@@ -155,6 +157,71 @@ function mergeProposal(prev: AgentProposal[], incoming: AgentProposal): AgentPro
   return [incoming, ...next].slice(0, 20);
 }
 
+function emptyStoryContractDraft(): StoryContractDraft {
+  return {
+    title: "",
+    genre: "",
+    targetReader: "",
+    readerPromise: "",
+    first30ChapterPromise: "",
+    mainConflict: "",
+    structuralBoundary: "",
+    toneContract: "",
+  };
+}
+
+function storyContractDraftFromSummary(
+  contract: StoryContractSummary | null | undefined,
+): StoryContractDraft {
+  return {
+    title: contract?.title ?? "",
+    genre: contract?.genre ?? "",
+    targetReader: contract?.targetReader ?? "",
+    readerPromise: contract?.readerPromise ?? "",
+    first30ChapterPromise: contract?.first30ChapterPromise ?? "",
+    mainConflict: contract?.mainConflict ?? "",
+    structuralBoundary: contract?.structuralBoundary ?? "",
+    toneContract: contract?.toneContract ?? "",
+  };
+}
+
+function emptyChapterMissionDraft(): ChapterMissionDraft {
+  return {
+    mission: "",
+    mustInclude: "",
+    mustNot: "",
+    expectedEnding: "",
+    status: "in_progress",
+    sourceRef: "author",
+  };
+}
+
+function chapterMissionDraftFromSummary(
+  mission: ChapterMissionSummary | null | undefined,
+): ChapterMissionDraft {
+  return {
+    mission: mission?.mission ?? "",
+    mustInclude: mission?.mustInclude ?? "",
+    mustNot: mission?.mustNot ?? "",
+    expectedEnding: mission?.expectedEnding ?? "",
+    status: mission?.status || "in_progress",
+    sourceRef: mission?.sourceRef || "author",
+  };
+}
+
+function hasStoryContractContent(draft: StoryContractDraft): boolean {
+  return Object.values(draft).some((value) => value.trim().length > 0);
+}
+
+function hasChapterMissionContent(draft: ChapterMissionDraft): boolean {
+  return [
+    draft.mission,
+    draft.mustInclude,
+    draft.mustNot,
+    draft.expectedEnding,
+  ].some((value) => value.trim().length > 0);
+}
+
 type SecondBrainTone = "neutral" | "accent" | "danger" | "success";
 
 interface SecondBrainItem {
@@ -162,6 +229,26 @@ interface SecondBrainItem {
   value: string;
   detail?: string;
   tone: SecondBrainTone;
+}
+
+interface StoryContractDraft {
+  title: string;
+  genre: string;
+  targetReader: string;
+  readerPromise: string;
+  first30ChapterPromise: string;
+  mainConflict: string;
+  structuralBoundary: string;
+  toneContract: string;
+}
+
+interface ChapterMissionDraft {
+  mission: string;
+  mustInclude: string;
+  mustNot: string;
+  expectedEnding: string;
+  status: string;
+  sourceRef: string;
 }
 
 function compactLine(text: string | undefined, fallback: string, max = 96): string {
@@ -541,9 +628,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
   const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
-  const [activeTab, setActiveTab] = useState<"status" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "foundation" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [contractDraft, setContractDraft] = useState<StoryContractDraft>(() => emptyStoryContractDraft());
+  const [missionDraft, setMissionDraft] = useState<ChapterMissionDraft>(() => emptyChapterMissionDraft());
+  const [foundationSaveState, setFoundationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [foundationDirty, setFoundationDirty] = useState(false);
+  const foundationChapterRef = useRef(currentChapter);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -571,6 +663,23 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setReviewQueue(nextReviewQueue);
       setStoryDebt(nextStoryDebt);
       setTrace(nextTrace);
+      if (foundationChapterRef.current !== currentChapter) {
+        foundationChapterRef.current = currentChapter;
+        setFoundationDirty(false);
+        setFoundationSaveState("idle");
+        setMissionDraft(emptyChapterMissionDraft());
+      }
+      setContractDraft((prev) =>
+        foundationDirty || hasStoryContractContent(prev)
+          ? prev
+          : storyContractDraftFromSummary(nextLedger.storyContract),
+      );
+      const activeMission =
+        nextLedger.activeChapterMission ??
+        nextLedger.chapterMissions.find((mission) => mission.chapterTitle === currentChapter);
+      setMissionDraft((prev) =>
+        foundationDirty || hasChapterMissionContent(prev) ? prev : chapterMissionDraftFromSummary(activeMission),
+      );
       setProposals((prev) => {
         const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
         return merged.filter((proposal) =>
@@ -580,7 +689,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch {
       // kernel not initialized yet
     }
-  }, [currentChapter]);
+  }, [currentChapter, foundationDirty]);
 
   useEffect(() => {
     const initial = setTimeout(refreshStatus, 0);
@@ -810,6 +919,78 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     }
   }, [recordFeedback]);
 
+  const handleSaveFoundation = useCallback(async () => {
+    setOperationError(null);
+    setFoundationSaveState("saving");
+    const projectId = status?.projectId ?? ledger?.storyContract?.projectId ?? "local-project";
+    const operations: WriterOperation[] = [];
+
+    if (hasStoryContractContent(contractDraft)) {
+      operations.push({
+        kind: "story_contract.upsert",
+        contract: {
+          projectId,
+          title: contractDraft.title.trim(),
+          genre: contractDraft.genre.trim(),
+          targetReader: contractDraft.targetReader.trim(),
+          readerPromise: contractDraft.readerPromise.trim(),
+          first30ChapterPromise: contractDraft.first30ChapterPromise.trim(),
+          mainConflict: contractDraft.mainConflict.trim(),
+          structuralBoundary: contractDraft.structuralBoundary.trim(),
+          toneContract: contractDraft.toneContract.trim(),
+        },
+      });
+    }
+
+    if (currentChapter && hasChapterMissionContent(missionDraft)) {
+      operations.push({
+        kind: "chapter_mission.upsert",
+        mission: {
+          projectId,
+          chapterTitle: currentChapter,
+          mission: missionDraft.mission.trim(),
+          mustInclude: missionDraft.mustInclude.trim(),
+          mustNot: missionDraft.mustNot.trim(),
+          expectedEnding: missionDraft.expectedEnding.trim(),
+          status: missionDraft.status.trim() || "in_progress",
+          sourceRef: missionDraft.sourceRef.trim() || "author",
+        },
+      });
+    }
+
+    if (operations.length === 0) {
+      setFoundationSaveState("error");
+      setOperationError("Fill at least one Story Contract or Chapter Mission field before saving.");
+      return;
+    }
+
+    try {
+      for (const operation of operations) {
+        const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
+          operation,
+          currentRevision: currentChapterRevision ?? "",
+        });
+        if (!result.success) {
+          throw new Error(result.error?.message ?? "Foundation operation was rejected by the kernel.");
+        }
+      }
+      setFoundationDirty(false);
+      setFoundationSaveState("saved");
+      await refreshStatus();
+    } catch (e) {
+      setFoundationSaveState("error");
+      setOperationError(String(e));
+    }
+  }, [
+    contractDraft,
+    currentChapter,
+    currentChapterRevision,
+    ledger?.storyContract?.projectId,
+    missionDraft,
+    refreshStatus,
+    status?.projectId,
+  ]);
+
   const handleRestoreLatestChapterBackup = useCallback(async () => {
     if (!currentChapter || chapterBackups.length === 0) return;
     setOperationError(null);
@@ -852,8 +1033,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     mode === "write"
       ? (["status"] as const)
       : mode === "review"
-        ? (["queue", "promises", "canon", "decisions", "audit"] as const)
-        : (["status", "promises", "canon", "decisions", "audit"] as const);
+        ? (["foundation", "queue", "promises", "canon", "decisions", "audit"] as const)
+        : (["status", "foundation", "promises", "canon", "decisions", "audit"] as const);
   const effectiveTab =
     mode === "write"
       ? "status"
@@ -912,6 +1093,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             >
               {tab === "status"
                 ? "状态"
+                : tab === "foundation"
+                  ? "地基"
                 : tab === "queue"
                   ? "队列"
                 : tab === "promises"
@@ -1169,6 +1352,185 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {effectiveTab === "foundation" && (
+          <div className="space-y-3 text-xs">
+            <div className="rounded border border-border-subtle bg-bg-raised p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium text-text-primary">Story Contract</div>
+                  <div className="text-[10px] text-text-muted">Book-level promise every agent action must obey.</div>
+                </div>
+                <span className="shrink-0 text-[10px] text-text-muted">
+                  {ledger?.storyContract?.updatedAt ? "saved" : "draft"}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <input
+                  value={contractDraft.title}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, title: event.target.value }));
+                  }}
+                  className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Title"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={contractDraft.genre}
+                    onChange={(event) => {
+                      setFoundationDirty(true);
+                      setContractDraft((prev) => ({ ...prev, genre: event.target.value }));
+                    }}
+                    className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                    placeholder="Genre"
+                  />
+                  <input
+                    value={contractDraft.targetReader}
+                    onChange={(event) => {
+                      setFoundationDirty(true);
+                      setContractDraft((prev) => ({ ...prev, targetReader: event.target.value }));
+                    }}
+                    className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                    placeholder="Target reader"
+                  />
+                </div>
+                <textarea
+                  value={contractDraft.readerPromise}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, readerPromise: event.target.value }));
+                  }}
+                  className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Reader promise"
+                />
+                <textarea
+                  value={contractDraft.first30ChapterPromise}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, first30ChapterPromise: event.target.value }));
+                  }}
+                  className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="First 30 chapters promise"
+                />
+                <textarea
+                  value={contractDraft.mainConflict}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, mainConflict: event.target.value }));
+                  }}
+                  className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Main conflict"
+                />
+                <textarea
+                  value={contractDraft.structuralBoundary}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, structuralBoundary: event.target.value }));
+                  }}
+                  className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Boundaries / forbidden moves"
+                />
+                <textarea
+                  value={contractDraft.toneContract}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setContractDraft((prev) => ({ ...prev, toneContract: event.target.value }));
+                  }}
+                  className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Tone and style floor"
+                />
+              </div>
+            </div>
+
+            <div className="rounded border border-border-subtle bg-bg-raised p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium text-text-primary">Chapter Mission</div>
+                  <div className="text-[10px] text-text-muted">{currentChapter || "No chapter selected"}</div>
+                </div>
+                <select
+                  value={missionDraft.status}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setMissionDraft((prev) => ({ ...prev, status: event.target.value }));
+                  }}
+                  className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary outline-none focus:border-accent"
+                >
+                  <option value="in_progress">Active</option>
+                  <option value="needs_review">Review</option>
+                  <option value="completed">Done</option>
+                  <option value="drifted">Drift</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <textarea
+                  value={missionDraft.mission}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setMissionDraft((prev) => ({ ...prev, mission: event.target.value }));
+                  }}
+                  className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="What this chapter must accomplish"
+                />
+                <textarea
+                  value={missionDraft.mustInclude}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setMissionDraft((prev) => ({ ...prev, mustInclude: event.target.value }));
+                  }}
+                  className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Must include"
+                />
+                <textarea
+                  value={missionDraft.mustNot}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setMissionDraft((prev) => ({ ...prev, mustNot: event.target.value }));
+                  }}
+                  className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Must not reveal or do"
+                />
+                <textarea
+                  value={missionDraft.expectedEnding}
+                  onChange={(event) => {
+                    setFoundationDirty(true);
+                    setMissionDraft((prev) => ({ ...prev, expectedEnding: event.target.value }));
+                  }}
+                  className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                  placeholder="Expected ending state"
+                />
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-border-subtle bg-bg-surface pt-2">
+              <span className={`text-[10px] ${
+                foundationSaveState === "error"
+                  ? "text-danger"
+                  : foundationSaveState === "saved"
+                    ? "text-success"
+                    : "text-text-muted"
+              }`}>
+                {foundationSaveState === "saving"
+                  ? "Saving foundation..."
+                  : foundationSaveState === "saved"
+                    ? "Foundation saved"
+                    : foundationSaveState === "error"
+                      ? "Foundation save failed"
+                      : foundationDirty
+                        ? "Unsaved foundation edits"
+                        : "Foundation is synced"}
+              </span>
+              <button
+                onClick={handleSaveFoundation}
+                disabled={foundationSaveState === "saving"}
+                className="rounded bg-accent px-3 py-1 text-xs text-bg-deep transition-colors hover:bg-accent/80 disabled:opacity-60"
+              >
+                Save Foundation
+              </button>
+            </div>
           </div>
         )}
 
