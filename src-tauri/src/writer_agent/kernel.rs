@@ -25,8 +25,8 @@ use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
     ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextRecallSummary,
-    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, StoryContractQuality,
-    StoryContractSummary, WriterMemory,
+    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, PromiseKind,
+    StoryContractQuality, StoryContractSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -4094,7 +4094,7 @@ fn extract_new_canon_entities(text: &str, known: &[String]) -> Vec<CanonEntityOp
     entities
 }
 
-fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec<PlotPromiseOp> {
+pub fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec<PlotPromiseOp> {
     let mut promises = Vec::new();
     for sentence in split_sentences(text) {
         if !contains_promise_cue(&sentence) {
@@ -4104,8 +4104,14 @@ fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec<Plo
         if title.is_empty() || promises.iter().any(|p: &PlotPromiseOp| p.title == title) {
             continue;
         }
+        let kind = promise_kind_from_cues(&sentence);
+        let priority = match kind {
+            PromiseKind::ObjectWhereabouts | PromiseKind::MysteryClue => 5,
+            PromiseKind::CharacterCommitment | PromiseKind::EmotionalDebt => 4,
+            _ => 3,
+        };
         promises.push(PlotPromiseOp {
-            kind: "open_question".to_string(),
+            kind: kind.as_kind_str().to_string(),
             title,
             description: sentence_snippet(&sentence, 140),
             introduced_chapter: observation
@@ -4113,7 +4119,7 @@ fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec<Plo
                 .clone()
                 .unwrap_or_else(|| "current chapter".to_string()),
             expected_payoff: "后续章节回收或解释".to_string(),
-            priority: 3,
+            priority,
         });
     }
     promises
@@ -4345,13 +4351,47 @@ fn contains_promise_cue(sentence: &str) -> bool {
         "下落",
         "没有说出口",
         "没有告诉",
+        "约定",
+        "承诺",
+        "发誓",
+        "一定会",
+        "等着",
+        "留给",
+        "交给",
+        "带走",
+        "失踪",
+        "不见",
+        "消失",
+        "藏",
+        "隐瞒",
     ]
     .iter()
     .any(|cue| sentence.contains(cue))
 }
 
+fn promise_kind_from_cues(sentence: &str) -> PromiseKind {
+    let s = sentence;
+    if s.contains("下落") || s.contains("不见") || s.contains("消失") || s.contains("带走")
+    {
+        PromiseKind::ObjectWhereabouts
+    } else if s.contains("秘密") || s.contains("谜") || s.contains("真相") || s.contains("隐瞒")
+    {
+        PromiseKind::MysteryClue
+    } else if s.contains("约定") || s.contains("承诺") || s.contains("发誓") || s.contains("等着")
+    {
+        PromiseKind::CharacterCommitment
+    } else if s.contains("没有说出口") || s.contains("没有告诉") || s.contains("藏") {
+        PromiseKind::EmotionalDebt
+    } else {
+        PromiseKind::PlotPromise
+    }
+}
+
 fn promise_title(sentence: &str) -> String {
-    for marker in ["玉佩", "密信", "钥匙", "令牌", "真相", "秘密", "下落"] {
+    for marker in [
+        "玉佩", "密信", "钥匙", "令牌", "真相", "秘密", "下落", "戒指", "剑", "刀", "信物", "地图",
+        "药", "毒",
+    ] {
         if sentence.contains(marker) {
             return marker.to_string();
         }

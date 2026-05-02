@@ -213,3 +213,55 @@ pub fn run_story_debt_priority_ordering_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_promise_kind_extraction_from_text_eval() -> EvalResult {
+    let mut errors = Vec::new();
+
+    // Object whereabouts
+    let mut obs = observation("张三带走了那枚玉佩，从此下落不明。");
+    obs.chapter_title = Some("Chapter-3".to_string());
+    let promises = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "张三带走了那枚玉佩，从此下落不明。",
+        &obs,
+    );
+    let has_object = promises
+        .iter()
+        .any(|p| p.kind.contains("object_whereabouts"));
+    if !has_object {
+        errors.push(format!(
+            "object whereabouts not detected, got kinds: {:?}",
+            promises.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>()
+        ));
+    }
+
+    // Mystery clue
+    let mut obs2 = observation("这个秘密已经埋藏了二十年。");
+    obs2.chapter_title = Some("Chapter-1".to_string());
+    let promises2 = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "这个秘密已经埋藏了二十年。",
+        &obs2,
+    );
+    let has_mystery = promises2.iter().any(|p| p.kind.contains("mystery_clue"));
+    if !has_mystery {
+        errors.push("mystery clue not detected for secret".to_string());
+    }
+
+    // Priority: object/mystery should get higher priority than generic
+    if !promises.is_empty() && promises[0].priority < 4 {
+        errors.push(format!(
+            "object promise should have priority >= 4, got {}",
+            promises[0].priority
+        ));
+    }
+
+    eval_result(
+        "writer_agent:promise_kind_extraction_from_text",
+        format!(
+            "objectPromises={} mysteryPromises={} objPriority={}",
+            promises.len(),
+            promises2.len(),
+            promises.first().map(|p| p.priority).unwrap_or(0)
+        ),
+        errors,
+    )
+}
