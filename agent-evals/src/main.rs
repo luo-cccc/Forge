@@ -1,9 +1,11 @@
 mod evals;
 mod evals_extra;
+mod evals_extra2;
 mod fixtures;
 
 use crate::evals::*;
 use crate::evals_extra::*;
+use crate::evals_extra2::*;
 use crate::fixtures::*;
 
 use agent_writer_lib::writer_agent::memory::WriterMemory;
@@ -192,6 +194,8 @@ fn main() {
     results.push(run_end_to_end_ghost_pipeline_eval());
     results.push(run_end_to_end_contract_guard_eval());
     results.push(run_end_to_end_mission_drift_detection_eval());
+    results.push(run_trajectory_product_metrics_present_eval());
+    results.push(run_ghost_task_packet_foundation_coverage_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
