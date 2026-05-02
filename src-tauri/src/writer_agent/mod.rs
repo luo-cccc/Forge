@@ -8,6 +8,7 @@ pub mod memory;
 pub mod observation;
 pub mod operation;
 pub mod proposal;
+pub mod trajectory;
 
 pub use feedback::ProposalFeedback;
 pub use kernel::{WriterAgentKernel, WriterAgentStatus};

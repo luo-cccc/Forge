@@ -14,6 +14,7 @@ export const Commands = {
   deleteLoreEntry: "delete_lore_entry",
   deleteOutlineNode: "delete_outline_node",
   exportDiagnosticLogs: "export_diagnostic_logs",
+  exportWriterAgentTrajectory: "export_writer_agent_trajectory",
   generateChapterAutonomous: "generate_chapter_autonomous",
   getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",

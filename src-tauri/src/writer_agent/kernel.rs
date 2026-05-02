@@ -1673,6 +1673,14 @@ impl WriterAgentKernel {
         }
     }
 
+    pub fn export_trajectory(&self, limit: usize) -> super::trajectory::WriterTrajectoryExport {
+        super::trajectory::export_trace_snapshot(
+            &self.project_id,
+            &self.session_id,
+            &self.trace_snapshot(limit),
+        )
+    }
+
     fn proposal_state(&self, proposal: &AgentProposal, now: u64) -> String {
         if self.superseded_proposals.contains(&proposal.id) {
             return "superseded".to_string();

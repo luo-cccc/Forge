@@ -70,6 +70,38 @@ fn load_api_key_from_keychain() -> Option<String> {
     entry.get_password().ok()
 }
 
+fn safe_filename_component(raw: &str) -> String {
+    let mut safe = String::new();
+    let mut last_was_dash = false;
+    for ch in raw.trim().to_lowercase().chars() {
+        let next = if ch.is_ascii_alphanumeric() {
+            Some(ch)
+        } else if ch == ' ' || ch == '-' || ch == '_' {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(ch) = next {
+            if ch == '-' {
+                if last_was_dash {
+                    continue;
+                }
+                last_was_dash = true;
+            } else {
+                last_was_dash = false;
+            }
+            safe.push(ch);
+        }
+    }
+    let safe = safe.trim_matches('-');
+    if safe.is_empty() {
+        "default".to_string()
+    } else {
+        safe.to_string()
+    }
+}
+
 #[tauri::command]
 fn export_diagnostic_logs(app: tauri::AppHandle) -> Result<String, String> {
     use std::io::Write;
@@ -109,6 +141,25 @@ fn export_diagnostic_logs(app: tauri::AppHandle) -> Result<String, String> {
 
     zip.finish().map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn export_writer_agent_trajectory(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<String, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    let export = kernel.export_trajectory(limit.unwrap_or(200).min(1_000));
+    let dir = log_dir()?.join("trajectory");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file_name = format!(
+        "writer-agent-{}-{}.jsonl",
+        safe_filename_component(&export.project_id),
+        agent_runtime::now_ms()
+    );
+    let path = dir.join(file_name);
+    std::fs::write(&path, export.jsonl).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 fn log_dir() -> Result<std::path::PathBuf, String> {
@@ -3469,7 +3520,8 @@ pub fn run() {
             rename_chapter_file,
             set_api_key,
             check_api_key,
-            export_diagnostic_logs
+            export_diagnostic_logs,
+            export_writer_agent_trajectory
         ])
         .run(tauri::generate_context!())
     {
