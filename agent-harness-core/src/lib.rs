@@ -18,6 +18,7 @@ pub mod retry;
 pub mod router;
 pub mod run_trace;
 pub mod skill_lifecycle;
+pub mod task_packet;
 pub mod tool_executor;
 pub mod tool_registry;
 pub mod vector_db;
@@ -43,11 +44,16 @@ pub use hermes_memory::{HermesDB, SessionSearchResult};
 pub use hooks::{HookDecision, HookEvent, HookPayload, HookRunner};
 pub use llm::LLMClient;
 pub use permission::{PermissionDecision, PermissionMode, PermissionPolicy, PermissionRule};
+pub use planner::{ExecutionPlan, PlanState, PlanStep};
 pub use prompt_cache::{PromptCache, PromptCacheConfig, PromptCacheStats};
 pub use ptc::{build_ptc_prompt, parse_ptc_output, PtcConfig, PtcResult, PtcScript};
 pub use router::{classify_intent, Intent};
 pub use run_trace::{AgentRunEvent, AgentRunEventKind, AgentRunStatus, AgentRunTrace};
 pub use skill_lifecycle::{CurationReport, CuratorConfig, Skill, SkillCategory, SkillCurator};
+pub use task_packet::{
+    FeedbackContract, FoundationCoverage, RequiredContext, TaskBelief, TaskPacket,
+    TaskPacketValidationError, TaskScope, ToolPolicyContract,
+};
 pub use tool_executor::{DoomLoopDetector, ToolExecution, ToolExecutor, ToolHandler};
 pub use tool_registry::{
     default_writing_tool_registry, EffectiveToolEntry, EffectiveToolInventory, EffectiveToolStatus,

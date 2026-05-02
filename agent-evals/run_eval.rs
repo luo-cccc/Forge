@@ -797,6 +797,128 @@ fn run_effective_tool_inventory_eval() -> EvalResult {
     )
 }
 
+fn run_task_packet_foundation_eval() -> EvalResult {
+    let mut packet = agent_harness_core::TaskPacket::new(
+        "eval-task-1",
+        "继续审讯场景，保持章节任务、角色设定和伏笔账本一致。",
+        agent_harness_core::TaskScope::Chapter,
+        now_ms(),
+    );
+    packet.scope_ref = Some("Chapter-7".to_string());
+    packet.intent = Some(agent_harness_core::Intent::GenerateContent);
+    packet.constraints = vec![
+        "不得提前泄露玉佩来源。".to_string(),
+        "林墨说话保持克制，不改成外放型角色。".to_string(),
+    ];
+    packet.success_criteria = vec![
+        "输出推进审讯冲突。".to_string(),
+        "不制造与寒影刀设定冲突的武器描写。".to_string(),
+    ];
+    packet.beliefs = vec![
+        agent_harness_core::TaskBelief::new("林墨", "惯用武器是寒影刀。", 0.95)
+            .with_source("canon"),
+        agent_harness_core::TaskBelief::new("玉佩", "来源仍属于禁区信息。", 0.90)
+            .with_source("chapter_mission"),
+    ];
+    packet.required_context = vec![
+        agent_harness_core::RequiredContext::new(
+            "chapter_mission",
+            "约束本章推进内容与禁止泄露事项。",
+            700,
+            true,
+        ),
+        agent_harness_core::RequiredContext::new(
+            "promise_ledger",
+            "追踪玉佩和角色承诺是否需要兑现。",
+            600,
+            true,
+        ),
+        agent_harness_core::RequiredContext::new(
+            "canon_slice",
+            "检查林墨设定和武器设定。",
+            500,
+            true,
+        ),
+    ];
+    packet.tool_policy = agent_harness_core::ToolPolicyContract {
+        max_side_effect_level: agent_harness_core::ToolSideEffectLevel::ProviderCall,
+        allow_approval_required: false,
+        required_tool_tags: vec!["project".to_string()],
+    };
+    packet.feedback = agent_harness_core::FeedbackContract {
+        expected_signals: vec![
+            "ghost accepted/rejected".to_string(),
+            "continuity warning emitted".to_string(),
+        ],
+        checkpoints: vec![
+            "record context sources in trace".to_string(),
+            "write chapter result feedback after save".to_string(),
+        ],
+        memory_writes: vec!["chapter_result_summary".to_string()],
+    };
+
+    let mut errors = Vec::new();
+    if let Err(error) = packet.validate() {
+        errors.extend(error.errors().iter().cloned());
+    }
+    let coverage = packet.foundation_coverage();
+    if !coverage.is_complete() {
+        errors.push(format!(
+            "foundation coverage incomplete: {:?}",
+            coverage.missing
+        ));
+    }
+
+    let filter = packet.to_tool_filter(None);
+    if filter.intent != Some(agent_harness_core::Intent::GenerateContent) {
+        errors.push(format!("tool filter intent mismatch: {:?}", filter.intent));
+    }
+    if filter.include_requires_approval {
+        errors.push("tool filter should not expose approval-required tools".to_string());
+    }
+    if filter.max_side_effect_level != Some(agent_harness_core::ToolSideEffectLevel::ProviderCall) {
+        errors.push(format!(
+            "tool side-effect ceiling mismatch: {:?}",
+            filter.max_side_effect_level
+        ));
+    }
+
+    let plan = agent_harness_core::ExecutionPlan::from_task_packet(packet.clone());
+    match plan {
+        Ok(plan) => {
+            if plan.task_packet.as_ref() != Some(&packet) {
+                errors.push("execution plan did not retain task packet".to_string());
+            }
+            if !plan
+                .steps
+                .iter()
+                .any(|step| step.action == "load_required_context")
+            {
+                errors.push("execution plan lacks required context loading step".to_string());
+            }
+            if !plan
+                .steps
+                .iter()
+                .any(|step| step.action == "capture_feedback")
+            {
+                errors.push("execution plan lacks feedback capture step".to_string());
+            }
+        }
+        Err(error) => errors.push(error),
+    }
+
+    eval_result(
+        "agent_harness:task_packet_covers_five_foundation_axes",
+        format!(
+            "coverageComplete={} requiredContext={} beliefs={}",
+            coverage.is_complete(),
+            packet.required_context.len(),
+            packet.beliefs.len()
+        ),
+        errors,
+    )
+}
+
 struct EvalToolHandler;
 
 #[async_trait::async_trait]
@@ -2292,6 +2414,7 @@ fn main() {
     results.push(run_compaction_latest_user_anchor_eval());
     results.push(run_tool_permission_guard_eval());
     results.push(run_effective_tool_inventory_eval());
+    results.push(run_task_packet_foundation_eval());
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
