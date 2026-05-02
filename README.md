@@ -104,6 +104,12 @@ Run the P2 companion-surface guard:
 npm run check:p2
 ```
 
+Clean generated eval reports:
+
+```powershell
+npm run clean:reports
+```
+
 Run Rust tests:
 
 ```powershell
@@ -121,19 +127,17 @@ cargo run -p agent-evals
 Before pushing foundation changes, run:
 
 ```powershell
-npm run lint
-npm run build
-npm run check:p2
-cargo test -p agent-writer
-cargo run -p agent-evals
-git diff --check
+npm run verify
 ```
 
 Expected current baseline:
 
-- `cargo test -p agent-writer`: 147 tests passing
-- `cargo run -p agent-evals`: 46/46 evals passing
+- `cargo test -p agent-harness-core`: 79 tests passing
+- `cargo test -p agent-writer`: 151 tests passing
+- `cargo run -p agent-evals`: 48/48 evals passing
 - `npm run check:p2`: 8/8 checks passing
+
+`cargo run -p agent-evals` writes `reports/eval_report.json`; `npm run verify` cleans it automatically before checking whitespace.
 
 ## Current Engineering Priorities
 

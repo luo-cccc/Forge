@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "check:p2": "node scripts/check-p2-companion.cjs",
+    "clean:reports": "node scripts/clean-eval-reports.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "verify": "node scripts/verify.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",
