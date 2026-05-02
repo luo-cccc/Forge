@@ -6,7 +6,7 @@ description = "Evaluation harness for Forge Writer Agent Kernel"
 
 [[bin]]
 name = "run_eval"
-path = "run_eval.rs"
+path = "src/main.rs"
 
 [dependencies]
 agent-harness-core = { path = "../agent-harness-core" }
