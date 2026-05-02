@@ -3925,6 +3925,27 @@ pub fn validate_promise_candidate(candidate: &PlotPromiseOp) -> MemoryCandidateQ
     MemoryCandidateQuality::Acceptable
 }
 
+pub fn validate_promise_candidate_with_dedup(
+    candidate: &PlotPromiseOp,
+    memory: &WriterMemory,
+) -> MemoryCandidateQuality {
+    let quality = validate_promise_candidate(candidate);
+    if quality != MemoryCandidateQuality::Acceptable {
+        return quality;
+    }
+    if let Ok(existing) = memory.get_open_promise_summaries() {
+        if existing
+            .iter()
+            .any(|p| p.title.trim() == candidate.title.trim())
+        {
+            return MemoryCandidateQuality::Duplicate {
+                existing_name: candidate.title.clone(),
+            };
+        }
+    }
+    MemoryCandidateQuality::Acceptable
+}
+
 fn should_replace_proposal(existing: &AgentProposal, incoming: &AgentProposal) -> bool {
     if is_llm_ghost(incoming) && !is_llm_ghost(existing) {
         return true;

@@ -376,3 +376,63 @@ pub fn run_promise_related_entities_extraction_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩下落",
+            "张三带走了玉佩",
+            "Ch1",
+            "Ch5",
+            4,
+        )
+        .unwrap();
+
+    use agent_writer_lib::writer_agent::kernel::{
+        validate_promise_candidate_with_dedup, MemoryCandidateQuality,
+    };
+    use agent_writer_lib::writer_agent::operation::PlotPromiseOp;
+
+    let duplicate = PlotPromiseOp {
+        kind: "mystery_clue".to_string(),
+        title: "玉佩下落".to_string(),
+        description: "张三带走了玉佩，去向不明。".to_string(),
+        introduced_chapter: "Ch2".to_string(),
+        expected_payoff: "Ch5".to_string(),
+        priority: 4,
+        related_entities: vec!["张三".to_string(), "玉佩".to_string()],
+    };
+    let new_promise = PlotPromiseOp {
+        kind: "object_whereabouts".to_string(),
+        title: "寒玉戒指".to_string(),
+        description: "林墨母亲的遗物在旧门后被发现。".to_string(),
+        introduced_chapter: "Ch3".to_string(),
+        expected_payoff: "Ch6".to_string(),
+        priority: 4,
+        related_entities: vec!["林墨".to_string(), "戒指".to_string()],
+    };
+
+    let mut errors = Vec::new();
+    match validate_promise_candidate_with_dedup(&duplicate, &memory) {
+        MemoryCandidateQuality::Duplicate { .. } => {}
+        other => errors.push(format!(
+            "expected Duplicate for same-title promise, got {:?}",
+            other
+        )),
+    }
+    match validate_promise_candidate_with_dedup(&new_promise, &memory) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for unique promise, got {:?}",
+            other
+        )),
+    }
+
+    eval_result(
+        "writer_agent:promise_dedup_against_existing",
+        format!("duplicate detected correctly"),
+        errors,
+    )
+}
