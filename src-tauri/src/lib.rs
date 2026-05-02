@@ -755,6 +755,9 @@ struct ChapterGenerationStart {
 struct AgentKernelStatus {
     tool_generation: u64,
     tool_count: usize,
+    effective_tool_count: usize,
+    blocked_tool_count: usize,
+    model_callable_tool_count: usize,
     approval_required_tool_count: usize,
     write_tool_count: usize,
     domain_id: String,
@@ -2198,14 +2201,24 @@ fn get_agent_tools() -> Result<Vec<AgentToolDescriptor>, String> {
 }
 
 #[tauri::command]
+fn get_effective_agent_tool_inventory() -> Result<agent_harness_core::EffectiveToolInventory, String>
+{
+    Ok(agent_runtime::effective_tool_inventory())
+}
+
+#[tauri::command]
 fn get_agent_kernel_status() -> Result<AgentKernelStatus, String> {
     let registry = default_writing_tool_registry();
     let tools = registry.list();
+    let inventory = agent_runtime::effective_tool_inventory();
     let domain = writing_domain_profile();
 
     Ok(AgentKernelStatus {
         tool_generation: registry.generation(),
         tool_count: tools.len(),
+        effective_tool_count: inventory.allowed.len(),
+        blocked_tool_count: inventory.blocked.len(),
+        model_callable_tool_count: inventory.openai_callable_allowed_count(),
         approval_required_tool_count: tools.iter().filter(|tool| tool.requires_approval).count(),
         write_tool_count: tools
             .iter()
@@ -3497,6 +3510,7 @@ pub fn run() {
             record_implicit_ghost_rejection,
             approve_writer_operation,
             get_agent_tools,
+            get_effective_agent_tool_inventory,
             get_lorebook,
             save_lore_entry,
             delete_lore_entry,

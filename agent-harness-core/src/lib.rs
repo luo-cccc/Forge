@@ -50,8 +50,8 @@ pub use run_trace::{AgentRunEvent, AgentRunEventKind, AgentRunStatus, AgentRunTr
 pub use skill_lifecycle::{CurationReport, CuratorConfig, Skill, SkillCategory, SkillCurator};
 pub use tool_executor::{DoomLoopDetector, ToolExecution, ToolExecutor, ToolHandler};
 pub use tool_registry::{
-    default_writing_tool_registry, ToolDescriptor, ToolFilter, ToolRegistry, ToolRegistryError,
-    ToolSideEffectLevel, ToolStage,
+    default_writing_tool_registry, EffectiveToolEntry, EffectiveToolInventory, EffectiveToolStatus,
+    ToolDescriptor, ToolFilter, ToolRegistry, ToolRegistryError, ToolSideEffectLevel, ToolStage,
 };
 pub use vector_db::{chunk_text, cosine_similarity, extract_keywords, Chunk, VectorDB};
 

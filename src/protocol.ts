@@ -26,6 +26,7 @@ export const Commands = {
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
   getAgentTools: "get_agent_tools",
+  getEffectiveAgentToolInventory: "get_effective_agent_tool_inventory",
   getChapterRevision: "get_chapter_revision",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
@@ -294,9 +295,33 @@ export interface AgentToolDescriptor {
   inputSchema?: unknown;
 }
 
+export type EffectiveToolStatus =
+  | "allowed"
+  | "disabled"
+  | "intent_mismatch"
+  | "side_effect_too_high"
+  | "missing_tag"
+  | "approval_required"
+  | "permission_denied";
+
+export interface EffectiveToolEntry {
+  descriptor: AgentToolDescriptor;
+  allowed: boolean;
+  status: EffectiveToolStatus;
+  reason?: string;
+}
+
+export interface EffectiveToolInventory {
+  allowed: AgentToolDescriptor[];
+  blocked: EffectiveToolEntry[];
+}
+
 export interface AgentKernelStatus {
   toolGeneration: number;
   toolCount: number;
+  effectiveToolCount: number;
+  blockedToolCount: number;
+  modelCallableToolCount: number;
   approvalRequiredToolCount: number;
   writeToolCount: number;
   domainId: string;

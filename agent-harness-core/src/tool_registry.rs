@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::permission::{PermissionDecision, PermissionPolicy};
 use crate::router::Intent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -128,6 +129,62 @@ pub struct ToolFilter {
     pub required_tags: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectiveToolStatus {
+    Allowed,
+    Disabled,
+    IntentMismatch,
+    SideEffectTooHigh,
+    MissingTag,
+    ApprovalRequired,
+    PermissionDenied,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveToolEntry {
+    pub descriptor: ToolDescriptor,
+    pub allowed: bool,
+    pub status: EffectiveToolStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveToolInventory {
+    pub allowed: Vec<ToolDescriptor>,
+    pub blocked: Vec<EffectiveToolEntry>,
+}
+
+impl EffectiveToolInventory {
+    pub fn allowed_names(&self) -> Vec<String> {
+        self.allowed.iter().map(|tool| tool.name.clone()).collect()
+    }
+
+    pub fn blocked_names(&self) -> Vec<String> {
+        self.blocked
+            .iter()
+            .map(|entry| entry.descriptor.name.clone())
+            .collect()
+    }
+
+    pub fn to_openai_tools(&self) -> Vec<serde_json::Value> {
+        self.allowed
+            .iter()
+            .filter_map(|tool| tool.to_openai_tool())
+            .collect()
+    }
+
+    pub fn openai_callable_allowed_count(&self) -> usize {
+        self.allowed
+            .iter()
+            .filter(|tool| tool.input_schema.is_some())
+            .count()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolRegistryError {
     DuplicateTool(String),
@@ -215,6 +272,52 @@ impl ToolRegistry {
             .collect()
     }
 
+    pub fn effective_inventory(
+        &self,
+        filter: &ToolFilter,
+        policy: &PermissionPolicy,
+    ) -> EffectiveToolInventory {
+        let mut inventory = EffectiveToolInventory::default();
+
+        for tool in &self.tools {
+            if let Some((status, reason)) = filter_block_reason(tool, filter) {
+                inventory.blocked.push(EffectiveToolEntry {
+                    descriptor: tool.clone(),
+                    allowed: false,
+                    status,
+                    reason: Some(reason),
+                });
+                continue;
+            }
+
+            match policy.authorize(&tool.name, tool.side_effect_level, tool.requires_approval) {
+                PermissionDecision::Allow => inventory.allowed.push(tool.clone()),
+                PermissionDecision::Ask { reason } => inventory.blocked.push(EffectiveToolEntry {
+                    descriptor: tool.clone(),
+                    allowed: false,
+                    status: EffectiveToolStatus::ApprovalRequired,
+                    reason: Some(reason),
+                }),
+                PermissionDecision::Deny { reason } => inventory.blocked.push(EffectiveToolEntry {
+                    descriptor: tool.clone(),
+                    allowed: false,
+                    status: EffectiveToolStatus::PermissionDenied,
+                    reason: Some(reason),
+                }),
+            }
+        }
+
+        inventory
+    }
+
+    pub fn to_effective_openai_tools(
+        &self,
+        filter: &ToolFilter,
+        policy: &PermissionPolicy,
+    ) -> Vec<serde_json::Value> {
+        self.effective_inventory(filter, policy).to_openai_tools()
+    }
+
     /// Export all tools matching the filter as OpenAI function calling schemas.
     pub fn to_openai_tools(&self, filter: &ToolFilter) -> Vec<serde_json::Value> {
         self.filter(filter)
@@ -222,6 +325,60 @@ impl ToolRegistry {
             .filter_map(|d| d.to_openai_tool())
             .collect()
     }
+}
+
+fn filter_block_reason(
+    tool: &ToolDescriptor,
+    filter: &ToolFilter,
+) -> Option<(EffectiveToolStatus, String)> {
+    if !filter.include_disabled && !tool.enabled_by_default {
+        return Some((
+            EffectiveToolStatus::Disabled,
+            format!("Tool '{}' is disabled by default", tool.name),
+        ));
+    }
+
+    if !filter.include_requires_approval && tool.requires_approval {
+        return Some((
+            EffectiveToolStatus::ApprovalRequired,
+            format!(
+                "Tool '{}' requires approval and the filter excludes approval tools",
+                tool.name
+            ),
+        ));
+    }
+
+    if let Some(level) = filter.max_side_effect_level {
+        if tool.side_effect_level > level {
+            return Some((
+                EffectiveToolStatus::SideEffectTooHigh,
+                format!(
+                    "Tool '{}' side effect {:?} exceeds max {:?}",
+                    tool.name, tool.side_effect_level, level
+                ),
+            ));
+        }
+    }
+
+    if let Some(intent) = filter.intent.as_ref() {
+        if !tool.supports_intent(intent) {
+            return Some((
+                EffectiveToolStatus::IntentMismatch,
+                format!("Tool '{}' does not support intent {:?}", tool.name, intent),
+            ));
+        }
+    }
+
+    for tag in &filter.required_tags {
+        if !tool.tags.iter().any(|candidate| candidate == tag) {
+            return Some((
+                EffectiveToolStatus::MissingTag,
+                format!("Tool '{}' is missing required tag '{}'", tool.name, tag),
+            ));
+        }
+    }
+
+    None
 }
 
 pub fn default_writing_tool_registry() -> ToolRegistry {
@@ -398,6 +555,7 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::permission::{PermissionMode, PermissionPolicy};
 
     #[test]
     fn registry_filters_by_intent_and_approval() {
@@ -451,5 +609,64 @@ mod tests {
         ));
         assert_eq!(registry.generation(), 2);
         assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn effective_inventory_blocks_approval_required_write_tool() {
+        let registry = default_writing_tool_registry();
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let inventory = registry.effective_inventory(
+            &ToolFilter {
+                intent: Some(Intent::GenerateContent),
+                include_requires_approval: true,
+                include_disabled: false,
+                max_side_effect_level: Some(ToolSideEffectLevel::Write),
+                required_tags: Vec::new(),
+            },
+            &policy,
+        );
+
+        assert!(inventory
+            .allowed
+            .iter()
+            .any(|tool| tool.name == "generate_bounded_continuation"));
+        assert!(!inventory
+            .allowed
+            .iter()
+            .any(|tool| tool.name == "generate_chapter_draft"));
+
+        let blocked = inventory
+            .blocked
+            .iter()
+            .find(|entry| entry.descriptor.name == "generate_chapter_draft")
+            .expect("chapter draft tool should be present in blocked inventory");
+        assert_eq!(blocked.status, EffectiveToolStatus::ApprovalRequired);
+        assert!(blocked
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("requires explicit approval")));
+    }
+
+    #[test]
+    fn effective_inventory_reports_filter_reasons() {
+        let registry = default_writing_tool_registry();
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let inventory = registry.effective_inventory(
+            &ToolFilter {
+                intent: Some(Intent::Linter),
+                include_requires_approval: true,
+                include_disabled: false,
+                max_side_effect_level: Some(ToolSideEffectLevel::Read),
+                required_tags: Vec::new(),
+            },
+            &policy,
+        );
+
+        let blocked = inventory
+            .blocked
+            .iter()
+            .find(|entry| entry.descriptor.name == "query_project_brain")
+            .expect("provider-call tool should be blocked by side-effect ceiling");
+        assert_eq!(blocked.status, EffectiveToolStatus::SideEffectTooHigh);
     }
 }

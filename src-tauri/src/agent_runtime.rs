@@ -1,4 +1,7 @@
-use agent_harness_core::{default_writing_tool_registry, ToolDescriptor};
+use agent_harness_core::{
+    default_writing_tool_registry, EffectiveToolInventory, PermissionMode, PermissionPolicy,
+    ToolDescriptor, ToolFilter, ToolSideEffectLevel,
+};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -368,6 +371,19 @@ pub fn registered_tools() -> Vec<AgentToolDescriptor> {
     default_writing_tool_registry().list()
 }
 
+pub fn effective_tool_inventory() -> EffectiveToolInventory {
+    let registry = default_writing_tool_registry();
+    let filter = ToolFilter {
+        intent: None,
+        include_requires_approval: true,
+        include_disabled: false,
+        max_side_effect_level: Some(ToolSideEffectLevel::Write),
+        required_tags: Vec::new(),
+    };
+    let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+    registry.effective_inventory(&filter, &policy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +485,19 @@ mod tests {
             agent_harness_core::ToolSideEffectLevel::Write
         );
         assert!(chapter_tool.requires_approval);
+    }
+
+    #[test]
+    fn effective_inventory_blocks_chapter_generation_by_default() {
+        let inventory = effective_tool_inventory();
+        assert!(inventory
+            .blocked
+            .iter()
+            .any(|entry| entry.descriptor.name == "generate_chapter_draft"
+                && entry.status == agent_harness_core::EffectiveToolStatus::ApprovalRequired));
+        assert!(!inventory
+            .allowed
+            .iter()
+            .any(|tool| tool.name == "generate_chapter_draft"));
     }
 }

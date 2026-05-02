@@ -129,7 +129,7 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             required_tags: Vec::new(),
         };
         let registry = self.executor.registry.blocking_lock();
-        registry.to_openai_tools(&filter)
+        registry.to_effective_openai_tools(&filter, &self.executor.permission_policy)
     }
 
     /// The main execution loop.
@@ -342,7 +342,9 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
 mod tests {
     use super::*;
     use crate::provider::openai_compat::OpenAiCompatProvider;
-    use crate::tool_registry::default_writing_tool_registry;
+    use crate::tool_registry::{
+        default_writing_tool_registry, ToolDescriptor, ToolSideEffectLevel, ToolStage,
+    };
     use async_trait::async_trait;
 
     /// Mock tool handler for testing.
@@ -363,12 +365,17 @@ mod tests {
     }
 
     fn make_agent() -> AgentLoop<OpenAiCompatProvider, MockToolHandler> {
+        make_agent_with_registry(default_writing_tool_registry())
+    }
+
+    fn make_agent_with_registry(
+        registry: ToolRegistry,
+    ) -> AgentLoop<OpenAiCompatProvider, MockToolHandler> {
         let provider = Arc::new(OpenAiCompatProvider::new(
             "https://api.openai.com/v1",
             "sk-test",
             "gpt-4o-mini",
         ));
-        let registry = default_writing_tool_registry();
         AgentLoop::new(
             AgentLoopConfig {
                 max_rounds: 3,
@@ -415,6 +422,72 @@ mod tests {
             assert_eq!(tool["type"], "function");
             assert!(tool["function"]["name"].is_string());
         }
+    }
+
+    #[test]
+    fn test_build_tools_hides_approval_required_write_tool() {
+        let agent = make_agent();
+        let tools = agent.build_tools(&Intent::GenerateContent);
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect();
+
+        assert!(!names.contains(&"generate_chapter_draft"));
+    }
+
+    #[test]
+    fn test_build_tools_filters_schema_backed_approval_tool() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        });
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(
+                ToolDescriptor::new(
+                    "safe_preview",
+                    "Safe preview.",
+                    "none",
+                    "json",
+                    ToolSideEffectLevel::ProviderCall,
+                    false,
+                    100,
+                    0,
+                    ToolStage::Execute,
+                )
+                .with_supported_intents(&[Intent::GenerateContent])
+                .with_input_schema(schema.clone()),
+            )
+            .unwrap();
+        registry
+            .register(
+                ToolDescriptor::new(
+                    "approval_write",
+                    "Approval write.",
+                    "none",
+                    "json",
+                    ToolSideEffectLevel::Write,
+                    true,
+                    100,
+                    0,
+                    ToolStage::Execute,
+                )
+                .with_supported_intents(&[Intent::GenerateContent])
+                .with_input_schema(schema),
+            )
+            .unwrap();
+
+        let agent = make_agent_with_registry(registry);
+        let tools = agent.build_tools(&Intent::GenerateContent);
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect();
+
+        assert!(names.contains(&"safe_preview"));
+        assert!(!names.contains(&"approval_write"));
     }
 
     #[test]
