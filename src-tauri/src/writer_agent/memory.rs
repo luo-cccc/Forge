@@ -407,6 +407,15 @@ impl NextBeatSummary {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryContractQuality {
+    Missing,
+    Vague,
+    Usable,
+    Strong,
+}
+
 impl StoryContractSummary {
     pub fn is_empty(&self) -> bool {
         [
@@ -423,8 +432,115 @@ impl StoryContractSummary {
         .all(|value| value.trim().is_empty())
     }
 
+    pub fn quality(&self) -> StoryContractQuality {
+        let reader_promise_len = self.reader_promise.trim().chars().count();
+        let main_conflict_len = self.main_conflict.trim().chars().count();
+        let tone_contract_len = self.tone_contract.trim().chars().count();
+        let structural_boundary_len = self.structural_boundary.trim().chars().count();
+        let first_30_len = self.first_30_chapter_promise.trim().chars().count();
+
+        if self.is_empty() {
+            return StoryContractQuality::Missing;
+        }
+
+        let weak_fields = [
+            ("title", self.title.trim().is_empty(), 0),
+            ("genre", self.genre.trim().is_empty(), 0),
+            ("reader_promise", reader_promise_len < 8, reader_promise_len),
+            ("main_conflict", main_conflict_len < 8, main_conflict_len),
+            ("tone_contract", tone_contract_len < 6, tone_contract_len),
+            (
+                "structural_boundary",
+                structural_boundary_len < 8,
+                structural_boundary_len,
+            ),
+            ("first_30_chapter_promise", first_30_len < 8, first_30_len),
+        ];
+        let vague_count = weak_fields.iter().filter(|(_, weak, _)| *weak).count();
+
+        if vague_count >= 3 {
+            return StoryContractQuality::Vague;
+        }
+
+        if vague_count >= 1
+            || reader_promise_len < 20
+            || main_conflict_len < 20
+            || tone_contract_len < 12
+        {
+            return StoryContractQuality::Usable;
+        }
+
+        StoryContractQuality::Strong
+    }
+
+    pub fn quality_gaps(&self) -> Vec<String> {
+        let mut gaps = Vec::new();
+        let quality = self.quality();
+
+        if quality == StoryContractQuality::Strong {
+            return gaps;
+        }
+
+        let checks: Vec<(&str, &str, usize, usize)> = vec![
+            ("title", &self.title, 0, 1),
+            ("genre", &self.genre, 0, 1),
+            ("target_reader", &self.target_reader, 0, 1),
+            ("reader_promise", &self.reader_promise, 8, 20),
+            (
+                "first_30_chapter_promise",
+                &self.first_30_chapter_promise,
+                8,
+                12,
+            ),
+            ("main_conflict", &self.main_conflict, 8, 20),
+            ("structural_boundary", &self.structural_boundary, 8, 12),
+            ("tone_contract", &self.tone_contract, 6, 12),
+        ];
+
+        let labels: std::collections::HashMap<&str, &str> = [
+            ("title", "标题"),
+            ("genre", "题材定位"),
+            ("target_reader", "目标读者"),
+            ("reader_promise", "读者承诺"),
+            ("first_30_chapter_promise", "前30章承诺"),
+            ("main_conflict", "核心冲突"),
+            ("structural_boundary", "结构边界"),
+            ("tone_contract", "语气/风格合同"),
+        ]
+        .into();
+
+        for (key, value, min_chars, strong_chars) in checks {
+            let char_count = value.trim().chars().count();
+            if char_count == 0 {
+                gaps.push(format!("{}: 缺失", labels[key]));
+            } else if char_count < min_chars {
+                gaps.push(format!(
+                    "{}: 过于简略 ({}字，至少需要{}字)",
+                    labels[key], char_count, min_chars
+                ));
+            } else if quality == StoryContractQuality::Usable && char_count < strong_chars {
+                gaps.push(format!(
+                    "{}: 可以更具体 ({}字，建议{}字以上)",
+                    labels[key], char_count, strong_chars
+                ));
+            }
+        }
+
+        gaps
+    }
+
     pub fn render_for_context(&self) -> String {
         let mut lines = Vec::new();
+        let quality = self.quality();
+        lines.push(format!(
+            "合同质量: {}",
+            match quality {
+                StoryContractQuality::Missing => "缺失 — 请在设置中填写故事合同",
+                StoryContractQuality::Vague => "模糊 — 关键字段不够具体，会影响AI写作质量",
+                StoryContractQuality::Usable => "可用",
+                StoryContractQuality::Strong => "完整 — 所有关键约束清晰",
+            }
+        ));
         push_contract_line(&mut lines, "标题", &self.title);
         push_contract_line(&mut lines, "题材定位", &self.genre);
         push_contract_line(&mut lines, "目标读者", &self.target_reader);

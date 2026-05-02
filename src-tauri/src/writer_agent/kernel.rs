@@ -25,8 +25,8 @@ use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
     ChapterMissionSummary, ChapterResultSummary, ContextBudgetTrace, ContextRecallSummary,
-    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, StoryContractSummary,
-    WriterMemory,
+    ContextSourceBudgetTrace, ManualAgentTurnSummary, NextBeatSummary, StoryContractQuality,
+    StoryContractSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{
@@ -3704,56 +3704,25 @@ fn save_result_is_success(save_result: &str) -> bool {
 }
 
 fn validate_story_contract_summary(contract: &StoryContractSummary) -> Option<String> {
-    let mut missing = Vec::new();
-    for (label, value) in [
-        ("title", contract.title.as_str()),
-        ("genre", contract.genre.as_str()),
-        ("target_reader", contract.target_reader.as_str()),
-        ("reader_promise", contract.reader_promise.as_str()),
-        (
-            "first_30_chapter_promise",
-            contract.first_30_chapter_promise.as_str(),
-        ),
-        ("main_conflict", contract.main_conflict.as_str()),
-        ("structural_boundary", contract.structural_boundary.as_str()),
-        ("tone_contract", contract.tone_contract.as_str()),
-    ] {
-        if value.trim().is_empty() {
-            missing.push(label);
+    let quality = contract.quality();
+    match quality {
+        StoryContractQuality::Missing => {
+            return Some(
+                "Story Contract is empty: fill in at minimum the genre, reader promise, main conflict, and tone contract.".to_string(),
+            );
         }
-    }
-
-    if !missing.is_empty() {
-        return Some(format!(
-            "Story Contract is missing required fields: {}",
-            missing.join(", ")
-        ));
-    }
-
-    for (label, value, min_chars) in [
-        ("reader_promise", contract.reader_promise.as_str(), 8),
-        (
-            "first_30_chapter_promise",
-            contract.first_30_chapter_promise.as_str(),
-            8,
-        ),
-        ("main_conflict", contract.main_conflict.as_str(), 8),
-        (
-            "structural_boundary",
-            contract.structural_boundary.as_str(),
-            8,
-        ),
-        ("tone_contract", contract.tone_contract.as_str(), 6),
-    ] {
-        if value.trim().chars().count() < min_chars {
+        StoryContractQuality::Vague => {
+            let gaps = contract.quality_gaps();
             return Some(format!(
-                "Story Contract field '{}' is too vague; write a concrete, checkable statement.",
-                label
+                "Story Contract is too vague to guide the writing agent. Key gaps:\n{}",
+                gaps.iter()
+                    .map(|gap| format!("  - {}", gap))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             ));
         }
+        StoryContractQuality::Usable | StoryContractQuality::Strong => None,
     }
-
-    None
 }
 
 fn validate_chapter_mission_summary(mission: &ChapterMissionSummary) -> Option<String> {

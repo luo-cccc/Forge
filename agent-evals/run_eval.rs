@@ -12,7 +12,9 @@ use agent_writer_lib::writer_agent::kernel::{
     StoryDebtCategory, StoryReviewQueueStatus, WriterAgentApprovalMode, WriterAgentFrontendState,
     WriterAgentRunRequest, WriterAgentStreamMode, WriterAgentTask,
 };
-use agent_writer_lib::writer_agent::memory::WriterMemory;
+use agent_writer_lib::writer_agent::memory::{
+    StoryContractQuality, StoryContractSummary, WriterMemory,
+};
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
 };
@@ -1726,6 +1728,150 @@ fn run_story_contract_negated_guard_eval() -> EvalResult {
     )
 }
 
+fn run_story_contract_quality_nominal_eval() -> EvalResult {
+    let empty = StoryContractSummary::default();
+    let mut vague = StoryContractSummary::default();
+    vague.project_id = "eval".to_string();
+    vague.title = "测试".to_string();
+    vague.genre = "玄幻".to_string();
+    vague.reader_promise = "一个故事".to_string();
+    vague.main_conflict = "冲突".to_string();
+    let mut usable = vague.clone();
+    usable.reader_promise = "刀客追查玉佩真相，在复仇与守护之间做出最终选择。".to_string();
+    usable.main_conflict = "林墨必须在复仇和守护之间做艰难选择。".to_string();
+    usable.tone_contract = "冷峻克制的武侠叙述".to_string();
+    let mut strong = usable.clone();
+    strong.reader_promise =
+        "刀客追查玉佩真相，在复仇与守护之间做出最终选择，揭示隐藏身份。".to_string();
+    strong.main_conflict = "林墨必须在复仇和守护之间做艰难选择，同时面对血脉真相。".to_string();
+    strong.first_30_chapter_promise = "前30章完成玉佩线第一次大转折".to_string();
+    strong.structural_boundary = "不得提前泄露玉佩来源".to_string();
+    strong.tone_contract = "冷峻克制的武侠叙述，对话精准，心理描写内敛".to_string();
+
+    let mut errors = Vec::new();
+    if empty.quality() != StoryContractQuality::Missing {
+        errors.push("empty contract should be Missing".to_string());
+    }
+    if vague.quality() != StoryContractQuality::Vague {
+        errors.push(format!("vague contract was {:?}", vague.quality()));
+    }
+    if usable.quality() != StoryContractQuality::Usable {
+        errors.push(format!("usable contract was {:?}", usable.quality()));
+    }
+    if strong.quality() != StoryContractQuality::Strong {
+        errors.push(format!("strong contract was {:?}", strong.quality()));
+    }
+    if empty.quality_gaps().len() < 4 {
+        errors.push("empty contract should report several gaps".to_string());
+    }
+    if vague.quality_gaps().len() < 3 {
+        errors.push("vague contract should report specific gaps".to_string());
+    }
+    if strong.quality_gaps().len() != 0 {
+        errors.push("strong contract should have zero gaps".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_contract_quality_nominal",
+        format!(
+            "qualities={:?}/{:?}/{:?}/{:?} strongGaps={}",
+            empty.quality(),
+            vague.quality(),
+            usable.quality(),
+            strong.quality(),
+            strong.quality_gaps().len()
+        ),
+        errors,
+    )
+}
+
+fn run_story_contract_vague_excluded_from_context_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed("eval", "寒影录", "玄幻", "一个故事", "选择", "")
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation("林墨停在旧门前。");
+    let pack = kernel.context_pack_for_default(
+        agent_writer_lib::writer_agent::context::AgentTask::GhostWriting,
+        &obs,
+    );
+
+    let mut errors = Vec::new();
+    let contract_source = pack.sources.iter().find(|source| {
+        matches!(
+            source.source,
+            agent_writer_lib::writer_agent::context::ContextSource::ProjectBrief
+        )
+    });
+    if contract_source.is_some() {
+        errors.push("vague StoryContract leaked into context pack".to_string());
+    }
+    if pack.sources.is_empty() {
+        errors.push("context pack has zero sources after vague contract exclusion".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_contract_vague_excluded_from_context",
+        format!(
+            "sources={} contractIncluded={}",
+            pack.sources.len(),
+            contract_source.is_some()
+        ),
+        errors,
+    )
+}
+
+fn run_story_contract_quality_chapter_gen_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-2".to_string());
+    let obs = observation_in_chapter("林墨拔出长刀，迎着风雪走向旧门。", "Chapter-2");
+    let pack = kernel.context_pack_for_default(
+        agent_writer_lib::writer_agent::context::AgentTask::ChapterGeneration,
+        &obs,
+    );
+
+    let mut errors = Vec::new();
+    let contract_source = pack.sources.iter().find(|source| {
+        matches!(
+            source.source,
+            agent_writer_lib::writer_agent::context::ContextSource::ProjectBrief
+        )
+    });
+    if contract_source.is_none() {
+        errors.push("chapter generation pack must include StoryContract source".to_string());
+    }
+    if let Some(source) = contract_source {
+        if !source.content.contains("合同质量") {
+            errors.push("chapter generation contract source lacks quality annotation".to_string());
+        }
+        if !source.content.contains("可用") && !source.content.contains("完整") {
+            errors.push("chapter generation contract source quality not visible".to_string());
+        }
+    }
+
+    eval_result(
+        "writer_agent:story_contract_quality_chapter_gen",
+        format!(
+            "sources={} contractIncluded={}",
+            pack.sources.len(),
+            contract_source.is_some()
+        ),
+        errors,
+    )
+}
+
 fn run_chapter_mission_result_feedback_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -3209,6 +3355,9 @@ fn main() {
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
     results.push(run_foundation_write_validation_eval());
+    results.push(run_story_contract_quality_nominal_eval());
+    results.push(run_story_contract_vague_excluded_from_context_eval());
+    results.push(run_story_contract_quality_chapter_gen_eval());
     results.push(run_story_contract_guard_eval());
     results.push(run_story_contract_negated_guard_eval());
     results.push(run_chapter_mission_result_feedback_eval());

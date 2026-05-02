@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::kernel::derive_next_beat;
-use super::memory::WriterMemory;
+use super::memory::{StoryContractQuality, WriterMemory};
 use super::observation::WriterObservation;
 
 /// A single context source with its content and budget info.
@@ -534,9 +534,21 @@ fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
         .get_story_contract(project_id)
         .ok()
         .flatten()
-        .filter(|contract| !contract.is_empty())
+        .filter(|contract| contract.quality() >= StoryContractQuality::Usable)
         .map(|contract| contract.render_for_context())
         .unwrap_or_default()
+}
+
+fn story_contract_quality_for_task(
+    project_id: &str,
+    memory: &WriterMemory,
+) -> StoryContractQuality {
+    memory
+        .get_story_contract(project_id)
+        .ok()
+        .flatten()
+        .map(|contract| contract.quality())
+        .unwrap_or(StoryContractQuality::Missing)
 }
 
 pub fn seed_chapter_missions_from_outline(
