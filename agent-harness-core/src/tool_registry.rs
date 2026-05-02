@@ -400,7 +400,14 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Observe,
         )
         .with_tags(&["router", "writing"])
-        .with_supported_intents(&[Chat, RetrieveKnowledge, AnalyzeText, GenerateContent, ExecutePlan, Linter]),
+        .with_supported_intents(&[
+            Chat,
+            RetrieveKnowledge,
+            AnalyzeText,
+            GenerateContent,
+            ExecutePlan,
+            Linter,
+        ]),
         ToolDescriptor::new(
             "load_current_chapter",
             "Load the active chapter text and revision metadata for context-aware writing.",
@@ -413,7 +420,12 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Context,
         )
         .with_tags(&["project", "chapter", "read"])
-        .with_supported_intents(&[AnalyzeText, GenerateContent, ExecutePlan, Linter]),
+        .with_supported_intents(&[AnalyzeText, GenerateContent, ExecutePlan, Linter])
+        .with_input_schema(single_string_input_schema(
+            "chapter",
+            "Exact chapter title to load from the project.",
+            160,
+        )),
         ToolDescriptor::new(
             "load_outline_node",
             "Load the outline summary and status for a target chapter.",
@@ -426,7 +438,12 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Context,
         )
         .with_tags(&["project", "outline", "read"])
-        .with_supported_intents(&[AnalyzeText, GenerateContent, ExecutePlan]),
+        .with_supported_intents(&[AnalyzeText, GenerateContent, ExecutePlan])
+        .with_input_schema(single_string_input_schema(
+            "chapter",
+            "Exact chapter title or outline node id to inspect.",
+            160,
+        )),
         ToolDescriptor::new(
             "search_lorebook",
             "Search project lore entries before inventing details about named entities or rules.",
@@ -439,7 +456,18 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Context,
         )
         .with_tags(&["project", "lore", "read"])
-        .with_supported_intents(&[RetrieveKnowledge, AnalyzeText, GenerateContent, ExecutePlan, Linter]),
+        .with_supported_intents(&[
+            RetrieveKnowledge,
+            AnalyzeText,
+            GenerateContent,
+            ExecutePlan,
+            Linter,
+        ])
+        .with_input_schema(single_string_input_schema(
+            "keyword",
+            "Character, place, object, rule, or story term to search in the lorebook.",
+            160,
+        )),
         ToolDescriptor::new(
             "query_project_brain",
             "Run semantic retrieval over the embedded project brain.",
@@ -452,7 +480,12 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Context,
         )
         .with_tags(&["project", "rag", "provider"])
-        .with_supported_intents(&[RetrieveKnowledge, AnalyzeText, GenerateContent, ExecutePlan]),
+        .with_supported_intents(&[RetrieveKnowledge, AnalyzeText, GenerateContent, ExecutePlan])
+        .with_input_schema(single_string_input_schema(
+            "query",
+            "Focused semantic query for project memory and embedded notes.",
+            400,
+        )),
         ToolDescriptor::new(
             "read_user_drift_profile",
             "Read learned user preferences and durable writing profile entries.",
@@ -517,7 +550,12 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
             Execute,
         )
         .with_tags(&["generation", "preview", "provider"])
-        .with_supported_intents(&[GenerateContent]),
+        .with_supported_intents(&[GenerateContent])
+        .with_input_schema(single_string_input_schema(
+            "prompt",
+            "Bounded prompt containing the local scene context and requested continuation direction.",
+            4_000,
+        )),
         ToolDescriptor::new(
             "generate_chapter_draft",
             "Generate and save a full chapter draft using project context and conflict checks.",
@@ -552,6 +590,26 @@ pub fn default_writing_tool_registry() -> ToolRegistry {
     registry
 }
 
+fn single_string_input_schema(
+    field: &str,
+    description: &str,
+    max_length: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            field: {
+                "type": "string",
+                "description": description,
+                "minLength": 1,
+                "maxLength": max_length,
+            },
+        },
+        "required": [field],
+        "additionalProperties": false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +632,54 @@ mod tests {
         assert!(!tools
             .iter()
             .any(|tool| tool.name == "generate_chapter_draft"));
+    }
+
+    #[test]
+    fn default_registry_exposes_schema_for_real_callable_tools() {
+        let registry = default_writing_tool_registry();
+        for (name, required_field) in [
+            ("load_current_chapter", "chapter"),
+            ("load_outline_node", "chapter"),
+            ("search_lorebook", "keyword"),
+            ("query_project_brain", "query"),
+            ("generate_bounded_continuation", "prompt"),
+        ] {
+            let tool = registry.get(name).expect("tool registered");
+            let schema = tool.input_schema.as_ref().expect("tool has schema");
+            assert_eq!(schema["type"], "object");
+            assert_eq!(schema["additionalProperties"], false);
+            assert!(schema["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|field| field == required_field)));
+            assert!(schema["properties"][required_field].is_object());
+        }
+    }
+
+    #[test]
+    fn effective_openai_tools_include_read_and_provider_tools_only() {
+        let registry = default_writing_tool_registry();
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let tools = registry.to_effective_openai_tools(
+            &ToolFilter {
+                intent: Some(Intent::GenerateContent),
+                include_requires_approval: true,
+                include_disabled: false,
+                max_side_effect_level: Some(ToolSideEffectLevel::Write),
+                required_tags: Vec::new(),
+            },
+            &policy,
+        );
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect();
+
+        assert!(names.contains(&"load_current_chapter"));
+        assert!(names.contains(&"search_lorebook"));
+        assert!(names.contains(&"query_project_brain"));
+        assert!(names.contains(&"generate_bounded_continuation"));
+        assert!(!names.contains(&"generate_chapter_draft"));
+        assert!(!names.contains(&"record_run_trace"));
     }
 
     #[test]

@@ -15,13 +15,13 @@ impl ToolHandler for TauriToolBridge {
     ) -> Result<serde_json::Value, String> {
         match tool_name {
             "load_current_chapter" => {
-                let chapter = args.get("chapter").and_then(|v| v.as_str()).unwrap_or("");
+                let chapter = string_arg(&args, &["chapter", "chapter_title"]);
                 let content = crate::storage::load_chapter(&self.app, chapter.to_string())
                     .map_err(|e| format!("load_current_chapter: {}", e))?;
                 Ok(serde_json::json!({"content": content, "chapter": chapter}))
             }
             "search_lorebook" => {
-                let keyword = args.get("keyword").and_then(|v| v.as_str()).unwrap_or("");
+                let keyword = string_arg(&args, &["keyword", "keywords", "query"]);
                 let entries = crate::storage::load_lorebook(&self.app)
                     .map_err(|e| format!("search_lorebook: {}", e))?;
                 let matches: Vec<serde_json::Value> = entries
@@ -35,7 +35,7 @@ impl ToolHandler for TauriToolBridge {
                 Ok(serde_json::json!({"matches": matches}))
             }
             "load_outline_node" => {
-                let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id = string_arg(&args, &["chapter", "id", "chapter_title"]);
                 let nodes = crate::storage::load_outline(&self.app)
                     .map_err(|e| format!("load_outline_node: {}", e))?;
                 let node = nodes
@@ -52,7 +52,7 @@ impl ToolHandler for TauriToolBridge {
                 Ok(node)
             }
             "query_project_brain" => {
-                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let query = string_arg(&args, &["query", "semantic_query"]);
                 let api_key =
                     crate::resolve_api_key().ok_or_else(|| "No API key configured".to_string())?;
                 let settings = crate::llm_runtime::settings(api_key);
@@ -66,7 +66,7 @@ impl ToolHandler for TauriToolBridge {
                 Ok(serde_json::json!({"answer": result_text}))
             }
             "generate_bounded_continuation" => {
-                let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+                let prompt = string_arg(&args, &["prompt", "context"]);
                 let api_key =
                     crate::resolve_api_key().ok_or_else(|| "No API key configured".to_string())?;
                 let settings = crate::llm_runtime::settings(api_key);
@@ -88,5 +88,32 @@ impl ToolHandler for TauriToolBridge {
             | "record_run_trace" => Ok(serde_json::json!({"status": "ok", "tool": tool_name})),
             _ => Err(format!("Unknown tool: {}", tool_name)),
         }
+    }
+}
+
+fn string_arg<'a>(args: &'a serde_json::Value, names: &[&str]) -> &'a str {
+    names
+        .iter()
+        .find_map(|name| args.get(*name).and_then(|value| value.as_str()))
+        .unwrap_or("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_arg_reads_primary_and_legacy_aliases() {
+        let args = serde_json::json!({
+            "chapter_title": "Chapter-1",
+            "semantic_query": "玉佩 去向"
+        });
+
+        assert_eq!(
+            string_arg(&args, &["chapter", "chapter_title"]),
+            "Chapter-1"
+        );
+        assert_eq!(string_arg(&args, &["query", "semantic_query"]), "玉佩 去向");
+        assert_eq!(string_arg(&args, &["missing"]), "");
     }
 }

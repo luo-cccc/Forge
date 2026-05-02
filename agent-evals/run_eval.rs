@@ -674,46 +674,7 @@ fn run_tool_permission_guard_eval() -> EvalResult {
 }
 
 fn run_effective_tool_inventory_eval() -> EvalResult {
-    let schema = serde_json::json!({
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-    });
-    let mut registry = agent_harness_core::ToolRegistry::new();
-    registry
-        .register(
-            agent_harness_core::ToolDescriptor::new(
-                "safe_preview",
-                "Safe preview.",
-                "none",
-                "json",
-                agent_harness_core::ToolSideEffectLevel::ProviderCall,
-                false,
-                100,
-                0,
-                agent_harness_core::ToolStage::Execute,
-            )
-            .with_supported_intents(&[agent_harness_core::Intent::GenerateContent])
-            .with_input_schema(schema.clone()),
-        )
-        .expect("unique eval tool");
-    registry
-        .register(
-            agent_harness_core::ToolDescriptor::new(
-                "approval_write",
-                "Approval write.",
-                "none",
-                "json",
-                agent_harness_core::ToolSideEffectLevel::Write,
-                true,
-                100,
-                0,
-                agent_harness_core::ToolStage::Execute,
-            )
-            .with_supported_intents(&[agent_harness_core::Intent::GenerateContent])
-            .with_input_schema(schema),
-        )
-        .expect("unique eval tool");
+    let registry = agent_harness_core::default_writing_tool_registry();
     let policy = agent_harness_core::PermissionPolicy::new(
         agent_harness_core::PermissionMode::WorkspaceWrite,
     );
@@ -736,28 +697,34 @@ fn run_effective_tool_inventory_eval() -> EvalResult {
         .collect();
 
     let mut errors = Vec::new();
-    if !inventory
-        .allowed
-        .iter()
-        .any(|tool| tool.name == "safe_preview")
-    {
-        errors.push("safe provider-call tool is missing from allowed inventory".to_string());
-    }
-    if !model_tool_names.iter().any(|name| name == "safe_preview") {
-        errors.push("safe provider-call tool is missing from model tools".to_string());
+    for expected in [
+        "load_current_chapter",
+        "search_lorebook",
+        "query_project_brain",
+        "generate_bounded_continuation",
+    ] {
+        if !inventory.allowed.iter().any(|tool| tool.name == expected) {
+            errors.push(format!("{} is missing from allowed inventory", expected));
+        }
+        if !model_tool_names.iter().any(|name| name == expected) {
+            errors.push(format!("{} is missing from model tools", expected));
+        }
     }
     if inventory
         .allowed
         .iter()
-        .any(|tool| tool.name == "approval_write")
+        .any(|tool| tool.name == "generate_chapter_draft")
     {
         errors.push("approval-required write tool is present in allowed inventory".to_string());
     }
-    if model_tool_names.iter().any(|name| name == "approval_write") {
+    if model_tool_names
+        .iter()
+        .any(|name| name == "generate_chapter_draft")
+    {
         errors.push("approval-required write tool is exposed to model tools".to_string());
     }
     if !inventory.blocked.iter().any(|entry| {
-        entry.descriptor.name == "approval_write"
+        entry.descriptor.name == "generate_chapter_draft"
             && entry.status == agent_harness_core::EffectiveToolStatus::ApprovalRequired
             && entry
                 .reason
