@@ -265,3 +265,80 @@ pub fn run_promise_kind_extraction_from_text_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
+    use agent_writer_lib::writer_agent::kernel::{
+        validate_canon_candidate, validate_promise_candidate, MemoryCandidateQuality,
+    };
+    use agent_writer_lib::writer_agent::operation::{CanonEntityOp, PlotPromiseOp};
+
+    let mut errors = Vec::new();
+
+    // Vague canon: name too short
+    let vague_canon = CanonEntityOp {
+        kind: "character".to_string(),
+        name: "A".to_string(),
+        aliases: vec![],
+        summary: "short".to_string(),
+        attributes: serde_json::json!({}),
+        confidence: 0.5,
+    };
+    match validate_canon_candidate(&vague_canon) {
+        MemoryCandidateQuality::Vague { .. } => {}
+        other => errors.push(format!("expected Vague for short canon, got {:?}", other)),
+    }
+
+    // Valid canon
+    let valid_canon = CanonEntityOp {
+        kind: "character".to_string(),
+        name: "林墨".to_string(),
+        aliases: vec!["刀客".to_string()],
+        summary: "主角，追查玉佩下落的刀客".to_string(),
+        attributes: serde_json::json!({}),
+        confidence: 0.8,
+    };
+    match validate_canon_candidate(&valid_canon) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for valid canon, got {:?}",
+            other
+        )),
+    }
+
+    // Vague promise: description too short
+    let vague_promise = PlotPromiseOp {
+        kind: "mystery_clue".to_string(),
+        title: "谜".to_string(),
+        description: "短".to_string(),
+        introduced_chapter: "Ch1".to_string(),
+        expected_payoff: "Ch5".to_string(),
+        priority: 3,
+    };
+    match validate_promise_candidate(&vague_promise) {
+        MemoryCandidateQuality::Vague { .. } => {}
+        other => errors.push(format!("expected Vague for short promise, got {:?}", other)),
+    }
+
+    // Valid promise
+    let valid_promise = PlotPromiseOp {
+        kind: "mystery_clue".to_string(),
+        title: "玉佩下落".to_string(),
+        description: "张三带走了刻有龙纹的玉佩，下落不明。".to_string(),
+        introduced_chapter: "Chapter-1".to_string(),
+        expected_payoff: "Chapter-5".to_string(),
+        priority: 5,
+    };
+    match validate_promise_candidate(&valid_promise) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for valid promise, got {:?}",
+            other
+        )),
+    }
+
+    eval_result(
+        "writer_agent:memory_candidate_quality_validation",
+        format!("4 candidates validated"),
+        errors,
+    )
+}

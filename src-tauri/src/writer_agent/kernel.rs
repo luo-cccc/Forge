@@ -3852,6 +3852,51 @@ pub(crate) fn sentence_snippet(sentence: &str, limit: usize) -> String {
         .collect()
 }
 
+#[derive(Debug, PartialEq)]
+pub enum MemoryCandidateQuality {
+    Acceptable,
+    Vague { reason: String },
+    Duplicate { existing_name: String },
+}
+
+pub fn validate_canon_candidate(candidate: &CanonEntityOp) -> MemoryCandidateQuality {
+    let name = candidate.name.trim();
+    if name.chars().count() < 2 {
+        return MemoryCandidateQuality::Vague {
+            reason: "entity name too short (min 2 chars)".to_string(),
+        };
+    }
+    let summary = candidate.summary.trim();
+    if summary.chars().count() < 6 {
+        return MemoryCandidateQuality::Vague {
+            reason: format!(
+                "entity summary too short ({} chars, min 6)",
+                summary.chars().count()
+            ),
+        };
+    }
+    MemoryCandidateQuality::Acceptable
+}
+
+pub fn validate_promise_candidate(candidate: &PlotPromiseOp) -> MemoryCandidateQuality {
+    let title = candidate.title.trim();
+    if title.chars().count() < 2 {
+        return MemoryCandidateQuality::Vague {
+            reason: "promise title too short (min 2 chars)".to_string(),
+        };
+    }
+    let description = candidate.description.trim();
+    if description.chars().count() < 8 {
+        return MemoryCandidateQuality::Vague {
+            reason: format!(
+                "promise description too short ({} chars, min 8)",
+                description.chars().count()
+            ),
+        };
+    }
+    MemoryCandidateQuality::Acceptable
+}
+
 fn should_replace_proposal(existing: &AgentProposal, incoming: &AgentProposal) -> bool {
     if is_llm_ghost(incoming) && !is_llm_ghost(existing) {
         return true;
