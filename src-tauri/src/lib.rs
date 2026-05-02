@@ -46,7 +46,7 @@ fn load_api_key_from_keychain() -> Option<String> {
     entry.get_password().ok()
 }
 
-fn safe_filename_component(raw: &str) -> String {
+pub(crate) fn safe_filename_component(raw: &str) -> String {
     let mut safe = String::new();
     let mut last_was_dash = false;
     for ch in raw.trim().to_lowercase().chars() {
@@ -78,67 +78,7 @@ fn safe_filename_component(raw: &str) -> String {
     }
 }
 
-#[tauri::command]
-fn export_diagnostic_logs(app: tauri::AppHandle) -> Result<String, String> {
-    use std::io::Write;
-
-    let log_dir = log_dir()?;
-    let out_path = log_dir.join("diagnostic-export.zip");
-    let file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipWriter::new(file);
-    let opts = zip::write::SimpleFileOptions::default();
-
-    // Pack recent log files
-    if let Ok(entries) = std::fs::read_dir(&log_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "log").unwrap_or(false) {
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                let content = std::fs::read_to_string(&path).unwrap_or_default();
-                zip.start_file(&*name, opts).map_err(|e| e.to_string())?;
-                zip.write_all(content.as_bytes())
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-    }
-
-    let storage_snapshot = match storage::project_storage_diagnostics(&app) {
-        Ok(snapshot) => serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?,
-        Err(e) => serde_json::json!({
-            "healthy": false,
-            "error": e,
-        })
-        .to_string(),
-    };
-    zip.start_file("project-storage-diagnostics.json", opts)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(storage_snapshot.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    zip.finish().map_err(|e| e.to_string())?;
-    Ok(out_path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-fn export_writer_agent_trajectory(
-    state: tauri::State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<String, String> {
-    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    let export = kernel.export_trajectory(limit.unwrap_or(200).min(1_000));
-    let dir = log_dir()?.join("trajectory");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let file_name = format!(
-        "writer-agent-{}-{}.jsonl",
-        safe_filename_component(&export.project_id),
-        agent_runtime::now_ms()
-    );
-    let path = dir.join(file_name);
-    std::fs::write(&path, export.jsonl).map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-fn log_dir() -> Result<std::path::PathBuf, String> {
+pub(crate) fn log_dir() -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         std::env::var("APPDATA")
@@ -355,6 +295,7 @@ use agent_harness_core::truncate_context;
 
 use commands::backups::{get_project_storage_diagnostics, list_file_backups, restore_file_backup};
 use commands::chapters::{create_chapter, get_chapter_revision, load_chapter, read_project_dir};
+use commands::diagnostics::{export_diagnostic_logs, export_writer_agent_trajectory};
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::outline::{
     delete_outline_node, get_outline, reorder_outline_nodes, save_outline_node,
