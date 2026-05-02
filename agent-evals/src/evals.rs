@@ -15,10 +15,8 @@ use agent_writer_lib::writer_agent::kernel::{
 use agent_writer_lib::writer_agent::memory::{
     PromiseKind, StoryContractQuality, StoryContractSummary, WriterMemory,
 };
-use agent_writer_lib::writer_agent::observation::{
-    ObservationReason, ObservationSource, TextRange, WriterObservation,
-};
-use agent_writer_lib::writer_agent::operation::{OperationApproval, WriterOperation};
+use agent_writer_lib::writer_agent::observation::{ObservationReason, ObservationSource};
+use agent_writer_lib::writer_agent::operation::WriterOperation;
 use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind, ProposalPriority};
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 
@@ -1064,6 +1062,78 @@ pub fn run_write_operation_lifecycle_trace_eval() -> EvalResult {
     )
 }
 
+pub fn run_product_metrics_trace_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation("林墨停在旧门前，风从裂开的门缝里钻出来。"),
+            "他终于听见门后有人低声念出了他的名字。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let mut approval = eval_approval("eval_metrics");
+    approval.proposal_id = Some(proposal.id.clone());
+
+    kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    kernel
+        .record_operation_durable_save(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-2".to_string(),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: None,
+            reason: Some("metrics acceptance".to_string()),
+            created_at: now_ms() + 10,
+        })
+        .unwrap();
+
+    let trace = kernel.trace_snapshot(20);
+    let metrics = trace.product_metrics;
+    let mut errors = Vec::new();
+    if metrics.proposal_count == 0 {
+        errors.push("metrics did not count proposals".to_string());
+    }
+    if metrics.accepted_count != 1 {
+        errors.push(format!("accepted count was {}", metrics.accepted_count));
+    }
+    if metrics.proposal_acceptance_rate <= 0.0 {
+        errors.push("acceptance rate was not positive".to_string());
+    }
+    if metrics.durable_save_success_rate <= 0.0 {
+        errors.push("durable save success rate was not positive".to_string());
+    }
+    if metrics.average_save_to_feedback_ms.is_none() {
+        errors.push("save-to-feedback latency was not calculated".to_string());
+    }
+    let export = kernel.export_trajectory(20);
+    if !export
+        .jsonl
+        .contains("\"eventType\":\"writer.product_metrics\"")
+    {
+        errors.push("trajectory export lacks product metrics event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:product_metrics_trace",
+        format!(
+            "acceptance={:.2} durable={:.2} latency={:?}",
+            metrics.proposal_acceptance_rate,
+            metrics.durable_save_success_rate,
+            metrics.average_save_to_feedback_ms
+        ),
+        errors,
+    )
+}
+
 pub fn run_task_packet_foundation_eval() -> EvalResult {
     let mut packet = agent_harness_core::TaskPacket::new(
         "eval-task-1",
@@ -1718,7 +1788,7 @@ pub fn run_story_contract_vague_excluded_from_context_eval() -> EvalResult {
     memory
         .ensure_story_contract_seed("eval", "寒影录", "玄幻", "一个故事", "选择", "")
         .unwrap();
-    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let kernel = WriterAgentKernel::new("eval", memory);
     let obs = observation("林墨停在旧门前。");
     let pack = kernel.context_pack_for_default(
         agent_writer_lib::writer_agent::context::AgentTask::GhostWriting,
@@ -3346,7 +3416,7 @@ pub fn run_character_conflict_flag_eval() -> EvalResult {
         .unwrap();
     let debt = kernel.story_debt_snapshot();
 
-    let mut errors = Vec::new();
+    let errors = Vec::new();
     // Agent may detect canon contradiction when lore states character is traitor
     // but text shows helping behavior. Not all contradictions are detectable with
     // current diagnostics. This eval exercises the full pipeline with conflicting lore.
@@ -3380,7 +3450,7 @@ pub fn run_style_continuity_learning_eval() -> EvalResult {
         .observe(observation("风停了。他站在原地，久久没有动。"))
         .unwrap();
 
-    let mut errors = Vec::new();
+    let errors = Vec::new();
     // Style preferences influence context but don't guarantee specific proposals
 
     eval_result(

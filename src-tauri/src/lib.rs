@@ -1,11 +1,8 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    ambient::EditorEvent,
-    default_writing_tool_registry,
-    hermes_memory::HermesDB,
-    provider::{openai_compat::OpenAiCompatProvider, LlmMessage},
-    writing_domain_profile, AgentLoopEvent,
+    ambient::EditorEvent, default_writing_tool_registry, hermes_memory::HermesDB,
+    provider::openai_compat::OpenAiCompatProvider, writing_domain_profile, AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -23,8 +20,6 @@ use chapter_generation::{
     ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
     PipelineTerminal, SaveMode,
 };
-use storage::{ChapterInfo, LoreEntry, OutlineNode};
-use writer_agent::memory::ManualAgentTurnSummary;
 
 const KEYRING_SERVICE: &str = "agent-writer";
 mod events {

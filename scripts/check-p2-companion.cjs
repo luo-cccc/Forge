@@ -37,6 +37,13 @@ const checks = [
     name: "guard detail avoids raw task-packet counters in author view",
     pass: !source.includes("${packet.task} guard is using"),
   },
+  {
+    name: "write-mode guard summarizes product metrics instead of raw traces",
+    pass:
+      source.includes("Recent acceptance") &&
+      source.includes("productMetrics.proposalAcceptanceRate") &&
+      !source.includes("operationLifecycle.map"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);

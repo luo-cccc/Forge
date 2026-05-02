@@ -869,6 +869,28 @@ export interface WriterAgentTraceSnapshot {
   recentFeedback: WriterFeedbackTrace[];
   operationLifecycle: WriterOperationLifecycleTrace[];
   contextRecalls: ContextRecallSummary[];
+  productMetrics: WriterProductMetrics;
+}
+
+export interface WriterProductMetrics {
+  proposalCount: number;
+  feedbackCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  editedCount: number;
+  snoozedCount: number;
+  explainedCount: number;
+  ignoredCount: number;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  proposalAcceptanceRate: number;
+  ignoredRepeatedSuggestionRate: number;
+  manualAskConvertedToOperationRate: number;
+  promiseRecallHitRate: number;
+  canonFalsePositiveRate: number;
+  chapterMissionCompletionRate: number;
+  durableSaveSuccessRate: number;
+  averageSaveToFeedbackMs?: number | null;
 }
 
 export interface WriterOperationLifecycleTrace {

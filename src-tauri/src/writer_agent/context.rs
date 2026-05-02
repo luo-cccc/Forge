@@ -539,18 +539,6 @@ fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
         .unwrap_or_default()
 }
 
-fn story_contract_quality_for_task(
-    project_id: &str,
-    memory: &WriterMemory,
-) -> StoryContractQuality {
-    memory
-        .get_story_contract(project_id)
-        .ok()
-        .flatten()
-        .map(|contract| contract.quality())
-        .unwrap_or(StoryContractQuality::Missing)
-}
-
 pub fn seed_chapter_missions_from_outline(
     project_id: &str,
     outline: &[crate::storage::OutlineNode],

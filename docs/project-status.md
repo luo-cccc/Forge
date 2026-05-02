@@ -14,6 +14,17 @@ P0 is complete:
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
 - **P0.3 (Command Boundary Audit)**: 47 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify`. All legacy direct-save commands reference `audit_project_file_write`.
 
+## P1 Status (May 2026): Trust Contract And Product Validation
+
+P1 is in progress:
+
+- Story Contract quality now has explicit Missing / Vague / Usable / Strong states and vague contracts are excluded from context packs.
+- Chapter Mission save calibration can mark completed, drifted, or needs_review states based on save observations.
+- Promise Ledger now classifies promise kinds including plot promise, emotional debt, object whereabouts, character commitment, mystery clue, and relationship tension.
+- Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency.
+- Companion Panel write mode remains quiet and now summarizes acceptance/save health instead of exposing raw operation traces.
+- `agent-evals` includes a first 5-chapter scenario plus character conflict, style continuity, mission drift, and ghost quality-confidence checks. More scenario fixtures are still needed before P1 can be called complete.
+
 ## What Is Solid Now
 
 - Rust workspace is rooted at `C:\Users\Msi\Desktop\Forge`; the authoritative lockfile is the root `Cargo.lock`.
@@ -30,6 +41,7 @@ P0 is complete:
   - trajectory export
   - unified task execution (prepare_task_run / run_task)
   - operation lifecycle tracking
+  - derived product metrics
 - The five foundation axes are represented by `TaskPacket` and enforced in trace/eval paths.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
@@ -46,6 +58,7 @@ P0 is complete:
 - Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs.
 - Operation lifecycle is tracked end-to-end: proposed → approved → applied → durably_saved → feedback_recorded, with durable-save-before-feedback enforcement.
 - A static command boundary audit classifies all 47 Tauri commands by risk level and verifies audit coverage for write paths.
+- Product metrics are derived from trace data and emitted in trajectory JSONL as `writer.product_metrics`.
 
 ## Current Verification Baseline
 
@@ -53,8 +66,8 @@ The expected local baseline is:
 
 - `cargo test -p agent-writer`: 153 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 51/51 passing
-- `npm run check:p2`: 8/8 passing
+- `cargo run -p agent-evals`: 61/61 passing
+- `npm run check:p2`: 9/9 passing
 - `npm run check:audit`: 47 commands, 0 issues
 - `npm run lint`: passing
 - `npm run build`: passing
@@ -75,7 +88,7 @@ The expected local baseline is:
 - `src-tauri/src/lib.rs` is still too large and should be split into command modules after the save-flow risks are fully closed.
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions (P1).
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
-- Companion Panel needs to be further simplified to show only the top 3-5 highest-value signals (P1).
-- No multi-chapter scenario evals yet (5+ chapter fixtures needed for P1 product validation).
-- No product metrics recording yet (proposal acceptance rate, promise recall hit rate, etc.) (P1).
-- `kernel.rs` (6834 lines), `lib.rs` (4039 lines), and `run_eval.rs` (3272 lines) need modular splitting (P2).
+- Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
+- Product validation still needs a broader scenario suite: the first 5-chapter fixture exists, but the plan target is at least 10 realistic long-form scenarios (P1).
+- Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
+- `kernel.rs`, `lib.rs`, and `agent-evals/src/evals.rs` still need modular splitting (P2).

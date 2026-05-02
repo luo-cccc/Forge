@@ -351,6 +351,11 @@ function formatContextBudgetDetail(proposal: WriterProposalTrace | undefined): s
   return `${budget.task} · ${budget.sourceReports.length} sources · ${pct}% used · ${truncated} truncated`;
 }
 
+function formatRate(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) return "0%";
+  return `${Math.round(value * 100)}%`;
+}
+
 function missionStatusLabel(status: string | undefined): string {
   if (status === "completed") return "Done";
   if (status === "drifted") return "Drift";
@@ -401,6 +406,9 @@ function guardModeDetail(trace: WriterAgentTraceSnapshot | null, storyDebt: Stor
   const packet = latestTaskPacket(trace);
   const debtCount = storyDebt?.openCount ?? 0;
   if (debtCount > 0) return `${debtCount} story point${debtCount === 1 ? "" : "s"} need protection before the next move.`;
+  if (trace?.productMetrics?.feedbackCount) {
+    return `Recent acceptance ${formatRate(trace.productMetrics.proposalAcceptanceRate)} · saves ${formatRate(trace.productMetrics.durableSaveSuccessRate)}.`;
+  }
   if (packet) {
     return "Grounded on the current chapter, memory, and book-level promise.";
   }

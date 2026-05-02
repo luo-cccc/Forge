@@ -1,6 +1,6 @@
 //! Manual agent history and turn management. Extracted from lib.rs.
 
-use crate::{agent_runtime, writer_agent::memory::ManualAgentTurnSummary, AppState};
+use crate::{writer_agent::memory::ManualAgentTurnSummary, AppState};
 
 const MANUAL_AGENT_HISTORY_MAX_STORED_TURNS: usize = 64;
 const MANUAL_AGENT_TURN_USER_CHARS: usize = 1_200;

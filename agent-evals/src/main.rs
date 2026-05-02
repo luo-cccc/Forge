@@ -28,6 +28,7 @@ fn main() {
     results.push(run_manual_request_kernel_owns_run_loop_eval());
     results.push(run_operation_feedback_requires_durable_save_eval());
     results.push(run_write_operation_lifecycle_trace_eval());
+    results.push(run_product_metrics_trace_eval());
     results.push(run_task_packet_foundation_eval());
     results.push(run_chapter_generation_task_packet_eval());
     results.push(run_result_feedback_tight_budget_eval());

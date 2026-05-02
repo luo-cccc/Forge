@@ -24,14 +24,17 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - `WriterOperation` 已覆盖正文、canon、promise、style、story contract、chapter mission、outline 等变更。
 - 写入类操作已有 approval context 和 audit 记录。
 - 关键保存风险已处理：dirty state、chapter switching、autosave、inline operation、accepted feedback、batch generation dirty protection。
-- `npm run verify` 当前通过：lint、build、P2 checks、Rust tests、writer evals。
+- `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
+- Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
+- Command boundary audit 已覆盖 47 个 Tauri commands，并进入 `npm run verify`。
+- trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、61/61 writer evals。
 
-### 仍然没有闭合的核心矛盾
+### 当前剩余核心矛盾
 
-- `ask_agent` 仍然在 Writer Agent Kernel observation/context pack 之后执行旧 `AgentLoop`，说明 agent 大脑没有完全统一。
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
-- 现有 eval 主要证明工程不变量，不足以证明真实作者价值。
+- 已有第一批产品场景 eval，但还没有达到“10 个真实长篇场景”的目标，仍不足以证明真实作者价值。
 - `src-tauri/src/lib.rs` 和 `writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
 
 ## 2. 总体原则
@@ -98,6 +101,8 @@ Observation
 ```
 
 ## 4. P0：统一 Writer Agent Kernel 大脑
+
+当前状态：已完成。保留本节作为验收清单和防回归边界。
 
 ### P0.1 退役 `ask_agent` 旧执行层
 
@@ -371,10 +376,12 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 - chapter mission completion rate
 - manual ask converted-to-operation rate
 
+当前状态：第一版已完成。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。剩余工作是保留更长的 session 历史，并提供 debug/inspector 趋势视图。
+
 验收标准：
 
-- 本地 trajectory export 可包含匿名化指标摘要。
-- Companion / debug view 能查看最近写作 session 的 agent 有用程度。
+- 本地 trajectory export 可包含匿名化指标摘要。（已完成）
+- Companion / debug view 能查看最近写作 session 的 agent 有用程度。（部分完成：Companion 已显示摘要，debug 趋势视图未完成）
 
 ## 8. P2：上下文、记忆、检索继续补强
 

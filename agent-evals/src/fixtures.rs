@@ -1,28 +1,11 @@
 //! Evaluation harness for the real Writer Agent Kernel.
 //! These are product-behavior checks, not mirror implementations.
 
-use agent_writer_lib::chapter_generation::{
-    build_chapter_generation_task_packet, BuiltChapterContext, ChapterContextBudgetReport,
-    ChapterContextSource, ChapterTarget,
-};
-use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
-use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
-use agent_writer_lib::writer_agent::intent::{AgentBehavior, IntentEngine, WritingIntent};
-use agent_writer_lib::writer_agent::kernel::{
-    StoryDebtCategory, StoryReviewQueueStatus, WriterAgentApprovalMode, WriterAgentFrontendState,
-    WriterAgentRunRequest, WriterAgentStreamMode, WriterAgentTask,
-};
-use agent_writer_lib::writer_agent::memory::{
-    PromiseKind, StoryContractQuality, StoryContractSummary, WriterMemory,
-};
 use agent_writer_lib::writer_agent::observation::{
     ObservationReason, ObservationSource, TextRange, WriterObservation,
 };
-use agent_writer_lib::writer_agent::operation::{OperationApproval, WriterOperation};
-use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind, ProposalPriority};
-use agent_writer_lib::writer_agent::WriterAgentKernel;
+use agent_writer_lib::writer_agent::operation::OperationApproval;
 use serde::Serialize;
-use std::path::Path;
 
 #[derive(Debug, Serialize)]
 pub struct EvalResult {

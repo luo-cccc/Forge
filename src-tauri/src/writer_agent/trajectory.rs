@@ -155,6 +155,26 @@ pub fn export_trace_snapshot(
             },
         );
     }
+    seq += 1;
+    push_event(
+        &mut lines,
+        TrajectoryEvent {
+            trace_schema: TRAJECTORY_SCHEMA,
+            schema_version: SCHEMA_VERSION,
+            trace_id: &trace_id,
+            project_id,
+            session_id,
+            seq,
+            event_type: "writer.product_metrics",
+            ts_ms: snapshot
+                .recent_feedback
+                .iter()
+                .map(|feedback| feedback.created_at)
+                .max()
+                .unwrap_or(0),
+            data: &snapshot.product_metrics,
+        },
+    );
 
     WriterTrajectoryExport {
         schema: TRAJECTORY_SCHEMA.to_string(),
@@ -235,15 +255,17 @@ mod tests {
             }],
             operation_lifecycle: Vec::new(),
             context_recalls: Vec::new(),
+            product_metrics: Default::default(),
         };
 
         let export = export_trace_snapshot("novel-a", "session-a", &snapshot);
         let lines = export.jsonl.lines().collect::<Vec<_>>();
 
         assert_eq!(export.schema, TRAJECTORY_SCHEMA);
-        assert_eq!(export.event_count, 2);
-        assert_eq!(lines.len(), 2);
+        assert_eq!(export.event_count, 3);
+        assert_eq!(lines.len(), 3);
         assert!(lines[0].contains("\"eventType\":\"writer.observation\""));
         assert!(lines[1].contains("\"eventType\":\"writer.feedback\""));
+        assert!(lines[2].contains("\"eventType\":\"writer.product_metrics\""));
     }
 }
