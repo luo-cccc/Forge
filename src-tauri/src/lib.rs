@@ -3577,6 +3577,9 @@ async fn ask_agent(
             context_limit_tokens: Some(
                 agent_harness_core::resolve_context_window_info(&model).tokens,
             ),
+            tool_filter: Some(writer_agent::kernel::tool_filter_for_task(
+                writer_agent::context::AgentTask::ManualRequest,
+            )),
         },
         provider,
         registry,

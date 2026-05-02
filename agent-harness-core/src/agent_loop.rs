@@ -50,6 +50,7 @@ pub struct AgentLoopConfig {
     pub max_rounds: u32,
     pub system_prompt: String,
     pub context_limit_tokens: Option<u64>,
+    pub tool_filter: Option<ToolFilter>,
 }
 
 impl Default for AgentLoopConfig {
@@ -58,6 +59,7 @@ impl Default for AgentLoopConfig {
             max_rounds: 10,
             system_prompt: String::new(),
             context_limit_tokens: None,
+            tool_filter: None,
         }
     }
 }
@@ -121,13 +123,13 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
 
     /// Build the available tools list filtered by intent.
     pub fn build_tools(&self, intent: &Intent) -> Vec<serde_json::Value> {
-        let filter = ToolFilter {
+        let filter = self.config.tool_filter.clone().unwrap_or(ToolFilter {
             intent: Some(intent.clone()),
             max_side_effect_level: Some(ToolSideEffectLevel::Write),
             include_requires_approval: true,
             include_disabled: false,
             required_tags: Vec::new(),
-        };
+        });
         let registry = self.executor.registry.blocking_lock();
         registry.to_effective_openai_tools(&filter, &self.executor.permission_policy)
     }
@@ -381,6 +383,7 @@ mod tests {
                 max_rounds: 3,
                 system_prompt: "You are a test agent.".into(),
                 context_limit_tokens: None,
+                tool_filter: None,
             },
             provider,
             registry,
@@ -488,6 +491,31 @@ mod tests {
 
         assert!(names.contains(&"safe_preview"));
         assert!(!names.contains(&"approval_write"));
+    }
+
+    #[test]
+    fn test_build_tools_respects_task_filter_boundary() {
+        let mut agent = make_agent();
+        agent.config.tool_filter = Some(ToolFilter {
+            intent: None,
+            include_requires_approval: false,
+            include_disabled: false,
+            max_side_effect_level: Some(ToolSideEffectLevel::ProviderCall),
+            required_tags: vec!["project".to_string()],
+        });
+
+        let tools = agent.build_tools(&Intent::GenerateContent);
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect();
+
+        assert!(names.contains(&"load_current_chapter"));
+        assert!(names.contains(&"load_outline_node"));
+        assert!(names.contains(&"search_lorebook"));
+        assert!(names.contains(&"query_project_brain"));
+        assert!(!names.contains(&"generate_bounded_continuation"));
+        assert!(!names.contains(&"generate_chapter_draft"));
     }
 
     #[test]

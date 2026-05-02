@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use agent_harness_core::{
-    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolPolicyContract,
-    ToolSideEffectLevel,
+    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolFilter,
+    ToolPolicyContract, ToolSideEffectLevel,
 };
 
 use super::canon::CanonEngine;
@@ -2748,6 +2748,17 @@ fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {
             allow_approval_required: false,
             required_tool_tags: vec!["project".to_string()],
         },
+    }
+}
+
+pub fn tool_filter_for_task(task: AgentTask) -> ToolFilter {
+    let policy = tool_policy_for_task(&task);
+    ToolFilter {
+        intent: None,
+        include_requires_approval: policy.allow_approval_required,
+        include_disabled: false,
+        max_side_effect_level: Some(policy.max_side_effect_level),
+        required_tags: policy.required_tool_tags,
     }
 }
 

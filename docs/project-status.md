@@ -32,13 +32,15 @@ Forge is a Cursor-style writing agent for novels, not a generic writing tool. Th
 - Story Contract and current Chapter Mission now have a Foundation editing surface in the Companion Panel; saves go through typed WriterOperations into Writer Agent memory.
 - Write-capable WriterOperations for memory, promises, foundation, canon, and outline now require surfaced approval context and record an approval decision before execution.
 - Legacy direct file-write commands for chapters, lore, outline, backup restore, and chapter rename now record Writer Agent audit decisions after successful writes.
+- Manual `ask_agent` requests now run the old execution loop under the Writer Agent ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
 
 ## Current Verification Baseline
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 148 passing
-- `cargo run -p agent-evals`: 46/46 passing
+- `cargo test -p agent-writer`: 149 passing
+- `cargo test -p agent-harness-core`: 79 passing
+- `cargo run -p agent-evals`: 47/47 passing
 - `npm run check:p2`: 8/8 passing
 - `npm run lint`: passing
 - `npm run build`: passing
@@ -56,6 +58,6 @@ The expected local baseline is:
 ## Remaining Gaps
 
 - `src-tauri/src/lib.rs` is still too large and should be split into command modules after the save-flow risks are fully closed.
-- `ask_agent` manual requests now create WriterObservations, run Writer Agent Kernel observation, use ManualRequest context packs, persist manual exchanges, and then execute through the older agent loop; the remaining gap is retiring that execution layer once the kernel can own the full run loop.
+- `ask_agent` manual requests now create WriterObservations, run Writer Agent Kernel observation, use ManualRequest context packs/tool boundaries, persist manual exchanges, and then execute through the older agent loop; the remaining gap is retiring that execution layer once the kernel can own the full run loop.
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions.
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class and eventually routing more saves through typed operations.

@@ -818,6 +818,73 @@ fn run_effective_tool_inventory_eval() -> EvalResult {
     )
 }
 
+fn run_manual_request_tool_boundary_eval() -> EvalResult {
+    let registry = agent_harness_core::default_writing_tool_registry();
+    let policy = agent_harness_core::PermissionPolicy::new(
+        agent_harness_core::PermissionMode::WorkspaceWrite,
+    );
+    let filter = agent_harness_core::ToolFilter {
+        intent: None,
+        include_requires_approval: false,
+        include_disabled: false,
+        max_side_effect_level: Some(agent_harness_core::ToolSideEffectLevel::ProviderCall),
+        required_tags: vec!["project".to_string()],
+    };
+    let inventory = registry.effective_inventory(&filter, &policy);
+    let model_tool_names: Vec<String> = inventory
+        .to_openai_tools()
+        .iter()
+        .filter_map(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .map(|name| name.to_string())
+        })
+        .collect();
+
+    let mut errors = Vec::new();
+    for expected in ["search_lorebook", "query_project_brain"] {
+        if !model_tool_names.iter().any(|name| name == expected) {
+            errors.push(format!(
+                "manual request model tools missing project context tool {}",
+                expected
+            ));
+        }
+    }
+    for forbidden in [
+        "generate_bounded_continuation",
+        "generate_chapter_draft",
+        "read_user_drift_profile",
+        "record_run_trace",
+    ] {
+        if model_tool_names.iter().any(|name| name == forbidden) {
+            errors.push(format!(
+                "manual request exposed non-project or write/generation tool {}",
+                forbidden
+            ));
+        }
+    }
+    if inventory.allowed.iter().any(|tool| {
+        tool.requires_approval
+            || tool.side_effect_level > agent_harness_core::ToolSideEffectLevel::ProviderCall
+            || !tool.tags.iter().any(|tag| tag == "project")
+    }) {
+        errors.push(
+            "manual request allowed inventory exceeds WriterAgent ManualRequest tool policy"
+                .to_string(),
+        );
+    }
+
+    eval_result(
+        "agent_harness:manual_request_tool_boundary",
+        format!(
+            "allowed={} model_tools={}",
+            inventory.allowed.len(),
+            model_tool_names.join(",")
+        ),
+        errors,
+    )
+}
+
 fn run_task_packet_foundation_eval() -> EvalResult {
     let mut packet = agent_harness_core::TaskPacket::new(
         "eval-task-1",
@@ -2800,6 +2867,7 @@ fn main() {
     results.push(run_compaction_latest_user_anchor_eval());
     results.push(run_tool_permission_guard_eval());
     results.push(run_effective_tool_inventory_eval());
+    results.push(run_manual_request_tool_boundary_eval());
     results.push(run_task_packet_foundation_eval());
     results.push(run_chapter_generation_task_packet_eval());
     results.push(run_result_feedback_tight_budget_eval());
