@@ -3,6 +3,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use agent_harness_core::{
+    FeedbackContract, RequiredContext, TaskBelief, TaskPacket, TaskScope, ToolPolicyContract,
+    ToolSideEffectLevel,
+};
+
 use super::canon::CanonEngine;
 use super::context::{
     assemble_observation_context, assemble_observation_context_with_default_budget, AgentTask,
@@ -144,9 +149,28 @@ pub enum StoryDebtStatus {
 #[serde(rename_all = "camelCase")]
 pub struct WriterAgentTraceSnapshot {
     pub recent_observations: Vec<WriterObservationTrace>,
+    pub task_packets: Vec<WriterTaskPacketTrace>,
     pub recent_proposals: Vec<WriterProposalTrace>,
     pub recent_feedback: Vec<WriterFeedbackTrace>,
     pub context_recalls: Vec<ContextRecallSummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterTaskPacketTrace {
+    pub id: String,
+    pub observation_id: String,
+    pub task: String,
+    pub objective: String,
+    pub scope: String,
+    pub intent: Option<String>,
+    pub required_context_count: usize,
+    pub belief_count: usize,
+    pub success_criteria_count: usize,
+    pub max_side_effect_level: String,
+    pub feedback_checkpoint_count: usize,
+    pub foundation_complete: bool,
+    pub packet: TaskPacket,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -192,6 +216,7 @@ pub struct WriterAgentKernel {
     observations: Vec<WriterObservation>,
     proposals: Vec<AgentProposal>,
     proposal_context_budgets: HashMap<String, ContextBudgetTrace>,
+    task_packets: Vec<WriterTaskPacketTrace>,
     feedback_events: Vec<ProposalFeedback>,
     superseded_proposals: HashSet<String>,
     suppressed_slots: Vec<SuppressedProposalSlot>,
@@ -230,6 +255,7 @@ impl WriterAgentKernel {
             observations: Vec::new(),
             proposals: Vec::new(),
             proposal_context_budgets: HashMap::new(),
+            task_packets: Vec::new(),
             feedback_events: Vec::new(),
             superseded_proposals: HashSet::new(),
             suppressed_slots: Vec::new(),
@@ -376,6 +402,18 @@ impl WriterAgentKernel {
                 &observation,
                 &self.memory,
             );
+            self.record_task_packet_for(
+                AgentTask::GhostWriting,
+                &observation,
+                &context_pack,
+                "Continue from the current cursor while preserving chapter mission, canon, and open promises.",
+                vec![
+                    "Continuation fits the local paragraph without forcing a broad rewrite."
+                        .to_string(),
+                    "Continuation does not introduce canon or promise-ledger conflicts."
+                        .to_string(),
+                ],
+            );
             let continuation = draft_continuation(&intent.primary, &observation, &context_pack);
             let insert_at = observation.cursor.as_ref().map(|c| c.to).unwrap_or(0);
             let chapter = observation
@@ -497,6 +535,18 @@ impl WriterAgentKernel {
                 created_at: crate::agent_runtime::now_ms(),
             })
             .map_err(|e| e.to_string())?;
+        let context_pack = self.context_pack_for_default(AgentTask::ManualRequest, observation);
+        self.record_task_packet_for(
+            AgentTask::ManualRequest,
+            observation,
+            &context_pack,
+            "Answer the author's explicit request as a writing partner using current manuscript context and ledgers.",
+            vec![
+                "Answer directly addresses the author's request.".to_string(),
+                "Durable decisions or preferences are recorded when the response changes project state."
+                    .to_string(),
+            ],
+        );
         Ok(())
     }
 
@@ -517,6 +567,16 @@ impl WriterAgentKernel {
             observation.reason == super::observation::ObservationReason::ChapterSwitch,
         );
         let context_pack = self.ghost_context_pack(&observation);
+        self.record_task_packet_for(
+            AgentTask::GhostWriting,
+            &observation,
+            &context_pack,
+            "Generate an LLM-backed ghost continuation grounded in the active writing context.",
+            vec![
+                "LLM ghost is short enough to review inline.".to_string(),
+                "LLM ghost cites the same required context pack used for generation.".to_string(),
+            ],
+        );
         let insert_at = observation.cursor.as_ref().map(|c| c.to).unwrap_or(0);
         let chapter = observation
             .chapter_title
@@ -1610,6 +1670,13 @@ impl WriterAgentKernel {
                     })
                     .collect()
             },
+            task_packets: self
+                .task_packets
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect(),
             recent_proposals: if persisted_proposals.is_empty() {
                 self.proposals
                     .iter()
@@ -1679,6 +1746,41 @@ impl WriterAgentKernel {
             &self.session_id,
             &self.trace_snapshot(limit),
         )
+    }
+
+    fn record_task_packet_for(
+        &mut self,
+        task: AgentTask,
+        observation: &WriterObservation,
+        context_pack: &WritingContextPack,
+        objective: &str,
+        success_criteria: Vec<String>,
+    ) {
+        let packet = build_task_packet_for_observation(
+            &self.project_id,
+            &self.session_id,
+            task.clone(),
+            observation,
+            context_pack,
+            objective,
+            success_criteria,
+        );
+        let coverage = packet.foundation_coverage();
+        self.task_packets.push(WriterTaskPacketTrace {
+            id: packet.id.clone(),
+            observation_id: observation.id.clone(),
+            task: format!("{:?}", task),
+            objective: packet.objective.clone(),
+            scope: packet.scope_label(),
+            intent: packet.intent.as_ref().map(|intent| format!("{:?}", intent)),
+            required_context_count: packet.required_context.len(),
+            belief_count: packet.beliefs.len(),
+            success_criteria_count: packet.success_criteria.len(),
+            max_side_effect_level: format!("{:?}", packet.tool_policy.max_side_effect_level),
+            feedback_checkpoint_count: packet.feedback.checkpoints.len(),
+            foundation_complete: coverage.is_complete(),
+            packet,
+        });
     }
 
     fn proposal_state(&self, proposal: &AgentProposal, now: u64) -> String {
@@ -2370,6 +2472,269 @@ fn context_budget_trace(pack: &WritingContextPack) -> ContextBudgetTrace {
                 truncation_reason: source.truncation_reason.clone(),
             })
             .collect(),
+    }
+}
+
+pub fn build_task_packet_for_observation(
+    project_id: &str,
+    session_id: &str,
+    task: AgentTask,
+    observation: &WriterObservation,
+    context_pack: &WritingContextPack,
+    objective: &str,
+    success_criteria: Vec<String>,
+) -> TaskPacket {
+    let scope_ref = observation
+        .chapter_title
+        .clone()
+        .or_else(|| {
+            observation
+                .cursor
+                .as_ref()
+                .map(|cursor| format!("{}..{}", cursor.from, cursor.to))
+        })
+        .unwrap_or_else(|| project_id.to_string());
+    let scope = match task {
+        AgentTask::GhostWriting => TaskScope::CursorWindow,
+        AgentTask::InlineRewrite => TaskScope::Selection,
+        AgentTask::ChapterGeneration => TaskScope::Chapter,
+        AgentTask::ManualRequest => TaskScope::Chapter,
+        AgentTask::ContinuityDiagnostic | AgentTask::CanonMaintenance => TaskScope::Scene,
+        AgentTask::ProposalEvaluation => TaskScope::Custom,
+    };
+    let mut packet = TaskPacket::new(
+        format!("{}:{}:{:?}", session_id, observation.id, task),
+        objective,
+        scope,
+        observation.created_at,
+    );
+    packet.scope_ref = Some(scope_ref);
+    packet.intent = Some(match task {
+        AgentTask::GhostWriting | AgentTask::ChapterGeneration | AgentTask::InlineRewrite => {
+            agent_harness_core::Intent::GenerateContent
+        }
+        AgentTask::ContinuityDiagnostic
+        | AgentTask::CanonMaintenance
+        | AgentTask::ProposalEvaluation => agent_harness_core::Intent::AnalyzeText,
+        AgentTask::ManualRequest => agent_harness_core::Intent::Chat,
+    });
+    packet.constraints = constraints_for_task(&task);
+    packet.success_criteria = success_criteria;
+    packet.beliefs = beliefs_from_context_pack(context_pack);
+    packet.required_context = required_context_from_pack(context_pack);
+    packet.tool_policy = tool_policy_for_task(&task);
+    packet.feedback = feedback_contract_for_task(&task);
+    packet
+}
+
+fn constraints_for_task(task: &AgentTask) -> Vec<String> {
+    let mut constraints = vec![
+        "Preserve established canon unless the user explicitly approves a change.".to_string(),
+        "Respect active chapter mission and story contract boundaries.".to_string(),
+    ];
+    match task {
+        AgentTask::GhostWriting => {
+            constraints.push("Keep proactive text short and easy to ignore.".to_string());
+        }
+        AgentTask::ManualRequest => {
+            constraints
+                .push("Answer the author directly before proposing broad rewrites.".to_string());
+        }
+        AgentTask::ChapterGeneration => {
+            constraints
+                .push("Generate chapter prose only; no analysis or markdown wrapper.".to_string());
+        }
+        AgentTask::InlineRewrite => {
+            constraints
+                .push("Limit edits to the selected range or cursor insertion point.".to_string());
+        }
+        AgentTask::ContinuityDiagnostic | AgentTask::CanonMaintenance => {
+            constraints.push("Surface evidence before recommending canon changes.".to_string());
+        }
+        AgentTask::ProposalEvaluation => {
+            constraints
+                .push("Judge the proposal against evidence and feedback history.".to_string());
+        }
+    }
+    constraints
+}
+
+fn beliefs_from_context_pack(context_pack: &WritingContextPack) -> Vec<TaskBelief> {
+    let mut beliefs = Vec::new();
+    for source in &context_pack.sources {
+        if beliefs.len() >= 8 {
+            break;
+        }
+        let subject = format!("{:?}", source.source);
+        let statement = snippet(&source.content, 180);
+        if statement.trim().is_empty() {
+            continue;
+        }
+        beliefs.push(TaskBelief::new(
+            subject,
+            statement,
+            belief_confidence(&source.source),
+        ));
+    }
+
+    if beliefs.is_empty() {
+        beliefs.push(TaskBelief::new(
+            "editor_context",
+            "Only the current editor observation is available for this task.",
+            0.55,
+        ));
+    }
+    beliefs
+}
+
+fn belief_confidence(source: &ContextSource) -> f32 {
+    match source {
+        ContextSource::SystemContract
+        | ContextSource::ProjectBrief
+        | ContextSource::ChapterMission
+        | ContextSource::CanonSlice
+        | ContextSource::PromiseSlice => 0.9,
+        ContextSource::ResultFeedback | ContextSource::DecisionSlice | ContextSource::NextBeat => {
+            0.8
+        }
+        ContextSource::CursorPrefix
+        | ContextSource::CursorSuffix
+        | ContextSource::SelectedText
+        | ContextSource::PreviousChapter
+        | ContextSource::NextChapter
+        | ContextSource::NeighborText => 0.75,
+        ContextSource::AuthorStyle | ContextSource::OutlineSlice | ContextSource::RagExcerpt => 0.7,
+    }
+}
+
+fn required_context_from_pack(context_pack: &WritingContextPack) -> Vec<RequiredContext> {
+    let mut contexts = context_pack
+        .sources
+        .iter()
+        .take(12)
+        .map(|source| {
+            RequiredContext::new(
+                format!("{:?}", source.source),
+                context_source_purpose(&source.source),
+                source.char_count.max(1),
+                is_required_context_source(&context_pack.task, &source.source),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if !contexts.iter().any(|context| context.required) {
+        if let Some(first) = contexts.first_mut() {
+            first.required = true;
+        } else {
+            contexts.push(RequiredContext::new(
+                "editor_observation",
+                "Fallback sensory context for the current writing task.",
+                1,
+                true,
+            ));
+        }
+    }
+    contexts
+}
+
+fn context_source_purpose(source: &ContextSource) -> &'static str {
+    match source {
+        ContextSource::SystemContract | ContextSource::ProjectBrief => {
+            "Keep the task inside the book-level contract."
+        }
+        ContextSource::ChapterMission => "Preserve this chapter's active mission.",
+        ContextSource::NextBeat => "Carry forward the next intended story beat.",
+        ContextSource::ResultFeedback => "Use the previous chapter result feedback loop.",
+        ContextSource::AuthorStyle => "Preserve learned author style preferences.",
+        ContextSource::CanonSlice => "Avoid contradictions against established canon.",
+        ContextSource::PromiseSlice => "Track open promises and story debts.",
+        ContextSource::DecisionSlice => "Respect recent creative decisions.",
+        ContextSource::OutlineSlice => "Stay aligned with the outline.",
+        ContextSource::RagExcerpt => "Ground the task in retrieved project memory.",
+        ContextSource::CursorPrefix => "Read the local prose before the cursor.",
+        ContextSource::CursorSuffix => "Avoid clashing with local prose after the cursor.",
+        ContextSource::SelectedText => "Constrain edits to the selected text.",
+        ContextSource::PreviousChapter => "Maintain continuity from previous chapters.",
+        ContextSource::NextChapter => "Avoid blocking the next planned chapter.",
+        ContextSource::NeighborText => "Maintain nearby prose flow.",
+    }
+}
+
+fn is_required_context_source(task: &AgentTask, source: &ContextSource) -> bool {
+    task.required_source_budgets()
+        .iter()
+        .any(|(required, _)| required == source)
+}
+
+fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {
+    match task {
+        AgentTask::ChapterGeneration => ToolPolicyContract {
+            max_side_effect_level: ToolSideEffectLevel::Write,
+            allow_approval_required: true,
+            required_tool_tags: vec!["generation".to_string()],
+        },
+        AgentTask::GhostWriting | AgentTask::ManualRequest | AgentTask::InlineRewrite => {
+            ToolPolicyContract {
+                max_side_effect_level: ToolSideEffectLevel::ProviderCall,
+                allow_approval_required: false,
+                required_tool_tags: vec!["project".to_string()],
+            }
+        }
+        AgentTask::ContinuityDiagnostic
+        | AgentTask::CanonMaintenance
+        | AgentTask::ProposalEvaluation => ToolPolicyContract {
+            max_side_effect_level: ToolSideEffectLevel::Read,
+            allow_approval_required: false,
+            required_tool_tags: vec!["project".to_string()],
+        },
+    }
+}
+
+fn feedback_contract_for_task(task: &AgentTask) -> FeedbackContract {
+    match task {
+        AgentTask::GhostWriting => FeedbackContract {
+            expected_signals: vec![
+                "ghost accepted".to_string(),
+                "ghost rejected".to_string(),
+                "author typed past ghost".to_string(),
+            ],
+            checkpoints: vec![
+                "record proposal trace".to_string(),
+                "record context budget trace".to_string(),
+            ],
+            memory_writes: vec!["style preference from feedback".to_string()],
+        },
+        AgentTask::ManualRequest => FeedbackContract {
+            expected_signals: vec![
+                "manual response completed".to_string(),
+                "author follow-up".to_string(),
+            ],
+            checkpoints: vec![
+                "record manual turn".to_string(),
+                "record creative decision".to_string(),
+            ],
+            memory_writes: vec![
+                "manual_agent_turn".to_string(),
+                "creative_decision".to_string(),
+            ],
+        },
+        AgentTask::ChapterGeneration => FeedbackContract {
+            expected_signals: vec![
+                "chapter saved".to_string(),
+                "save conflict".to_string(),
+                "chapter result snapshot".to_string(),
+            ],
+            checkpoints: vec![
+                "record context sources".to_string(),
+                "record result feedback after save".to_string(),
+            ],
+            memory_writes: vec!["chapter_result_summary".to_string()],
+        },
+        _ => FeedbackContract {
+            expected_signals: vec!["proposal accepted/rejected".to_string()],
+            checkpoints: vec!["record proposal trace".to_string()],
+            memory_writes: vec!["creative_decision".to_string()],
+        },
     }
 }
 

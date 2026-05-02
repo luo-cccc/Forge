@@ -2347,6 +2347,99 @@ fn run_trajectory_export_eval() -> EvalResult {
     )
 }
 
+fn run_task_packet_trace_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨在审讯里逼近玉佩线索。",
+            "玉佩线索",
+            "提前揭开玉佩来源",
+            "以新的疑问收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "玉佩",
+            "张三拿走玉佩，需要交代下落。",
+            "Chapter-1",
+            "Chapter-4",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation(
+            "林墨深吸一口气，说道：“这件事我本来不该告诉你，可你已经走到这里，就没有回头路了。",
+        ))
+        .unwrap();
+    let trace = kernel.trace_snapshot(10);
+    let packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "GhostWriting");
+    let export = kernel.export_trajectory(20);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if !proposals
+        .iter()
+        .any(|proposal| proposal.kind == ProposalKind::Ghost)
+    {
+        errors.push("fixture did not create ghost proposal".to_string());
+    }
+    if packet.is_none() {
+        errors.push("missing GhostWriting task packet trace".to_string());
+    }
+    if !packet.is_some_and(|packet| packet.foundation_complete) {
+        errors.push("task packet foundation coverage is incomplete".to_string());
+    }
+    if !packet.is_some_and(|packet| {
+        packet.required_context_count >= 3
+            && packet.belief_count >= 1
+            && packet.success_criteria_count >= 2
+            && packet.max_side_effect_level == "ProviderCall"
+    }) {
+        errors.push("task packet lacks context, beliefs, criteria, or tool boundary".to_string());
+    }
+    if !lines
+        .iter()
+        .any(|line| line.contains("\"eventType\":\"writer.task_packet\""))
+    {
+        errors.push("trajectory export lacks writer.task_packet event".to_string());
+    }
+    if !lines
+        .iter()
+        .filter(|line| line.contains("\"eventType\":\"writer.task_packet\""))
+        .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+    {
+        errors.push("task packet trajectory event is not valid json".to_string());
+    }
+
+    eval_result(
+        "writer_agent:task_packet_trace_export",
+        format!(
+            "taskPackets={} events={}",
+            trace.task_packets.len(),
+            export.event_count
+        ),
+        errors,
+    )
+}
+
 fn run_context_recall_tracking_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -2440,6 +2533,7 @@ fn main() {
     results.push(run_story_debt_priority_eval());
     results.push(run_guard_trace_evidence_eval());
     results.push(run_trajectory_export_eval());
+    results.push(run_task_packet_trace_eval());
     results.push(run_context_recall_tracking_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();

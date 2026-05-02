@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::kernel::{
     WriterAgentTraceSnapshot, WriterFeedbackTrace, WriterObservationTrace, WriterProposalTrace,
+    WriterTaskPacketTrace,
 };
 use super::memory::ContextRecallSummary;
 
@@ -66,6 +67,23 @@ pub fn export_trace_snapshot(
                 event_type: "writer.observation",
                 ts_ms: observation.created_at,
                 data: observation,
+            },
+        );
+    }
+    for task_packet in &snapshot.task_packets {
+        seq += 1;
+        push_event(
+            &mut lines,
+            TrajectoryEvent {
+                trace_schema: TRAJECTORY_SCHEMA,
+                schema_version: SCHEMA_VERSION,
+                trace_id: &trace_id,
+                project_id,
+                session_id,
+                seq,
+                event_type: "writer.task_packet",
+                ts_ms: task_packet.packet.created_at_ms,
+                data: task_packet,
             },
         );
     }
@@ -168,6 +186,7 @@ fn push_event<T: Serialize>(lines: &mut Vec<String>, event: TrajectoryEvent<'_, 
 #[allow(dead_code)]
 fn _assert_trace_types(
     _observation: &WriterObservationTrace,
+    _task_packet: &WriterTaskPacketTrace,
     _proposal: &WriterProposalTrace,
     _feedback: &WriterFeedbackTrace,
     _recall: &ContextRecallSummary,
@@ -188,6 +207,7 @@ mod tests {
                 chapter_title: Some("Chapter-1".to_string()),
                 paragraph_snippet: "林墨停下。".to_string(),
             }],
+            task_packets: Vec::new(),
             recent_proposals: Vec::new(),
             recent_feedback: vec![WriterFeedbackTrace {
                 proposal_id: "prop_1".to_string(),
