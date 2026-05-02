@@ -824,9 +824,67 @@ export interface WriterAgentLedgerSnapshot {
 
 export interface WriterAgentTraceSnapshot {
   recentObservations: WriterObservationTrace[];
+  taskPackets: WriterTaskPacketTrace[];
   recentProposals: WriterProposalTrace[];
   recentFeedback: WriterFeedbackTrace[];
   contextRecalls: ContextRecallSummary[];
+}
+
+export interface WriterTaskPacketTrace {
+  id: string;
+  observationId: string;
+  task: string;
+  objective: string;
+  scope: string;
+  intent?: string;
+  requiredContextCount: number;
+  beliefCount: number;
+  successCriteriaCount: number;
+  maxSideEffectLevel: string;
+  feedbackCheckpointCount: number;
+  foundationComplete: boolean;
+  packet: TaskPacket;
+}
+
+export interface TaskPacket {
+  id: string;
+  objective: string;
+  scope: string;
+  scopeRef?: string;
+  intent?: "chat" | "retrieve_knowledge" | "analyze_text" | "generate_content" | "execute_plan" | "linter";
+  constraints: string[];
+  successCriteria: string[];
+  beliefs: TaskBelief[];
+  requiredContext: RequiredContext[];
+  toolPolicy: ToolPolicyContract;
+  feedback: FeedbackContract;
+  createdAtMs: number;
+}
+
+export interface TaskBelief {
+  subject: string;
+  statement: string;
+  confidence: number;
+  source?: string;
+}
+
+export interface RequiredContext {
+  sourceType: string;
+  purpose: string;
+  maxChars: number;
+  required: boolean;
+}
+
+export interface ToolPolicyContract {
+  maxSideEffectLevel: AgentToolDescriptor["sideEffectLevel"];
+  allowApprovalRequired: boolean;
+  requiredToolTags: string[];
+}
+
+export interface FeedbackContract {
+  expectedSignals: string[];
+  checkpoints: string[];
+  memoryWrites: string[];
 }
 
 export interface WriterObservationTrace {

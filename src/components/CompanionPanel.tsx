@@ -247,11 +247,50 @@ function sourceBudgetClass(truncated: boolean): string {
   return truncated ? "text-accent" : "text-text-muted";
 }
 
+function latestTaskPacket(trace: WriterAgentTraceSnapshot | null) {
+  return trace?.taskPackets?.[0];
+}
+
+function guardModeLabel(
+  trace: WriterAgentTraceSnapshot | null,
+  storyDebt: StoryDebtSnapshot | null,
+  isAgentThinking: boolean,
+): string {
+  if (isAgentThinking) return "checking";
+  if ((storyDebt?.openCount ?? 0) > 0) return "watching";
+  if (latestTaskPacket(trace)?.foundationComplete) return "aligned";
+  return "quiet";
+}
+
+function guardModeTone(
+  trace: WriterAgentTraceSnapshot | null,
+  storyDebt: StoryDebtSnapshot | null,
+  isAgentThinking: boolean,
+): SecondBrainTone {
+  if (isAgentThinking) return "accent";
+  if ((storyDebt?.canonRiskCount ?? 0) > 0 || (storyDebt?.missionCount ?? 0) > 0) return "danger";
+  if ((storyDebt?.openCount ?? 0) > 0) return "accent";
+  if (latestTaskPacket(trace)?.foundationComplete) return "success";
+  return "neutral";
+}
+
+function guardModeDetail(trace: WriterAgentTraceSnapshot | null, storyDebt: StoryDebtSnapshot | null): string {
+  const packet = latestTaskPacket(trace);
+  const debtCount = storyDebt?.openCount ?? 0;
+  if (debtCount > 0) return `${debtCount} story guard item${debtCount === 1 ? "" : "s"} need attention.`;
+  if (packet) {
+    return `${packet.task} guard is using ${packet.requiredContextCount} context anchors and ${packet.beliefCount} beliefs.`;
+  }
+  return "No active guard item. Keep writing.";
+}
+
 function buildSecondBrainItems(
   ledger: WriterAgentLedgerSnapshot | null,
   storyDebt: StoryDebtSnapshot | null,
   proposals: AgentProposal[],
   currentChapter: string,
+  trace: WriterAgentTraceSnapshot | null,
+  isAgentThinking: boolean,
 ): SecondBrainItem[] {
   const contractDebt = firstDebt(storyDebt, ["story_contract"]);
   const missionDebt = firstDebt(storyDebt, ["chapter_mission"]);
@@ -416,7 +455,13 @@ function buildSecondBrainItems(
       )
     : "Save a chapter to turn actual written outcomes into future context.";
 
-  return [
+  const allItems: SecondBrainItem[] = [
+    {
+      label: "Agent Guard",
+      value: guardModeLabel(trace, storyDebt, isAgentThinking),
+      detail: guardModeDetail(trace, storyDebt),
+      tone: guardModeTone(trace, storyDebt, isAgentThinking),
+    },
     {
       label: "Book Contract",
       value: contractValue,
@@ -460,6 +505,19 @@ function buildSecondBrainItems(
       tone: pacingDebt || arcProposal ? "accent" : "success",
     },
   ];
+  const priority = new Map<string, number>([
+    ["Agent Guard", 100],
+    ["Chapter Mission", missionDebt ? 95 : 70],
+    ["Open Promise", openPromise || promiseDebt ? 90 : 45],
+    ["Canon Risk", canonRisk ? 85 : 40],
+    ["Book Contract", contractDebt ? 80 : hasStoryContract ? 35 : 75],
+    ["Scene Goal", sceneGoal || nextBeat ? 65 : 30],
+    ["Arc / Pacing", pacingDebt || arcProposal ? 60 : 20],
+    ["Last Result", latestResult ? 25 : 15],
+  ]);
+  return allItems
+    .sort((left, right) => (priority.get(right.label) ?? 0) - (priority.get(left.label) ?? 0))
+    .slice(0, 5);
 }
 
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
@@ -775,10 +833,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     storyDebt,
     pendingProposals,
     currentChapter,
+    trace,
+    isAgentThinking,
   );
-  const latestContextTrace = latestContextProposal(trace);
-  const latestContextBudget = latestContextTrace?.contextBudget;
-  const latestContextTone = contextBudgetTone(trace);
   const availableTabs =
     mode === "write"
       ? (["status", "promises", "canon"] as const)
@@ -800,13 +857,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       <div className="px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center justify-between mb-2">
           <span className="font-display text-sm tracking-wider text-text-primary">
-            {mode === "write" ? "Story Guard" : mode === "review" ? "Story Review" : "Explore Context"}
+            {mode === "write" ? "Writing Companion" : mode === "review" ? "Story Review" : "Agent Evidence"}
           </span>
           <span className={`w-2 h-2 rounded-full ${
             isAgentThinking ? "bg-accent animate-pulse" : "bg-success"
           }`} />
         </div>
-        {status && (
+        {status && mode !== "write" && (
           <div className="grid grid-cols-2 gap-2 text-xs text-text-muted">
             <div>
               <span className="block text-text-secondary">Observations</span>
@@ -866,7 +923,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             {mode === "write" && (
               <div className="p-2 rounded bg-bg-raised border border-border-subtle text-xs text-text-muted">
-                Write mode keeps the agent quiet. Only urgent story-truth issues surface here.
+                The companion stays quiet unless story truth, chapter intent, or an open promise needs attention.
               </div>
             )}
             {operationError && (
@@ -876,7 +933,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-medium text-text-secondary">Second Brain</span>
+                <span className="font-medium text-text-secondary">What It Is Guarding</span>
                 <span className="text-[10px] text-text-muted">
                   {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
                 </span>
@@ -902,39 +959,49 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 ))}
               </div>
             </div>
-            <div className={`rounded border p-2 text-xs ${secondBrainToneClass(latestContextTone)}`}>
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="text-[10px] uppercase tracking-wide text-text-muted">
-                  Context Engine
-                </span>
-                <span className="font-mono text-[10px] text-text-muted">
-                  {latestContextTrace?.kind ?? "idle"}
-                </span>
+            {mode !== "write" && (
+              <div className={`rounded border p-2 text-xs ${secondBrainToneClass(contextBudgetTone(trace))}`}>
+                {(() => {
+                  const latestContextTrace = latestContextProposal(trace);
+                  const latestContextBudget = latestContextTrace?.contextBudget;
+                  return (
+                    <>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                          Evidence Trace
+                        </span>
+                        <span className="font-mono text-[10px] text-text-muted">
+                          {latestContextTrace?.kind ?? "idle"}
+                        </span>
+                      </div>
+                      <div className={`font-medium ${secondBrainValueClass(contextBudgetTone(trace))}`}>
+                        {formatContextBudgetValue(latestContextTrace)}
+                      </div>
+                      <div className="mt-1 text-[10px] leading-snug text-text-secondary">
+                        {formatContextBudgetDetail(latestContextTrace)}
+                      </div>
+                      {latestContextBudget && (
+                        <div className="mt-2 space-y-1">
+                          {latestContextBudget.sourceReports.slice(0, 4).map((source) => (
+                            <div
+                              key={`${latestContextTrace.id}-${source.source}`}
+                              className="flex items-center justify-between gap-2 rounded bg-bg-deep px-1.5 py-1"
+                            >
+                              <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
+                                {source.source}
+                              </span>
+                              <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                                {source.provided}/{source.requested}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
-              <div className={`font-medium ${secondBrainValueClass(latestContextTone)}`}>
-                {formatContextBudgetValue(latestContextTrace)}
-              </div>
-              <div className="mt-1 text-[10px] leading-snug text-text-secondary">
-                {formatContextBudgetDetail(latestContextTrace)}
-              </div>
-              {latestContextBudget && (
-                <div className="mt-2 space-y-1">
-                  {latestContextBudget.sourceReports.slice(0, 4).map((source) => (
-                    <div
-                      key={`${latestContextTrace.id}-${source.source}`}
-                      className="flex items-center justify-between gap-2 rounded bg-bg-deep px-1.5 py-1"
-                    >
-                      <span className={`truncate ${sourceBudgetClass(source.truncated)}`} title={source.source}>
-                        {source.source}
-                      </span>
-                      <span className="shrink-0 font-mono text-[10px] text-text-muted">
-                        {source.provided}/{source.requested}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
             <div className="text-xs text-text-muted">
               <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
               <div className="p-2 rounded bg-bg-raised border border-border-subtle">
@@ -1382,9 +1449,48 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         {effectiveTab === "audit" && (
           <div className="space-y-2 text-xs">
             {(trace?.recentProposals.length ?? 0) === 0 &&
+              (trace?.taskPackets.length ?? 0) === 0 &&
               (ledger?.memoryAudit.length ?? 0) === 0 &&
               (trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) === 0 && (
               <p className="text-text-muted">No agent audit events yet.</p>
+            )}
+            {(trace?.taskPackets.length ?? 0) > 0 && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Why It Spoke</span>
+                  <span className="text-[10px] text-text-muted">
+                    {trace?.taskPackets.length ?? 0} packets
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {trace?.taskPackets.slice(0, 4).map((packet) => (
+                    <div key={packet.id} className="rounded border border-border-subtle bg-bg-deep p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-text-secondary" title={packet.objective}>
+                          {packet.task} · {packet.foundationComplete ? "grounded" : "partial"}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                          {packet.requiredContextCount} ctx · {packet.beliefCount} beliefs
+                        </span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[10px] text-text-muted">
+                        {packet.objective}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          {packet.scope}
+                        </span>
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          {packet.maxSideEffectLevel}
+                        </span>
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          {packet.feedbackCheckpointCount} checks
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {((trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) > 0) && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
