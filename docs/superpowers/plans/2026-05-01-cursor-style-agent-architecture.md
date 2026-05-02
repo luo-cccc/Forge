@@ -1,5 +1,7 @@
 # Cursor-Style Co-Writing Agent — Foundation-First Architecture Plan
 
+> Status note: this is a historical implementation plan. Some phase items have since been completed or superseded. See `docs/project-status.md` for the active project status, cleanup policy, and remaining gaps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a rock-solid agent runtime foundation (provider abstraction → tool loop → compaction → memory → permission → PTC) before touching any editor UI. All four reference agents mined for architecture, algorithms, and patterns. Editor integration (patch review, ghost text, inline commands) goes on top only after the foundation passes full test coverage.

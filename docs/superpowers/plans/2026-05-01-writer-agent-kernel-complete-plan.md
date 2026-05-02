@@ -1,5 +1,7 @@
 # Cursor-Style Writer Agent Kernel — Complete Foundation Plan
 
+> Status note: this is a historical foundation plan. Some "current state" bullets have since been completed or superseded. See `docs/project-status.md` for the active project status, cleanup policy, and remaining gaps.
+
 ## 0. Product Reframe
 
 Forge is not a writing tool with AI features.
@@ -821,4 +823,3 @@ Avoid these until the foundation is stable:
 The product does not win by writing prettier paragraphs.
 
 It wins by becoming the only system that can hold an entire novel in working memory, protect its truth, understand the writer's current intent, and collaborate without stealing authorship.
-

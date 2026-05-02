@@ -1,57 +1,70 @@
-# Agent-Writer
+# Forge Writer Agent
 
-Agent-Writer is a local AI writing desktop app for long-form fiction. It combines a Tiptap editor, a Tauri/Rust harness, project files, lorebook retrieval, chapter generation, script review, and a lightweight local memory/RAG layer.
+Forge is a local-first, Cursor-style writing agent for long-form fiction. The editor is the surface; the product is the persistent co-writer underneath it: a project-aware agent that observes the manuscript, remembers creative decisions, protects continuity, proposes typed operations, and learns from author feedback.
 
-## Stack
+## Product Positioning
 
-- Desktop shell: Tauri 2
-- Frontend: React, TypeScript, Vite, Tailwind CSS, Zustand, Tiptap
-- Backend: Rust workspace with `src-tauri` and `agent-harness-core`
-- Storage: local app data files, SQLite via `rusqlite`, JSON vector store
-- LLM API: OpenAI-compatible chat completions and embeddings endpoints
+Forge is not a generic writing tool with AI buttons. It is meant to become a writing partner:
 
-## Main Features
+- A second brain for the book: canon, promises, chapter missions, decisions, and style memory stay available across sessions.
+- A second novelist at the desk: the agent can continue, warn, draft, revise, and explain why.
+- A quiet companion: the default right rail shows the few things the agent is guarding, not a noisy chat transcript.
+- A Cursor-like workflow for prose: observations become proposals, proposals become inspectable operations, and feedback feeds the next turn.
 
-- Multi-chapter writing workspace with auto-save.
-- Tiptap rich-text editor with inline AI commands.
-- Agent side panel with streaming responses.
-- Action tags for editor operations: insert, replace, and lorebook search.
-- Lorebook for characters, locations, and world details.
-- Outline/beat sheet with background chapter generation.
-- Script Doctor review with inline highlighted comments.
-- Project Brain RAG over saved chapter chunks.
-- Entity graph, storyboard, and pacing analysis views.
-- Hermes-inspired memory for interaction history and learned writing rules.
-- API key storage through the OS keychain and diagnostic log export.
-
-## Project Layout
+## Current Architecture
 
 ```text
-.
-├─ src/                    React frontend
-│  ├─ components/          App panels and views
-│  ├─ extensions/          Tiptap marks
-│  ├─ App.tsx              Three-column application shell
-│  └─ store.ts             Zustand state
-├─ src-tauri/              Tauri app and product-specific Rust commands
-├─ agent-harness-core/     Shared Rust harness modules
-├─ public/                 Static frontend assets
-└─ docs/P*.md              Phase development plans outside this repo
+src/                         React + Tiptap writing surfaces
+  App.tsx                    Three-column shell and chapter switching
+  components/                Editor, companion panel, outline, lore, review views
+  extensions/                Tiptap marks/plugins for ghost text, previews, lint, anchors
+  protocol.ts                Tauri command/event and agent protocol types
+
+src-tauri/                   Product-specific Tauri backend
+  src/lib.rs                 Command bridge, orchestration, event emission
+  src/writer_agent/          Writer Agent Kernel
+  src/chapter_generation.rs  Autonomous chapter generation and save protection
+  src/storage.rs             Local project storage and bounded backups
+
+agent-harness-core/          Reusable agent runtime foundation
+  provider/                  OpenAI-compatible provider abstraction
+  agent_loop.rs              Tool-calling loop
+  compaction.rs              Context compaction
+  task_packet.rs             Five-axis task contract
+  tool_registry.rs           Tool inventory and side-effect policy
+
+agent-evals/                 Regression evals for writer-agent behavior
+docs/                        Architecture plans and project status
+scripts/                     Local static checks
 ```
 
-## Configuration
+## Foundation Features
 
-The app first tries to read the OpenAI-compatible API key from the OS keychain under provider `openai`. It can also fall back to `OPENAI_API_KEY` from the environment.
+- `TaskPacket` contract for core agent actions: objective, context, beliefs, tool policy, success criteria, and feedback checkpoints.
+- Story Contract / Book Contract context for genre, reader promise, main conflict, boundaries, and tone.
+- Chapter Mission tracking for what the current chapter must advance, include, avoid, and resolve.
+- Result Feedback Loop on save: chapter summaries, state changes, new/settled promises, conflicts, and next-beat handoff.
+- Promise Ledger for unresolved topics, emotional debt, object whereabouts, and payoff expectations.
+- Companion Panel quiet mode: current guard state, chapter mission, open promises, canon risk, arc/pacing, and next step.
+- Typed `WriterOperation` flow for text, canon, promise, style, story contract, chapter mission, and outline changes.
+- Effective Tool Inventory and allowlist filtering so model-visible tools respect side-effect limits.
+- Trajectory export as JSONL for observations, proposals, feedback, task packets, and state snapshots.
 
-Optional environment variables:
+## Local Storage And Secrets
+
+- Chapters, outline, lorebook, project brain, and writer memory live in local app data.
+- API keys are stored through the OS keychain under provider `openai`; the renderer only checks whether a key exists.
+- The app can also read `OPENAI_API_KEY` from the environment for development.
+- Production CSP is restrictive; Vite localhost and `unsafe-eval` are only present in `devCsp`.
+- `reports/`, `dist/`, `target/`, `node_modules/`, `.env`, and worktrees are local/generated and ignored.
+
+Optional provider environment variables:
 
 ```text
 OPENAI_API_KEY=...
-OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_BASE=https://openrouter.ai/api/v1
+OPENAI_MODEL=deepseek/deepseek-v4-flash
 ```
-
-Embedding currently uses `text-embedding-3-small`.
 
 ## Development
 
@@ -79,34 +92,57 @@ Build the frontend:
 npm run build
 ```
 
-Check Rust workspace:
-
-```powershell
-cargo check --workspace
-```
-
-Run tests:
-
-```powershell
-cargo test --workspace
-```
-
-Lint frontend:
+Run frontend lint:
 
 ```powershell
 npm run lint
 ```
 
-## Current Architecture Notes
+Run the P2 companion-surface guard:
 
-The repository has already been split into a Rust workspace, but `src-tauri/src/lib.rs` still contains much of the product-specific orchestration. `agent-harness-core` holds reusable pieces such as action parsing, config types, memory, routing, planner types, and vector search.
+```powershell
+npm run check:p2
+```
 
-The current protocol still uses Tauri invoke commands and event streams. Frontend action handling is intentionally simple and XML tag based, with tags such as `<ACTION_INSERT>...</ACTION_INSERT>`.
+Run Rust tests:
 
-## Known Gaps
+```powershell
+cargo test -p agent-writer
+```
 
-- The Tauri backend needs further modularization.
-- Event names and command names should be centralized.
-- Planner/DAG execution is not yet fully wired into the main agent loop.
-- Hierarchical summaries have storage support but not a complete generation pipeline.
-- Storyboard physical file reordering needs a safer persistence model.
+Run writer-agent evals:
+
+```powershell
+cargo run -p agent-evals
+```
+
+## Verification Baseline
+
+Before pushing foundation changes, run:
+
+```powershell
+npm run lint
+npm run build
+npm run check:p2
+cargo test -p agent-writer
+cargo run -p agent-evals
+git diff --check
+```
+
+Expected current baseline:
+
+- `cargo test -p agent-writer`: 147 tests passing
+- `cargo run -p agent-evals`: 46/46 evals passing
+- `npm run check:p2`: 8/8 checks passing
+
+## Current Engineering Priorities
+
+P0/P1 foundation work comes before new UI:
+
+- Keep manuscript persistence transactional: dirty state, chapter switching, autosave, and accepted feedback must not diverge.
+- Keep the Writer Agent Kernel as the owner of agent intelligence; the frontend renders observations and proposals.
+- Keep all model actions typed and reviewable through `WriterOperation`.
+- Keep memory grounded in author feedback and saved manuscript results.
+- Keep generated reports and build outputs out of git.
+
+See [Project Status](docs/project-status.md) for the latest architecture state and remaining gaps.

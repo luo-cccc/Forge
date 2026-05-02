@@ -3,6 +3,7 @@ logs
 *.log
 smoke-*.png
 reports/
+**/reports/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -13,6 +14,7 @@ node_modules
 dist
 src-tauri/target
 target
+src-tauri/Cargo.lock
 .env
 dist-ssr
 *.local
