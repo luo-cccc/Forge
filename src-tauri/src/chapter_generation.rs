@@ -1,4 +1,7 @@
-use agent_harness_core::VectorDB;
+use agent_harness_core::{
+    FeedbackContract, Intent, RequiredContext, TaskBelief, TaskPacket, TaskScope,
+    ToolPolicyContract, ToolSideEffectLevel, VectorDB,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{llm_runtime, storage};
@@ -787,6 +790,190 @@ pub fn build_chapter_context(
     })
 }
 
+pub fn build_chapter_generation_task_packet(
+    project_id: &str,
+    session_id: &str,
+    context: &BuiltChapterContext,
+    user_instruction: &str,
+    created_at_ms: u64,
+) -> TaskPacket {
+    let instruction = user_instruction.trim();
+    let instruction_summary = if instruction.is_empty() {
+        "Draft the target chapter from the built chapter context.".to_string()
+    } else {
+        snippet_text(instruction, 180)
+    };
+    let target_title = snippet_text(&context.target.title, 180);
+    let objective = snippet_text(
+        &format!(
+            "Draft '{}' from the chapter generation context. Instruction: {}",
+            target_title, instruction_summary
+        ),
+        560,
+    );
+    let mut packet = TaskPacket::new(
+        format!("{}:{}:ChapterGeneration", session_id, context.request_id),
+        objective,
+        TaskScope::Chapter,
+        created_at_ms,
+    );
+    packet.scope_ref = Some(context.target.title.clone());
+    packet.intent = Some(Intent::GenerateContent);
+    packet.constraints = vec![
+        "Preserve established canon unless the author explicitly approves a change.".to_string(),
+        "Respect the book contract, chapter mission, outline beat, and known promise ledger."
+            .to_string(),
+        "Generate chapter prose only; no analysis, markdown fences, or meta commentary."
+            .to_string(),
+        "Saving generated content must pass revision/conflict checks before overwriting chapters."
+            .to_string(),
+    ];
+    packet.success_criteria = vec![
+        "Generated prose passes non-empty and output-size validation.".to_string(),
+        "Context sources include the instruction plus chapter/continuity memory before drafting."
+            .to_string(),
+        "Save completes, or a concrete save conflict is surfaced to the author.".to_string(),
+        "Chapter result feedback can be recorded after a successful save.".to_string(),
+    ];
+    packet.beliefs = chapter_context_beliefs(context, project_id);
+    packet.required_context = chapter_required_context(context);
+    packet.tool_policy = ToolPolicyContract {
+        max_side_effect_level: ToolSideEffectLevel::Write,
+        allow_approval_required: true,
+        required_tool_tags: vec!["generation".to_string()],
+    };
+    packet.feedback = FeedbackContract {
+        expected_signals: vec![
+            PHASE_CONTEXT_BUILT.to_string(),
+            PHASE_COMPLETED.to_string(),
+            PHASE_CONFLICT.to_string(),
+            "chapter_result_summary".to_string(),
+        ],
+        checkpoints: vec![
+            "record chapter generation context sources".to_string(),
+            "validate generated content before save".to_string(),
+            "check target revision before overwrite".to_string(),
+            "record result feedback after successful save".to_string(),
+        ],
+        memory_writes: vec![
+            "chapter_result_summary".to_string(),
+            "outline_status".to_string(),
+        ],
+    };
+    packet
+}
+
+fn chapter_context_beliefs(context: &BuiltChapterContext, project_id: &str) -> Vec<TaskBelief> {
+    let mut beliefs = context
+        .sources
+        .iter()
+        .filter(|source| source.included_chars > 0)
+        .take(8)
+        .map(|source| {
+            let mut statement = format!(
+                "{} contributes {} chars",
+                source.label, source.included_chars
+            );
+            if source.truncated {
+                statement.push_str(" after truncation");
+            }
+            TaskBelief::new(
+                source.source_type.clone(),
+                statement,
+                chapter_source_confidence(&source.source_type),
+            )
+            .with_source(source.id.clone())
+        })
+        .collect::<Vec<_>>();
+
+    if beliefs.is_empty() {
+        beliefs.push(
+            TaskBelief::new(
+                "chapter_generation_context",
+                format!(
+                    "{} has no explicit context sources; fall back to project {}.",
+                    context.target.title, project_id
+                ),
+                0.5,
+            )
+            .with_source(context.request_id.clone()),
+        );
+    }
+
+    beliefs
+}
+
+fn chapter_required_context(context: &BuiltChapterContext) -> Vec<RequiredContext> {
+    let mut required_context = context
+        .sources
+        .iter()
+        .take(12)
+        .map(|source| {
+            RequiredContext::new(
+                source.source_type.clone(),
+                chapter_source_purpose(&source.source_type),
+                source.included_chars.max(1),
+                is_required_chapter_source(&source.source_type),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if !required_context
+        .iter()
+        .any(|context| context.required && !context.source_type.trim().is_empty())
+    {
+        required_context.push(RequiredContext::new(
+            "chapter_generation_context",
+            "Fallback chapter context required to draft safely.",
+            1,
+            true,
+        ));
+    }
+
+    required_context
+}
+
+fn is_required_chapter_source(source_type: &str) -> bool {
+    matches!(
+        source_type,
+        "instruction"
+            | "outline"
+            | "target_beat"
+            | "previous_chapters"
+            | "lorebook"
+            | "project_brain"
+    )
+}
+
+fn chapter_source_purpose(source_type: &str) -> &'static str {
+    match source_type {
+        "instruction" => "Capture the author's explicit generation request.",
+        "outline" => "Keep the draft aligned with the book-level beat sheet.",
+        "target_beat" => "Preserve the target chapter mission and planned payoff.",
+        "previous_chapters" => "Maintain continuity from recent chapter outcomes.",
+        "next_chapter" => "Avoid blocking the next planned beat.",
+        "target_existing_text" => "Respect any existing prose already in the target chapter.",
+        "lorebook" => "Ground character, setting, and canon details.",
+        "project_brain" => "Recall relevant long-range project memory.",
+        "user_profile" => "Preserve learned author style preferences.",
+        _ => "Provide supporting context for chapter generation.",
+    }
+}
+
+fn chapter_source_confidence(source_type: &str) -> f32 {
+    match source_type {
+        "instruction" | "target_beat" => 0.92,
+        "outline" | "lorebook" => 0.88,
+        "previous_chapters" | "project_brain" => 0.78,
+        "next_chapter" | "target_existing_text" | "user_profile" => 0.70,
+        _ => 0.60,
+    }
+}
+
+fn snippet_text(text: &str, limit: usize) -> String {
+    text.chars().take(limit).collect()
+}
+
 pub async fn generate_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
@@ -1006,6 +1193,7 @@ pub async fn run_chapter_generation_pipeline(
     payload: GenerateChapterAutonomousPayload,
     user_profile_entries: Vec<String>,
     mut emit: impl FnMut(ChapterGenerationEvent) + Send,
+    mut record_task_packet: impl FnMut(&BuiltChapterContext) + Send,
 ) -> PipelineTerminal {
     let request_id = payload
         .request_id
@@ -1038,6 +1226,8 @@ pub async fn run_chapter_generation_pipeline(
             return PipelineTerminal::Failed(error);
         }
     };
+
+    record_task_packet(&context);
 
     emit(ChapterGenerationEvent {
         request_id: request_id.clone(),

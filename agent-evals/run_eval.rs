@@ -1,6 +1,10 @@
 //! Evaluation harness for the real Writer Agent Kernel.
 //! These are product-behavior checks, not mirror implementations.
 
+use agent_writer_lib::chapter_generation::{
+    build_chapter_generation_task_packet, BuiltChapterContext, ChapterContextBudgetReport,
+    ChapterContextSource, ChapterTarget,
+};
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::intent::{AgentBehavior, IntentEngine, WritingIntent};
@@ -914,6 +918,145 @@ fn run_task_packet_foundation_eval() -> EvalResult {
             coverage.is_complete(),
             packet.required_context.len(),
             packet.beliefs.len()
+        ),
+        errors,
+    )
+}
+
+fn run_chapter_generation_task_packet_eval() -> EvalResult {
+    let context = BuiltChapterContext {
+        request_id: "chapter-eval-1".to_string(),
+        target: ChapterTarget {
+            title: "Chapter-7".to_string(),
+            filename: "chapter-7.md".to_string(),
+            number: Some(7),
+            summary: "林墨逼问玉佩来源，但不能提前揭露幕后主使。".to_string(),
+            status: "draft".to_string(),
+        },
+        base_revision: "rev-7".to_string(),
+        prompt_context: "User instruction\nOutline / beat sheet\nRelevant lorebook entries"
+            .to_string(),
+        sources: vec![
+            ChapterContextSource {
+                source_type: "instruction".to_string(),
+                id: "user-instruction".to_string(),
+                label: "User instruction".to_string(),
+                original_chars: 40,
+                included_chars: 40,
+                truncated: false,
+                score: None,
+            },
+            ChapterContextSource {
+                source_type: "target_beat".to_string(),
+                id: "Chapter-7".to_string(),
+                label: "Current chapter beat".to_string(),
+                original_chars: 80,
+                included_chars: 80,
+                truncated: false,
+                score: None,
+            },
+            ChapterContextSource {
+                source_type: "lorebook".to_string(),
+                id: "lorebook.json".to_string(),
+                label: "Relevant lorebook entries".to_string(),
+                original_chars: 800,
+                included_chars: 500,
+                truncated: true,
+                score: Some(0.86),
+            },
+            ChapterContextSource {
+                source_type: "project_brain".to_string(),
+                id: "project_brain.json".to_string(),
+                label: "Project Brain relevant chunks".to_string(),
+                original_chars: 600,
+                included_chars: 450,
+                truncated: false,
+                score: Some(0.74),
+            },
+        ],
+        budget: ChapterContextBudgetReport {
+            max_chars: 24_000,
+            included_chars: 1_070,
+            source_count: 4,
+            truncated_source_count: 1,
+            warnings: vec![],
+        },
+        warnings: vec![],
+    };
+    let packet = build_chapter_generation_task_packet(
+        "eval-project",
+        "eval-session",
+        &context,
+        "帮我写这一章完整初稿，重点是审讯张力。",
+        now_ms(),
+    );
+
+    let mut errors = Vec::new();
+    if let Err(error) = packet.validate() {
+        errors.extend(error.errors().iter().cloned());
+    }
+    let coverage = packet.foundation_coverage();
+    if !coverage.is_complete() {
+        errors.push(format!(
+            "foundation coverage incomplete: {:?}",
+            coverage.missing
+        ));
+    }
+    if packet.scope != agent_harness_core::TaskScope::Chapter {
+        errors.push(format!("scope mismatch: {:?}", packet.scope));
+    }
+    if packet.intent != Some(agent_harness_core::Intent::GenerateContent) {
+        errors.push(format!("intent mismatch: {:?}", packet.intent));
+    }
+    if packet.tool_policy.max_side_effect_level != agent_harness_core::ToolSideEffectLevel::Write {
+        errors.push(format!(
+            "side effect ceiling mismatch: {:?}",
+            packet.tool_policy.max_side_effect_level
+        ));
+    }
+    if !packet.tool_policy.allow_approval_required {
+        errors
+            .push("chapter generation packet must allow approval-required save tools".to_string());
+    }
+    if !packet
+        .required_context
+        .iter()
+        .any(|context| context.source_type == "target_beat" && context.required)
+    {
+        errors.push("target beat is not marked as required context".to_string());
+    }
+    if !packet
+        .required_context
+        .iter()
+        .any(|context| context.source_type == "lorebook" && context.required)
+    {
+        errors.push("lorebook is not marked as required context".to_string());
+    }
+    if !packet
+        .feedback
+        .checkpoints
+        .iter()
+        .any(|checkpoint| checkpoint.contains("revision"))
+    {
+        errors.push("feedback checkpoints do not include save conflict/revision guard".to_string());
+    }
+    if !packet
+        .feedback
+        .memory_writes
+        .iter()
+        .any(|write| write == "chapter_result_summary")
+    {
+        errors.push("feedback contract does not write chapter result summary".to_string());
+    }
+
+    eval_result(
+        "writer_agent:chapter_generation_task_packet_foundation",
+        format!(
+            "coverageComplete={} requiredContext={} beliefs={} sideEffect={:?}",
+            coverage.is_complete(),
+            packet.required_context.len(),
+            packet.beliefs.len(),
+            packet.tool_policy.max_side_effect_level
         ),
         errors,
     )
@@ -2508,6 +2651,7 @@ fn main() {
     results.push(run_tool_permission_guard_eval());
     results.push(run_effective_tool_inventory_eval());
     results.push(run_task_packet_foundation_eval());
+    results.push(run_chapter_generation_task_packet_eval());
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());

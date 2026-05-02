@@ -1748,6 +1748,15 @@ impl WriterAgentKernel {
         )
     }
 
+    pub fn record_task_packet(
+        &mut self,
+        observation_id: impl Into<String>,
+        task: impl Into<String>,
+        packet: TaskPacket,
+    ) {
+        self.push_task_packet_trace(observation_id.into(), task.into(), packet);
+    }
+
     fn record_task_packet_for(
         &mut self,
         task: AgentTask,
@@ -1765,11 +1774,15 @@ impl WriterAgentKernel {
             objective,
             success_criteria,
         );
+        self.push_task_packet_trace(observation.id.clone(), format!("{:?}", task), packet);
+    }
+
+    fn push_task_packet_trace(&mut self, observation_id: String, task: String, packet: TaskPacket) {
         let coverage = packet.foundation_coverage();
         self.task_packets.push(WriterTaskPacketTrace {
             id: packet.id.clone(),
-            observation_id: observation.id.clone(),
-            task: format!("{:?}", task),
+            observation_id,
+            task,
             objective: packet.objective.clone(),
             scope: packet.scope_label(),
             intent: packet.intent.as_ref().map(|intent| format!("{:?}", intent)),

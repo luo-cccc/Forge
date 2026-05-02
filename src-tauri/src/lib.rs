@@ -11,7 +11,7 @@ use agent_harness_core::{
 mod agent_runtime;
 mod ambient_agents;
 mod brain_service;
-mod chapter_generation;
+pub mod chapter_generation;
 mod llm_runtime;
 mod storage;
 mod tool_bridge;
@@ -1627,6 +1627,8 @@ async fn batch_generate_chapter(
             save_mode: SaveMode::ReplaceIfClean,
             chapter_summary_override: Some(summary),
         };
+        let user_instruction = payload.user_instruction.clone();
+        let trace_app = app_clone.clone();
 
         let terminal = chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
@@ -1635,6 +1637,26 @@ async fn batch_generate_chapter(
             user_profile_entries,
             |event| {
                 let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
+            },
+            move |context| {
+                let state = trace_app.state::<AppState>();
+                let Ok(mut kernel) = state.writer_kernel.lock() else {
+                    return;
+                };
+                {
+                    let packet = chapter_generation::build_chapter_generation_task_packet(
+                        &kernel.project_id,
+                        &kernel.session_id,
+                        context,
+                        &user_instruction,
+                        agent_runtime::now_ms(),
+                    );
+                    kernel.record_task_packet(
+                        context.request_id.clone(),
+                        "ChapterGeneration",
+                        packet,
+                    );
+                }
             },
         )
         .await;
@@ -1702,6 +1724,8 @@ async fn generate_chapter_autonomous(
     let app_clone = app.clone();
 
     tokio::spawn(async move {
+        let user_instruction = payload.user_instruction.clone();
+        let trace_app = app_clone.clone();
         let terminal = chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
             settings,
@@ -1709,6 +1733,26 @@ async fn generate_chapter_autonomous(
             user_profile_entries,
             |event: ChapterGenerationEvent| {
                 let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
+            },
+            move |context| {
+                let state = trace_app.state::<AppState>();
+                let Ok(mut kernel) = state.writer_kernel.lock() else {
+                    return;
+                };
+                {
+                    let packet = chapter_generation::build_chapter_generation_task_packet(
+                        &kernel.project_id,
+                        &kernel.session_id,
+                        context,
+                        &user_instruction,
+                        agent_runtime::now_ms(),
+                    );
+                    kernel.record_task_packet(
+                        context.request_id.clone(),
+                        "ChapterGeneration",
+                        packet,
+                    );
+                }
             },
         )
         .await;
