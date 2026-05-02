@@ -277,11 +277,11 @@ function guardModeTone(
 function guardModeDetail(trace: WriterAgentTraceSnapshot | null, storyDebt: StoryDebtSnapshot | null): string {
   const packet = latestTaskPacket(trace);
   const debtCount = storyDebt?.openCount ?? 0;
-  if (debtCount > 0) return `${debtCount} story guard item${debtCount === 1 ? "" : "s"} need attention.`;
+  if (debtCount > 0) return `${debtCount} story point${debtCount === 1 ? "" : "s"} need protection before the next move.`;
   if (packet) {
-    return `${packet.task} guard is using ${packet.requiredContextCount} context anchors and ${packet.beliefCount} beliefs.`;
+    return "Grounded on the current chapter, memory, and book-level promise.";
   }
-  return "No active guard item. Keep writing.";
+  return "No active risk surfaced.";
 }
 
 function buildSecondBrainItems(
@@ -838,7 +838,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   );
   const availableTabs =
     mode === "write"
-      ? (["status", "promises", "canon"] as const)
+      ? (["status"] as const)
       : mode === "review"
         ? (["queue", "promises", "canon", "decisions", "audit"] as const)
         : (["status", "promises", "canon", "decisions", "audit"] as const);
@@ -886,31 +886,33 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-border-subtle">
-        {availableTabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2 text-xs tracking-wide transition-colors ${
-              effectiveTab === tab
-                ? "text-accent border-b border-accent"
-                : "text-text-muted hover:text-text-secondary"
-            }`}
-          >
-            {tab === "status"
-              ? "状态"
-              : tab === "queue"
-                ? "队列"
-              : tab === "promises"
-                ? "伏笔"
-                : tab === "canon"
-                  ? "设定"
-                  : tab === "decisions"
-                    ? "决策"
-                    : "审计"}
-          </button>
-        ))}
-      </div>
+      {availableTabs.length > 1 && (
+        <div className="flex border-b border-border-subtle">
+          {availableTabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2 text-xs tracking-wide transition-colors ${
+                effectiveTab === tab
+                  ? "text-accent border-b border-accent"
+                  : "text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              {tab === "status"
+                ? "状态"
+                : tab === "queue"
+                  ? "队列"
+                : tab === "promises"
+                  ? "伏笔"
+                  : tab === "canon"
+                    ? "设定"
+                    : tab === "decisions"
+                      ? "决策"
+                      : "审计"}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -921,11 +923,6 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 Agent is in {agentMode} mode. Switch to Proactive for ambient suggestions.
               </div>
             )}
-            {mode === "write" && (
-              <div className="p-2 rounded bg-bg-raised border border-border-subtle text-xs text-text-muted">
-                The companion stays quiet unless story truth, chapter intent, or an open promise needs attention.
-              </div>
-            )}
             {operationError && (
               <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
                 {operationError}
@@ -934,9 +931,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="font-medium text-text-secondary">What It Is Guarding</span>
-                <span className="text-[10px] text-text-muted">
-                  {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
-                </span>
+                {mode !== "write" && (
+                  <span className="text-[10px] text-text-muted">
+                    {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
+                  </span>
+                )}
               </div>
               <div className="grid grid-cols-1 gap-2 2xl:grid-cols-2">
                 {secondBrainItems.map((item) => (
@@ -1002,29 +1001,31 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 })()}
               </div>
             )}
-            <div className="text-xs text-text-muted">
-              <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
-              <div className="p-2 rounded bg-bg-raised border border-border-subtle">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate">{currentChapter || "No chapter loaded"}</span>
+            {mode !== "write" && (
+              <div className="text-xs text-text-muted">
+                <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
+                <div className="p-2 rounded bg-bg-raised border border-border-subtle">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">{currentChapter || "No chapter loaded"}</span>
+                    {chapterBackups.length > 0 && (
+                      <button
+                        onClick={handleRestoreLatestChapterBackup}
+                        className="shrink-0 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent"
+                        title={chapterBackups[0].filename}
+                      >
+                        Restore latest
+                      </button>
+                    )}
+                  </div>
                   {chapterBackups.length > 0 && (
-                    <button
-                      onClick={handleRestoreLatestChapterBackup}
-                      className="shrink-0 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent"
-                      title={chapterBackups[0].filename}
-                    >
-                      Restore latest
-                    </button>
+                    <div className="mt-1 text-[10px] text-text-muted">
+                      {chapterBackups.length} recent backups · latest {formatBytes(chapterBackups[0].bytes)}
+                    </div>
                   )}
                 </div>
-                {chapterBackups.length > 0 && (
-                  <div className="mt-1 text-[10px] text-text-muted">
-                    {chapterBackups.length} recent backups · latest {formatBytes(chapterBackups[0].bytes)}
-                  </div>
-                )}
               </div>
-            </div>
-            {storageDiagnostics && (
+            )}
+            {mode !== "write" && storageDiagnostics && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2 text-xs">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="font-medium text-text-primary">Project Storage</span>
@@ -1113,10 +1114,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       </div>
                     </div>
                     <p className="text-text-muted mb-2">{p.preview}</p>
-                    {p.rationale && (
+                    {mode !== "write" && p.rationale && (
                       <p className="text-text-secondary italic mb-1">{p.rationale}</p>
                     )}
-                    {p.evidence.length > 0 && (
+                    {mode !== "write" && p.evidence.length > 0 && (
                       <div className="mb-2 space-y-1">
                         {p.evidence.map((e, i) => (
                           <div key={i} className="p-1.5 rounded bg-bg-deep border border-border-subtle">
@@ -1126,7 +1127,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                         ))}
                       </div>
                     )}
-                    {primaryOperation(p) && (
+                    {mode !== "write" && primaryOperation(p) && (
                       <div className="mb-2 rounded bg-bg-deep border border-border-subtle p-1.5 text-[10px] text-text-muted">
                         {primaryOperation(p)?.kind}
                         {p.alternatives.length > 1 ? ` · ${p.alternatives.length} branches` : ""}
