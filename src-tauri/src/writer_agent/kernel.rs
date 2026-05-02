@@ -1753,8 +1753,10 @@ impl WriterAgentKernel {
         observation_id: impl Into<String>,
         task: impl Into<String>,
         packet: TaskPacket,
-    ) {
+    ) -> Result<(), String> {
+        packet.validate().map_err(|error| error.to_string())?;
         self.push_task_packet_trace(observation_id.into(), task.into(), packet);
+        Ok(())
     }
 
     fn record_task_packet_for(
@@ -1774,6 +1776,14 @@ impl WriterAgentKernel {
             objective,
             success_criteria,
         );
+        if let Err(error) = packet.validate() {
+            tracing::warn!(
+                "Skipping invalid writer task packet for {:?}: {}",
+                task,
+                error
+            );
+            return;
+        }
         self.push_task_packet_trace(observation.id.clone(), format!("{:?}", task), packet);
     }
 
@@ -4874,6 +4884,63 @@ mod tests {
             .any(|line| line.contains("冲突")));
         assert!(result.new_clues.contains(&"玉佩".to_string()));
         assert!(result.source_ref.contains("chapter_save:第一章:rev-1"));
+    }
+
+    #[test]
+    fn invalid_task_packet_is_rejected_before_trace() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let packet = TaskPacket::new(
+            "bad-packet",
+            "missing foundation fields",
+            TaskScope::Chapter,
+            1,
+        );
+
+        let error = kernel
+            .record_task_packet("obs-1", "ChapterGeneration", packet)
+            .unwrap_err();
+
+        assert!(error.contains("scopeRef"));
+        assert!(kernel.trace_snapshot(10).task_packets.is_empty());
+    }
+
+    #[test]
+    fn save_observation_result_feedback_feeds_next_task_packet() {
+        let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+        let mut kernel = WriterAgentKernel::new("default", memory);
+        let mut obs =
+            observation("林墨发现玉佩的下落，却开始怀疑张三。张三选择隐瞒真相，新的冲突就此埋下。");
+        obs.reason = ObservationReason::Save;
+        obs.source = ObservationSource::ChapterSave;
+        obs.chapter_title = Some("第一章".to_string());
+        obs.chapter_revision = Some("rev-1".to_string());
+        obs.prefix = obs.paragraph.clone();
+
+        kernel.observe(obs).unwrap();
+        let next = observation("林墨深吸一口气，说道：“");
+        kernel
+            .create_llm_ghost_proposal(next, "我已经知道玉佩在哪了。".to_string(), "eval-model")
+            .unwrap();
+
+        let trace = kernel.trace_snapshot(10);
+        let packet_trace = trace
+            .task_packets
+            .iter()
+            .find(|packet| packet.task == "GhostWriting")
+            .expect("next ghost task should record a task packet");
+        assert!(packet_trace.foundation_complete);
+        assert_eq!(packet_trace.packet.scope, TaskScope::CursorWindow);
+        assert!(packet_trace
+            .packet
+            .required_context
+            .iter()
+            .any(|context| context.source_type == "ResultFeedback" && context.required));
+        assert!(packet_trace
+            .packet
+            .beliefs
+            .iter()
+            .any(|belief| belief.subject == "ResultFeedback" && belief.statement.contains("玉佩")));
     }
 
     #[test]

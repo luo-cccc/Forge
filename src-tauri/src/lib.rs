@@ -601,6 +601,25 @@ fn observe_chapter_save(
     Ok(())
 }
 
+fn observe_generated_chapter_result(
+    app: &tauri::AppHandle,
+    saved: &chapter_generation::SaveGeneratedChapterOutput,
+    generated_content: &str,
+) {
+    if let Err(e) = observe_chapter_save(
+        app,
+        &saved.chapter_title,
+        generated_content,
+        &saved.new_revision,
+    ) {
+        tracing::warn!(
+            "WriterAgent generated-chapter result feedback failed for '{}': {}",
+            saved.chapter_title,
+            e
+        );
+    }
+}
+
 fn last_meaningful_paragraph(text: &str) -> Option<String> {
     text.split('\n')
         .rev()
@@ -1651,11 +1670,16 @@ async fn batch_generate_chapter(
                         &user_instruction,
                         agent_runtime::now_ms(),
                     );
-                    kernel.record_task_packet(
+                    if let Err(error) = kernel.record_task_packet(
                         context.request_id.clone(),
                         "ChapterGeneration",
                         packet,
-                    );
+                    ) {
+                        tracing::warn!(
+                            "WriterAgent chapter-generation task packet rejected: {}",
+                            error
+                        );
+                    }
                 }
             },
         )
@@ -1663,8 +1687,10 @@ async fn batch_generate_chapter(
 
         match terminal {
             PipelineTerminal::Completed {
-                generated_content, ..
+                saved,
+                generated_content,
             } => {
+                observe_generated_chapter_result(&app_clone, &saved, &generated_content);
                 let embed_app = app_clone.clone();
                 let embed_title = title_clone.clone();
                 tokio::spawn(async move {
@@ -1747,11 +1773,16 @@ async fn generate_chapter_autonomous(
                         &user_instruction,
                         agent_runtime::now_ms(),
                     );
-                    kernel.record_task_packet(
+                    if let Err(error) = kernel.record_task_packet(
                         context.request_id.clone(),
                         "ChapterGeneration",
                         packet,
-                    );
+                    ) {
+                        tracing::warn!(
+                            "WriterAgent chapter-generation task packet rejected: {}",
+                            error
+                        );
+                    }
                 }
             },
         )
@@ -1762,6 +1793,7 @@ async fn generate_chapter_autonomous(
             generated_content,
         } = terminal
         {
+            observe_generated_chapter_result(&app_clone, &saved, &generated_content);
             let embed_app = app_clone.clone();
             tokio::spawn(async move {
                 auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content).await;

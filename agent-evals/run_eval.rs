@@ -2583,6 +2583,130 @@ fn run_task_packet_trace_eval() -> EvalResult {
     )
 }
 
+fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let context = BuiltChapterContext {
+        request_id: "chapter-trace-eval".to_string(),
+        target: ChapterTarget {
+            title: "Chapter-8".to_string(),
+            filename: "chapter-8.md".to_string(),
+            number: Some(8),
+            summary: "林墨追查玉佩下落，并把张三逼到选择边缘。".to_string(),
+            status: "draft".to_string(),
+        },
+        base_revision: "rev-8".to_string(),
+        prompt_context: "User instruction\nCurrent chapter beat\nRelevant lorebook entries"
+            .to_string(),
+        sources: vec![
+            ChapterContextSource {
+                source_type: "instruction".to_string(),
+                id: "user-instruction".to_string(),
+                label: "User instruction".to_string(),
+                original_chars: 38,
+                included_chars: 38,
+                truncated: false,
+                score: None,
+            },
+            ChapterContextSource {
+                source_type: "outline".to_string(),
+                id: "outline.json".to_string(),
+                label: "Outline / beat sheet".to_string(),
+                original_chars: 900,
+                included_chars: 700,
+                truncated: false,
+                score: None,
+            },
+            ChapterContextSource {
+                source_type: "target_beat".to_string(),
+                id: "Chapter-8".to_string(),
+                label: "Current chapter beat".to_string(),
+                original_chars: 120,
+                included_chars: 120,
+                truncated: false,
+                score: None,
+            },
+            ChapterContextSource {
+                source_type: "project_brain".to_string(),
+                id: "project_brain.json".to_string(),
+                label: "Project Brain relevant chunks".to_string(),
+                original_chars: 640,
+                included_chars: 480,
+                truncated: false,
+                score: Some(0.72),
+            },
+        ],
+        budget: ChapterContextBudgetReport {
+            max_chars: 24_000,
+            included_chars: 1_338,
+            source_count: 4,
+            truncated_source_count: 0,
+            warnings: vec![],
+        },
+        warnings: vec![],
+    };
+    let packet = build_chapter_generation_task_packet(
+        &kernel.project_id,
+        &kernel.session_id,
+        &context,
+        "继续写这一章完整初稿，重点保持玉佩线的选择压力。",
+        now_ms(),
+    );
+    let record_result = kernel.record_task_packet(&context.request_id, "ChapterGeneration", packet);
+    let trace = kernel.trace_snapshot(10);
+    let recorded = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "ChapterGeneration");
+
+    let mut errors = Vec::new();
+    if let Err(error) = record_result {
+        errors.push(format!("record task packet failed: {}", error));
+    }
+    if recorded.is_none() {
+        errors.push("missing ChapterGeneration task packet trace".to_string());
+    }
+    if !recorded.is_some_and(|packet| packet.foundation_complete) {
+        errors.push("chapter generation task packet foundation is incomplete".to_string());
+    }
+    if !recorded.is_some_and(|packet| {
+        packet.max_side_effect_level == "Write"
+            && packet.required_context_count >= 4
+            && packet.feedback_checkpoint_count >= 3
+            && packet.packet.tool_policy.allow_approval_required
+    }) {
+        errors
+            .push("chapter generation trace lacks write boundary or feedback contract".to_string());
+    }
+    if !recorded.is_some_and(|packet| {
+        packet
+            .packet
+            .required_context
+            .iter()
+            .any(|context| context.source_type == "target_beat" && context.required)
+            && packet
+                .packet
+                .feedback
+                .memory_writes
+                .iter()
+                .any(|write| write == "chapter_result_summary")
+    }) {
+        errors.push(
+            "chapter generation packet lacks target beat or result feedback write".to_string(),
+        );
+    }
+
+    eval_result(
+        "writer_agent:chapter_generation_task_packet_trace",
+        format!(
+            "taskPackets={} recorded={}",
+            trace.task_packets.len(),
+            recorded.is_some()
+        ),
+        errors,
+    )
+}
+
 fn run_context_recall_tracking_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
@@ -2678,6 +2802,7 @@ fn main() {
     results.push(run_guard_trace_evidence_eval());
     results.push(run_trajectory_export_eval());
     results.push(run_task_packet_trace_eval());
+    results.push(run_chapter_generation_task_packet_trace_eval());
     results.push(run_context_recall_tracking_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
