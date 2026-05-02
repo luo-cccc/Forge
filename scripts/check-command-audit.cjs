@@ -1,15 +1,32 @@
 const fs = require("fs");
 const path = require("path");
 
-const libRs = path.join(__dirname, "..", "src-tauri", "src", "lib.rs");
-const source = fs.readFileSync(libRs, "utf8");
+function collectCommands(dirPath) {
+  const results = [];
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectCommands(full));
+    } else if (entry.name.endsWith(".rs")) {
+      const source = fs.readFileSync(full, "utf8");
+      const commandPattern =
+        /#\[tauri::command\]\s*\n(?:\/\/.*\n)*\s*(?:async\s+)?(?:pub\s+)?fn\s+(\w+)/g;
+      let match;
+      while ((match = commandPattern.exec(source)) !== null) {
+        results.push({ name: match[1], file: full });
+      }
+    }
+  }
+  return results;
+}
 
-// Extract all #[tauri::command] functions
-const commandPattern = /#\[tauri::command\]\s*\n(?:\/\/.*\n)*\s*(?:async\s+)?fn\s+(\w+)/g;
-const commands = [];
-let match;
-while ((match = commandPattern.exec(source)) !== null) {
-  commands.push(match[1]);
+const srcDir = path.join(__dirname, "..", "src-tauri", "src");
+const commandEntries = collectCommands(srcDir);
+const commands = commandEntries.map((e) => e.name);
+const sourceByCommand = {};
+for (const entry of commandEntries) {
+  sourceByCommand[entry.name] = entry.file;
 }
 
 // Risk classification by function name and patterns in source
@@ -100,6 +117,9 @@ const AUDIT_FUNCTIONS = [
 ];
 
 function extractFunctionBody(name) {
+  const file = sourceByCommand[name];
+  if (!file) return "";
+  const source = fs.readFileSync(file, "utf8");
   const fnPattern = new RegExp(
     `(?:async\\s+)?fn\\s+${name}\\b[^{]*\\{`,
     "m"

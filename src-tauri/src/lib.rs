@@ -12,6 +12,7 @@ mod agent_runtime;
 mod ambient_agents;
 mod brain_service;
 pub mod chapter_generation;
+mod commands;
 mod llm_runtime;
 mod storage;
 mod tool_bridge;
@@ -48,22 +49,6 @@ mod events {
     pub const EDITOR_HOVER_HINT: &str = "editor-hover-hint";
     pub const INLINE_WRITER_OPERATION: &str = "inline-writer-operation";
     pub const STORYBOARD_MARKER: &str = "storyboard-marker";
-}
-
-#[tauri::command]
-fn set_api_key(provider: String, key: String) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
-        .map_err(|e| format!("Keyring error: {}", e))?;
-    entry
-        .set_password(&key)
-        .map_err(|e| format!("Set error: {}", e))
-}
-
-#[tauri::command]
-fn check_api_key(provider: String) -> Result<bool, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &provider)
-        .map_err(|e| format!("Keyring error: {}", e))?;
-    Ok(entry.get_password().is_ok())
 }
 
 fn load_api_key_from_keychain() -> Option<String> {
@@ -497,12 +482,15 @@ struct InlineWriterOperationEvent {
 
 use agent_harness_core::truncate_context;
 
-#[tauri::command]
-fn get_lorebook(app: tauri::AppHandle) -> Result<Vec<LoreEntry>, String> {
-    storage::load_lorebook(&app)
-}
+use commands::chapters::{create_chapter, get_chapter_revision, load_chapter, read_project_dir};
+use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
+use commands::outline::{
+    delete_outline_node, get_outline, reorder_outline_nodes, save_outline_node,
+    update_outline_status,
+};
+use commands::settings::{check_api_key, set_api_key};
 
-fn audit_project_file_write(
+pub(crate) fn audit_project_file_write(
     app: &tauri::AppHandle,
     scope: &str,
     title: &str,
@@ -531,61 +519,6 @@ fn backup_target_label(target: &storage::BackupTarget) -> String {
         storage::BackupTarget::ProjectBrain => "project_brain".to_string(),
         storage::BackupTarget::Chapter { title } => format!("chapter:{}", title),
     }
-}
-
-#[tauri::command]
-fn save_lore_entry(
-    app: tauri::AppHandle,
-    keyword: String,
-    content: String,
-) -> Result<Vec<LoreEntry>, String> {
-    let entries = storage::upsert_lore_entry(&app, keyword.clone(), content.clone())?;
-    audit_project_file_write(
-        &app,
-        "lorebook",
-        &format!("Lore saved: {}", keyword),
-        "saved_lore_entry",
-        &format!(
-            "Author saved lore entry '{}' ({} chars).",
-            keyword,
-            content.chars().count()
-        ),
-        &[format!("lore:{}", keyword)],
-    );
-    Ok(entries)
-}
-
-#[tauri::command]
-fn delete_lore_entry(app: tauri::AppHandle, id: String) -> Result<Vec<LoreEntry>, String> {
-    let entries = storage::remove_lore_entry(&app, id.clone())?;
-    audit_project_file_write(
-        &app,
-        "lorebook",
-        &format!("Lore deleted: {}", id),
-        "deleted_lore_entry",
-        &format!("Author deleted lore entry '{}'.", id),
-        &[format!("lore:{}", id)],
-    );
-    Ok(entries)
-}
-
-#[tauri::command]
-fn read_project_dir(app: tauri::AppHandle) -> Result<Vec<ChapterInfo>, String> {
-    storage::read_project_dir(&app)
-}
-
-#[tauri::command]
-fn create_chapter(app: tauri::AppHandle, title: String) -> Result<ChapterInfo, String> {
-    let chapter = storage::create_chapter(&app, title.clone())?;
-    audit_project_file_write(
-        &app,
-        &title,
-        &format!("Chapter created: {}", title),
-        "created_chapter",
-        &format!("Author created chapter '{}'.", title),
-        &[format!("chapter:{}", title)],
-    );
-    Ok(chapter)
 }
 
 #[tauri::command]
@@ -781,98 +714,6 @@ fn decode_html_entity(entity: &str) -> String {
             .unwrap_or_else(|| format!("&{};", entity)),
         _ => format!("&{};", entity),
     }
-}
-
-#[tauri::command]
-fn load_chapter(app: tauri::AppHandle, title: String) -> Result<String, String> {
-    storage::load_chapter(&app, title)
-}
-
-#[tauri::command]
-fn get_chapter_revision(app: tauri::AppHandle, title: String) -> Result<String, String> {
-    storage::chapter_revision(&app, &title)
-}
-
-#[tauri::command]
-fn get_outline(app: tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
-    storage::load_outline(&app)
-}
-
-#[tauri::command]
-fn save_outline_node(
-    app: tauri::AppHandle,
-    chapter_title: String,
-    summary: String,
-) -> Result<Vec<OutlineNode>, String> {
-    let nodes = storage::upsert_outline_node(&app, chapter_title.clone(), summary.clone())?;
-    audit_project_file_write(
-        &app,
-        &chapter_title,
-        &format!("Outline saved: {}", chapter_title),
-        "saved_outline_node",
-        &format!(
-            "Author saved outline for '{}' ({} chars).",
-            chapter_title,
-            summary.chars().count()
-        ),
-        &[format!("outline:{}", chapter_title)],
-    );
-    Ok(nodes)
-}
-
-#[tauri::command]
-fn delete_outline_node(
-    app: tauri::AppHandle,
-    chapter_title: String,
-) -> Result<Vec<OutlineNode>, String> {
-    let nodes = storage::remove_outline_node(&app, chapter_title.clone())?;
-    audit_project_file_write(
-        &app,
-        &chapter_title,
-        &format!("Outline deleted: {}", chapter_title),
-        "deleted_outline_node",
-        &format!("Author deleted outline node '{}'.", chapter_title),
-        &[format!("outline:{}", chapter_title)],
-    );
-    Ok(nodes)
-}
-
-#[tauri::command]
-fn update_outline_status(
-    app: tauri::AppHandle,
-    chapter_title: String,
-    status: String,
-) -> Result<Vec<OutlineNode>, String> {
-    let nodes = storage::update_outline_status(&app, chapter_title.clone(), status.clone())?;
-    audit_project_file_write(
-        &app,
-        &chapter_title,
-        &format!("Outline status: {}", chapter_title),
-        "updated_outline_status",
-        &format!(
-            "Author set outline status for '{}' to '{}'.",
-            chapter_title, status
-        ),
-        &[format!("outline:{}", chapter_title)],
-    );
-    Ok(nodes)
-}
-
-#[tauri::command]
-fn reorder_outline_nodes(
-    app: tauri::AppHandle,
-    ordered_titles: Vec<String>,
-) -> Result<Vec<OutlineNode>, String> {
-    let nodes = storage::reorder_outline_nodes(&app, ordered_titles.clone())?;
-    audit_project_file_write(
-        &app,
-        "outline",
-        "Outline reordered",
-        "reordered_outline",
-        &format!("Author reordered {} outline nodes.", ordered_titles.len()),
-        &["outline:order".to_string()],
-    );
-    Ok(nodes)
 }
 
 #[derive(Serialize, Clone)]
