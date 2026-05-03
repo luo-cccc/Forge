@@ -58,7 +58,10 @@ pub(crate) use super::kernel_memory_feedback::{
     MemoryExtractionFeedback,
 };
 pub(crate) use super::kernel_metrics::product_metrics_from_trace;
-pub use super::kernel_metrics::WriterProductMetrics;
+pub(crate) use super::kernel_metrics::product_metrics_trend_from_run_events;
+pub use super::kernel_metrics::{
+    WriterProductMetricSessionTrend, WriterProductMetrics, WriterProductMetricsTrend,
+};
 pub(crate) use super::kernel_ops::*;
 pub(crate) use super::kernel_prompts::*;
 pub(crate) use super::kernel_proposals::{
@@ -210,6 +213,7 @@ pub struct WriterAgentTraceSnapshot {
     pub context_source_trends: Vec<WriterContextSourceTrend>,
     pub context_recalls: Vec<ContextRecallSummary>,
     pub product_metrics: WriterProductMetrics,
+    pub product_metrics_trend: WriterProductMetricsTrend,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

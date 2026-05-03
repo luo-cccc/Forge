@@ -334,6 +334,7 @@ impl WriterAgentKernel {
                 .list_context_recalls(&self.project_id, limit)
                 .unwrap_or_default(),
             product_metrics: self.product_metrics(),
+            product_metrics_trend: self.product_metrics_trend(limit),
         }
     }
 
@@ -361,6 +362,15 @@ impl WriterAgentKernel {
             self.memory.list_context_recalls(&self.project_id, 50),
             self.memory.list_chapter_missions(&self.project_id, 250),
         )
+    }
+
+    fn product_metrics_trend(&self, limit: usize) -> WriterProductMetricsTrend {
+        let event_limit = limit.max(20).saturating_mul(40).min(5_000);
+        let events = self
+            .memory
+            .list_project_run_events(&self.project_id, event_limit)
+            .unwrap_or_default();
+        product_metrics_trend_from_run_events(&events, limit.min(12).max(3))
     }
 }
 

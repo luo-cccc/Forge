@@ -1911,6 +1911,42 @@ impl WriterMemory {
         Ok(events)
     }
 
+    pub fn list_project_run_events(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<RunEventSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, project_id, session_id, task_id, event_type, source_refs_json, data_json, ts_ms
+             FROM writer_run_events
+             WHERE project_id=?1
+             ORDER BY ts_ms DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project_id, limit as i64], |row| {
+            let seq: i64 = row.get(0)?;
+            let task_id: String = row.get(3)?;
+            let data_json: String = row.get(6)?;
+            let ts_ms: i64 = row.get(7)?;
+            Ok(RunEventSummary {
+                seq: seq.max(0) as u64,
+                project_id: row.get(1)?,
+                session_id: row.get(2)?,
+                task_id: if task_id.trim().is_empty() {
+                    None
+                } else {
+                    Some(task_id)
+                },
+                event_type: row.get(4)?,
+                source_refs: string_vec_from_json(row.get::<_, String>(5)?.as_str()),
+                data: serde_json::from_str(&data_json).unwrap_or_else(|_| serde_json::json!({})),
+                ts_ms: ts_ms.max(0) as u64,
+            })
+        })?;
+        let mut events = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        events.reverse();
+        Ok(events)
+    }
+
     #[cfg(test)]
     pub fn feedback_stats(&self, proposal_id: &str) -> rusqlite::Result<(i64, i64)> {
         let mut stmt = self.conn.prepare(

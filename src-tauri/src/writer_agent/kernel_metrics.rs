@@ -1,9 +1,11 @@
 //! Product metric derivation from WriterAgent trace state.
 
+use std::collections::{BTreeMap, HashMap};
+
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::kernel::{WriterOperationLifecycleState, WriterOperationLifecycleTrace};
 use super::kernel_helpers::{operation_affected_scope, operation_kind_label};
-use super::memory::{ChapterMissionSummary, ContextRecallSummary};
+use super::memory::{ChapterMissionSummary, ContextRecallSummary, RunEventSummary};
 use super::proposal::{AgentProposal, ProposalKind};
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -27,6 +29,37 @@ pub struct WriterProductMetrics {
     pub chapter_mission_completion_rate: f64,
     pub durable_save_success_rate: f64,
     pub average_save_to_feedback_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterProductMetricsTrend {
+    pub source_event_count: usize,
+    pub session_count: usize,
+    pub overall_average_save_to_feedback_ms: Option<u64>,
+    pub recent_average_save_to_feedback_ms: Option<u64>,
+    pub previous_average_save_to_feedback_ms: Option<u64>,
+    pub save_to_feedback_delta_ms: Option<i64>,
+    pub recent_sessions: Vec<WriterProductMetricSessionTrend>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterProductMetricSessionTrend {
+    pub session_id: String,
+    pub first_event_at: u64,
+    pub last_event_at: u64,
+    pub event_count: u64,
+    pub proposal_count: u64,
+    pub feedback_count: u64,
+    pub accepted_count: u64,
+    pub rejected_count: u64,
+    pub edited_count: u64,
+    pub ignored_count: u64,
+    pub proposal_acceptance_rate: f64,
+    pub durable_save_success_rate: f64,
+    pub average_save_to_feedback_ms: Option<u64>,
+    pub save_feedback_sample_count: u64,
 }
 
 pub(crate) fn product_metrics_from_trace(
@@ -195,10 +228,224 @@ pub(crate) fn product_metrics_from_trace(
     }
 }
 
+pub(crate) fn product_metrics_trend_from_run_events(
+    events: &[RunEventSummary],
+    session_limit: usize,
+) -> WriterProductMetricsTrend {
+    let mut sessions = BTreeMap::<String, SessionMetricAccumulator>::new();
+    for event in events {
+        let accumulator = sessions.entry(event.session_id.clone()).or_default();
+        accumulator.record_event(event);
+    }
+
+    let mut session_trends = sessions
+        .into_iter()
+        .map(|(session_id, accumulator)| accumulator.into_trend(session_id))
+        .filter(|trend| trend.event_count > 0)
+        .collect::<Vec<_>>();
+    session_trends.sort_by(|left, right| {
+        right
+            .last_event_at
+            .cmp(&left.last_event_at)
+            .then_with(|| right.first_event_at.cmp(&left.first_event_at))
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+
+    let all_save_feedback_samples = session_trends
+        .iter()
+        .filter_map(|trend| {
+            trend
+                .average_save_to_feedback_ms
+                .map(|average| (average, trend.save_feedback_sample_count))
+        })
+        .flat_map(|(average, count)| std::iter::repeat(average).take(count as usize))
+        .collect::<Vec<_>>();
+    let overall_average_save_to_feedback_ms = average_u64(&all_save_feedback_samples);
+    let recent_average_save_to_feedback_ms = session_trends
+        .iter()
+        .find_map(|trend| trend.average_save_to_feedback_ms);
+    let previous_average_save_to_feedback_ms = session_trends
+        .iter()
+        .filter_map(|trend| trend.average_save_to_feedback_ms)
+        .nth(1);
+    let save_to_feedback_delta_ms = recent_average_save_to_feedback_ms
+        .zip(previous_average_save_to_feedback_ms)
+        .map(|(recent, previous)| recent as i64 - previous as i64);
+    let session_count = session_trends.len();
+    let recent_sessions = session_trends
+        .into_iter()
+        .take(session_limit)
+        .collect::<Vec<_>>();
+
+    WriterProductMetricsTrend {
+        source_event_count: events.len(),
+        session_count,
+        overall_average_save_to_feedback_ms,
+        recent_average_save_to_feedback_ms,
+        previous_average_save_to_feedback_ms,
+        save_to_feedback_delta_ms,
+        recent_sessions,
+    }
+}
+
 fn ratio(numerator: u64, denominator: u64) -> f64 {
     if denominator == 0 {
         0.0
     } else {
         numerator as f64 / denominator as f64
+    }
+}
+
+#[derive(Default)]
+struct SessionMetricAccumulator {
+    first_event_at: Option<u64>,
+    last_event_at: u64,
+    event_count: u64,
+    proposal_count: u64,
+    feedback_count: u64,
+    accepted_count: u64,
+    rejected_count: u64,
+    edited_count: u64,
+    snoozed_count: u64,
+    explained_count: u64,
+    durable_save_count: u64,
+    failed_save_count: u64,
+    durable_saves_by_proposal: HashMap<String, Vec<u64>>,
+    feedback_by_proposal: Vec<(String, u64)>,
+}
+
+impl SessionMetricAccumulator {
+    fn record_event(&mut self, event: &RunEventSummary) {
+        self.event_count = self.event_count.saturating_add(1);
+        self.first_event_at = Some(
+            self.first_event_at
+                .map(|existing| existing.min(event.ts_ms))
+                .unwrap_or(event.ts_ms),
+        );
+        self.last_event_at = self.last_event_at.max(event.ts_ms);
+
+        match event.event_type.as_str() {
+            "writer.proposal_created" => {
+                self.proposal_count = self.proposal_count.saturating_add(1);
+            }
+            "writer.feedback_recorded" => {
+                self.record_feedback_event(event);
+            }
+            "writer.operation_lifecycle" => {
+                self.record_operation_lifecycle_event(event);
+            }
+            _ => {}
+        }
+    }
+
+    fn record_feedback_event(&mut self, event: &RunEventSummary) {
+        self.feedback_count = self.feedback_count.saturating_add(1);
+        let action = json_string(&event.data, "action")
+            .as_deref()
+            .map(normalize_metric_label)
+            .unwrap_or_default();
+        match action.as_str() {
+            "accepted" => self.accepted_count = self.accepted_count.saturating_add(1),
+            "rejected" => self.rejected_count = self.rejected_count.saturating_add(1),
+            "edited" => self.edited_count = self.edited_count.saturating_add(1),
+            "snoozed" => self.snoozed_count = self.snoozed_count.saturating_add(1),
+            "explained" => self.explained_count = self.explained_count.saturating_add(1),
+            _ => {}
+        }
+        if let Some(proposal_id) = json_string(&event.data, "proposalId") {
+            self.feedback_by_proposal.push((proposal_id, event.ts_ms));
+        }
+    }
+
+    fn record_operation_lifecycle_event(&mut self, event: &RunEventSummary) {
+        let state = json_string(&event.data, "state")
+            .map(|state| normalize_metric_label(&state))
+            .unwrap_or_default();
+        if state == "durably_saved" {
+            self.durable_save_count = self.durable_save_count.saturating_add(1);
+            if let Some(proposal_id) = json_string(&event.data, "proposalId") {
+                self.durable_saves_by_proposal
+                    .entry(proposal_id)
+                    .or_default()
+                    .push(event.ts_ms);
+            }
+        } else if state == "rejected"
+            && json_string(&event.data, "saveResult").is_some_and(|value| !value.trim().is_empty())
+        {
+            self.failed_save_count = self.failed_save_count.saturating_add(1);
+        }
+    }
+
+    fn into_trend(self, session_id: String) -> WriterProductMetricSessionTrend {
+        let mut save_to_feedback = Vec::new();
+        for (proposal_id, feedback_at) in &self.feedback_by_proposal {
+            if let Some(saved_events) = self.durable_saves_by_proposal.get(proposal_id) {
+                for saved_at in saved_events {
+                    if feedback_at >= saved_at {
+                        save_to_feedback.push(feedback_at - saved_at);
+                    }
+                }
+            }
+        }
+
+        let ignored_count = self
+            .rejected_count
+            .saturating_add(self.snoozed_count)
+            .saturating_add(self.explained_count);
+        WriterProductMetricSessionTrend {
+            session_id,
+            first_event_at: self.first_event_at.unwrap_or_default(),
+            last_event_at: self.last_event_at,
+            event_count: self.event_count,
+            proposal_count: self.proposal_count,
+            feedback_count: self.feedback_count,
+            accepted_count: self.accepted_count,
+            rejected_count: self.rejected_count,
+            edited_count: self.edited_count,
+            ignored_count,
+            proposal_acceptance_rate: ratio(
+                self.accepted_count.saturating_add(self.edited_count),
+                self.feedback_count,
+            ),
+            durable_save_success_rate: ratio(
+                self.durable_save_count,
+                self.durable_save_count
+                    .saturating_add(self.failed_save_count),
+            ),
+            average_save_to_feedback_ms: average_u64(&save_to_feedback),
+            save_feedback_sample_count: save_to_feedback.len() as u64,
+        }
+    }
+}
+
+fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|field| field.as_str())
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalize_metric_label(value: &str) -> String {
+    value
+        .chars()
+        .enumerate()
+        .flat_map(|(index, ch)| {
+            let mut output = Vec::new();
+            if ch.is_ascii_uppercase() && index > 0 {
+                output.push('_');
+            }
+            output.push(ch.to_ascii_lowercase());
+            output
+        })
+        .collect()
+}
+
+fn average_u64(values: &[u64]) -> Option<u64> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<u64>() / values.len() as u64)
     }
 }

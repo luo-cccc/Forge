@@ -207,6 +207,27 @@ pub fn export_trace_snapshot(
             project_id,
             session_id,
             seq,
+            event_type: "writer.product_metrics_trend",
+            ts_ms: snapshot
+                .product_metrics_trend
+                .recent_sessions
+                .iter()
+                .map(|session| session.last_event_at)
+                .max()
+                .unwrap_or(0),
+            data: &snapshot.product_metrics_trend,
+        },
+    );
+    seq += 1;
+    push_event(
+        &mut lines,
+        TrajectoryEvent {
+            trace_schema: TRAJECTORY_SCHEMA,
+            schema_version: SCHEMA_VERSION,
+            trace_id: &trace_id,
+            project_id,
+            session_id,
+            seq,
             event_type: "writer.product_metrics",
             ts_ms: snapshot
                 .recent_feedback
@@ -481,6 +502,33 @@ fn trace_viewer_summary(event_type: &str, data: &Value) -> String {
             )
             .unwrap_or_else(|| "unknown".to_string()),
         ),
+        "writer.product_metrics_trend" => format!(
+            "Product metrics trend: sessions={} recent_save_feedback={} previous_save_feedback={} delta={}",
+            number_field(data, &["sessionCount", "session_count"]).unwrap_or(0),
+            number_field(
+                data,
+                &[
+                    "recentAverageSaveToFeedbackMs",
+                    "recent_average_save_to_feedback_ms"
+                ]
+            )
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string()),
+            number_field(
+                data,
+                &[
+                    "previousAverageSaveToFeedbackMs",
+                    "previous_average_save_to_feedback_ms"
+                ]
+            )
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string()),
+            number_or_float_field(
+                data,
+                &["saveToFeedbackDeltaMs", "save_to_feedback_delta_ms"]
+            )
+            .unwrap_or_else(|| "n/a".to_string()),
+        ),
         _ => format!("{}: {}", event_type, compact_json_snippet(data, 600)),
     }
 }
@@ -625,16 +673,18 @@ mod tests {
             context_source_trends: Vec::new(),
             context_recalls: Vec::new(),
             product_metrics: Default::default(),
+            product_metrics_trend: Default::default(),
         };
 
         let export = export_trace_snapshot("novel-a", "session-a", &snapshot);
         let lines = export.jsonl.lines().collect::<Vec<_>>();
 
         assert_eq!(export.schema, TRAJECTORY_SCHEMA);
-        assert_eq!(export.event_count, 3);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(export.event_count, 4);
+        assert_eq!(lines.len(), 4);
         assert!(lines[0].contains("\"eventType\":\"writer.observation\""));
         assert!(lines[1].contains("\"eventType\":\"writer.feedback\""));
-        assert!(lines[2].contains("\"eventType\":\"writer.product_metrics\""));
+        assert!(lines[2].contains("\"eventType\":\"writer.product_metrics_trend\""));
+        assert!(lines[3].contains("\"eventType\":\"writer.product_metrics\""));
     }
 }

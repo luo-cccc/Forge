@@ -306,6 +306,7 @@ export const WriterInspectorPanel: React.FC = () => {
   const saveCompletedEvents = events.filter((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
+  const metricsTrend = trace?.productMetricsTrend;
   const proposalById = useMemo(() => {
     const proposals = new Map<string, WriterProposalTrace>();
     for (const proposal of trace?.recentProposals ?? []) {
@@ -555,7 +556,74 @@ export const WriterInspectorPanel: React.FC = () => {
                   <span className="block text-[10px] text-text-muted">Save Events</span>
                   <span className="font-mono text-text-primary">{saveCompletedEvents.length}</span>
                 </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Trend Sessions</span>
+                  <span className="font-mono text-text-primary">{metricsTrend?.sessionCount ?? 0}</span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Latency Delta</span>
+                  <span className={
+                    (metricsTrend?.saveToFeedbackDeltaMs ?? 0) > 0
+                      ? "font-mono text-accent"
+                      : "font-mono text-success"
+                  }>
+                    {formatDuration(metricsTrend?.saveToFeedbackDeltaMs)}
+                  </span>
+                </div>
               </div>
+            </section>
+
+            <section className="rounded border border-border-subtle bg-bg-raised p-2 text-xs">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="font-medium text-text-primary">Session Trend</span>
+                <span className="text-[10px] text-text-muted">
+                  {metricsTrend?.sourceEventCount ?? 0} events
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Recent</span>
+                  <span className="font-mono text-text-primary">
+                    {formatDuration(metricsTrend?.recentAverageSaveToFeedbackMs)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Previous</span>
+                  <span className="font-mono text-text-primary">
+                    {formatDuration(metricsTrend?.previousAverageSaveToFeedbackMs)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Overall</span>
+                  <span className="font-mono text-text-primary">
+                    {formatDuration(metricsTrend?.overallAverageSaveToFeedbackMs)}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {(metricsTrend?.recentSessions ?? []).slice(0, 5).map((session) => (
+                  <div key={session.sessionId} className="rounded border border-border-subtle bg-bg-deep p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-text-secondary" title={session.sessionId}>
+                        {session.sessionId}
+                      </span>
+                      <span className="font-mono text-[10px] text-text-muted">
+                        {formatDuration(session.averageSaveToFeedbackMs)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                      <span>{formatTime(session.lastEventAt)}</span>
+                      <span>{session.proposalCount} proposals</span>
+                      <span>{session.feedbackCount} feedback</span>
+                      <span>accept {formatRate(session.proposalAcceptanceRate)}</span>
+                      <span>save {formatRate(session.durableSaveSuccessRate)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {(metricsTrend?.recentSessions ?? []).length === 0 && (
+                <p className="mt-2 text-text-muted">No persisted session trend yet.</p>
+              )}
             </section>
 
             {(latestProviderBudget || providerBudget) && (

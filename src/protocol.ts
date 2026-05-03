@@ -958,6 +958,7 @@ export interface WriterAgentTraceSnapshot {
   contextSourceTrends: WriterContextSourceTrend[];
   contextRecalls: ContextRecallSummary[];
   productMetrics: WriterProductMetrics;
+  productMetricsTrend: WriterProductMetricsTrend;
 }
 
 export interface WriterPostWriteDiagnosticReport {
@@ -1010,6 +1011,33 @@ export interface WriterProductMetrics {
   chapterMissionCompletionRate: number;
   durableSaveSuccessRate: number;
   averageSaveToFeedbackMs?: number | null;
+}
+
+export interface WriterProductMetricsTrend {
+  sourceEventCount: number;
+  sessionCount: number;
+  overallAverageSaveToFeedbackMs?: number | null;
+  recentAverageSaveToFeedbackMs?: number | null;
+  previousAverageSaveToFeedbackMs?: number | null;
+  saveToFeedbackDeltaMs?: number | null;
+  recentSessions: WriterProductMetricSessionTrend[];
+}
+
+export interface WriterProductMetricSessionTrend {
+  sessionId: string;
+  firstEventAt: number;
+  lastEventAt: number;
+  eventCount: number;
+  proposalCount: number;
+  feedbackCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  editedCount: number;
+  ignoredCount: number;
+  proposalAcceptanceRate: number;
+  durableSaveSuccessRate: number;
+  averageSaveToFeedbackMs?: number | null;
+  saveFeedbackSampleCount: number;
 }
 
 export interface WriterOperationLifecycleTrace {

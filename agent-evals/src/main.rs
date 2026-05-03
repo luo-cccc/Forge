@@ -37,6 +37,7 @@ fn main() {
     results.push(run_operation_feedback_requires_durable_save_eval());
     results.push(run_write_operation_lifecycle_trace_eval());
     results.push(run_product_metrics_trace_eval());
+    results.push(run_product_metrics_multi_session_trend_eval());
     results.push(run_memory_correction_overrides_reinforcement_eval());
     results.push(run_accepted_feedback_reinforces_style_memory_eval());
     results.push(run_rejected_proposal_records_correction_signal_eval());

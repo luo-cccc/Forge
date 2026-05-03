@@ -386,12 +386,12 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 - chapter mission completion rate
 - manual ask converted-to-operation rate
 
-当前状态：工程第一版已完成，但产品验证不能按完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。剩余工作是保留更长的 session 历史、提供 debug/inspector 趋势视图，并用真实连续写作场景证明这些指标与作者价值相关。
+当前状态：工程第一版已完成，但产品验证不能按完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。多 session 第一阶段已完成：`WriterAgentTraceSnapshot.productMetricsTrend` 会从持久化 `writer_run_events` 按 session 聚合 proposal / feedback / operation lifecycle，Inspect 模式展示最近 session 的 save-to-feedback 平均值、上一 session 对照、总体平均值和 delta，trajectory JSONL 额外导出 `writer.product_metrics_trend`。剩余工作是用真实连续写作场景证明这些指标与作者价值相关。
 
 验收标准：
 
 - 本地 trajectory export 可包含匿名化指标摘要。（已完成）
-- Companion / debug view 能查看最近写作 session 的 agent 有用程度。（部分完成：Companion 已显示摘要，debug 趋势视图未完成）
+- Companion / debug view 能查看最近写作 session 的 agent 有用程度。（已完成第一阶段：Companion 显示当前摘要，Inspect 显示多 session 趋势）
 
 ## 8. P2：上下文、记忆、检索继续补强
 
@@ -843,10 +843,11 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 报告已写入 `writer.post_write_diagnostics` run event，并进入 `WriterAgentTraceSnapshot.post_write_diagnostics` 与 trajectory JSONL。
    - `record_writer_operation_durable_save` 已支持保存后正文 / 章节 / revision 参数；accepted inline / proposal text operation 成功持久化后，会用操作影响窗口复跑 diagnostics，并在 report source refs 中保留 proposal / operation / affected scope。
    - Companion Audit 页已展示最近 post-write diagnostic reports，包含错误/警告/信息计数、诊断消息、fix suggestion、revision 和 source refs。
-   - Inspect 模式已展示最新 post-write diagnostic report，可在专用调试面板里查看错误/警告/信息计数、诊断条目、remediation、最近 save_completed 事件 source refs、save_completed 专用筛选和 save-to-feedback latency。
+   - Inspect 模式已展示最新 post-write diagnostic report，可在专用调试面板里查看错误/警告/信息计数、诊断条目、remediation、最近 save_completed 事件 source refs、save_completed 专用筛选、当前 save-to-feedback latency 和多 session save-to-feedback 趋势。
    - 已新增 eval：`writer_agent:post_write_diagnostics_recorded`、`writer_agent:post_write_diagnostics_after_accepted_operation`。
    - 已新增 `writer.save_completed` run event，把 save result、proposal / operation source refs、post-write report id 与诊断计数串进同一条可回放事件。
-   - 剩余：继续补 save-to-feedback latency 的多 session 趋势，而不是只显示当前 trace 平均值。
+   - 已新增 `WriterProductMetricsTrend`，从持久化 run events 聚合最近 session 的 proposal / feedback / durable save / save-to-feedback latency，并在 Inspect 模式和 trajectory 中展示。
+   - 剩余：继续用真实连续写作 fixture 校准趋势是否真的暴露 agent 有用性变化，而不是只证明聚合可运行。
 4. Provider call budget。（第一阶段已完成）
    - 已新增 `src-tauri/src/writer_agent/provider_budget.rs`。
    - 长章节生成、批量生成、Project Brain 重建、外部研究、手动请求和 ghost preview 都有默认 token/cost 阈值。
@@ -964,7 +965,8 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已新增 eval：`writer_agent:trajectory_trace_viewer_export`。
 4. Product metrics 趋势。
    - 当前已有 acceptance rate、ignored suggestion rate、promise recall、canon false-positive、mission completion、durable save、save-to-feedback latency。
-   - 下一步增加多 session 趋势和真实项目 fixture 对照。
+   - 多 session 第一阶段已完成：`productMetricsTrend` 从持久化 `writer_run_events` 按 session 聚合最近/上一 session 的 save-to-feedback latency、总体平均值、delta、采纳率和 durable save 成功率；Inspect 模式展示趋势，trajectory 导出 `writer.product_metrics_trend`。
+   - 下一步增加真实项目 fixture 对照和更长历史窗口校准。
 5. Continuous writing fixture。
    - 不只测单函数输出。
    - 至少覆盖连续 10-20 章的设定、伏笔、物件、角色关系、任务漂移、作者反馈。
@@ -982,7 +984,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:context_pack_built_run_event`（已完成）
 - `writer_agent:model_started_run_event`（已完成）
 - `writer_agent:tool_called_run_event`（已完成）
-- `writer_agent:product_metrics_multi_session_trend`
+- `writer_agent:product_metrics_multi_session_trend`（已完成）
 - `writer_agent:continuous_writing_fixture_20_chapters`
 
 ### 11.7 不建议照搬的机制
@@ -1021,7 +1023,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 8. Provider call budget。（第一阶段已完成）
    - 已有 token/cost estimation、approval-required/warn/blocked 决策和 remediation；章节生成 provider call 前置门禁、`writer.provider_budget` run event、Explore 审批卡、已批准 budget 前端传递和后端覆盖校验已接入；Project Brain chat answer provider call 已有后端 preflight / run event / failure bundle；manual request AgentLoop 第一轮 provider call 已有后端 preflight / run event / failure bundle；Project Brain/manual retry UI 和后端批准凭证覆盖校验已接入；外部研究 provider call、AgentLoop 多轮 provider 成本追踪仍未完成。
 9. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）
-   - 保存观察会生成 post-write diagnostic report，写入 run event、trace snapshot 和 trajectory；accepted inline/proposal text operation durable-save 路径也会带保存后正文复跑 diagnostics，并输出 proposal / operation 级 source refs；Companion Audit 页已能查看最近报告；Inspect 模式已有最近 post-write diagnostics 摘要、save_completed 专用筛选和 save-to-feedback latency；`writer.save_completed` 已串联 save result、post-write report id 和诊断计数。剩余是多 session save/feedback latency 趋势。
+   - 保存观察会生成 post-write diagnostic report，写入 run event、trace snapshot 和 trajectory；accepted inline/proposal text operation durable-save 路径也会带保存后正文复跑 diagnostics，并输出 proposal / operation 级 source refs；Companion Audit 页已能查看最近报告；Inspect 模式已有最近 post-write diagnostics 摘要、save_completed 专用筛选、save-to-feedback latency 和多 session latency 趋势；`writer.save_completed` 已串联 save result、post-write report id 和诊断计数。剩余是真实连续写作 fixture 校准。
 10. External tool remediation。（第一阶段已完成）
    - ToolExecution 失败结果已有结构化 remediation，并已映射进 `WriterFailureEvidenceBundle` / `writer.error` run event / Inspector `failure` event；Research 子任务 tool/provider 失败已有 subtask 证据包覆盖；真实外部公开资料 provider/tool 集成仍未完成。
 
@@ -1166,7 +1168,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
 9. 增加 post-write diagnostics。（保存观察 + accepted operation + Audit UI + save_completed link 第一阶段已完成：report / run event / trace snapshot / trajectory export / eval / UI summary / save_completed inspector filter）
 10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
-11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、memory candidate run event、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard、isolated research/diagnostic subtask workspace、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；后续重点转向更多真实 run-loop/UI 接入和连续写作 fixture）
+11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、memory candidate run event、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard、isolated research/diagnostic subtask workspace、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、product metrics multi-session trend、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；后续重点转向更多真实 run-loop/UI 接入和连续写作 fixture）
 
 ## 14. 完成定义
 

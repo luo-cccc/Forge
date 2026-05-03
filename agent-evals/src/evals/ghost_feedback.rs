@@ -302,6 +302,125 @@ pub fn run_product_metrics_trace_eval() -> EvalResult {
     )
 }
 
+pub fn run_product_metrics_multi_session_trend_eval() -> EvalResult {
+    let db_path = std::env::temp_dir().join(format!(
+        "forge-product-metrics-trend-{}-{}.sqlite",
+        std::process::id(),
+        now_ms()
+    ));
+    let mut errors = Vec::new();
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "trend-session-a".to_string();
+        let proposal = kernel
+            .create_llm_ghost_proposal(
+                observation("林墨停在旧门前，风从裂开的门缝里钻出来。"),
+                "他终于听见门后有人低声念出了他的名字。".to_string(),
+                "eval-model",
+            )
+            .unwrap();
+        let operation = proposal.operations[0].clone();
+        let mut approval = eval_approval("trend-session-a");
+        approval.proposal_id = Some(proposal.id.clone());
+        kernel
+            .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+            .unwrap();
+        kernel
+            .record_operation_durable_save(
+                Some(proposal.id.clone()),
+                operation,
+                "editor_save:rev-2".to_string(),
+            )
+            .unwrap();
+        kernel
+            .apply_feedback(ProposalFeedback {
+                proposal_id: proposal.id.clone(),
+                action: FeedbackAction::Accepted,
+                final_text: None,
+                reason: Some("first session feedback".to_string()),
+                created_at: now_ms() + 25,
+            })
+            .unwrap();
+    }
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "trend-session-b".to_string();
+        let proposal = kernel
+            .create_llm_ghost_proposal(
+                observation("林墨抬头，看见旧门内侧刻着半枚残缺的印记。"),
+                "那印记和他袖中的玉佩严丝合缝。".to_string(),
+                "eval-model",
+            )
+            .unwrap();
+        let operation = proposal.operations[0].clone();
+        let mut approval = eval_approval("trend-session-b");
+        approval.proposal_id = Some(proposal.id.clone());
+        kernel
+            .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+            .unwrap();
+        kernel
+            .record_operation_durable_save(
+                Some(proposal.id.clone()),
+                operation,
+                "editor_save:rev-3".to_string(),
+            )
+            .unwrap();
+        kernel
+            .apply_feedback(ProposalFeedback {
+                proposal_id: proposal.id.clone(),
+                action: FeedbackAction::Accepted,
+                final_text: None,
+                reason: Some("second session feedback".to_string()),
+                created_at: now_ms() + 40,
+            })
+            .unwrap();
+
+        let trace = kernel.trace_snapshot(80);
+        let trend = trace.product_metrics_trend;
+        if trend.session_count < 2 {
+            errors.push(format!("trend only saw {} sessions", trend.session_count));
+        }
+        if trend.source_event_count < 6 {
+            errors.push(format!(
+                "trend did not read enough persisted events: {}",
+                trend.source_event_count
+            ));
+        }
+        if trend.recent_sessions.len() < 2 {
+            errors.push("trend lacks recent session rows".to_string());
+        }
+        if !trend
+            .recent_sessions
+            .iter()
+            .all(|session| session.average_save_to_feedback_ms.is_some())
+        {
+            errors.push("session trend missing save-to-feedback latency".to_string());
+        }
+        if trend.overall_average_save_to_feedback_ms.is_none() {
+            errors.push("trend missing overall save-to-feedback average".to_string());
+        }
+        if trend.save_to_feedback_delta_ms.is_none() {
+            errors.push("trend missing recent-vs-previous latency delta".to_string());
+        }
+        if !kernel
+            .export_trajectory(80)
+            .jsonl
+            .contains("\"eventType\":\"writer.product_metrics_trend\"")
+        {
+            errors.push("trajectory export lacks product_metrics_trend event".to_string());
+        }
+    }
+    let _ = std::fs::remove_file(&db_path);
+
+    eval_result(
+        "writer_agent:product_metrics_multi_session_trend",
+        format!("db={}", db_path.display()),
+        errors,
+    )
+}
+
 pub fn run_memory_correction_overrides_reinforcement_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let slot = "memory|canon|character|沈照".to_string();

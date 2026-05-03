@@ -187,11 +187,20 @@ pub fn build_inspector_timeline(
         task_id: None,
         source_refs: Vec::new(),
         summary: format!(
-            "acceptance={:.2} durable_save={:.2}",
+            "acceptance={:.2} durable_save={:.2} sessions={} save_feedback_delta_ms={}",
             snapshot.product_metrics.proposal_acceptance_rate,
-            snapshot.product_metrics.durable_save_success_rate
+            snapshot.product_metrics.durable_save_success_rate,
+            snapshot.product_metrics_trend.session_count,
+            snapshot
+                .product_metrics_trend
+                .save_to_feedback_delta_ms
+                .map(|delta| delta.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
         ),
-        detail: Some(serde_json::json!(snapshot.product_metrics)),
+        detail: Some(serde_json::json!({
+            "metrics": snapshot.product_metrics,
+            "trend": snapshot.product_metrics_trend,
+        })),
     });
 
     events.sort_by(|left, right| {
@@ -338,6 +347,7 @@ mod tests {
             context_source_trends: Vec::new(),
             context_recalls: Vec::new(),
             product_metrics: WriterProductMetrics::default(),
+            product_metrics_trend: Default::default(),
         };
         let summary = build_companion_timeline_summary(&snapshot);
         assert!(!summary.includes_internal_trace);
