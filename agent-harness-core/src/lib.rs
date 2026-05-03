@@ -55,7 +55,8 @@ pub use task_packet::{
     TaskPacketValidationError, TaskScope, ToolPolicyContract,
 };
 pub use tool_executor::{
-    DoomLoopDetector, ToolExecution, ToolExecutionRemediation, ToolExecutor, ToolHandler,
+    DoomLoopDetector, ToolExecution, ToolExecutionAuditEvent, ToolExecutionAuditSink,
+    ToolExecutionRemediation, ToolExecutor, ToolHandler,
 };
 pub use tool_registry::{
     default_writing_tool_registry, EffectiveToolEntry, EffectiveToolInventory, EffectiveToolStatus,

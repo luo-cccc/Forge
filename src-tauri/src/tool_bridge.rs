@@ -1,10 +1,73 @@
-use agent_harness_core::tool_executor::ToolHandler;
+use agent_harness_core::tool_executor::{
+    ToolExecution, ToolExecutionAuditEvent, ToolExecutionAuditSink, ToolHandler,
+};
 use tauri::AppHandle;
 use tauri::Manager;
 
 /// Real tool handler that bridges agent-harness-core tools to the Tauri app's storage layer.
 pub struct TauriToolBridge {
     pub app: AppHandle,
+}
+
+pub fn writer_tool_audit_sink(
+    app: AppHandle,
+    task_id: impl Into<String>,
+    source_refs: Vec<String>,
+) -> ToolExecutionAuditSink {
+    let task_id = task_id.into();
+    std::sync::Arc::new(move |event| match event {
+        ToolExecutionAuditEvent::Start { tool_name, input } => {
+            record_writer_tool_called_start(&app, &task_id, tool_name, input, source_refs.clone());
+        }
+        ToolExecutionAuditEvent::End { execution } => {
+            record_writer_tool_called_end(&app, &task_id, execution, source_refs.clone());
+        }
+    })
+}
+
+fn record_writer_tool_called_start(
+    app: &AppHandle,
+    task_id: &str,
+    tool_name: String,
+    input: serde_json::Value,
+    mut source_refs: Vec<String>,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    source_refs.push(format!("tool:{}", tool_name));
+    kernel.record_tool_called_run_event(
+        task_id.to_string(),
+        tool_name,
+        "start",
+        Some(&input),
+        None,
+        source_refs,
+        crate::agent_runtime::now_ms(),
+    );
+}
+
+fn record_writer_tool_called_end(
+    app: &AppHandle,
+    task_id: &str,
+    execution: ToolExecution,
+    mut source_refs: Vec<String>,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    source_refs.push(format!("tool:{}", execution.tool_name));
+    kernel.record_tool_called_run_event(
+        task_id.to_string(),
+        execution.tool_name.clone(),
+        "end",
+        Some(&execution.input),
+        Some(&execution),
+        source_refs,
+        crate::agent_runtime::now_ms(),
+    );
 }
 
 #[async_trait::async_trait]

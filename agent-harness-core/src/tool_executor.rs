@@ -36,6 +36,20 @@ pub struct ToolExecutionRemediation {
     pub message: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum ToolExecutionAuditEvent {
+    Start {
+        tool_name: String,
+        input: serde_json::Value,
+    },
+    End {
+        execution: ToolExecution,
+    },
+}
+
+pub type ToolExecutionAuditSink = Arc<dyn Fn(ToolExecutionAuditEvent) + Send + Sync>;
+
 /// Tracks tool calls to detect doom loops.
 /// Ported from OpenCode `processor.ts` doom loop detection (line 305-331).
 #[derive(Debug, Clone, Default)]
@@ -72,6 +86,7 @@ pub struct ToolExecutor<H: ToolHandler> {
     pub handler: H,
     pub doom_detector: DoomLoopDetector,
     pub permission_policy: PermissionPolicy,
+    audit_sink: Option<ToolExecutionAuditSink>,
 }
 
 impl<H: ToolHandler> ToolExecutor<H> {
@@ -81,6 +96,7 @@ impl<H: ToolHandler> ToolExecutor<H> {
             handler,
             doom_detector: DoomLoopDetector::default(),
             permission_policy: PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+            audit_sink: None,
         }
     }
 
@@ -89,23 +105,33 @@ impl<H: ToolHandler> ToolExecutor<H> {
         self
     }
 
+    pub fn with_audit_sink(mut self, audit_sink: ToolExecutionAuditSink) -> Self {
+        self.audit_sink = Some(audit_sink);
+        self
+    }
+
+    pub fn set_audit_sink(&mut self, audit_sink: ToolExecutionAuditSink) {
+        self.audit_sink = Some(audit_sink);
+    }
+
     /// Execute a tool and return structured result.
     pub async fn execute(&mut self, tool_name: &str, args: serde_json::Value) -> ToolExecution {
         let start = std::time::Instant::now();
+        self.emit_audit_start(tool_name, &args);
 
         let descriptor = {
             let registry = self.registry.lock().await;
             registry.get(tool_name).cloned()
         };
         let Some(descriptor) = descriptor else {
-            return ToolExecution {
+            return self.emit_audit_end(ToolExecution {
                 tool_name: tool_name.to_string(),
                 input: args,
                 output: serde_json::Value::Null,
                 error: Some(format!("Tool '{}' is not registered", tool_name)),
                 remediation: remediation_for_missing_tool(tool_name),
                 duration_ms: start.elapsed().as_millis() as u64,
-            };
+            });
         };
 
         match self.permission_policy.authorize(
@@ -115,7 +141,7 @@ impl<H: ToolHandler> ToolExecutor<H> {
         ) {
             PermissionDecision::Allow => {}
             PermissionDecision::Deny { reason } | PermissionDecision::Ask { reason } => {
-                return ToolExecution {
+                return self.emit_audit_end(ToolExecution {
                     tool_name: tool_name.to_string(),
                     input: args,
                     output: serde_json::Value::Null,
@@ -126,7 +152,7 @@ impl<H: ToolHandler> ToolExecutor<H> {
                     ),
                     error: Some(reason),
                     duration_ms: start.elapsed().as_millis() as u64,
-                };
+                });
             }
         }
 
@@ -155,14 +181,32 @@ impl<H: ToolHandler> ToolExecutor<H> {
             }];
         }
 
-        ToolExecution {
+        self.emit_audit_end(ToolExecution {
             tool_name: tool_name.to_string(),
             input: args,
             output,
             error: error_msg,
             remediation,
             duration_ms: start.elapsed().as_millis() as u64,
+        })
+    }
+
+    fn emit_audit_start(&self, tool_name: &str, input: &serde_json::Value) {
+        if let Some(audit_sink) = self.audit_sink.as_ref() {
+            audit_sink(ToolExecutionAuditEvent::Start {
+                tool_name: tool_name.to_string(),
+                input: input.clone(),
+            });
         }
+    }
+
+    fn emit_audit_end(&self, execution: ToolExecution) -> ToolExecution {
+        if let Some(audit_sink) = self.audit_sink.as_ref() {
+            audit_sink(ToolExecutionAuditEvent::End {
+                execution: execution.clone(),
+            });
+        }
+        execution
     }
 }
 
@@ -374,5 +418,32 @@ mod tests {
         assert!(result.error.is_none());
         assert_eq!(result.output["tool"], "read_tool");
         assert!(result.remediation.is_empty());
+    }
+
+    #[tokio::test]
+    async fn executor_audit_sink_records_start_and_end_without_raw_policy() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let audit_sink: ToolExecutionAuditSink = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+        let mut executor = ToolExecutor::new(registry(), MockHandler).with_audit_sink(audit_sink);
+        let result = executor
+            .execute("read_tool", serde_json::json!({"id": 7}))
+            .await;
+
+        assert!(result.error.is_none());
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0],
+            ToolExecutionAuditEvent::Start { tool_name, input }
+                if tool_name == "read_tool" && input.get("id").and_then(|value| value.as_u64()) == Some(7)
+        ));
+        assert!(matches!(
+            &events[1],
+            ToolExecutionAuditEvent::End { execution }
+                if execution.tool_name == "read_tool" && execution.error.is_none()
+        ));
     }
 }

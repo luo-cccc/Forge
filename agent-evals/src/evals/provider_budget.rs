@@ -434,6 +434,148 @@ pub fn run_tool_called_run_event_eval() -> EvalResult {
     )
 }
 
+pub fn run_tool_executor_audit_records_tool_called_eval() -> EvalResult {
+    struct AuditHandler;
+
+    #[async_trait::async_trait]
+    impl agent_harness_core::ToolHandler for AuditHandler {
+        async fn execute(
+            &self,
+            _tool_name: &str,
+            args: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({
+                "answer": format!(
+                    "公开资料摘要：{}",
+                    args.get("query").and_then(|value| value.as_str()).unwrap_or("")
+                )
+            }))
+        }
+    }
+
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let kernel = std::sync::Arc::new(std::sync::Mutex::new(WriterAgentKernel::new(
+        "eval", memory,
+    )));
+    let audit_kernel = kernel.clone();
+    let audit_sink: agent_harness_core::ToolExecutionAuditSink =
+        std::sync::Arc::new(move |event| {
+            let Ok(mut kernel) = audit_kernel.lock() else {
+                return;
+            };
+            match event {
+                agent_harness_core::ToolExecutionAuditEvent::Start { tool_name, input } => {
+                    kernel.record_tool_called_run_event(
+                        "direct-tool-eval",
+                        tool_name.clone(),
+                        "start",
+                        Some(&input),
+                        None,
+                        vec![
+                            "direct_tool_executor".to_string(),
+                            format!("tool:{}", tool_name),
+                        ],
+                        now_ms(),
+                    );
+                }
+                agent_harness_core::ToolExecutionAuditEvent::End { execution } => {
+                    kernel.record_tool_called_run_event(
+                        "direct-tool-eval",
+                        execution.tool_name.clone(),
+                        "end",
+                        Some(&execution.input),
+                        Some(&execution),
+                        vec![
+                            "direct_tool_executor".to_string(),
+                            format!("tool:{}", execution.tool_name),
+                        ],
+                        now_ms(),
+                    );
+                }
+            }
+        });
+
+    let registry = agent_harness_core::default_writing_tool_registry();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut executor =
+        agent_harness_core::ToolExecutor::new(registry, AuditHandler).with_audit_sink(audit_sink);
+    let execution = runtime.block_on(async {
+        executor
+            .execute(
+                "query_project_brain",
+                serde_json::json!({
+                    "query": "玉佩秘密",
+                    "limit": 3
+                }),
+            )
+            .await
+    });
+
+    let snapshot = kernel.lock().unwrap().trace_snapshot(20);
+    let tool_events = snapshot
+        .run_events
+        .iter()
+        .filter(|event| event.event_type == "writer.tool_called")
+        .collect::<Vec<_>>();
+    let mut errors = Vec::new();
+    if execution.error.is_some() {
+        errors.push(format!(
+            "direct tool execution failed: {:?}",
+            execution.error
+        ));
+    }
+    if tool_events.len() != 2 {
+        errors.push(format!(
+            "expected direct executor start/end tool events, got {}",
+            tool_events.len()
+        ));
+    }
+    if !tool_events.iter().any(|event| {
+        event.data.get("phase").and_then(|value| value.as_str()) == Some("start")
+            && event
+                .data
+                .get("inputKeys")
+                .and_then(|value| value.as_array())
+                .is_some_and(|keys| {
+                    keys.iter().any(|key| key.as_str() == Some("query"))
+                        && keys.iter().any(|key| key.as_str() == Some("limit"))
+                })
+            && event
+                .source_refs
+                .iter()
+                .any(|reference| reference == "direct_tool_executor")
+    }) {
+        errors.push("direct tool start event lacks input key/source summary".to_string());
+    }
+    if !tool_events.iter().any(|event| {
+        event.data.get("phase").and_then(|value| value.as_str()) == Some("end")
+            && event.data.get("success").and_then(|value| value.as_bool()) == Some(true)
+            && event
+                .data
+                .get("outputBytes")
+                .and_then(|value| value.as_u64())
+                .is_some_and(|bytes| bytes > 0)
+    }) {
+        errors.push("direct tool end event lacks success/output summary".to_string());
+    }
+    let trajectory = kernel.lock().unwrap().export_trajectory(20).jsonl;
+    for leaked in ["玉佩秘密", "公开资料摘要"] {
+        if trajectory.contains(leaked) {
+            errors.push(format!("direct tool audit leaked raw text: {}", leaked));
+        }
+    }
+
+    eval_result(
+        "writer_agent:tool_executor_audit_records_tool_called",
+        format!(
+            "toolEvents={} outputBytes={}",
+            tool_events.len(),
+            execution.output.to_string().len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_project_brain_provider_budget_eval() -> EvalResult {
     let long_context = "寒玉戒指仍未归还，旧门钥匙和潮汐祭账互相指向同一条线索。".repeat(2600);
     let messages = vec![

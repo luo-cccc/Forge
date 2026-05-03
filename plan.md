@@ -739,7 +739,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已新增 eval：`writer_agent:planning_mode_denies_writes`、`writer_agent:planning_mode_uses_story_foundation`。
 2. 将 planning / diagnosis / generation 的前置阶段整理成 Writer Kernel phase pipeline。
    - 保持现有 `WriterAgentKernel.prepare_task_run()` 作为统一入口。
-   - 当前完成度：PlanningReview / ManualRequest / ChapterGeneration 已通过统一 task packet 和 trace 入口；真实写作工作流中的 context pack 组装已进入 `writer.context_pack_built` run event；章节生成 / Project Brain / manual request 的 provider call 启动已进入 `writer.model_started` run event；manual AgentLoop 工具调用 start/end 已进入 `writer.tool_called` run event。后续是扩展到更多非 AgentLoop 工具入口，而不是本轮 RunEventStore phase 缺口。
+   - 当前完成度：PlanningReview / ManualRequest / ChapterGeneration 已通过统一 task packet 和 trace 入口；真实写作工作流中的 context pack 组装已进入 `writer.context_pack_built` run event；章节生成 / Project Brain / manual request 的 provider call 启动已进入 `writer.model_started` run event；manual AgentLoop 工具调用 start/end 已进入 `writer.tool_called` run event。`agent-harness-core::ToolExecutor` 现在有可选 audit sink，Tauri 侧已有 `writer_tool_audit_sink` helper，manual AgentLoop 已迁到 executor 层记录；这补上了非 AgentLoop 直接 executor 调用的第一阶段能力，但还需要把未来真实外部工具入口逐个挂上该 sink。
 3. 为 ChapterGeneration、BatchGeneration、长诊断增加 WriterTaskReceipt。（ChapterGeneration / BatchGeneration 第一阶段已完成，长诊断未完成）
    - 已新增 `src-tauri/src/writer_agent/task_receipt.rs`。
    - `WriterTaskReceipt` 字段包括 task id、task kind、chapter、objective、required evidence、expected artifacts、must_not、source_refs、base_revision、created_at。
@@ -942,7 +942,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - `writer.approval_decided` 记录 WriterOperation 审批成功/拒绝、operationKind、affectedScope、approvalSource、actor、surfacedToUser 和 reason，用于回放写操作为什么被允许或拒绝。
    - `writer.context_pack_built` 记录真实 writer 工作流和章节生成上下文组装的 task、sourceCount、totalChars、budgetLimit、wasted、truncatedSourceCount、sourceReports、required 标记和来源 refs；事件只存预算/来源摘要，不写入正文上下文原文。
    - `writer.model_started` 记录章节生成、Project Brain 和 manual request 在预算门禁通过后、真实 provider call 前的 task、model、provider、stream、估算 token/cost、budgetDecision 和来源 refs；事件不记录 prompt 或模型输出。
-   - `writer.tool_called` 记录 manual AgentLoop 工具调用 start/end 的 toolName、phase、success、durationMs、inputKeys、inputBytes、outputBytes、error 和 remediationCodes；事件不写入参数值或工具输出原文。后续再扩展到非 AgentLoop 工具入口。
+   - `writer.tool_called` 记录 manual AgentLoop 工具调用 start/end 的 toolName、phase、success、durationMs、inputKeys、inputBytes、outputBytes、error 和 remediationCodes；事件不写入参数值或工具输出原文。`ToolExecutor` 已新增可选 audit sink，Tauri `writer_tool_audit_sink` 可把直接 executor 调用映射为同一类 run event，已有 eval 证明直接 executor 调用不会泄露 raw args / output；后续是把真实外部研究等新入口挂接到该 sink。
 2. Inspector timeline。
    - 当前状态：第一阶段已完成，前端只读 Inspect 切片已完成。
    - 已新增 `src-tauri/src/writer_agent/inspector.rs`，从 `WriterAgentTraceSnapshot` 派生 Inspector timeline 和 Companion-safe summary。
@@ -984,6 +984,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:context_pack_built_run_event`（已完成）
 - `writer_agent:model_started_run_event`（已完成）
 - `writer_agent:tool_called_run_event`（已完成）
+- `writer_agent:tool_executor_audit_records_tool_called`（已完成）
 - `writer_agent:product_metrics_multi_session_trend`（已完成）
 - `writer_agent:continuous_writing_fixture_20_chapters`
 

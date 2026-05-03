@@ -128,6 +128,7 @@ fn main() {
     results.push(run_provider_budget_records_run_event_eval());
     results.push(run_model_started_run_event_eval());
     results.push(run_tool_called_run_event_eval());
+    results.push(run_tool_executor_audit_records_tool_called_eval());
     results.push(run_project_brain_provider_budget_eval());
     results.push(run_project_brain_provider_budget_approval_eval());
     results.push(run_manual_request_provider_budget_eval());

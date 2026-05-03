@@ -77,48 +77,6 @@ fn record_manual_model_started(
     );
 }
 
-fn record_manual_tool_called_start(
-    app: &tauri::AppHandle,
-    task_id: &str,
-    tool: String,
-    args: serde_json::Value,
-) {
-    let state = app.state::<AppState>();
-    let Ok(mut kernel) = state.writer_kernel.lock() else {
-        return;
-    };
-    kernel.record_tool_called_run_event(
-        task_id.to_string(),
-        tool.clone(),
-        "start",
-        Some(&args),
-        None,
-        vec![format!("tool:{}", tool)],
-        agent_runtime::now_ms(),
-    );
-}
-
-fn record_manual_tool_called_end(
-    app: &tauri::AppHandle,
-    task_id: &str,
-    tool: String,
-    result: agent_harness_core::ToolExecution,
-) {
-    let state = app.state::<AppState>();
-    let Ok(mut kernel) = state.writer_kernel.lock() else {
-        return;
-    };
-    kernel.record_tool_called_run_event(
-        task_id.to_string(),
-        tool.clone(),
-        "end",
-        Some(&result.input),
-        Some(&result),
-        vec![format!("tool:{}", tool)],
-        agent_runtime::now_ms(),
-    );
-}
-
 fn record_manual_provider_budget_failure(
     app: &tauri::AppHandle,
     task_id: String,
@@ -340,6 +298,14 @@ pub async fn ask_agent(
         budget_source_refs,
         agent_runtime::now_ms(),
     );
+    prepared_run
+        .agent
+        .executor
+        .set_audit_sink(tool_bridge::writer_tool_audit_sink(
+            app.clone(),
+            budget_task_id.clone(),
+            vec!["manual_agent_loop".to_string()],
+        ));
 
     for proposal in emitted_proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)
@@ -347,8 +313,6 @@ pub async fn ask_agent(
     }
 
     let app_handle = app.clone();
-    let tool_event_app = app.clone();
-    let tool_event_task_id = budget_task_id.clone();
     prepared_run.set_event_callback(std::sync::Arc::new(move |event| match event {
         AgentLoopEvent::Intent { intent } => {
             let _ = app_handle.emit(
@@ -379,25 +343,10 @@ pub async fn ask_agent(
                 serde_json::json!({"reason": "complete"}),
             );
         }
-        AgentLoopEvent::ToolCallStart { ref tool, ref args } => {
-            record_manual_tool_called_start(
-                &tool_event_app,
-                &tool_event_task_id,
-                tool.clone(),
-                args.clone(),
-            );
+        AgentLoopEvent::ToolCallStart { .. } => {
             let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
         }
-        AgentLoopEvent::ToolCallEnd {
-            ref tool,
-            ref result,
-        } => {
-            record_manual_tool_called_end(
-                &tool_event_app,
-                &tool_event_task_id,
-                tool.clone(),
-                result.clone(),
-            );
+        AgentLoopEvent::ToolCallEnd { .. } => {
             let _ = app_handle.emit("agent-loop-event", serde_json::json!(event));
         }
         _ => {
