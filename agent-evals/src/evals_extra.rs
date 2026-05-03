@@ -1,8 +1,10 @@
 use crate::fixtures::*;
 use agent_harness_core::{Chunk, VectorDB};
 use agent_writer_lib::brain_service::{
-    build_project_brain_knowledge_index, rerank_project_brain_results_with_focus,
-    safe_knowledge_index_file_path, search_project_brain_results_with_focus, ProjectBrainFocus,
+    build_project_brain_knowledge_index, project_brain_embedding_batch_status,
+    project_brain_embedding_profile_from_config, rerank_project_brain_results_with_focus,
+    safe_knowledge_index_file_path, search_project_brain_results_with_focus, trim_embedding_input,
+    ProjectBrainEmbeddingBatchStatus, ProjectBrainFocus,
 };
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::context_relevance::{
@@ -1736,6 +1738,76 @@ pub fn run_project_brain_knowledge_index_path_guard_eval() -> EvalResult {
     eval_result(
         "writer_agent:project_brain_knowledge_index_path_guard",
         format!("root={}", root.display()),
+        errors,
+    )
+}
+
+pub fn run_project_brain_embedding_provider_limits_eval() -> EvalResult {
+    let profile = project_brain_embedding_profile_from_config(
+        "https://openrouter.ai/api/v1",
+        "text-embedding-3-large",
+        48,
+    );
+    let (trimmed, truncated) =
+        trim_embedding_input("寒玉戒指".repeat(40).as_str(), profile.input_limit_chars);
+
+    let mut errors = Vec::new();
+    if profile.provider_id != "openrouter" {
+        errors.push(format!(
+            "provider id should be openrouter, got {}",
+            profile.provider_id
+        ));
+    }
+    if profile.model != "text-embedding-3-large" {
+        errors.push(format!("profile model mismatch: {}", profile.model));
+    }
+    if profile.dimensions != 3072 {
+        errors.push(format!(
+            "text-embedding-3-large dimensions should be 3072, got {}",
+            profile.dimensions
+        ));
+    }
+    if profile.input_limit_chars != 48 {
+        errors.push(format!(
+            "input limit should come from settings, got {}",
+            profile.input_limit_chars
+        ));
+    }
+    if profile.batch_limit == 0 || profile.retry_limit == 0 {
+        errors.push("profile lacks batch/retry limits".to_string());
+    }
+    if !truncated || trimmed.chars().count() > profile.input_limit_chars {
+        errors.push(format!(
+            "embedding input was not truncated to limit: truncated={} chars={}",
+            truncated,
+            trimmed.chars().count()
+        ));
+    }
+    if project_brain_embedding_batch_status(3, 3, 0, &[])
+        != ProjectBrainEmbeddingBatchStatus::Complete
+    {
+        errors.push("all embedded chunks should report a complete batch".to_string());
+    }
+    if project_brain_embedding_batch_status(3, 2, 1, &[])
+        != ProjectBrainEmbeddingBatchStatus::Partial
+    {
+        errors.push("skipped chunks should report a partial batch".to_string());
+    }
+    if project_brain_embedding_batch_status(3, 0, 3, &[]) != ProjectBrainEmbeddingBatchStatus::Empty
+    {
+        errors.push("zero embedded chunks should report an empty batch".to_string());
+    }
+
+    eval_result(
+        "writer_agent:project_brain_embedding_provider_limits",
+        format!(
+            "provider={} model={} dims={} limit={} truncated={}",
+            profile.provider_id,
+            profile.model,
+            profile.dimensions,
+            profile.input_limit_chars,
+            truncated
+        ),
         errors,
     )
 }

@@ -119,6 +119,7 @@ fn main() {
     results.push(run_project_brain_author_fixture_rerank_eval());
     results.push(run_project_brain_knowledge_index_graph_eval());
     results.push(run_project_brain_knowledge_index_path_guard_eval());
+    results.push(run_project_brain_embedding_provider_limits_eval());
     results.push(run_research_subtask_uses_isolated_workspace_eval());
     results.push(run_research_subtask_outputs_evidence_only_eval());
     results.push(run_diagnostic_subtask_denies_writes_eval());

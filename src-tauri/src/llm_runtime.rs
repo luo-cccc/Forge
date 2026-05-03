@@ -8,6 +8,7 @@ pub struct LlmSettings {
     pub api_base: String,
     pub model: String,
     pub embedding_model: String,
+    pub embedding_input_limit_chars: usize,
 }
 
 pub enum StreamControl {
@@ -23,6 +24,11 @@ pub fn settings(api_key: String) -> LlmSettings {
             .unwrap_or_else(|_| "deepseek/deepseek-v4-flash".to_string()),
         embedding_model: std::env::var("OPENAI_EMBEDDING_MODEL")
             .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
+        embedding_input_limit_chars: std::env::var("OPENAI_EMBEDDING_INPUT_LIMIT_CHARS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value >= 128)
+            .unwrap_or(8_000),
     }
 }
 
@@ -273,6 +279,7 @@ mod tests {
             api_base: "https://openrouter.ai/api/v1".to_string(),
             model: "deepseek/deepseek-v4-flash".to_string(),
             embedding_model: "text-embedding-3-small".to_string(),
+            embedding_input_limit_chars: 8_000,
         }
     }
 
