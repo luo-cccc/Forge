@@ -655,6 +655,9 @@ export interface RecordOperationDurableSavePayload {
   proposalId?: string;
   operation: WriterOperation;
   saveResult: string;
+  savedContent?: string;
+  chapterTitle?: string;
+  chapterRevision?: string;
 }
 
 export interface ProposalFeedback {

@@ -399,3 +399,100 @@ pub fn run_post_write_diagnostics_recorded_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_post_write_diagnostics_after_accepted_operation_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角惯用武器是寒影刀",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation_in_chapter("林墨停在门前，低声确认这次不会惊动任何人。", "Chapter-4"),
+            "林墨拔出长剑，逼问玉佩的下落。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+
+    let mut approval = eval_approval("accepted_operation_post_write");
+    approval.proposal_id = Some(proposal.id.clone());
+    let approved = kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    let saved_text = "林墨停在门前，低声确认这次不会惊动任何人。林墨拔出长剑，逼问玉佩的下落。";
+    kernel
+        .record_operation_durable_save_with_post_write(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-2".to_string(),
+            Some(saved_text.to_string()),
+            Some("Chapter-4".to_string()),
+            Some("rev-2".to_string()),
+        )
+        .unwrap();
+
+    let snapshot = kernel.trace_snapshot(50);
+    let export = kernel.export_trajectory(50);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let report = snapshot.post_write_diagnostics.first();
+
+    let mut errors = Vec::new();
+    if !approved.success {
+        errors.push("accepted operation approval failed".to_string());
+    }
+    if report.is_none() {
+        errors.push("accepted operation durable save did not record diagnostics".to_string());
+    }
+    if let Some(report) = report {
+        if report.error_count == 0 {
+            errors.push("accepted operation report missed canon conflict error".to_string());
+        }
+        if !report
+            .source_refs
+            .iter()
+            .any(|source| source == &format!("proposal:{}", proposal.id))
+        {
+            errors.push(format!(
+                "accepted operation report lacks proposal source ref: {:?}",
+                report.source_refs
+            ));
+        }
+        if !report
+            .source_refs
+            .iter()
+            .any(|source| source == "operation:text.insert")
+        {
+            errors.push("accepted operation report lacks operation source ref".to_string());
+        }
+        if report.chapter_revision.as_deref() != Some("rev-2") {
+            errors.push(format!(
+                "accepted operation report has wrong revision: {:?}",
+                report.chapter_revision
+            ));
+        }
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.post_write_diagnostics\"")
+            && line.contains("operation:text.insert")
+    }) {
+        errors.push("trajectory export lacks accepted-operation post-write diagnostic".to_string());
+    }
+
+    eval_result(
+        "writer_agent:post_write_diagnostics_after_accepted_operation",
+        format!(
+            "reports={} trajectoryLines={}",
+            snapshot.post_write_diagnostics.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}

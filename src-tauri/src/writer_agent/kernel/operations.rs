@@ -129,6 +129,25 @@ impl WriterAgentKernel {
         operation: WriterOperation,
         save_result: String,
     ) -> Result<(), String> {
+        self.record_operation_durable_save_with_post_write(
+            proposal_id,
+            operation,
+            save_result,
+            None,
+            None,
+            None,
+        )
+    }
+
+    pub fn record_operation_durable_save_with_post_write(
+        &mut self,
+        proposal_id: Option<String>,
+        operation: WriterOperation,
+        save_result: String,
+        saved_text: Option<String>,
+        chapter_title: Option<String>,
+        chapter_revision: Option<String>,
+    ) -> Result<(), String> {
         if !operation_is_write_capable(&operation) {
             return Ok(());
         }
@@ -148,16 +167,92 @@ impl WriterAgentKernel {
         let approval_source = resolved_proposal_id
             .as_deref()
             .and_then(|id| self.latest_approval_source_for_operation(id, &operation));
+        let created_at = now_ms();
         self.push_operation_lifecycle(
-            resolved_proposal_id,
+            resolved_proposal_id.clone(),
             &operation,
-            state,
+            state.clone(),
             approval_source,
             Some(normalized),
             None,
-            now_ms(),
+            created_at,
         );
+        if state == WriterOperationLifecycleState::DurablySaved {
+            self.record_saved_operation_post_write_diagnostics(
+                resolved_proposal_id.as_deref(),
+                &operation,
+                saved_text.as_deref(),
+                chapter_title,
+                chapter_revision,
+                created_at,
+            );
+        }
         Ok(())
+    }
+
+    fn record_saved_operation_post_write_diagnostics(
+        &mut self,
+        proposal_id: Option<&str>,
+        operation: &WriterOperation,
+        saved_text: Option<&str>,
+        chapter_title: Option<String>,
+        chapter_revision: Option<String>,
+        created_at: u64,
+    ) {
+        let Some(saved_text) = saved_text.map(str::trim).filter(|text| !text.is_empty()) else {
+            return;
+        };
+        let Some((paragraph, paragraph_offset, cursor)) =
+            operation_post_write_diagnostic_window(saved_text, operation)
+        else {
+            return;
+        };
+        let chapter = chapter_title
+            .or_else(|| operation_chapter(operation))
+            .or_else(|| self.active_chapter.clone())
+            .unwrap_or_else(|| "Chapter-1".to_string());
+        let observation = WriterObservation {
+            id: format!("operation-save-{}", created_at),
+            created_at,
+            source: observation::ObservationSource::ChapterSave,
+            reason: observation::ObservationReason::Save,
+            project_id: self.project_id.clone(),
+            chapter_title: Some(chapter.clone()),
+            chapter_revision,
+            cursor: Some(observation::TextRange {
+                from: cursor,
+                to: cursor,
+            }),
+            selection: None,
+            prefix: text_tail(saved_text, 3_000),
+            suffix: String::new(),
+            paragraph,
+            full_text_digest: None,
+            editor_dirty: false,
+        };
+        let diagnostics = self.diagnostics.diagnose(
+            &observation.paragraph,
+            paragraph_offset,
+            &chapter,
+            &self.project_id,
+            &self.memory,
+        );
+        let mut report =
+            crate::writer_agent::post_write_diagnostics::build_post_write_diagnostic_report(
+                &observation,
+                &diagnostics,
+                created_at,
+            );
+        let mut source_refs = Vec::new();
+        if let Some(proposal_id) = proposal_id {
+            source_refs.push(format!("proposal:{}", proposal_id));
+        }
+        source_refs.push(format!("operation:{}", operation_kind_label(operation)));
+        if let Some(scope) = operation_affected_scope(operation) {
+            source_refs.push(scope);
+        }
+        extend_unique_source_refs(&mut report.source_refs, source_refs);
+        self.record_post_write_diagnostic_report(&report);
     }
 
     fn record_operation_result_lifecycle(
@@ -254,5 +349,74 @@ impl WriterAgentKernel {
                     && trace.state == WriterOperationLifecycleState::Approved
             })
             .and_then(|trace| trace.approval_source.clone())
+    }
+}
+
+fn operation_chapter(operation: &WriterOperation) -> Option<String> {
+    match operation {
+        WriterOperation::TextInsert { chapter, .. }
+        | WriterOperation::TextReplace { chapter, .. }
+        | WriterOperation::TextAnnotate { chapter, .. } => Some(chapter.clone()),
+        WriterOperation::PromiseResolve { chapter, .. }
+        | WriterOperation::PromiseDefer { chapter, .. }
+        | WriterOperation::PromiseAbandon { chapter, .. } => Some(chapter.clone()),
+        WriterOperation::ChapterMissionUpsert { mission } => Some(mission.chapter_title.clone()),
+        _ => None,
+    }
+}
+
+fn operation_post_write_diagnostic_window(
+    saved_text: &str,
+    operation: &WriterOperation,
+) -> Option<(String, usize, usize)> {
+    let chars = saved_text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return None;
+    }
+    let (target_start, target_end) = match operation {
+        WriterOperation::TextInsert { at, text, .. } => {
+            let start = (*at).min(chars.len());
+            let end = start.saturating_add(text.chars().count()).min(chars.len());
+            (start, end.max(start + 1).min(chars.len()))
+        }
+        WriterOperation::TextReplace { from, text, .. } => {
+            let start = (*from).min(chars.len());
+            let end = start.saturating_add(text.chars().count()).min(chars.len());
+            (start, end.max(start + 1).min(chars.len()))
+        }
+        _ => {
+            let end = chars.len().min(1_800);
+            return Some((chars[..end].iter().collect(), 0, end));
+        }
+    };
+
+    let mut start = target_start;
+    while start > 0 && chars[start - 1] != '\n' && target_start.saturating_sub(start) < 900 {
+        start -= 1;
+    }
+    let mut end = target_end;
+    while end < chars.len() && chars[end] != '\n' && end.saturating_sub(target_end) < 900 {
+        end += 1;
+    }
+    if start == end {
+        return None;
+    }
+    let cursor = target_end.min(chars.len());
+    Some((chars[start..end].iter().collect(), start, cursor))
+}
+
+fn text_tail(text: &str, max_chars: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = chars.len().saturating_sub(max_chars);
+    chars[start..].iter().collect()
+}
+
+fn extend_unique_source_refs(target: &mut Vec<String>, refs: Vec<String>) {
+    for source_ref in refs {
+        let source_ref = source_ref.trim();
+        if source_ref.is_empty() || target.iter().any(|existing| existing == source_ref) {
+            continue;
+        }
+        target.push(source_ref.to_string());
     }
 }

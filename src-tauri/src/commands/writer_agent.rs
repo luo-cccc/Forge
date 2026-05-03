@@ -136,9 +136,20 @@ pub fn record_writer_operation_durable_save(
     proposal_id: Option<String>,
     operation: crate::writer_agent::operation::WriterOperation,
     save_result: String,
+    saved_content: Option<String>,
+    chapter_title: Option<String>,
+    chapter_revision: Option<String>,
 ) -> Result<(), String> {
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.record_operation_durable_save(proposal_id, operation, save_result)
+    let saved_text = saved_content.map(|content| crate::html_to_plain_text(&content));
+    kernel.record_operation_durable_save_with_post_write(
+        proposal_id,
+        operation,
+        save_result,
+        saved_text,
+        chapter_title,
+        chapter_revision,
+    )
 }
 
 #[tauri::command]

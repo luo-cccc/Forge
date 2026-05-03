@@ -18,6 +18,8 @@ interface ApplyWriterOperationResult {
   applied: boolean;
   saved: boolean;
   revision?: string;
+  savedContent?: string;
+  chapterTitle?: string;
   error?: string;
 }
 
@@ -188,14 +190,20 @@ function App() {
         proposalId: undefined,
         operation,
         saveResult: `editor_save:${revision}`,
+        savedContent: content,
+        chapterTitle: currentChapter,
+        chapterRevision: revision,
       });
-      return { applied: true, saved: true, revision };
+      return { applied: true, saved: true, revision, savedContent: content, chapterTitle: currentChapter };
     } catch (e) {
       setIsEditorDirty(true);
       await invoke(Commands.recordWriterOperationDurableSave, {
         proposalId: undefined,
         operation,
         saveResult: `editor_save_failed:${String(e)}`,
+        savedContent: content,
+        chapterTitle: currentChapter,
+        chapterRevision: undefined,
       }).catch((error) => {
         console.error("Failed to record operation save failure:", error);
       });

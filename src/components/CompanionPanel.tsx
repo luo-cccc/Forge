@@ -33,6 +33,8 @@ interface ApplyOperationResult {
   applied: boolean;
   saved: boolean;
   revision?: string;
+  savedContent?: string;
+  chapterTitle?: string;
   error?: string;
 }
 
@@ -40,12 +42,18 @@ async function recordOperationDurableSave(
   proposalId: string | undefined,
   operation: WriterOperation,
   saveResult: string,
+  savedContent?: string,
+  chapterTitle?: string,
+  chapterRevision?: string,
 ) {
   if (!proposalId) return;
   await invoke(Commands.recordWriterOperationDurableSave, {
     proposalId,
     operation,
     saveResult,
+    savedContent,
+    chapterTitle,
+    chapterRevision,
   });
 }
 
@@ -763,6 +771,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       proposalId,
       operation,
       result.revision ? `editor_save:${result.revision}` : "editor_save:ok",
+      result.savedContent,
+      result.chapterTitle,
+      result.revision,
     );
     return true;
   }, [onApplyOperation]);

@@ -268,12 +268,18 @@ async function recordOperationDurableSave(
   proposalId: string | undefined,
   operation: WriterOperation | undefined,
   saveResult: string,
+  savedContent?: string,
+  chapterTitle?: string,
+  chapterRevision?: string,
 ) {
   if (!proposalId || !operation) return;
   await invoke(Commands.recordWriterOperationDurableSave, {
     proposalId,
     operation,
     saveResult,
+    savedContent,
+    chapterTitle,
+    chapterRevision,
   });
 }
 
@@ -777,6 +783,9 @@ export default function EditorPanel({
               activeGhost.proposalId,
               activeGhost.operation,
               `editor_auto_save:${revision}`,
+              content,
+              chapterAtSave,
+              revision,
             )
               .then(() => {
                 if (pendingGhostFeedbackRef.current?.proposalId === activeGhost.proposalId) {
@@ -1030,6 +1039,9 @@ export default function EditorPanel({
           preview.proposalId,
           writerOperationFromInlinePreview(preview, editor),
           `editor_save_failed:${String(e)}`,
+          content,
+          chapterAtSave,
+          undefined,
         ).catch((error) => {
           console.error("Failed to record inline operation save failure:", error);
         });
@@ -1041,6 +1053,9 @@ export default function EditorPanel({
         preview.proposalId,
         writerOperationFromInlinePreview(preview, editor),
         `editor_save:${savedRevision}`,
+        content,
+        chapterAtSave,
+        savedRevision,
       );
       const feedback: ProposalFeedback = {
         proposalId: preview.proposalId,
