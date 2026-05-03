@@ -1,7 +1,7 @@
 use crate::fixtures::*;
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::context_relevance::{
-    format_text_chunk_relevance, rerank_text_chunks,
+    format_text_chunk_relevance, rerank_text_chunks, writing_scene_types,
 };
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::memory::WriterMemory;
@@ -1107,6 +1107,74 @@ pub fn run_project_brain_writing_relevance_rerank_eval() -> EvalResult {
     eval_result(
         "writer_agent:project_brain_writing_relevance_rerank",
         format!("first={} explanation={}", first_id, first_explanation),
+        errors,
+    )
+}
+
+pub fn run_scene_type_relevance_signal_eval() -> EvalResult {
+    let focus_scene_types = writing_scene_types("本章要揭开寒玉戒指来源的真相，并回收前文伏笔。");
+    let chunks = vec![
+        (
+            42.0,
+            (
+                "surface-similar",
+                "林墨摩挲寒玉戒指，旧门外的风声反复敲打窗棂，气味潮湿。",
+            ),
+        ),
+        (
+            1.0,
+            (
+                "reveal-scene",
+                "张三终于说出真相：寒玉戒指来源于北境宗门旧案，这条线索回收了母亲遗物的伏笔。",
+            ),
+        ),
+    ];
+    let reranked = rerank_text_chunks(
+        chunks,
+        "本章要揭开寒玉戒指来源的真相，并回收前文伏笔。",
+        |(_, text)| text.to_string(),
+    );
+    let first_id = reranked
+        .first()
+        .map(|(_, _, (id, _))| *id)
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if !focus_scene_types.iter().any(|scene| scene == "reveal")
+        || !focus_scene_types
+            .iter()
+            .any(|scene| scene == "setup_payoff")
+    {
+        errors.push(format!(
+            "focus scene types should include reveal and setup_payoff, got {:?}",
+            focus_scene_types
+        ));
+    }
+    if first_id != "reveal-scene" {
+        errors.push(format!(
+            "reveal scene should outrank surface-similar description, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("scene type reveal")
+        || !first_explanation.contains("scene type setup_payoff")
+    {
+        errors.push(format!(
+            "rerank explanation missing scene type signals: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:scene_type_relevance_signal",
+        format!(
+            "first={} scenes={:?} explanation={}",
+            first_id, focus_scene_types, first_explanation
+        ),
         errors,
     )
 }

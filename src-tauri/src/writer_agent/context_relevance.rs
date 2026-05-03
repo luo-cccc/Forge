@@ -10,6 +10,8 @@ pub(crate) struct WritingRelevance {
     foundation_text: String,
     cursor_terms: Vec<String>,
     foundation_terms: Vec<String>,
+    cursor_scene_types: Vec<WritingSceneType>,
+    foundation_scene_types: Vec<WritingSceneType>,
 }
 
 #[derive(Default)]
@@ -24,6 +26,35 @@ impl RelevanceScore {
         let reason = reason.into();
         if !reason.trim().is_empty() && !self.reasons.contains(&reason) {
             self.reasons.push(reason);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WritingSceneType {
+    Dialogue,
+    Action,
+    Description,
+    EmotionalBeat,
+    ConflictEscalation,
+    Reveal,
+    SetupPayoff,
+    Exposition,
+    Transition,
+}
+
+impl WritingSceneType {
+    fn label(self) -> &'static str {
+        match self {
+            WritingSceneType::Dialogue => "dialogue",
+            WritingSceneType::Action => "action",
+            WritingSceneType::Description => "description",
+            WritingSceneType::EmotionalBeat => "emotional_beat",
+            WritingSceneType::ConflictEscalation => "conflict_escalation",
+            WritingSceneType::Reveal => "reveal",
+            WritingSceneType::SetupPayoff => "setup_payoff",
+            WritingSceneType::Exposition => "exposition",
+            WritingSceneType::Transition => "transition",
         }
     }
 }
@@ -51,6 +82,8 @@ impl WritingRelevance {
         Self {
             cursor_terms: relevance_terms(&cursor_text),
             foundation_terms: relevance_terms(&foundation_text),
+            cursor_scene_types: infer_scene_types(&cursor_text),
+            foundation_scene_types: infer_scene_types(&foundation_text),
             cursor_text,
             foundation_text,
         }
@@ -96,6 +129,13 @@ pub fn format_text_chunk_relevance(reasons: &[String]) -> String {
     format!("WHY writing_relevance: {}", reason)
 }
 
+pub fn writing_scene_types(text: &str) -> Vec<String> {
+    infer_scene_types(text)
+        .into_iter()
+        .map(|scene_type| scene_type.label().to_string())
+        .collect()
+}
+
 pub(crate) fn score_canon_entity(
     entity: &CanonEntitySummary,
     observation: &WriterObservation,
@@ -113,6 +153,21 @@ pub(crate) fn score_canon_entity(
             format!("mission/result mentions entity {}", entity.name),
         );
     }
+    let entity_scene_types = infer_scene_types(&entity_text);
+    add_scene_type_scores(
+        &mut score,
+        &relevance.cursor_scene_types,
+        &entity_scene_types,
+        14,
+        "cursor",
+    );
+    add_scene_type_scores(
+        &mut score,
+        &relevance.foundation_scene_types,
+        &entity_scene_types,
+        10,
+        "foundation",
+    );
 
     for term in relevance
         .cursor_terms
@@ -173,6 +228,26 @@ pub(crate) fn score_promise(
     }
 
     let promise_text = promise_text(promise);
+    let mut promise_scene_types = infer_scene_types(&promise_text);
+    for scene_type in promise_kind_scene_types(&promise.kind) {
+        if !promise_scene_types.contains(&scene_type) {
+            promise_scene_types.push(scene_type);
+        }
+    }
+    add_scene_type_scores(
+        &mut score,
+        &relevance.cursor_scene_types,
+        &promise_scene_types,
+        16,
+        "cursor",
+    );
+    add_scene_type_scores(
+        &mut score,
+        &relevance.foundation_scene_types,
+        &promise_scene_types,
+        12,
+        "foundation",
+    );
     for term in relevance
         .cursor_terms
         .iter()
@@ -238,6 +313,7 @@ fn promise_text_contains_terms(promise_text: &str, decision_text: &str) -> bool 
 struct WritingRelevanceFocus {
     raw_text: String,
     terms: Vec<String>,
+    scene_types: Vec<WritingSceneType>,
 }
 
 impl WritingRelevanceFocus {
@@ -245,12 +321,21 @@ impl WritingRelevanceFocus {
         Self {
             raw_text: text.to_string(),
             terms: relevance_terms(text),
+            scene_types: infer_scene_types(text),
         }
     }
 }
 
 fn score_text_chunk(focus: &WritingRelevanceFocus, text: &str) -> RelevanceScore {
     let mut score = RelevanceScore::default();
+    let chunk_scene_types = infer_scene_types(text);
+    add_scene_type_scores(
+        &mut score,
+        &focus.scene_types,
+        &chunk_scene_types,
+        28,
+        "focus",
+    );
     for term in focus
         .terms
         .iter()
@@ -277,6 +362,38 @@ fn score_text_chunk(focus: &WritingRelevanceFocus, text: &str) -> RelevanceScore
         }
     }
     score
+}
+
+fn add_scene_type_scores(
+    score: &mut RelevanceScore,
+    focus_scene_types: &[WritingSceneType],
+    candidate_scene_types: &[WritingSceneType],
+    points: i32,
+    prefix: &str,
+) {
+    for scene_type in focus_scene_types
+        .iter()
+        .filter(|scene_type| candidate_scene_types.contains(scene_type))
+        .take(2)
+    {
+        score.add(
+            points,
+            format!("{} scene type {}", prefix, scene_type.label()),
+        );
+    }
+}
+
+fn promise_kind_scene_types(kind: &str) -> Vec<WritingSceneType> {
+    match kind {
+        "mystery_clue" => vec![WritingSceneType::Reveal, WritingSceneType::SetupPayoff],
+        "object_whereabouts" => vec![WritingSceneType::SetupPayoff],
+        "emotional_debt" => vec![WritingSceneType::EmotionalBeat],
+        "character_commitment" => vec![WritingSceneType::Dialogue, WritingSceneType::SetupPayoff],
+        "relationship_tension" => {
+            vec![WritingSceneType::Dialogue, WritingSceneType::EmotionalBeat]
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn relevance_reason_text(reasons: &[String]) -> String {
@@ -325,6 +442,109 @@ fn promise_text(promise: &PlotPromiseSummary) -> String {
         promise.last_seen_chapter,
         promise.expected_payoff
     )
+}
+
+fn infer_scene_types(text: &str) -> Vec<WritingSceneType> {
+    let mut scene_types = Vec::new();
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Dialogue,
+        &[
+            "「", "」", "\"", "说", "问", "回答", "低声", "低语", "喃喃", "喊",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Action,
+        &[
+            "拔", "挥", "冲", "扑", "闪", "避", "刺", "劈", "砍", "追", "打斗", "交锋",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Description,
+        &[
+            "雾", "风", "月光", "烛", "气味", "潮湿", "冷意", "雪", "雨", "颜色", "影子",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::EmotionalBeat,
+        &[
+            "沉默", "心跳", "愤怒", "恐惧", "悲伤", "颤抖", "握紧", "犹豫", "后悔",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::ConflictEscalation,
+        &[
+            "突然",
+            "然而",
+            "不料",
+            "没想到",
+            "更糟",
+            "危机",
+            "追杀",
+            "背叛",
+            "阻止",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Reveal,
+        &[
+            "真相", "揭开", "揭露", "发现", "原来", "秘密", "身份", "来源", "线索",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::SetupPayoff,
+        &[
+            "伏笔", "回收", "兑现", "下落", "承诺", "誓言", "代价", "结果", "收束",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Exposition,
+        &[
+            "解释", "说明", "背景", "来历", "规则", "设定", "宗门", "朝堂", "历史",
+        ],
+    );
+    add_scene_type_if(
+        &mut scene_types,
+        text,
+        WritingSceneType::Transition,
+        &[
+            "翌日",
+            "后来",
+            "与此同时",
+            "转眼",
+            "回到",
+            "离开",
+            "抵达",
+            "路上",
+        ],
+    );
+    scene_types
+}
+
+fn add_scene_type_if(
+    scene_types: &mut Vec<WritingSceneType>,
+    text: &str,
+    scene_type: WritingSceneType,
+    cues: &[&str],
+) {
+    if cues.iter().any(|cue| text.contains(cue)) && !scene_types.contains(&scene_type) {
+        scene_types.push(scene_type);
+    }
 }
 
 fn relevance_terms(text: &str) -> Vec<String> {
