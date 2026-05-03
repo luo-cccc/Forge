@@ -1440,6 +1440,61 @@ pub fn run_project_brain_avoid_terms_preserve_payoff_eval() -> EvalResult {
     )
 }
 
+pub fn run_project_brain_must_not_boundary_eval() -> EvalResult {
+    let chunks = vec![
+        (
+            48.0,
+            (
+                "rumor-dominates",
+                "旧门传闻盖过寒玉戒指下落，酒肆闲谈只把旧门传闻当成主线，林墨没有得到新线索。",
+            ),
+        ),
+        (
+            1.0,
+            (
+                "ring-payoff",
+                "林墨追查寒玉戒指下落，发现黑衣人把戒指带往北境宗门，戒指来源线索终于收束。",
+            ),
+        ),
+    ];
+    let reranked = rerank_text_chunks(
+        chunks,
+        "本章必须追查寒玉戒指下落，揭开戒指来源；不得让旧门传闻盖过寒玉戒指下落。",
+        |(_, text)| text.to_string(),
+    );
+    let first_id = reranked
+        .first()
+        .map(|(_, _, (id, _))| *id)
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if first_id != "ring-payoff" {
+        errors.push(format!(
+            "must_not boundary should suppress rumor while preserving ring target, got {}",
+            first_id
+        ));
+    }
+    if first_explanation.contains("avoid term 寒玉戒指")
+        || !first_explanation.contains("寒玉戒指")
+        || !first_explanation.contains("scene type setup_payoff")
+    {
+        errors.push(format!(
+            "must_not boundary should keep ring payoff as positive target: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_must_not_boundary",
+        format!("first={} explanation={}", first_id, first_explanation),
+        errors,
+    )
+}
+
 pub fn run_end_to_end_ghost_pipeline_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

@@ -383,15 +383,31 @@ fn add_scene_type_scores(
     points: i32,
     prefix: &str,
 ) {
-    for scene_type in focus_scene_types
+    let mut matching_scene_types = focus_scene_types
         .iter()
+        .copied()
         .filter(|scene_type| candidate_scene_types.contains(scene_type))
-        .take(2)
-    {
+        .collect::<Vec<_>>();
+    matching_scene_types.sort_by_key(|scene_type| scene_type_relevance_priority(*scene_type));
+    for scene_type in matching_scene_types.into_iter().take(2) {
         score.add(
             points,
             format!("{} scene type {}", prefix, scene_type.label()),
         );
+    }
+}
+
+fn scene_type_relevance_priority(scene_type: WritingSceneType) -> u8 {
+    match scene_type {
+        WritingSceneType::SetupPayoff => 0,
+        WritingSceneType::Reveal => 1,
+        WritingSceneType::ConflictEscalation => 2,
+        WritingSceneType::EmotionalBeat => 3,
+        WritingSceneType::Dialogue => 4,
+        WritingSceneType::Action => 5,
+        WritingSceneType::Exposition => 6,
+        WritingSceneType::Description => 7,
+        WritingSceneType::Transition => 8,
     }
 }
 
@@ -619,12 +635,7 @@ fn negative_relevance_terms(text: &str) -> Vec<String> {
         for cue in NEGATIVE_CUES {
             if let Some(cue_start) = segment.find(cue) {
                 let cue_tail = &segment[cue_start + cue.len()..];
-                let phrase_terms = negative_phrase_terms(cue_tail);
-                for term in phrase_terms.iter().cloned().chain(
-                    relevance_terms(cue_tail)
-                        .into_iter()
-                        .filter(|term| !phrase_terms.iter().any(|phrase| phrase.contains(term))),
-                ) {
+                for term in negative_phrase_terms(cue_tail) {
                     if seen.insert(term.clone()) {
                         terms.push(term);
                     }
@@ -636,7 +647,9 @@ fn negative_relevance_terms(text: &str) -> Vec<String> {
 }
 
 const NEGATIVE_CUES: &[&str] = &["不要", "不得", "禁止", "避免", "不能"];
-const NEGATIVE_BOUNDARIES: &[&str] = &["稀释", "干扰", "掩盖", "拖慢", "分散", "偏离", "覆盖"];
+const NEGATIVE_BOUNDARIES: &[&str] = &[
+    "稀释", "干扰", "掩盖", "拖慢", "分散", "偏离", "覆盖", "盖过", "取代", "代替", "抢走",
+];
 
 fn negative_phrase_terms(text: &str) -> Vec<String> {
     let before_boundary = NEGATIVE_BOUNDARIES
@@ -664,6 +677,9 @@ fn strip_negative_phrase_filler(raw: &str) -> &str {
         .trim_start_matches('被')
         .trim_start_matches('把')
         .trim_start_matches('将')
+        .trim_start_matches('让')
+        .trim_start_matches('用')
+        .trim_start_matches('以')
         .trim_start_matches("继续")
         .trim_start_matches("只是")
         .trim_start_matches('只')

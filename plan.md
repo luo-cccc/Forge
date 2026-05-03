@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、96/96 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、97/97 writer evals。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
@@ -474,16 +474,18 @@ Done：
 - Writing relevance 会把 `不要` / `不得` / `禁止` / `避免` / `不能` 后的短语识别为 avoid terms，避免 mission 的禁止事项在 Project Brain rerank 中反向抬高干扰段落，同时不把可回收的旧伏笔一概压制。
 - `writer_agent:project_brain_long_session_candidate_recall` 已用多章节 Project Brain fixture 覆盖 query-only top5 漏召回、focus-aware 检索召回当前任务 chunk、并通过 avoid-term rerank 压制旧门传闻噪声。
 - `writer_agent:project_brain_avoid_terms_preserve_payoff` 已覆盖 `不要被旧门传闻稀释主线` 不会压掉 `旧门钥匙` 这类正在回收的伏笔段落。
+- `writer_agent:project_brain_must_not_boundary` 已覆盖 `不得让旧门传闻盖过寒玉戒指下落` 这类复杂 must_not 边界句式，避免把边界后的正向目标误识别为 avoid term。
+- Scene type relevance 解释会优先输出 setup/payoff 和 reveal，再输出 action/description 等泛场景信号，让 `WHY writing_relevance` 更贴近检索决策。
 
 Partial：
 
 - Scene type taxonomy 仍是轻量关键词规则，尚未做作者项目级自定义、LLM 校准或真实语料回归分析。
-- Project Brain 初筛候选池已扩大并使用 query + WriterMemory focus；已有合成长会话 fixture 覆盖候选召回、avoid-term 噪声压制和旧伏笔保留，仍需要真实作者项目数据验证候选池倍率、召回稳定性和噪声段落压制边界。
+- Project Brain 初筛候选池已扩大并使用 query + WriterMemory focus；已有合成长会话 fixture 覆盖候选召回、avoid-term 噪声压制、旧伏笔保留和复杂 must_not 边界，仍需要真实作者项目数据验证候选池倍率、召回稳定性和噪声段落压制边界。
 
 Remaining：
 
 - 用真实连续章节的 Project Brain fixtures 继续扩展 rerank eval，覆盖更多普通语义相似干扰、多章节召回和作者项目特有词汇。
-- 基于真实项目数据继续校准 Project Brain candidate multiplier 和 avoid-term 负向权重，尤其验证复杂 must_not 句式和需要回收的旧线索共存时的表现。
+- 基于真实项目数据继续校准 Project Brain candidate multiplier 和 avoid-term 负向权重，尤其验证更多口语化/长句式 must_not 与需要回收的旧线索共存时的表现。
 
 Verification：
 
@@ -494,6 +496,7 @@ Verification：
 - `writer_agent:project_brain_writer_memory_focus`
 - `writer_agent:project_brain_long_session_candidate_recall`
 - `writer_agent:project_brain_avoid_terms_preserve_payoff`
+- `writer_agent:project_brain_must_not_boundary`
 - `npm run verify`
 
 ## 9. P2：架构拆分和可维护性（P2.4-P2.6）
@@ -580,7 +583,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 96/96 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 97/97 passing。
 
 建议模块：
 
