@@ -4,9 +4,11 @@ use agent_writer_lib::writer_agent::operation::WriterOperation;
 use agent_writer_lib::writer_agent::proposal::{EvidenceRef, EvidenceSource};
 use agent_writer_lib::writer_agent::research_subtask::{
     build_evidence_only_subtask_result, create_subtask_workspace,
+    external_research_provider_budget_report, failure_bundle_from_subtask_provider_budget,
     failure_bundle_from_subtask_tool_execution, safe_subtask_artifact_path,
     subtask_completed_payload, subtask_started_payload, tool_filter_for_subtask,
     validate_evidence_only_subtask_result, write_subtask_artifact, WriterSubtaskKind,
+    WriterSubtaskProviderBudgetInput,
 };
 
 pub fn run_research_subtask_uses_isolated_workspace_eval() -> EvalResult {
@@ -437,6 +439,141 @@ pub fn run_research_subtask_tool_failure_records_bundle_eval() -> EvalResult {
         format!(
             "allowed={} runEvents={} inspectorEvents={}",
             inventory.allowed.len(),
+            snapshot.run_events.len(),
+            inspector.events.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_research_subtask_provider_budget_eval() -> EvalResult {
+    let input = WriterSubtaskProviderBudgetInput {
+        subtask_id: "research-budget-1".to_string(),
+        kind: WriterSubtaskKind::Research,
+        model: "gpt-4o".to_string(),
+        objective: "Verify external/public evidence for the ring clue without writing memory."
+            .to_string(),
+        query: "寒玉戒指 外部公开线索 ".repeat(800),
+        context_chars: 180_000,
+        requested_output_tokens: 12_000,
+    };
+    let report = external_research_provider_budget_report(&input);
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut errors = Vec::new();
+    let Ok(report) = report else {
+        return eval_result(
+            "writer_agent:research_subtask_provider_budget",
+            "budget=error".to_string(),
+            vec!["failed to build external research provider budget report".to_string()],
+        );
+    };
+    kernel.record_provider_budget_report(
+        input.subtask_id.clone(),
+        &report,
+        vec![format!("subtask:{}", input.subtask_id)],
+        now_ms(),
+    );
+    let bundle = failure_bundle_from_subtask_provider_budget(
+        WriterSubtaskKind::Research,
+        &input.subtask_id,
+        &input.objective,
+        report.clone(),
+        vec!["subtask:research-budget-1:artifact:evidence/public-search.json".to_string()],
+        now_ms(),
+    );
+    if let Ok(Some(bundle)) = bundle.as_ref() {
+        kernel.record_failure_evidence_bundle(bundle);
+    }
+    let snapshot = kernel.trace_snapshot(20);
+    let inspector = kernel.inspector_timeline(20);
+    let trajectory = kernel.export_trajectory(20).jsonl;
+
+    if report.task
+        != agent_writer_lib::writer_agent::provider_budget::WriterProviderBudgetTask::ExternalResearch
+    {
+        errors.push(format!("unexpected research budget task {:?}", report.task));
+    }
+    if report.decision
+        != agent_writer_lib::writer_agent::provider_budget::WriterProviderBudgetDecision::ApprovalRequired
+    {
+        errors.push(format!(
+            "long external research should require approval, got {:?}",
+            report.decision
+        ));
+    }
+    let bundle = match bundle {
+        Ok(Some(bundle)) => bundle,
+        Ok(None) => {
+            errors.push(
+                "approval-required research budget did not create failure bundle".to_string(),
+            );
+            return eval_result(
+                "writer_agent:research_subtask_provider_budget",
+                "bundle=false".to_string(),
+                errors,
+            );
+        }
+        Err(error) => {
+            errors.push(format!(
+                "failed to create research budget bundle: {}",
+                error
+            ));
+            return eval_result(
+                "writer_agent:research_subtask_provider_budget",
+                "bundle=error".to_string(),
+                errors,
+            );
+        }
+    };
+    if bundle.code != "RESEARCH_SUBTASK_PROVIDER_BUDGET_APPROVAL_REQUIRED" {
+        errors.push(format!("unexpected research budget code {}", bundle.code));
+    }
+    if !bundle
+        .remediation
+        .iter()
+        .any(|item| item.contains("subtask_external_research_budget"))
+    {
+        errors.push("research budget bundle lacks subtask remediation".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.provider_budget"
+            && event.task_id.as_deref() == Some("research-budget-1")
+            && event
+                .data
+                .get("providerBudget")
+                .and_then(|budget| budget.get("task"))
+                .and_then(|value| value.as_str())
+                == Some("external_research")
+    }) {
+        errors.push("research provider budget was not recorded as run event".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.error"
+            && event.task_id.as_deref() == Some("research-budget-1")
+            && event.data.get("code").and_then(|value| value.as_str())
+                == Some("RESEARCH_SUBTASK_PROVIDER_BUDGET_APPROVAL_REQUIRED")
+    }) {
+        errors
+            .push("research provider budget failure was not recorded as writer.error".to_string());
+    }
+    if !inspector.events.iter().any(|event| {
+        event.kind == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::Failure
+            && event.task_id.as_deref() == Some("research-budget-1")
+            && event.summary.contains("provider budget")
+    }) {
+        errors.push("inspector does not expose research provider budget failure".to_string());
+    }
+    if trajectory.contains("寒玉戒指 外部公开线索") {
+        errors.push("research provider budget leaked raw query text".to_string());
+    }
+
+    eval_result(
+        "writer_agent:research_subtask_provider_budget",
+        format!(
+            "decision={:?} tokens={} runEvents={} inspectorEvents={}",
+            report.decision,
+            report.estimated_total_tokens,
             snapshot.run_events.len(),
             inspector.events.len()
         ),

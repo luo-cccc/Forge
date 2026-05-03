@@ -10,10 +10,18 @@ use std::path::{Component, Path, PathBuf};
 
 use super::operation::WriterOperation;
 use super::proposal::EvidenceRef;
-use super::task_receipt::{failure_bundle_from_tool_execution, WriterFailureEvidenceBundle};
+use super::provider_budget::{
+    evaluate_provider_budget, WriterProviderBudgetDecision, WriterProviderBudgetReport,
+    WriterProviderBudgetRequest, WriterProviderBudgetTask,
+};
+use super::task_receipt::{
+    failure_bundle_from_tool_execution, WriterFailureCategory, WriterFailureEvidenceBundle,
+};
 
 const SUBTASK_ROOT_DIR: &str = "agent_subtasks";
 const SUBTASK_ARTIFACT_DIR: &str = "artifacts";
+const EXTERNAL_RESEARCH_TOOL_OVERHEAD_TOKENS: u64 = 768;
+const DEFAULT_EXTERNAL_RESEARCH_OUTPUT_TOKENS: u64 = 4_096;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +76,18 @@ pub struct WriterSubtaskToolPolicySummary {
     pub max_side_effect_level: String,
     pub allow_approval_required: bool,
     pub required_tool_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterSubtaskProviderBudgetInput {
+    pub subtask_id: String,
+    pub kind: WriterSubtaskKind,
+    pub model: String,
+    pub objective: String,
+    pub query: String,
+    pub context_chars: usize,
+    pub requested_output_tokens: u64,
 }
 
 pub fn create_subtask_workspace(
@@ -236,6 +256,108 @@ pub fn subtask_tool_policy_summary(kind: WriterSubtaskKind) -> WriterSubtaskTool
         allow_approval_required: policy.allow_approval_required,
         required_tool_tags: policy.required_tool_tags,
     }
+}
+
+pub fn external_research_provider_budget_report(
+    input: &WriterSubtaskProviderBudgetInput,
+) -> Result<WriterProviderBudgetReport, String> {
+    let _subtask_id = normalized_subtask_id(&input.subtask_id)?;
+    if input.kind != WriterSubtaskKind::Research {
+        return Err(
+            "External research provider budget is only valid for research subtasks".to_string(),
+        );
+    }
+    let model = input.model.trim();
+    if model.is_empty() {
+        return Err("External research provider model is empty".to_string());
+    }
+    let estimated_input_tokens = estimate_research_provider_input_tokens(input);
+    let requested_output_tokens = if input.requested_output_tokens == 0 {
+        DEFAULT_EXTERNAL_RESEARCH_OUTPUT_TOKENS
+    } else {
+        input.requested_output_tokens
+    };
+    Ok(evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ExternalResearch,
+        model,
+        estimated_input_tokens,
+        requested_output_tokens,
+    )))
+}
+
+pub fn failure_bundle_from_subtask_provider_budget(
+    kind: WriterSubtaskKind,
+    subtask_id: &str,
+    objective: &str,
+    report: WriterProviderBudgetReport,
+    artifact_refs: Vec<String>,
+    created_at_ms: u64,
+) -> Result<Option<WriterFailureEvidenceBundle>, String> {
+    let subtask_id = normalized_subtask_id(subtask_id)?;
+    let objective = objective.trim();
+    if objective.is_empty() {
+        return Err("Writer Agent subtask objective is empty".to_string());
+    }
+    let artifact_refs = normalize_strings(artifact_refs);
+    for artifact in &artifact_refs {
+        let expected_prefix = format!("subtask:{}:artifact:", subtask_id);
+        if !artifact.starts_with(&expected_prefix) {
+            return Err(format!(
+                "subtask artifact ref is outside the isolated workspace: {}",
+                artifact
+            ));
+        }
+    }
+    if !matches!(
+        report.decision,
+        WriterProviderBudgetDecision::ApprovalRequired | WriterProviderBudgetDecision::Blocked
+    ) {
+        return Ok(None);
+    }
+
+    let kind_label = subtask_kind_label(kind);
+    let code = if report.decision == WriterProviderBudgetDecision::Blocked {
+        "RESEARCH_SUBTASK_PROVIDER_BUDGET_BLOCKED"
+    } else {
+        "RESEARCH_SUBTASK_PROVIDER_BUDGET_APPROVAL_REQUIRED"
+    };
+    let message = format!(
+        "{} subtask '{}' provider budget requires review before calling the external research provider.",
+        kind_label, subtask_id
+    );
+    let mut remediation = report.remediation.clone();
+    remediation.push(
+        "subtask_external_research_budget: Keep the research evidence-only; reduce query/context scope or collect author approval before retrying.".to_string(),
+    );
+
+    Ok(Some(WriterFailureEvidenceBundle::new(
+        WriterFailureCategory::ProviderFailed,
+        code,
+        message,
+        true,
+        Some(subtask_id.clone()),
+        normalize_strings(
+            vec![
+                format!("subtask:{}", subtask_id),
+                format!("subtask:{}:kind:{}", subtask_id, kind_label),
+                format!("model:{}", report.model),
+                format!("estimated_tokens:{}", report.estimated_total_tokens),
+                format!("estimated_cost_micros:{}", report.estimated_cost_micros),
+            ]
+            .into_iter()
+            .chain(artifact_refs.iter().cloned())
+            .collect(),
+        ),
+        serde_json::json!({
+            "subtaskId": subtask_id,
+            "kind": kind_label,
+            "objective": objective,
+            "artifactRefs": artifact_refs,
+            "providerBudget": report,
+        }),
+        remediation,
+        created_at_ms,
+    )))
 }
 
 pub fn build_evidence_only_subtask_result(
@@ -434,6 +556,17 @@ fn safe_relative_path(relative_path: &str, label: &str) -> Result<PathBuf, Strin
     Ok(path.to_path_buf())
 }
 
+fn estimate_research_provider_input_tokens(input: &WriterSubtaskProviderBudgetInput) -> u64 {
+    EXTERNAL_RESEARCH_TOOL_OVERHEAD_TOKENS
+        + estimate_chars_as_tokens(&input.objective)
+        + estimate_chars_as_tokens(&input.query)
+        + input.context_chars as u64 / 3
+}
+
+fn estimate_chars_as_tokens(value: &str) -> u64 {
+    value.trim().chars().count() as u64 / 3
+}
+
 fn normalize_strings(values: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     for value in values {
@@ -528,6 +661,39 @@ mod tests {
             .artifact_refs
             .iter()
             .any(|artifact| artifact.contains("C:/")));
+    }
+
+    #[test]
+    fn external_research_budget_failure_preserves_budget_without_query_text() {
+        let input = WriterSubtaskProviderBudgetInput {
+            subtask_id: "research-budget-1".to_string(),
+            kind: WriterSubtaskKind::Research,
+            model: "gpt-4o".to_string(),
+            objective: "Verify public evidence without writing memory.".to_string(),
+            query: "sensitive ring clue query".repeat(400),
+            context_chars: 180_000,
+            requested_output_tokens: 12_000,
+        };
+        let report = external_research_provider_budget_report(&input).unwrap();
+        let bundle = failure_bundle_from_subtask_provider_budget(
+            WriterSubtaskKind::Research,
+            &input.subtask_id,
+            &input.objective,
+            report,
+            vec!["subtask:research-budget-1:artifact:evidence/search.json".to_string()],
+            99,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            bundle.code,
+            "RESEARCH_SUBTASK_PROVIDER_BUDGET_APPROVAL_REQUIRED"
+        );
+        assert_eq!(bundle.task_id.as_deref(), Some("research-budget-1"));
+        let serialized = serde_json::to_string(&bundle).unwrap();
+        assert!(serialized.contains("providerBudget"));
+        assert!(!serialized.contains("sensitive ring clue query"));
     }
 
     #[test]
