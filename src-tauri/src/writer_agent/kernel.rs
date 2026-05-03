@@ -15,7 +15,7 @@ use agent_harness_core::{PermissionMode, PermissionPolicy};
 use super::canon::CanonEngine;
 use super::context::{
     assemble_observation_context, assemble_observation_context_with_default_budget, AgentTask,
-    ContextSource, WritingContextPack,
+    WritingContextPack,
 };
 use super::diagnostics::{
     DiagnosticCategory, DiagnosticResult, DiagnosticSeverity, DiagnosticsEngine,
@@ -28,11 +28,12 @@ use super::memory::{
 };
 use super::observation::WriterObservation;
 use super::operation::{CanonEntityOp, OperationResult, PlotPromiseOp, WriterOperation};
-use super::proposal::{
-    AgentProposal, EvidenceRef, EvidenceSource, ProposalAlternative, ProposalKind, ProposalPriority,
-};
+use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
 
 pub(crate) use super::kernel_chapters::*;
+pub(crate) use super::kernel_ghost::{
+    context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
+};
 pub use super::kernel_helpers::*;
 pub(crate) use super::kernel_metrics::product_metrics_from_trace;
 pub use super::kernel_metrics::WriterProductMetrics;
@@ -3188,222 +3189,6 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
-}
-
-fn draft_continuation(
-    intent: &super::intent::WritingIntent,
-    observation: &WriterObservation,
-    context_pack: &WritingContextPack,
-) -> String {
-    let paragraph = observation.paragraph.trim();
-    let lead = if paragraph.ends_with('。')
-        || paragraph.ends_with('！')
-        || paragraph.ends_with('？')
-        || paragraph.ends_with('.')
-        || paragraph.ends_with('!')
-        || paragraph.ends_with('?')
-    {
-        "\n"
-    } else {
-        ""
-    };
-
-    let canon_hint = context_pack
-        .sources
-        .iter()
-        .find(|source| source.source == ContextSource::CanonSlice)
-        .and_then(|source| source.content.lines().next())
-        .unwrap_or("");
-    let promise_hint = context_pack
-        .sources
-        .iter()
-        .find(|source| source.source == ContextSource::PromiseSlice)
-        .and_then(|source| source.content.lines().next())
-        .unwrap_or("");
-
-    let text = if !promise_hint.is_empty() {
-        "他忽然想起那件还没交代清楚的旧事，原本要出口的话在舌尖停住了。"
-    } else if canon_hint.contains("weapon") || canon_hint.contains("武器") {
-        "他没有急着开口，只让手指重新落回熟悉的兵器旁，像是在确认自己仍握着选择。"
-    } else {
-        match intent {
-            super::intent::WritingIntent::Dialogue => {
-                "他没有立刻回答，只把真正想说的话压在喉咙后面。"
-            }
-            super::intent::WritingIntent::Action => {
-                "下一瞬，他侧身避开逼近的锋芒，顺势把局面逼向更窄的角落。"
-            }
-            super::intent::WritingIntent::ConflictEscalation => {
-                "偏在这时，门外传来第三个人的脚步声，把所有尚未出口的话都截断了。"
-            }
-            super::intent::WritingIntent::Description => {
-                "风从缝隙里钻进来，带着潮湿的冷意，让这片沉默显得更不安稳。"
-            }
-            _ => "他停了半息，终于做出那个无法再撤回的决定。",
-        }
-    };
-
-    format!("{lead}{text}")
-}
-
-fn ghost_alternatives(
-    intent: &super::intent::WritingIntent,
-    observation: &WriterObservation,
-    context_pack: &WritingContextPack,
-    chapter: &str,
-    insert_at: usize,
-    revision: &str,
-) -> Vec<ProposalAlternative> {
-    let candidates = ghost_candidate_texts(intent, observation, context_pack);
-    let labels = ghost_candidate_labels(intent);
-    candidates
-        .into_iter()
-        .enumerate()
-        .map(|(idx, preview)| {
-            let id = ["a", "b", "c"].get(idx).unwrap_or(&"x").to_string();
-            ProposalAlternative {
-                id: id.clone(),
-                label: labels[idx].to_string(),
-                operation: Some(WriterOperation::TextInsert {
-                    chapter: chapter.to_string(),
-                    at: insert_at,
-                    text: preview.clone(),
-                    revision: revision.to_string(),
-                }),
-                rationale: format!("multi-ghost branch {}", id.to_ascii_uppercase()),
-                preview,
-            }
-        })
-        .collect()
-}
-
-fn ghost_candidate_texts(
-    intent: &super::intent::WritingIntent,
-    observation: &WriterObservation,
-    context_pack: &WritingContextPack,
-) -> [String; 3] {
-    let base = draft_continuation(intent, observation, context_pack);
-    let promise_hint = context_pack
-        .sources
-        .iter()
-        .find(|source| source.source == ContextSource::PromiseSlice)
-        .and_then(|source| source.content.lines().next())
-        .unwrap_or("");
-    let canon_hint = context_pack
-        .sources
-        .iter()
-        .find(|source| source.source == ContextSource::CanonSlice)
-        .and_then(|source| source.content.lines().next())
-        .unwrap_or("");
-
-    let branch_b = if !promise_hint.is_empty() {
-        "他没有继续逼问，只把那件悬而未决的旧事重新压回心底，等对方先露出破绽。"
-    } else {
-        match intent {
-            super::intent::WritingIntent::Dialogue => {
-                "他垂下眼，像是随口一问：“你刚才避开的，究竟是哪一句？”"
-            }
-            super::intent::WritingIntent::Action => {
-                "他故意慢了半拍，让对方以为自己占了先机，再突然切进空门。"
-            }
-            super::intent::WritingIntent::ConflictEscalation => {
-                "他还没来得及判断局势，屋内的灯先灭了，黑暗把所有退路一并吞没。"
-            }
-            super::intent::WritingIntent::Description => {
-                "潮气沿着墙根蔓延，旧木与灰尘的味道混在一起，像某种迟迟不肯散去的警告。"
-            }
-            _ => "他没有立刻推进，只把目光移向最安静的那个人，等一个真正的答案。",
-        }
-    };
-
-    let branch_c = if canon_hint.contains("weapon") || canon_hint.contains("武器") {
-        "他松开那句差点出口的话，先确认掌心熟悉的重量仍在，才重新抬眼看向对方。"
-    } else {
-        match intent {
-            super::intent::WritingIntent::Dialogue => {
-                "那句话到了嘴边又被他咽回去，只剩一个短促的笑，听不出是承认还是挑衅。"
-            }
-            super::intent::WritingIntent::Action => {
-                "可就在他发力之前，身后传来一声轻响，迫使他把所有动作硬生生收住。"
-            }
-            super::intent::WritingIntent::ConflictEscalation => {
-                "更糟的是，来人没有藏脚步，仿佛正等着他们意识到自己已经无处可躲。"
-            }
-            super::intent::WritingIntent::Description => {
-                "远处的声响被夜色压得很低，低到像是从每个人心里慢慢渗出来的。"
-            }
-            _ => "他终于意识到，真正该被追问的不是眼前这句话，而是此前一直没人敢提的沉默。",
-        }
-    };
-
-    [base, branch_b.to_string(), branch_c.to_string()]
-}
-
-fn ghost_candidate_labels(intent: &super::intent::WritingIntent) -> [&'static str; 3] {
-    match intent {
-        super::intent::WritingIntent::Dialogue => ["A 直接表态", "B 言语试探", "C 压住情绪"],
-        super::intent::WritingIntent::Action => ["A 快节奏", "B 诱敌试探", "C 外部打断"],
-        super::intent::WritingIntent::ConflictEscalation => {
-            ["A 顺势加压", "B 黑暗反转", "C 来人压迫"]
-        }
-        super::intent::WritingIntent::Description => ["A 氛围推进", "B 感官细化", "C 情绪映射"],
-        _ => ["A 顺势推进", "B 关系试探", "C 伏笔回扣"],
-    }
-}
-
-fn sanitize_continuation(text: &str) -> String {
-    text.trim()
-        .trim_matches('`')
-        .trim()
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .chars()
-        .take(260)
-        .collect()
-}
-
-fn context_pack_evidence(
-    pack: &WritingContextPack,
-    observation: &WriterObservation,
-) -> Vec<EvidenceRef> {
-    let mut evidence = Vec::new();
-    for source in &pack.sources {
-        let evidence_source = match source.source {
-            ContextSource::CursorPrefix
-            | ContextSource::CursorSuffix
-            | ContextSource::SelectedText => EvidenceSource::ChapterText,
-            ContextSource::CanonSlice => EvidenceSource::Canon,
-            ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
-            ContextSource::ProjectBrief => EvidenceSource::StoryContract,
-            ContextSource::ChapterMission => EvidenceSource::ChapterMission,
-            ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
-            ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
-            ContextSource::OutlineSlice => EvidenceSource::Outline,
-            ContextSource::ResultFeedback => EvidenceSource::ChapterText,
-            _ => EvidenceSource::ChapterText,
-        };
-        evidence.push(EvidenceRef {
-            source: evidence_source,
-            reference: format!("{:?}", source.source),
-            snippet: source.content.chars().take(140).collect(),
-        });
-    }
-
-    if evidence.is_empty() {
-        evidence.push(EvidenceRef {
-            source: EvidenceSource::ChapterText,
-            reference: observation
-                .chapter_title
-                .clone()
-                .unwrap_or_else(|| "current chapter".into()),
-            snippet: observation.paragraph.chars().take(120).collect(),
-        });
-    }
-
-    evidence
 }
 
 #[cfg(test)]

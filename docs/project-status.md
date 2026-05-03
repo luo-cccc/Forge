@@ -54,6 +54,7 @@ P1 is in progress:
 - Writer Agent kernel splitting has started beyond the existing helper modules: TaskPacket construction, context budget trace conversion, and trace state expiry helpers now live in `src-tauri/src/writer_agent/kernel_task_packet.rs` while preserving the existing `writer_agent::kernel::build_task_packet_for_observation` export path.
 - Trace-derived product metrics now live in `src-tauri/src/writer_agent/kernel_metrics.rs`, while preserving the existing `writer_agent::kernel::WriterProductMetrics` export path.
 - Proposal lifecycle helpers now live in `src-tauri/src/writer_agent/kernel_proposals.rs`, covering replacement decisions, priority ordering, and expiry checks with focused unit coverage.
+- Ghost proposal helpers now live in `src-tauri/src/writer_agent/kernel_ghost.rs`, covering local continuation drafts, three-branch alternatives, continuation sanitization, and context evidence mapping with focused unit coverage.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
@@ -75,7 +76,7 @@ P1 is in progress:
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 157 passing
+- `cargo test -p agent-writer`: 161 passing
 - `cargo test -p agent-harness-core`: 79 passing
 - `cargo run -p agent-evals`: 84/84 passing
 - `npm run check:p2`: 9/9 passing
@@ -102,4 +103,4 @@ The expected local baseline is:
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
-- `writer_agent/kernel.rs` is still large, but TaskPacket/context-trace helpers have moved into `kernel_task_packet.rs`, product metrics have moved into `kernel_metrics.rs`, and proposal lifecycle helpers have moved into `kernel_proposals.rs`; remaining kernel split targets are run-loop, feedback, memory-candidate, and ghost-proposal responsibilities. `agent-evals/src/evals.rs` still needs modular splitting (P2).
+- `writer_agent/kernel.rs` is still large, but TaskPacket/context-trace helpers have moved into `kernel_task_packet.rs`, product metrics have moved into `kernel_metrics.rs`, proposal lifecycle helpers have moved into `kernel_proposals.rs`, and ghost proposal helpers have moved into `kernel_ghost.rs`; remaining kernel split targets are run-loop, feedback, and memory-candidate responsibilities. `agent-evals/src/evals.rs` still needs modular splitting (P2).
