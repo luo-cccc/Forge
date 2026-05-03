@@ -1,6 +1,7 @@
 pub mod backups;
 pub mod chapters;
 pub mod diagnostics;
+pub mod editor;
 pub mod generation;
 pub mod graph;
 pub mod lore;

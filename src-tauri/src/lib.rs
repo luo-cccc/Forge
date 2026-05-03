@@ -110,7 +110,7 @@ enum HarnessState {
     Idle,
 }
 
-struct AppState {
+pub(crate) struct AppState {
     harness_state: Mutex<HarnessState>,
     hermes_db: Mutex<HermesDB>,
     editor_prediction: Mutex<Option<EditorPredictionTask>>,
@@ -118,9 +118,9 @@ struct AppState {
     manual_agent_history: Mutex<ManualAgentHistory>,
 }
 
-struct EditorPredictionTask {
-    request_id: String,
-    cancel: CancellationToken,
+pub(crate) struct EditorPredictionTask {
+    pub(crate) request_id: String,
+    pub(crate) cancel: CancellationToken,
 }
 
 pub(crate) fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
@@ -137,7 +137,7 @@ fn lock_harness_state<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HarnessS
         .map_err(|_| "Harness state lock poisoned".to_string())
 }
 
-fn lock_editor_prediction<'a>(
+pub(crate) fn lock_editor_prediction<'a>(
     state: &'a AppState,
 ) -> Result<MutexGuard<'a, Option<EditorPredictionTask>>, String> {
     state
@@ -294,6 +294,7 @@ use commands::chapters::{
     save_chapter,
 };
 use commands::diagnostics::{export_diagnostic_logs, export_writer_agent_trajectory};
+use commands::editor::{abort_editor_prediction, report_editor_state, report_semantic_lint_state};
 use commands::generation::{
     analyze_chapter, analyze_pacing, ask_project_brain, batch_generate_chapter,
     generate_chapter_autonomous, generate_parallel_drafts,
@@ -521,16 +522,16 @@ pub(crate) struct AgentKernelStatus {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EditorStatePayload {
-    request_id: String,
-    prefix: String,
-    suffix: String,
-    cursor_position: usize,
-    text_cursor_position: Option<usize>,
-    paragraph: String,
-    chapter_title: Option<String>,
-    chapter_revision: Option<String>,
-    editor_dirty: Option<bool>,
+pub(crate) struct EditorStatePayload {
+    pub(crate) request_id: String,
+    pub(crate) prefix: String,
+    pub(crate) suffix: String,
+    pub(crate) cursor_position: usize,
+    pub(crate) text_cursor_position: Option<usize>,
+    pub(crate) paragraph: String,
+    pub(crate) chapter_title: Option<String>,
+    pub(crate) chapter_revision: Option<String>,
+    pub(crate) editor_dirty: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -563,19 +564,19 @@ struct EditorGhostEnd {
 }
 
 #[derive(Debug, Clone)]
-struct EditorGhostRenderTarget {
-    request_id: String,
-    cursor_position: usize,
+pub(crate) struct EditorGhostRenderTarget {
+    pub(crate) request_id: String,
+    pub(crate) cursor_position: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SemanticLintPayload {
-    request_id: String,
-    paragraph: String,
-    paragraph_from: usize,
-    cursor_position: usize,
-    chapter_title: Option<String>,
+pub(crate) struct SemanticLintPayload {
+    pub(crate) request_id: String,
+    pub(crate) paragraph: String,
+    pub(crate) paragraph_from: usize,
+    pub(crate) cursor_position: usize,
+    pub(crate) chapter_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -598,7 +599,7 @@ enum AskAgentMode {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EditorSemanticLint {
+pub(crate) struct EditorSemanticLint {
     request_id: String,
     cursor_position: usize,
     from: usize,
@@ -607,7 +608,7 @@ struct EditorSemanticLint {
     severity: String,
 }
 
-fn realtime_cowrite_enabled() -> bool {
+pub(crate) fn realtime_cowrite_enabled() -> bool {
     std::env::var("AGENT_WRITER_REALTIME_COWRITE")
         .map(|value| {
             let normalized = value.trim().to_lowercase();
@@ -700,7 +701,7 @@ fn ghost_candidates_from_proposal(
     candidates
 }
 
-fn emit_editor_ghost_end(
+pub(crate) fn emit_editor_ghost_end(
     app: &tauri::AppHandle,
     target: &EditorGhostRenderTarget,
     reason: &str,
@@ -718,7 +719,7 @@ fn emit_editor_ghost_end(
     Ok(())
 }
 
-fn emit_writer_ghost_proposal(
+pub(crate) fn emit_writer_ghost_proposal(
     app: &tauri::AppHandle,
     target: &EditorGhostRenderTarget,
     proposal: &writer_agent::proposal::AgentProposal,
@@ -938,7 +939,7 @@ fn find_char_range(text: &str, needle: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-fn semantic_lint_enabled() -> bool {
+pub(crate) fn semantic_lint_enabled() -> bool {
     std::env::var("AGENT_WRITER_AMBIENT_LINTER")
         .map(|value| {
             let normalized = value.trim().to_lowercase();
@@ -1011,7 +1012,7 @@ fn build_lore_conflict_hint(
     None
 }
 
-fn find_semantic_lint(
+pub(crate) fn find_semantic_lint(
     app: &tauri::AppHandle,
     payload: &SemanticLintPayload,
 ) -> Option<EditorSemanticLint> {
@@ -1110,7 +1111,7 @@ fn find_writer_agent_diagnostic_lint(
     })
 }
 
-fn abort_editor_prediction_task(
+pub(crate) fn abort_editor_prediction_task(
     state: &AppState,
     request_id: Option<&str>,
 ) -> Result<bool, String> {
@@ -1148,124 +1149,6 @@ fn clear_editor_prediction_for_output(app: &tauri::AppHandle, request_id: Option
     };
     let state = app.state::<AppState>();
     let _ = clear_editor_prediction_task(&state, request_id);
-}
-
-#[tauri::command]
-fn abort_editor_prediction(
-    app: tauri::AppHandle,
-    request_id: Option<String>,
-) -> Result<bool, String> {
-    let state = app.state::<AppState>();
-    let aborted = abort_editor_prediction_task(&state, request_id.as_deref())?;
-    if aborted {
-        if let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() {
-            if let Ok(mut bus) = bus_state.lock() {
-                bus.abort_agent("co-writer");
-            }
-        }
-    }
-    Ok(aborted)
-}
-
-#[tauri::command]
-async fn report_editor_state(
-    app: tauri::AppHandle,
-    payload: EditorStatePayload,
-) -> Result<(), String> {
-    if !realtime_cowrite_enabled() {
-        return Ok(());
-    }
-
-    let prefix = payload.prefix.trim_end();
-    if prefix.chars().count() < 12 {
-        return Ok(());
-    }
-
-    let request_id = payload.request_id.clone();
-    let cursor_position = payload.cursor_position;
-    let cancel = CancellationToken::new();
-    let render_target = EditorGhostRenderTarget {
-        request_id: request_id.clone(),
-        cursor_position,
-    };
-
-    {
-        let state = app.state::<AppState>();
-        abort_editor_prediction_task(&state, None)?;
-        let mut task = lock_editor_prediction(&state)?;
-        *task = Some(EditorPredictionTask {
-            request_id: request_id.clone(),
-            cancel: cancel.clone(),
-        });
-    }
-
-    let project_id = storage::active_project_id(&app)?;
-    let observation = build_writer_observation_from_editor_state(&payload, &project_id);
-    let (proposals, context_pack_for_llm) = {
-        let state = app.state::<AppState>();
-        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-        refresh_kernel_canon_from_lorebook(&app, &mut kernel);
-        let proposals = kernel.observe(observation.clone())?;
-        let context_pack = if proposals
-            .iter()
-            .any(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost)
-            && resolve_api_key().is_some()
-        {
-            Some(kernel.ghost_context_pack(&observation))
-        } else {
-            None
-        };
-        (proposals, context_pack)
-    };
-
-    for proposal in &proposals {
-        app.emit(events::AGENT_PROPOSAL, proposal.clone())
-            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
-    }
-
-    if let Some(proposal) = proposals
-        .iter()
-        .find(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost)
-    {
-        emit_writer_ghost_proposal(
-            &app,
-            &render_target,
-            proposal,
-            false,
-            context_pack_for_llm.is_none(),
-        )?;
-    } else {
-        emit_editor_ghost_end(&app, &render_target, "complete")?;
-    }
-
-    if let Some(context_pack) = context_pack_for_llm {
-        spawn_llm_ghost_proposal(app.clone(), observation, context_pack, Some(render_target));
-        return Ok(());
-    }
-
-    drop(cancel);
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn report_semantic_lint_state(
-    app: tauri::AppHandle,
-    payload: SemanticLintPayload,
-) -> Result<(), String> {
-    if !semantic_lint_enabled() {
-        return Ok(());
-    }
-
-    let app_clone = app.clone();
-    tokio::spawn(async move {
-        let _intent = agent_harness_core::Intent::Linter;
-        if let Some(lint) = find_semantic_lint(&app_clone, &payload) {
-            let _ = app_clone.emit(events::EDITOR_SEMANTIC_LINT, lint);
-        }
-    });
-
-    Ok(())
 }
 
 pub(crate) async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
