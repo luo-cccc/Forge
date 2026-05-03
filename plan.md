@@ -790,8 +790,9 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已新增 knowledge index 文件读取路径守卫，拒绝 absolute path 和 `..` 逃逸。
    - 已新增 read-only Tauri command：`get_project_brain_knowledge_graph`。
    - Graph 页已新增 Brain 模式，可查看 Project Brain knowledge nodes / shared-keyword edges / source refs / keywords，并保留 Ask Brain 入口。
+   - Graph 页已新增第一层节点类型过滤、来源/关键词/摘要/关系搜索、选中节点邻接高亮、reference / back-reference 列表和一键跳转到相邻节点。
    - 已新增 eval：`writer_agent:project_brain_knowledge_index_graph`、`writer_agent:project_brain_knowledge_index_path_guard`。
-   - 剩余：更细的 graph filtering、cross reference / back reference 操作、更多真实 Story Bible / 章节结果来源。
+   - 剩余：更深的 cross reference / back reference 操作、更多真实 Story Bible / 章节结果来源、跨来源冲突/重复关系校准。
 4. Project Brain embedding provider 抽象。
    - 明确 provider id、model、维度、input limit、batch status、失败重试策略。
    - 兼容本地和远程 embedding。
@@ -996,7 +997,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 4. Memory correction / reinforcement。（第一阶段已完成）
    - 已让作者对记忆候选的采纳/拒绝改变后续同 slot 候选行为；纠错优先于强化。
 5. Project Brain knowledge index / graph。（第一阶段已完成）
-   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；embedding provider 抽象仍未完成。
+   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；第一层 graph filtering、search 和 reference/back-reference navigation 已落地；embedding provider 抽象仍未完成。
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；真实 run loop 调度、外部检索工具、inspector 展示仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
@@ -1017,7 +1018,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 关键章节生成失败不是字符串，而是可分类的证据包；更多工具/反馈失败路径仍需接入。
 - RunEventStore 可以回放一次 writer run。
 - 作者对记忆候选的纠错会压制后续同 slot 抽取，采纳会强化同 slot 候选。
-- Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；更细的过滤和 cross-reference 操作仍未完成。
+- Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；第一层节点类型过滤、来源/关键词/摘要/关系搜索、邻接高亮和 reference/back-reference 导航已完成。更深的跨引用操作、真实 Story Bible/章节结果来源校准仍未完成。
 - Research / Diagnostic 子任务有隔离 artifact workspace、tool policy、evidence-only 结果边界和 Research tool/provider 失败证据包；真实外部公开资料 provider/tool 调度仍未完成。
 - Inspector timeline 有后端视图和前端 Inspect 只读调试面板，默认 Companion summary 已证明不暴露内部 trace；trajectory export 有 redaction warning 和 local-only 标记。
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成 provider call 已有前置门禁、Explore UI approval surface 和批准凭证覆盖校验；尚未强制接入所有真实 provider call。

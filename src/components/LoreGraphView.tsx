@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Commands } from "../protocol";
 
@@ -57,6 +57,17 @@ interface Node2D {
   sourceRef?: string;
   keywords?: string[];
 }
+interface Edge2D {
+  source: number;
+  target: number;
+  label: string;
+  evidenceRef?: string;
+}
+interface VisibleEdge2D extends Edge2D {
+  sourceId: string;
+  targetId: string;
+}
+type GraphMode = "entities" | "brain";
 
 const COLORS: Record<string, string> = {
   character: "#D4943A",
@@ -126,14 +137,16 @@ export default function LoreGraphView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphData | null>(null);
-  const [graphMode, setGraphMode] = useState<"entities" | "brain">("entities");
+  const [graphMode, setGraphMode] = useState<GraphMode>("entities");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node2D | null>(null);
   const [nodes, setNodes] = useState<Node2D[]>([]);
-  const [edges, setEdges] = useState<{ source: number; target: number; label: string }[]>([]);
+  const [edges, setEdges] = useState<Edge2D[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState("all");
   const [viewBox, setViewBox] = useState("0 0 800 600");
 
-  const loadGraph = useCallback(async (mode: "entities" | "brain") => {
+  const loadGraph = useCallback(async (mode: GraphMode) => {
     const w = 700;
     const h = 500;
 
@@ -159,7 +172,7 @@ export default function LoreGraphView() {
           const source = idToIdx.get(edge.from);
           const target = idToIdx.get(edge.to);
           return source !== undefined && target !== undefined && source !== target
-            ? [{ source, target, label: edge.relation }]
+            ? [{ source, target, label: edge.relation, evidenceRef: edge.evidenceRef }]
             : [];
         });
         forceSimulation(simNodes, simEdges, w, h);
@@ -185,7 +198,7 @@ export default function LoreGraphView() {
 
       const nameToIdx = new Map<string, number>();
       simNodes.forEach((node, index) => nameToIdx.set(node.name, index));
-      const simEdges: { source: number; target: number; label: string }[] = [];
+      const simEdges: Edge2D[] = [];
       for (const rel of data.relationships) {
         const source = nameToIdx.get(rel.source);
         const target = nameToIdx.get(rel.target);
@@ -225,6 +238,96 @@ export default function LoreGraphView() {
     }).catch(console.error);
   }, [selectedNode]);
 
+  const availableKinds = useMemo(() => {
+    const kinds = new Set(nodes.map((node) => node.category).filter(Boolean));
+    return ["all", ...Array.from(kinds).sort()];
+  }, [nodes]);
+
+  const visibleNodeIndexes = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return nodes
+      .map((node, index) => ({ node, index }))
+      .filter(({ node, index }) => {
+        if (kindFilter !== "all" && node.category !== kindFilter) return false;
+        if (!query) return true;
+
+        const searchable = [
+          node.name,
+          node.category,
+          node.description,
+          node.sourceRef ?? "",
+          ...(node.keywords ?? []),
+          ...edges.flatMap((edge) => {
+            if (edge.source !== index && edge.target !== index) return [];
+            return [edge.label, edge.evidenceRef ?? ""];
+          }),
+        ].join(" ").toLowerCase();
+        return searchable.includes(query);
+      });
+  }, [edges, kindFilter, nodes, searchQuery]);
+
+  const visibleIndexLookup = useMemo(() => {
+    const lookup = new Map<number, number>();
+    visibleNodeIndexes.forEach(({ index }, visibleIndex) => {
+      lookup.set(index, visibleIndex);
+    });
+    return lookup;
+  }, [visibleNodeIndexes]);
+
+  const visibleNodes = useMemo(
+    () => visibleNodeIndexes.map(({ node }) => node),
+    [visibleNodeIndexes],
+  );
+
+  const visibleEdges = useMemo<VisibleEdge2D[]>(() => (
+    edges.flatMap((edge) => {
+      const source = visibleIndexLookup.get(edge.source);
+      const target = visibleIndexLookup.get(edge.target);
+      const sourceNode = nodes[edge.source];
+      const targetNode = nodes[edge.target];
+
+      return source !== undefined && target !== undefined && sourceNode && targetNode
+        ? [{
+          ...edge,
+          source,
+          target,
+          sourceId: sourceNode.id,
+          targetId: targetNode.id,
+        }]
+        : [];
+    })
+  ), [edges, nodes, visibleIndexLookup]);
+
+  const selectedReferences = useMemo(() => {
+    if (!selectedNode) return [];
+    const selectedIndex = nodes.findIndex((node) => node.id === selectedNode.id);
+    if (selectedIndex < 0) return [];
+
+    return edges.flatMap((edge) => {
+      const isSource = edge.source === selectedIndex;
+      const isTarget = edge.target === selectedIndex;
+      if (!isSource && !isTarget) return [];
+
+      const linkedNode = nodes[isSource ? edge.target : edge.source];
+      return linkedNode
+        ? [{
+          node: linkedNode,
+          relation: edge.label,
+          direction: isSource ? "out" : "in",
+          evidenceRef: edge.evidenceRef,
+        }]
+        : [];
+    });
+  }, [edges, nodes, selectedNode]);
+
+  const selectedNeighborIds = useMemo(
+    () => new Set(selectedReferences.map((reference) => reference.node.id)),
+    [selectedReferences],
+  );
+
+  const graphSummary = `${visibleNodes.length}/${nodes.length} nodes · ${visibleEdges.length}/${edges.length} edges`;
+
   if (!graphData && graphMode === "entities" && !loadError) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted text-xs">
@@ -247,6 +350,8 @@ export default function LoreGraphView() {
                   setLoadError(null);
                   setNodes([]);
                   setEdges([]);
+                  setSearchQuery("");
+                  setKindFilter("all");
                   setGraphMode(mode);
                 }}
                 className={`px-2 py-0.5 rounded-sm text-[10px] ${
@@ -260,25 +365,59 @@ export default function LoreGraphView() {
             ))}
           </div>
         </div>
+        <div className="px-3 py-2 border-b border-border-subtle flex flex-wrap items-center gap-2">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={graphMode === "brain" ? "Search source, keyword, summary" : "Search entity or relation"}
+            className="min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-deep px-2 py-1 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent"
+          />
+          <div className="flex flex-wrap gap-1">
+            {availableKinds.map((kind) => (
+              <button
+                key={kind}
+                onClick={() => setKindFilter(kind)}
+                className={`rounded-sm px-2 py-1 text-[10px] ${
+                  kindFilter === kind
+                    ? "bg-accent text-bg-deep"
+                    : "bg-bg-deep text-text-muted hover:text-text-secondary"
+                }`}
+              >
+                {kind === "all" ? "All" : kind}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-text-muted">{graphSummary}</span>
+        </div>
         {loadError ? (
           <div className="p-4 text-xs text-danger">{loadError}</div>
         ) : nodes.length === 0 ? (
           <div className="p-4 text-xs text-text-muted">No graph nodes available yet.</div>
+        ) : visibleNodes.length === 0 ? (
+          <div className="p-4 text-xs text-text-muted">No matching graph nodes.</div>
         ) : (
-          <svg ref={svgRef} viewBox={viewBox} className="w-full h-[calc(100%-36px)]">
-          {edges.map((edge, index) => (
+          <svg ref={svgRef} viewBox={viewBox} className="w-full h-[calc(100%-84px)]">
+          {visibleEdges.map((edge, index) => {
+            const selectedEdge = selectedNode
+              ? edge.sourceId === selectedNode.id || edge.targetId === selectedNode.id
+              : false;
+            return (
             <line
               key={`edge-${index}`}
-              x1={nodes[edge.source]?.x ?? 0}
-              y1={nodes[edge.source]?.y ?? 0}
-              x2={nodes[edge.target]?.x ?? 0}
-              y2={nodes[edge.target]?.y ?? 0}
-              stroke="#3D3934"
-              strokeWidth={1}
-              strokeOpacity={0.6}
+              x1={visibleNodes[edge.source]?.x ?? 0}
+              y1={visibleNodes[edge.source]?.y ?? 0}
+              x2={visibleNodes[edge.target]?.x ?? 0}
+              y2={visibleNodes[edge.target]?.y ?? 0}
+              stroke={selectedEdge ? "#D4943A" : "#3D3934"}
+              strokeWidth={selectedEdge ? 2 : 1}
+              strokeOpacity={selectedEdge ? 0.9 : 0.6}
             />
-          ))}
-          {nodes.map((node) => (
+            );
+          })}
+          {visibleNodes.map((node) => {
+            const isSelected = selectedNode?.id === node.id;
+            const isNeighbor = selectedNeighborIds.has(node.id);
+            return (
             <g
               key={node.id}
               onClick={() => handleNodeClick(node)}
@@ -289,9 +428,9 @@ export default function LoreGraphView() {
                 cy={node.y}
                 r={node.category === "character" || node.category === "lore" ? 12 : 8}
                 fill={COLORS[node.category] || COLORS.default}
-                fillOpacity={0.8}
-                stroke={selectedNode?.id === node.id ? "#E4DAC8" : COLORS[node.category] || COLORS.default}
-                strokeWidth={selectedNode?.id === node.id ? 2 : 1}
+                fillOpacity={isSelected || isNeighbor ? 0.95 : 0.75}
+                stroke={isSelected ? "#E4DAC8" : isNeighbor ? "#D4943A" : COLORS[node.category] || COLORS.default}
+                strokeWidth={isSelected || isNeighbor ? 2 : 1}
               />
               <text
                 x={node.x}
@@ -304,7 +443,8 @@ export default function LoreGraphView() {
                 {node.name.length > 10 ? node.name.substring(0, 10) + "..." : node.name}
               </text>
             </g>
-          ))}
+            );
+          })}
         </svg>
         )}
       </div>
@@ -356,6 +496,35 @@ export default function LoreGraphView() {
               {knowledgeGraph.nodes.length} nodes · {knowledgeGraph.edges.length} edges · {knowledgeGraph.sourceCount} sources
             </div>
           )}
+          <div className="space-y-1">
+            <div className="text-[10px] uppercase tracking-wider text-text-muted">
+              References
+            </div>
+            {selectedReferences.length === 0 ? (
+              <div className="rounded bg-bg-deep p-2 text-[10px] text-text-muted">
+                No linked references.
+              </div>
+            ) : (
+              selectedReferences.slice(0, 8).map((reference) => (
+                <button
+                  key={`${reference.direction}-${reference.relation}-${reference.node.id}`}
+                  onClick={() => setSelectedNode(reference.node)}
+                  className="w-full rounded-sm border border-border-subtle bg-bg-deep p-2 text-left hover:border-accent/50"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[11px] text-text-secondary">{reference.node.name}</span>
+                    <span className="shrink-0 text-[9px] text-text-muted">
+                      {reference.direction === "out" ? "out" : "back"}
+                    </span>
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-[10px] text-text-muted">
+                    {reference.relation}
+                    {reference.evidenceRef ? ` · ${reference.evidenceRef}` : ""}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
