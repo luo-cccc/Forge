@@ -33,7 +33,8 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - Manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成已抽入 `src-tauri/src/memory_context.rs`。
 - Agent/editor/manual observation payload 和 WriterObservation 转换逻辑已抽入 `src-tauri/src/observation_bridge.rs`。
 - Editor realtime ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow 已抽入 `src-tauri/src/editor_realtime.rs`。
-- API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`；`lib.rs` 当前约 494 行。
+- API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
+- 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
 - `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、84/84 writer evals。
 
@@ -42,7 +43,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
 - `agent-evals/src/product_scenarios.rs` 已集中承载 10 个真实长篇产品场景 eval；下一步要继续提升场景真实性和失败解释质量，而不是只堆数量。
-- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分和 root helper 拆分已完成，但仍保留测试 glue 和最终 app setup glue；`writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
+- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
 
 ## 2. 总体原则
 
@@ -463,7 +464,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：进行中。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 47 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。剩余工作是继续把测试 helper 和最终 app setup glue 从 `lib.rs` 拆到职责更窄的模块。
+当前状态：进行中。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 47 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。剩余工作是评估最终 app setup / command registration glue 是否值得继续拆，避免为拆而拆。
 
 建议模块：
 
@@ -491,6 +492,7 @@ src-tauri/src/memory_context.rs
 src-tauri/src/observation_bridge.rs
 src-tauri/src/editor_realtime.rs
 src-tauri/src/writer_observer.rs
+src-tauri/src/tests.rs
 src-tauri/src/context_injection.rs
 src-tauri/src/manual_agent.rs
 ```
@@ -505,6 +507,7 @@ src-tauri/src/manual_agent.rs
 - Observation bridge 有独立模块。（已完成）
 - Editor realtime helper 有独立模块。（已完成）
 - Root utility / event / audit / writer observation helper 有独立模块。（已完成）
+- Root tests 有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
 
 ### P2.2 拆分 `writer_agent/kernel.rs`
@@ -698,9 +701,10 @@ agent-evals/src/
 5. 抽出 `observation_bridge.rs`。（已完成）
 6. 抽出 `editor_realtime.rs`。（已完成）
 7. 抽出 root utility / event / audit / writer observation helper。（已完成）
-8. 拆 `kernel.rs` 内部模块。
-9. 拆 `agent-evals/src/evals.rs`。
-10. 保持 public protocol 稳定。
+8. 抽出 root tests。（已完成）
+9. 拆 `kernel.rs` 内部模块。
+10. 拆 `agent-evals/src/evals.rs`。
+11. 保持 public protocol 稳定。
 
 ## 13. 完成定义
 
