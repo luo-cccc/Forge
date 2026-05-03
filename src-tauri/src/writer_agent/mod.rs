@@ -9,6 +9,7 @@ pub mod kernel_helpers;
 pub mod kernel_metrics;
 pub mod kernel_ops;
 pub mod kernel_prompts;
+pub mod kernel_proposals;
 pub mod kernel_review;
 pub mod kernel_task_packet;
 pub mod memory;

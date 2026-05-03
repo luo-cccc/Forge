@@ -38,6 +38,9 @@ pub(crate) use super::kernel_metrics::product_metrics_from_trace;
 pub use super::kernel_metrics::WriterProductMetrics;
 pub(crate) use super::kernel_ops::*;
 pub(crate) use super::kernel_prompts::*;
+pub(crate) use super::kernel_proposals::{
+    priority_weight, proposal_expired, should_replace_proposal,
+};
 pub(crate) use super::kernel_review::*;
 pub use super::kernel_task_packet::build_task_packet_for_observation;
 pub(crate) use super::kernel_task_packet::{context_budget_trace, trace_state_with_expiry};
@@ -3178,37 +3181,6 @@ pub fn validate_promise_candidate_with_dedup(
         }
     }
     MemoryCandidateQuality::Acceptable
-}
-
-fn should_replace_proposal(existing: &AgentProposal, incoming: &AgentProposal) -> bool {
-    if is_llm_ghost(incoming) && !is_llm_ghost(existing) {
-        return true;
-    }
-
-    if priority_weight(&incoming.priority) > priority_weight(&existing.priority) {
-        return true;
-    }
-
-    incoming.confidence > existing.confidence + 0.05
-}
-
-fn is_llm_ghost(proposal: &AgentProposal) -> bool {
-    proposal.kind == ProposalKind::Ghost && proposal.rationale.contains("LLM增强续写")
-}
-
-fn priority_weight(priority: &ProposalPriority) -> u8 {
-    match priority {
-        ProposalPriority::Ambient => 0,
-        ProposalPriority::Normal => 1,
-        ProposalPriority::Urgent => 2,
-    }
-}
-
-fn proposal_expired(proposal: &AgentProposal, now: u64) -> bool {
-    proposal
-        .expires_at
-        .map(|expires_at| expires_at <= now)
-        .unwrap_or(false)
 }
 
 fn now_ms() -> u64 {
