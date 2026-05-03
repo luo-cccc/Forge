@@ -5,6 +5,9 @@ use super::kernel_helpers::{
     normalize_chapter_mission_status, validate_chapter_mission_summary,
     validate_story_contract_summary,
 };
+use super::kernel_memory_candidates::{
+    validate_style_preference_with_memory, MemoryCandidateQuality,
+};
 use super::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
 use super::operation::{execute_text_operation, OperationResult, WriterOperation};
 
@@ -249,6 +252,45 @@ pub(crate) fn execute_writer_operation(
             })
         }
         WriterOperation::StyleUpdatePreference { key, value } => {
+            match validate_style_preference_with_memory(key, value, memory) {
+                MemoryCandidateQuality::Acceptable => {}
+                MemoryCandidateQuality::Vague { reason } => {
+                    return Ok(OperationResult {
+                        success: false,
+                        operation,
+                        error: Some(super::operation::OperationError::invalid(&format!(
+                            "Style preference is too vague: {}",
+                            reason
+                        ))),
+                        revision_after: None,
+                    });
+                }
+                MemoryCandidateQuality::Duplicate { existing_name } => {
+                    return Ok(OperationResult {
+                        success: false,
+                        operation,
+                        error: Some(super::operation::OperationError::invalid(&format!(
+                            "Style preference '{}' already exists",
+                            existing_name
+                        ))),
+                        revision_after: None,
+                    });
+                }
+                MemoryCandidateQuality::Conflict {
+                    existing_name,
+                    reason,
+                } => {
+                    return Ok(OperationResult {
+                        success: false,
+                        operation,
+                        error: Some(super::operation::OperationError::invalid(&format!(
+                            "Style preference '{}' conflicts: {}",
+                            existing_name, reason
+                        ))),
+                        revision_after: None,
+                    });
+                }
+            }
             memory
                 .upsert_style_preference(key, value, true)
                 .map_err(|e| format!("style preference: {}", e))?;

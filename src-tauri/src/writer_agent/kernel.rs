@@ -42,7 +42,8 @@ pub(crate) use super::kernel_memory_candidates::{
 };
 pub use super::kernel_memory_candidates::{
     extract_plot_promises, validate_canon_candidate, validate_canon_candidate_with_memory,
-    validate_promise_candidate, validate_promise_candidate_with_dedup, MemoryCandidateQuality,
+    validate_promise_candidate, validate_promise_candidate_with_dedup, validate_style_preference,
+    validate_style_preference_with_memory, MemoryCandidateQuality,
 };
 pub(crate) use super::kernel_memory_feedback::{
     proposal_slot_key, record_memory_audit_event, record_memory_candidate_feedback,

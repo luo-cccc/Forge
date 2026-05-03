@@ -296,6 +296,81 @@ fn execute_operation_upserts_canon_rule_and_style_preference() {
 }
 
 #[test]
+fn style_preference_operation_enforces_quality_gates() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+
+    let vague = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "tone".to_string(),
+                value: "好".to_string(),
+            },
+            "",
+            Some(&test_approval("style_quality")),
+        )
+        .unwrap();
+    assert!(!vague.success);
+    assert!(vague
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message.contains("too vague")));
+
+    let first = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext".to_string(),
+                value: "对话偏短句留白，避免直接解释情绪".to_string(),
+            },
+            "",
+            Some(&test_approval("style_quality")),
+        )
+        .unwrap();
+    assert!(first.success);
+
+    let duplicate = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext".to_string(),
+                value: "对话偏短句留白，避免直接解释情绪".to_string(),
+            },
+            "",
+            Some(&test_approval("style_quality")),
+        )
+        .unwrap();
+    assert!(!duplicate.success);
+    assert!(duplicate
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message.contains("already exists")));
+
+    let conflict = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext".to_string(),
+                value: "对话要完整解释每个角色的真实情绪".to_string(),
+            },
+            "",
+            Some(&test_approval("style_quality")),
+        )
+        .unwrap();
+    assert!(!conflict.success);
+    assert!(conflict
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message.contains("conflicts")));
+
+    let preferences = kernel.memory.list_style_preferences(10).unwrap();
+    assert_eq!(
+        preferences
+            .iter()
+            .filter(|preference| preference.key == "dialogue_subtext")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn pure_kernel_rejects_outline_update_without_project_runtime() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);

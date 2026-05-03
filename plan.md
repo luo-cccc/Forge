@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、89/89 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、90/90 writer evals。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
@@ -424,7 +424,7 @@ Verification：
 
 ### P2.2 记忆写入质量门槛
 
-Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Story Contract / Chapter Mission foundation guard 已存在；Style memory validation 和安全同实体属性合并仍未完全闭环。
+Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Story Contract / Chapter Mission foundation guard 已存在；Style memory validation 已覆盖显式 style operation 和反馈派生 style ledger 写入；安全同实体属性合并仍未完全闭环。
 
 Done：
 
@@ -432,23 +432,24 @@ Done：
 - 本地保存抽取和 LLM memory candidate 会过滤模糊、空泛、重复候选。
 - Canon / Promise 候选已有 dedupe 和冲突拦截；与现有 canon kind 或关键 attributes 冲突的候选不会直接写入长期记忆，而是生成高优先级 ContinuityWarning。
 - Story Contract / Chapter Mission 写入已有 foundation quality gate，低质量 foundation 不会进入有效 context。
+- Style preference 写入已有质量门槛：空泛、重复、同 key 冲突的偏好不会污染 style ledger；反馈派生的 style preference 只有足够具体时才会写入。
 
 Partial：
 
-- Style 写入还缺少与 Canon / Promise 同等级的专用质量规则和 eval。
 - 同名实体当前以整实体 dedupe 为主，尚未实现安全的同实体属性级 merge 操作。
+- Style validation 仍是 key/value 层面的轻量规则，后续可继续增强为更细的风格 taxonomy。
 
 Remaining：
 
-- 增加 Style memory validation eval，覆盖空泛风格、重复风格和互相冲突风格偏好。
 - 为同一 canon entity 的安全属性合并定义窄操作类型和审批上下文。
-- 把 Style / Contract / Mission 的质量门槛在文档和 eval 名称上独立列出，避免被 Canon / Promise 覆盖情况掩盖。
+- 把 Contract / Mission 的质量门槛在文档和 eval 名称上继续独立维护，避免被 Canon / Promise 覆盖情况掩盖。
 
 Verification：
 
 - `writer_agent:vague_memory_candidate_rejected`
 - `writer_agent:duplicate_memory_candidate_deduped`
 - `writer_agent:conflicting_memory_candidate_requires_review`
+- `writer_agent:style_memory_validation`
 - `writer_agent:foundation_write_validation`
 - `writer_agent:story_contract_quality_nominal`
 - `npm run verify`
@@ -565,7 +566,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 89/89 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 90/90 passing。
 
 建议模块：
 

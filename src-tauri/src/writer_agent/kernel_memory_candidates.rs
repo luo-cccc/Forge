@@ -7,7 +7,7 @@ use super::kernel_memory_feedback::{
     memory_candidate_slot_for_canon, memory_candidate_slot_for_promise, MemoryCandidate,
     MemoryExtractionFeedback,
 };
-use super::memory::{CanonEntitySummary, PromiseKind, WriterMemory};
+use super::memory::{CanonEntitySummary, PromiseKind, StylePreferenceSummary, WriterMemory};
 use super::observation::WriterObservation;
 use super::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
 use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
@@ -804,4 +804,97 @@ pub fn validate_promise_candidate_with_dedup(
         }
     }
     MemoryCandidateQuality::Acceptable
+}
+
+pub fn validate_style_preference(key: &str, value: &str) -> MemoryCandidateQuality {
+    let key = key.trim();
+    if key.chars().count() < 3 {
+        return MemoryCandidateQuality::Vague {
+            reason: "style key too short (min 3 chars)".to_string(),
+        };
+    }
+    if is_vague_style_key(key) {
+        return MemoryCandidateQuality::Vague {
+            reason: format!("style key '{}' is too generic", key),
+        };
+    }
+
+    let value = value.trim();
+    let value_chars = value.chars().count();
+    if value_chars < 6 {
+        return MemoryCandidateQuality::Vague {
+            reason: format!("style preference too short ({} chars, min 6)", value_chars),
+        };
+    }
+    if is_vague_style_value(value) {
+        return MemoryCandidateQuality::Vague {
+            reason: format!("style preference '{}' is too generic", value),
+        };
+    }
+
+    MemoryCandidateQuality::Acceptable
+}
+
+pub fn validate_style_preference_with_memory(
+    key: &str,
+    value: &str,
+    memory: &WriterMemory,
+) -> MemoryCandidateQuality {
+    let quality = validate_style_preference(key, value);
+    if quality != MemoryCandidateQuality::Acceptable {
+        return quality;
+    }
+
+    let key = key.trim();
+    let value = value.trim();
+    let Some(existing) = memory
+        .list_style_preferences(200)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|preference| preference.key.trim() == key)
+    else {
+        return MemoryCandidateQuality::Acceptable;
+    };
+
+    classify_existing_style_preference(&existing, value)
+}
+
+fn classify_existing_style_preference(
+    existing: &StylePreferenceSummary,
+    value: &str,
+) -> MemoryCandidateQuality {
+    if existing.value.trim() == value {
+        MemoryCandidateQuality::Duplicate {
+            existing_name: existing.key.clone(),
+        }
+    } else {
+        MemoryCandidateQuality::Conflict {
+            existing_name: existing.key.clone(),
+            reason: format!(
+                "style preference '{}' conflicts: existing={}, candidate={}",
+                existing.key, existing.value, value
+            ),
+        }
+    }
+}
+
+fn is_vague_style_key(key: &str) -> bool {
+    matches!(
+        key,
+        "style" | "tone" | "voice" | "writing" | "preference" | "good" | "bad" | "风格" | "语气"
+    )
+}
+
+fn is_vague_style_value(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "good" | "bad" | "better" | "nice" | "ok" | "accepted" | "rejected" | "not my style"
+    ) {
+        return true;
+    }
+    matches!(
+        value.trim(),
+        "好" | "不好" | "更好" | "不错" | "可以" | "喜欢" | "不喜欢" | "有感觉" | "没感觉"
+    )
 }

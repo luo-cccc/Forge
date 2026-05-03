@@ -36,13 +36,12 @@ impl WriterAgentKernel {
             if let Some(prop) = proposal.as_ref() {
                 record_memory_candidate_feedback(&self.memory, prop, true);
                 record_memory_audit_event(&self.memory, prop, &feedback);
-                self.memory
-                    .upsert_style_preference(
-                        &format!("accepted_{:?}", prop.kind),
-                        &prop.rationale,
-                        true,
-                    )
-                    .ok();
+                record_feedback_style_preference(
+                    &self.memory,
+                    &format!("accepted_{:?}", prop.kind),
+                    &prop.rationale,
+                    true,
+                );
                 self.memory
                     .record_decision(
                         self.active_chapter.as_deref().unwrap_or("project"),
@@ -88,9 +87,12 @@ impl WriterAgentKernel {
                 if prop.kind == ProposalKind::Ghost
                     && matches!(feedback.action, FeedbackAction::Explained)
                 {
-                    self.memory
-                        .upsert_style_preference("ignored_ghost", &prop.rationale, false)
-                        .ok();
+                    record_feedback_style_preference(
+                        &self.memory,
+                        "ignored_ghost",
+                        &prop.rationale,
+                        false,
+                    );
                 }
             }
         }
@@ -269,5 +271,13 @@ impl WriterAgentKernel {
             };
         }
         StoryReviewQueueStatus::Pending
+    }
+}
+
+fn record_feedback_style_preference(memory: &WriterMemory, key: &str, value: &str, accepted: bool) {
+    if validate_style_preference_with_memory(key, value, memory)
+        == MemoryCandidateQuality::Acceptable
+    {
+        let _ = memory.upsert_style_preference(key, value, accepted);
     }
 }

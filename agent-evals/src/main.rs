@@ -78,6 +78,7 @@ fn main() {
     results.push(run_story_debt_priority_ordering_eval());
     results.push(run_promise_kind_extraction_from_text_eval());
     results.push(run_memory_candidate_quality_validation_eval());
+    results.push(run_style_memory_validation_eval());
     results.push(run_promise_related_entities_extraction_eval());
     results.push(run_promise_dedup_against_existing_eval());
     results.push(run_vague_memory_candidate_rejected_eval());

@@ -272,7 +272,8 @@ pub fn run_promise_kind_extraction_from_text_eval() -> EvalResult {
 
 pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
     use agent_writer_lib::writer_agent::kernel::{
-        validate_canon_candidate, validate_promise_candidate, MemoryCandidateQuality,
+        validate_canon_candidate, validate_promise_candidate, validate_style_preference,
+        MemoryCandidateQuality,
     };
     use agent_writer_lib::writer_agent::operation::{CanonEntityOp, PlotPromiseOp};
 
@@ -342,9 +343,99 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
         )),
     }
 
+    match validate_style_preference("tone", "好") {
+        MemoryCandidateQuality::Vague { .. } => {}
+        other => errors.push(format!("expected Vague for vague style, got {:?}", other)),
+    }
+
+    match validate_style_preference("dialogue_subtext", "对话偏短句留白，避免直接解释情绪")
+    {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for valid style, got {:?}",
+            other
+        )),
+    }
+
     eval_result(
         "writer_agent:memory_candidate_quality_validation",
-        format!("4 candidates validated"),
+        format!("6 candidates validated"),
+        errors,
+    )
+}
+
+pub fn run_style_memory_validation_eval() -> EvalResult {
+    use agent_writer_lib::writer_agent::kernel::{
+        validate_style_preference_with_memory, MemoryCandidateQuality,
+    };
+
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_style_preference("dialogue_subtext", "对话偏短句留白，避免直接解释情绪", true)
+        .unwrap();
+
+    let mut errors = Vec::new();
+    match validate_style_preference_with_memory("tone", "好", &memory) {
+        MemoryCandidateQuality::Vague { .. } => {}
+        other => errors.push(format!("expected Vague for vague style, got {:?}", other)),
+    }
+    match validate_style_preference_with_memory(
+        "dialogue_subtext",
+        "对话偏短句留白，避免直接解释情绪",
+        &memory,
+    ) {
+        MemoryCandidateQuality::Duplicate { .. } => {}
+        other => errors.push(format!(
+            "expected Duplicate for repeated style, got {:?}",
+            other
+        )),
+    }
+    match validate_style_preference_with_memory(
+        "dialogue_subtext",
+        "对话要完整解释每个角色的真实情绪",
+        &memory,
+    ) {
+        MemoryCandidateQuality::Conflict { .. } => {}
+        other => errors.push(format!(
+            "expected Conflict for same-key style change, got {:?}",
+            other
+        )),
+    }
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let result = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext".to_string(),
+                value: "对话要完整解释每个角色的真实情绪".to_string(),
+            },
+            "",
+            Some(&eval_approval("style_memory_validation")),
+        )
+        .unwrap();
+    if result.success {
+        errors.push("conflicting style operation should be rejected".to_string());
+    }
+    let style_count = kernel
+        .memory
+        .list_style_preferences(20)
+        .unwrap()
+        .into_iter()
+        .filter(|preference| preference.key == "dialogue_subtext")
+        .count();
+    if style_count != 1 {
+        errors.push(format!(
+            "style ledger should keep one dialogue_subtext row, got {}",
+            style_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:style_memory_validation",
+        format!(
+            "operationRejected={} styleRows={}",
+            !result.success, style_count
+        ),
         errors,
     )
 }
