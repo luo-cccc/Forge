@@ -36,7 +36,8 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、87/87 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、89/89 writer evals。
+- Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
 
@@ -445,20 +446,22 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 ### P2.3 检索从“相似文本”升级为“写作相关性”
 
+当前状态：已完成第一阶段。`src-tauri/src/writer_agent/context_relevance.rs` 已集中承载 Writer Agent context pack 的写作相关性评分；Canon / Promise slice 会综合当前 chapter mission、next beat、result feedback、recent decisions、cursor 附近正文和 open promises 排序，并在每条被选中的 canon / promise 前输出 `WHY writing_relevance`。本阶段覆盖 Writer Agent ledger context，后续如继续增强外部 project brain / vector DB，可在同一评分语义上接入 rerank。
+
 任务：
 
 - 检索排序引入：
-  - 当前 chapter mission
-  - active entities
-  - active promises
-  - recent decisions
-  - cursor scene type
-- 不只返回 lore excerpt，还返回“为何相关”。
+  - 当前 chapter mission（已完成）
+  - active entities（已完成：Canon slice 相关实体评分）
+  - active promises（已完成：Promise slice 与 canon 关联评分）
+  - recent decisions（已完成）
+  - cursor scene type（部分完成：当前基于 cursor 附近正文、段落、选区和任务上下文抽取写作信号，未单独建模 scene type taxonomy）
+- 不只返回 lore excerpt，还返回“为何相关”。（已完成：`WHY writing_relevance`）
 
 验收标准：
 
-- 新增 eval：同名实体优先返回当前剧情相关实体。
-- 新增 eval：promise 相关检索优先于普通语义相似段落。
+- 新增 eval：同名实体优先返回当前剧情相关实体。（已完成）
+- 新增 eval：promise 相关检索优先于普通语义相似段落。（已完成）
 
 ## 9. P2：架构拆分和可维护性
 
@@ -545,7 +548,7 @@ writer_agent/
 
 ### P2.3 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 87/87 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 89/89 passing。
 
 建议模块：
 

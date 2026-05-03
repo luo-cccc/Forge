@@ -84,6 +84,8 @@ fn main() {
     results.push(run_duplicate_memory_candidate_deduped_eval());
     results.push(run_conflicting_memory_candidate_requires_review_eval());
     results.push(run_context_pack_explainability_eval());
+    results.push(run_current_plot_relevance_prioritizes_same_name_entity_eval());
+    results.push(run_promise_relevance_beats_plain_similarity_eval());
     results.push(run_end_to_end_ghost_pipeline_eval());
     results.push(run_end_to_end_contract_guard_eval());
     results.push(run_end_to_end_mission_drift_detection_eval());

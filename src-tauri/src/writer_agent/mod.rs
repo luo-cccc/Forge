@@ -1,5 +1,6 @@
 pub mod canon;
 pub mod context;
+pub mod context_relevance;
 pub mod diagnostics;
 pub mod feedback;
 pub mod intent;

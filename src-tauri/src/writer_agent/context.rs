@@ -3,8 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::context_relevance::{
+    format_canon_line, format_promise_line, score_canon_entity, score_promise, WritingRelevance,
+};
 use super::kernel::derive_next_beat;
-use super::memory::{StoryContractQuality, WriterMemory};
+use super::memory::{
+    CreativeDecisionSummary, PlotPromiseSummary, StoryContractQuality, WriterMemory,
+};
 use super::observation::WriterObservation;
 
 /// A single context source with its content and budget info.
@@ -495,9 +500,18 @@ pub fn assemble_observation_context(
     let chapter_mission = build_chapter_mission(&observation.project_id, observation, memory);
     let next_beat = build_next_beat(&observation.project_id, observation, memory);
     let result_feedback = build_result_feedback(&observation.project_id, observation, memory);
-    let canon_slice = build_canon_slice(&observation.paragraph, memory);
-    let promise_slice = build_promise_slice(memory);
-    let decision_slice = build_decision_slice(memory);
+    let decisions = memory.list_recent_decisions(6).unwrap_or_default();
+    let open_promises = memory.get_open_promise_summaries().unwrap_or_default();
+    let decision_slice = build_decision_slice(&decisions);
+    let relevance = WritingRelevance::new(
+        observation,
+        &chapter_mission,
+        &next_beat,
+        &result_feedback,
+        &decision_slice,
+    );
+    let canon_slice = build_canon_slice(observation, memory, &relevance, &open_promises);
+    let promise_slice = build_promise_slice(observation, &open_promises, &relevance, &decisions);
     let author_style = build_style_slice(memory);
     let selected_text = observation.selected_text().to_string();
     let cursor_prefix = if observation.prefix.trim().is_empty() {
@@ -848,26 +862,34 @@ fn char_window(text: &str, start: usize, max_chars: usize) -> String {
     truncate_to_budget(&remaining, max_chars).0
 }
 
-fn build_canon_slice(paragraph: &str, memory: &WriterMemory) -> String {
+fn build_canon_slice(
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+    relevance: &WritingRelevance,
+    open_promises: &[PlotPromiseSummary],
+) -> String {
     let mut lines = Vec::new();
     if let Ok(entities) = memory.list_canon_entities() {
-        for entity in entities
+        let mut scored = entities
             .into_iter()
-            .filter(|entity| paragraph.contains(&entity.name))
-            .take(6)
-        {
-            let attrs = if let Some(map) = entity.attributes.as_object() {
-                map.iter()
-                    .map(|(key, value)| format!("{}={}", key, value))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            } else {
-                String::new()
-            };
-            lines.push(format!(
-                "{} [{}] {} {}",
-                entity.name, entity.kind, entity.summary, attrs
-            ));
+            .filter_map(|entity| {
+                let score = score_canon_entity(&entity, observation, relevance, open_promises);
+                if score.score > 0 {
+                    Some((score, entity))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|(left, left_entity), (right, right_entity)| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| left_entity.name.cmp(&right_entity.name))
+        });
+
+        for (score, entity) in scored.into_iter().take(6) {
+            lines.push(format_canon_line(&entity, &score.reasons));
         }
     }
     if let Ok(rules) = memory.list_canon_rules(6) {
@@ -881,22 +903,34 @@ fn build_canon_slice(paragraph: &str, memory: &WriterMemory) -> String {
     lines.join("\n")
 }
 
-fn build_promise_slice(memory: &WriterMemory) -> String {
-    memory
-        .get_open_promise_summaries()
-        .unwrap_or_default()
+fn build_promise_slice(
+    observation: &WriterObservation,
+    promises: &[PlotPromiseSummary],
+    relevance: &WritingRelevance,
+    decisions: &[CreativeDecisionSummary],
+) -> String {
+    let mut scored = promises
+        .iter()
+        .map(|promise| {
+            (
+                score_promise(promise, observation, relevance, decisions),
+                promise,
+            )
+        })
+        .filter(|(score, _)| score.score > 0)
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left, left_promise), (right, right_promise)| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| right_promise.priority.cmp(&left_promise.priority))
+            .then_with(|| left_promise.title.cmp(&right_promise.title))
+    });
+
+    scored
         .into_iter()
         .take(6)
-        .map(|promise| {
-            let mut line = format!(
-                "{} [{}]: {} -> {}",
-                promise.title, promise.kind, promise.description, promise.expected_payoff
-            );
-            if !promise.last_seen_chapter.trim().is_empty() {
-                line.push_str(&format!(" | last seen: {}", promise.last_seen_chapter));
-            }
-            line
-        })
+        .map(|(score, promise)| format_promise_line(promise, &score.reasons))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -916,11 +950,9 @@ fn build_style_slice(memory: &WriterMemory) -> String {
         .join("\n")
 }
 
-fn build_decision_slice(memory: &WriterMemory) -> String {
-    memory
-        .list_recent_decisions(6)
-        .unwrap_or_default()
-        .into_iter()
+fn build_decision_slice(decisions: &[CreativeDecisionSummary]) -> String {
+    decisions
+        .iter()
         .map(|decision| {
             format!(
                 "{} [{}]: {}",
