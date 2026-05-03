@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::kernel::WriterAgentTraceSnapshot;
+use super::run_events::WriterRunEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +25,7 @@ pub enum WriterTimelineEventKind {
     Feedback,
     OperationLifecycle,
     RunEvent,
+    Failure,
     ContextRecall,
     ProductMetrics,
 }
@@ -142,6 +144,10 @@ pub fn build_inspector_timeline(
         });
     }
     for run_event in &snapshot.run_events {
+        if run_event.event_type == "writer.error" {
+            events.push(failure_event_from_run_event(run_event));
+            continue;
+        }
         events.push(WriterTimelineEvent {
             audience: WriterTimelineAudience::Inspector,
             kind: WriterTimelineEventKind::RunEvent,
@@ -261,11 +267,56 @@ fn event_kind_weight(kind: &WriterTimelineEventKind) -> u8 {
         WriterTimelineEventKind::Observation => 0,
         WriterTimelineEventKind::TaskPacket => 1,
         WriterTimelineEventKind::RunEvent => 2,
-        WriterTimelineEventKind::Proposal => 3,
-        WriterTimelineEventKind::OperationLifecycle => 4,
-        WriterTimelineEventKind::Feedback => 5,
-        WriterTimelineEventKind::ContextRecall => 6,
-        WriterTimelineEventKind::ProductMetrics => 7,
+        WriterTimelineEventKind::Failure => 3,
+        WriterTimelineEventKind::Proposal => 4,
+        WriterTimelineEventKind::OperationLifecycle => 5,
+        WriterTimelineEventKind::Feedback => 6,
+        WriterTimelineEventKind::ContextRecall => 7,
+        WriterTimelineEventKind::ProductMetrics => 8,
+    }
+}
+
+fn failure_event_from_run_event(run_event: &WriterRunEvent) -> WriterTimelineEvent {
+    let code = run_event
+        .data
+        .get("code")
+        .and_then(|value| value.as_str())
+        .unwrap_or("WRITER_ERROR");
+    let category = run_event
+        .data
+        .get("category")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let message = run_event
+        .data
+        .get("message")
+        .and_then(|value| value.as_str())
+        .unwrap_or("Writer failure recorded.");
+    let remediation_count = run_event
+        .data
+        .get("remediation")
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter(|item| item.as_str().is_some()).count())
+        .unwrap_or(0);
+    let first_remediation = run_event
+        .data
+        .get("remediation")
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.iter().find_map(|item| item.as_str()))
+        .unwrap_or("Inspect the failure bundle before retrying.");
+
+    WriterTimelineEvent {
+        audience: WriterTimelineAudience::Inspector,
+        kind: WriterTimelineEventKind::Failure,
+        label: format!("Failure {}", code),
+        ts_ms: run_event.ts_ms,
+        task_id: run_event.task_id.clone(),
+        source_refs: run_event.source_refs.clone(),
+        summary: format!(
+            "{} [{}] remediation={} first={}",
+            message, category, remediation_count, first_remediation
+        ),
+        detail: Some(run_event.data.clone()),
     }
 }
 
@@ -296,6 +347,7 @@ mod tests {
                     event.kind,
                     WriterTimelineEventKind::TaskPacket
                         | WriterTimelineEventKind::RunEvent
+                        | WriterTimelineEventKind::Failure
                         | WriterTimelineEventKind::OperationLifecycle
                 )
         }));

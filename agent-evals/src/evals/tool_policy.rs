@@ -354,3 +354,102 @@ pub fn run_external_tool_error_has_remediation_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_tool_remediation_records_failure_bundle_eval() -> EvalResult {
+    struct FailingToolHandler;
+
+    #[async_trait::async_trait]
+    impl agent_harness_core::ToolHandler for FailingToolHandler {
+        async fn execute(
+            &self,
+            tool_name: &str,
+            _args: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            Err(format!("missing binary for external tool {}", tool_name))
+        }
+    }
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let registry = agent_harness_core::default_writing_tool_registry();
+    let mut executor = agent_harness_core::ToolExecutor::new(registry, FailingToolHandler);
+    let execution = runtime.block_on(async {
+        executor
+            .execute("query_project_brain", serde_json::json!({"query": "玉佩"}))
+            .await
+    });
+    let bundle = agent_writer_lib::writer_agent::task_receipt::failure_bundle_from_tool_execution(
+        Some("tool-remediation-eval"),
+        &execution,
+        now_ms(),
+    );
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    if let Some(bundle) = bundle.as_ref() {
+        kernel.record_failure_evidence_bundle(bundle);
+    }
+    let snapshot = kernel.trace_snapshot(20);
+    let inspector = kernel.inspector_timeline(20);
+
+    let mut errors = Vec::new();
+    let Some(bundle) = bundle else {
+        errors.push("tool execution failure did not produce failure bundle".to_string());
+        return eval_result(
+            "writer_agent:tool_remediation_records_failure_bundle",
+            "bundle=false".to_string(),
+            errors,
+        );
+    };
+    if bundle.category
+        != agent_writer_lib::writer_agent::task_receipt::WriterFailureCategory::ToolFailed
+    {
+        errors.push(format!(
+            "tool missing binary mapped to wrong category: {:?}",
+            bundle.category
+        ));
+    }
+    if !bundle
+        .remediation
+        .iter()
+        .any(|item| item.contains("missing_binary_or_resource"))
+    {
+        errors.push(format!(
+            "failure bundle lacks tool remediation: {:?}",
+            bundle.remediation
+        ));
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.error"
+            && event.data.get("code").and_then(|value| value.as_str())
+                == Some("TOOL_MISSING_BINARY_OR_RESOURCE")
+            && event
+                .data
+                .get("remediation")
+                .and_then(|value| value.as_array())
+                .is_some_and(|items| !items.is_empty())
+    }) {
+        errors.push("writer.error run event lacks mapped tool remediation".to_string());
+    }
+    if !inspector.events.iter().any(|event| {
+        event.kind == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::Failure
+            && event.summary.contains("missing_binary_or_resource")
+            && event
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("remediation"))
+                .and_then(|value| value.as_array())
+                .is_some_and(|items| !items.is_empty())
+    }) {
+        errors.push("inspector failure event does not surface remediation".to_string());
+    }
+
+    eval_result(
+        "writer_agent:tool_remediation_records_failure_bundle",
+        format!(
+            "category={:?} runEvents={} inspectorEvents={}",
+            bundle.category,
+            snapshot.run_events.len(),
+            inspector.events.len()
+        ),
+        errors,
+    )
+}

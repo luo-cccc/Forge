@@ -927,6 +927,7 @@ export type WriterTimelineEventKind =
   | "feedback"
   | "operation_lifecycle"
   | "run_event"
+  | "failure"
   | "context_recall"
   | "product_metrics";
 

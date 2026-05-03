@@ -31,6 +31,7 @@ fn main() {
     results.push(run_manual_request_tool_boundary_eval());
     results.push(run_planning_review_tool_boundary_eval());
     results.push(run_external_tool_error_has_remediation_eval());
+    results.push(run_tool_remediation_records_failure_bundle_eval());
     results.push(run_manual_request_kernel_owns_run_loop_eval());
     results.push(run_planning_review_uses_story_foundation_eval());
     results.push(run_operation_feedback_requires_durable_save_eval());

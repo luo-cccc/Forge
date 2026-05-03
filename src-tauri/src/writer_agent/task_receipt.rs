@@ -153,6 +153,7 @@ impl WriterTaskReceiptMismatch {
 pub enum WriterFailureCategory {
     ContextMissing,
     ToolDenied,
+    ToolFailed,
     ProviderFailed,
     ReceiptMismatch,
     SaveFailed,
@@ -200,6 +201,58 @@ impl WriterFailureEvidenceBundle {
     }
 }
 
+pub fn failure_bundle_from_tool_execution(
+    task_id: Option<&str>,
+    execution: &agent_harness_core::ToolExecution,
+    created_at_ms: u64,
+) -> Option<WriterFailureEvidenceBundle> {
+    let error = execution.error.as_ref()?;
+    let first_remediation_code = execution
+        .remediation
+        .first()
+        .map(|remediation| remediation.code.as_str());
+    let mut evidence_refs = vec![format!("tool:{}", execution.tool_name)];
+    if let Some(task_id) = task_id.filter(|value| !value.trim().is_empty()) {
+        evidence_refs.push(format!("task:{}", task_id.trim()));
+    }
+    evidence_refs.extend(
+        execution
+            .remediation
+            .iter()
+            .map(|remediation| format!("remediation:{}", remediation.code)),
+    );
+    let mut remediation = execution
+        .remediation
+        .iter()
+        .map(|item| format!("{}: {}", item.code, item.message))
+        .collect::<Vec<_>>();
+    if remediation.is_empty() {
+        remediation.push(
+            "tool_handler_failed: Record the tool failure evidence and retry only after the tool inventory, permission policy, or workspace state changes."
+                .to_string(),
+        );
+    }
+
+    Some(WriterFailureEvidenceBundle::new(
+        tool_failure_category(first_remediation_code, error),
+        tool_failure_code(first_remediation_code),
+        format!("Tool '{}' failed: {}", execution.tool_name, error),
+        true,
+        task_id.map(|value| value.trim().to_string()),
+        evidence_refs,
+        serde_json::json!({
+            "toolName": execution.tool_name,
+            "input": execution.input,
+            "output": execution.output,
+            "error": execution.error,
+            "durationMs": execution.duration_ms,
+            "remediation": execution.remediation,
+        }),
+        remediation,
+        created_at_ms,
+    ))
+}
+
 pub fn normalize_strings(values: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     for value in values {
@@ -210,6 +263,44 @@ pub fn normalize_strings(values: Vec<String>) -> Vec<String> {
         normalized.push(value.to_string());
     }
     normalized
+}
+
+fn tool_failure_category(code: Option<&str>, error: &str) -> WriterFailureCategory {
+    let code = code.unwrap_or_default();
+    let lower_error = error.to_ascii_lowercase();
+    if matches!(
+        code,
+        "approval_required" | "external_access_denied" | "tool_denied"
+    ) || lower_error.contains("approval")
+        || lower_error.contains("permission")
+        || lower_error.contains("denied")
+    {
+        WriterFailureCategory::ToolDenied
+    } else {
+        WriterFailureCategory::ToolFailed
+    }
+}
+
+fn tool_failure_code(code: Option<&str>) -> String {
+    let Some(code) = code.filter(|value| !value.trim().is_empty()) else {
+        return "TOOL_EXECUTION_FAILED".to_string();
+    };
+    let normalized = code
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if normalized.starts_with("TOOL_") {
+        normalized
+    } else {
+        format!("TOOL_{}", normalized)
+    }
 }
 
 #[cfg(test)]
@@ -244,5 +335,34 @@ mod tests {
                 .map(|mismatch| mismatch.field.as_str()),
             Some("task_id")
         );
+    }
+
+    #[test]
+    fn tool_execution_failure_maps_to_failure_bundle() {
+        let execution = agent_harness_core::ToolExecution {
+            tool_name: "query_project_brain".to_string(),
+            input: serde_json::json!({ "query": "jade" }),
+            output: serde_json::Value::Null,
+            error: Some("missing binary for external search".to_string()),
+            remediation: vec![agent_harness_core::ToolExecutionRemediation {
+                code: "missing_binary_or_resource".to_string(),
+                message: "Install the configured search binary before retrying.".to_string(),
+            }],
+            duration_ms: 12,
+        };
+
+        let bundle = failure_bundle_from_tool_execution(Some("task-1"), &execution, 20).unwrap();
+
+        assert_eq!(bundle.category, WriterFailureCategory::ToolFailed);
+        assert_eq!(bundle.code, "TOOL_MISSING_BINARY_OR_RESOURCE");
+        assert!(bundle
+            .evidence_refs
+            .iter()
+            .any(|source| source == "tool:query_project_brain"));
+        assert!(bundle
+            .remediation
+            .iter()
+            .any(|item| item.contains("missing_binary_or_resource")));
+        assert_eq!(bundle.details["toolName"], "query_project_brain");
     }
 }

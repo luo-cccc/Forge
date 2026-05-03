@@ -36,9 +36,9 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前已单独验证：`cargo run -p agent-evals` 119/119 passing；完整 `npm run verify` 仍需在本轮最终复跑确认。
+- 当前已验证：`cargo run -p agent-evals` 120/120 passing；完整 `npm run verify` passing。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
-- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，Project Brain 已有 knowledge index / shared-keyword graph，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，且章节草稿生成会在真实 provider call 前执行 budget preflight；章节保存观察路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation。
+- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，Project Brain 已有 knowledge index / shared-keyword graph，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，且章节草稿生成会在真实 provider call 前执行 budget preflight；章节保存观察路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event。
 
 ### 当前剩余核心矛盾
 
@@ -850,8 +850,9 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 5. 外部工具错误可恢复。（第一阶段已完成）
    - `agent-harness-core::ToolExecution` 已增加结构化 `remediation`。
    - unregistered tool、approval/permission denied、missing binary/resource、workspace unavailable、unknown tool/agent、doom loop 和普通 handler failure 都会给出机器可读 code 与恢复建议。
-   - 已新增 eval：`writer_agent:external_tool_error_has_remediation`。
-   - 剩余：把 remediation 映射进 WriterFailureEvidenceBundle / Inspector failure view，并覆盖真实外部检索子任务。
+   - ToolExecution 失败可映射为 `WriterFailureEvidenceBundle`，记录为 `writer.error` run event；Inspector timeline 会把 `writer.error` 渲染为 `failure` 事件，并在 summary/detail 中保留 remediation。
+   - 已新增 eval：`writer_agent:external_tool_error_has_remediation`、`writer_agent:tool_remediation_records_failure_bundle`。
+   - 剩余：覆盖真实外部检索子任务的端到端失败路径，并把前端 inspector failure 视图做成可操作恢复入口。
 
 验收：
 
@@ -862,6 +863,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:provider_budget_requires_approval`（已完成）
 - `writer_agent:chapter_generation_provider_budget_preflight`（已完成）
 - `writer_agent:external_tool_error_has_remediation`（已完成）
+- `writer_agent:tool_remediation_records_failure_bundle`（已完成）
 
 ### 11.5 目标与信念：自主性的灵魂
 
@@ -986,7 +988,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 9. Post-write diagnostics。（保存观察路径第一阶段已完成）
    - 保存观察会生成 post-write diagnostic report，写入 run event、trace snapshot 和 trajectory；accepted inline/proposal 保存路径细化接入仍未完成。
 10. External tool remediation。（第一阶段已完成）
-   - ToolExecution 失败结果已有结构化 remediation；映射进 failure bundle、inspector failure view 和真实外部检索子任务仍未完成。
+   - ToolExecution 失败结果已有结构化 remediation，并已映射进 `WriterFailureEvidenceBundle` / `writer.error` run event / Inspector `failure` event；真实外部检索子任务端到端覆盖仍未完成。
 
 ### 11.9 P4 完成定义
 
@@ -1002,7 +1004,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - Inspector timeline 有后端视图，默认 Companion summary 已证明不暴露内部 trace；trajectory export 有 redaction warning 和 local-only 标记。
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成 provider call 已有前置门禁；尚未强制接入所有真实 provider call，也还没有 UI approval surface。
 - 保存观察路径已有 post-write diagnostic report、run event 和 trajectory export；更细的 accepted operation 保存路径和 UI 展示仍未完成。
-- 通用 ToolExecution 失败已有 remediation；尚未映射到 WriterFailureEvidenceBundle 和 inspector failure surface。
+- 通用 ToolExecution 失败已有 remediation，并已映射到 WriterFailureEvidenceBundle 和 inspector failure surface；真实外部检索子任务端到端失败路径仍未完成。
 
 中期完成：
 
@@ -1128,8 +1130,8 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / redaction warning / local-only export marker）
 8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
 9. 增加 post-write diagnostics。（保存观察路径第一阶段已完成：report / run event / trace snapshot / trajectory export / eval）
-10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval）
-11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、Project Brain knowledge index/path guard、isolated research/diagnostic subtask workspace、inspector timeline、trajectory redaction、provider budget、chapter-generation provider preflight、post-write diagnostics、external tool remediation；后续重点转向真实 run-loop/UI 接入和连续写作 fixture）
+10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
+11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、Project Brain knowledge index/path guard、isolated research/diagnostic subtask workspace、inspector timeline、trajectory redaction、provider budget、chapter-generation provider preflight、post-write diagnostics、external tool remediation 和 tool remediation failure bundle；后续重点转向真实 run-loop/UI 接入和连续写作 fixture）
 
 ## 14. 完成定义
 
