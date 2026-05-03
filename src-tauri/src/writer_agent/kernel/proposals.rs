@@ -72,6 +72,7 @@ impl WriterAgentKernel {
                 created_at,
             )
             .ok();
+        self.record_proposal_run_event(&proposal, created_at);
         for operation in proposal
             .operations
             .iter()

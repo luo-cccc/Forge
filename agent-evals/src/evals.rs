@@ -2,8 +2,9 @@ use crate::fixtures::*;
 use std::path::Path;
 
 use agent_writer_lib::chapter_generation::{
-    build_chapter_generation_task_packet, BuiltChapterContext, ChapterContextBudgetReport,
-    ChapterContextSource, ChapterTarget,
+    build_chapter_generation_receipt, build_chapter_generation_task_packet,
+    failure_bundle_from_chapter_error, BuiltChapterContext, ChapterContextBudgetReport,
+    ChapterContextSource, ChapterGenerationError, ChapterTarget,
 };
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
@@ -27,6 +28,8 @@ mod ghost_feedback;
 mod intent;
 mod mission;
 mod promise;
+mod provider_budget;
+mod research_subtask;
 mod run_loop;
 mod story_debt;
 mod task_packet;
@@ -40,6 +43,8 @@ pub use ghost_feedback::*;
 pub use intent::*;
 pub use mission::*;
 pub use promise::*;
+pub use provider_budget::*;
+pub use research_subtask::*;
 pub use run_loop::*;
 pub use story_debt::*;
 pub use task_packet::*;

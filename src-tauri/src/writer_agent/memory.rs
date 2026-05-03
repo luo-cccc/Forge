@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -193,6 +193,18 @@ CREATE TABLE IF NOT EXISTS writer_context_recalls (
     UNIQUE(project_id, source, reference)
 );
 
+CREATE TABLE IF NOT EXISTS writer_run_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seq INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    task_id TEXT DEFAULT '',
+    event_type TEXT NOT NULL,
+    source_refs_json TEXT DEFAULT '[]',
+    data_json TEXT DEFAULT '{}',
+    ts_ms INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS manual_agent_turns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL,
@@ -226,6 +238,8 @@ CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_tra
 CREATE INDEX IF NOT EXISTS idx_feedback_trace_created_at ON writer_feedback_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_context_recalls_project_last ON writer_context_recalls(project_id, last_recalled_at);
 CREATE INDEX IF NOT EXISTS idx_context_recalls_project_count ON writer_context_recalls(project_id, recall_count);
+CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_session_seq ON writer_run_events(project_id, session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_ts ON writer_run_events(project_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_manual_agent_turns_project_created_at ON manual_agent_turns(project_id, created_at);
 "#;
 
@@ -691,6 +705,18 @@ pub struct FeedbackTraceSummary {
     pub action: String,
     pub reason: Option<String>,
     pub created_at: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunEventSummary {
+    pub seq: u64,
+    pub project_id: String,
+    pub session_id: String,
+    pub task_id: Option<String>,
+    pub event_type: String,
+    pub source_refs: Vec<String>,
+    pub data: serde_json::Value,
+    pub ts_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1667,6 +1693,25 @@ impl WriterMemory {
         Ok(())
     }
 
+    pub fn record_run_event(&self, event: &RunEventSummary) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO writer_run_events
+             (seq, project_id, session_id, task_id, event_type, source_refs_json, data_json, ts_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                event.seq as i64,
+                event.project_id,
+                event.session_id,
+                event.task_id.clone().unwrap_or_default(),
+                event.event_type,
+                string_vec_json(&event.source_refs),
+                serde_json::to_string(&event.data).unwrap_or_else(|_| "{}".to_string()),
+                event.ts_ms as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn record_context_recalls(
         &self,
         project_id: &str,
@@ -1825,6 +1870,47 @@ impl WriterMemory {
         rows.collect()
     }
 
+    pub fn list_run_events(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<RunEventSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, project_id, session_id, task_id, event_type, source_refs_json, data_json, ts_ms
+             FROM writer_run_events
+             WHERE project_id=?1 AND session_id=?2
+             ORDER BY seq DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![project_id, session_id, limit as i64],
+            |row| {
+                let seq: i64 = row.get(0)?;
+                let task_id: String = row.get(3)?;
+                let data_json: String = row.get(6)?;
+                let ts_ms: i64 = row.get(7)?;
+                Ok(RunEventSummary {
+                    seq: seq.max(0) as u64,
+                    project_id: row.get(1)?,
+                    session_id: row.get(2)?,
+                    task_id: if task_id.trim().is_empty() {
+                        None
+                    } else {
+                        Some(task_id)
+                    },
+                    event_type: row.get(4)?,
+                    source_refs: string_vec_from_json(row.get::<_, String>(5)?.as_str()),
+                    data: serde_json::from_str(&data_json)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                    ts_ms: ts_ms.max(0) as u64,
+                })
+            },
+        )?;
+        let mut events = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        events.reverse();
+        Ok(events)
+    }
+
     #[cfg(test)]
     pub fn feedback_stats(&self, proposal_id: &str) -> rusqlite::Result<(i64, i64)> {
         let mut stmt = self.conn.prepare(
@@ -1865,6 +1951,19 @@ fn initialize_schema(conn: &Connection) -> SqlResult<()> {
 }
 
 fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS writer_run_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seq INTEGER NOT NULL,
+            project_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            task_id TEXT DEFAULT '',
+            event_type TEXT NOT NULL,
+            source_refs_json TEXT DEFAULT '[]',
+            data_json TEXT DEFAULT '{}',
+            ts_ms INTEGER NOT NULL
+        );",
+    )?;
     ensure_column(
         conn,
         "canon_entities",
@@ -2718,6 +2817,58 @@ mod tests {
         assert_eq!(
             m.list_feedback_traces(5).unwrap()[0].reason.as_deref(),
             Some("fits")
+        );
+    }
+
+    #[test]
+    fn test_run_events_persist_and_replay_in_order() {
+        let m = memory();
+        m.record_run_event(&RunEventSummary {
+            seq: 1,
+            project_id: "novel-a".to_string(),
+            session_id: "session-a".to_string(),
+            task_id: Some("obs-1".to_string()),
+            event_type: "writer.observation".to_string(),
+            source_refs: vec!["chapter:Chapter-1".to_string()],
+            data: serde_json::json!({"reason": "Idle"}),
+            ts_ms: 10,
+        })
+        .unwrap();
+        m.record_run_event(&RunEventSummary {
+            seq: 2,
+            project_id: "novel-a".to_string(),
+            session_id: "session-a".to_string(),
+            task_id: Some("prop-1".to_string()),
+            event_type: "writer.proposal_created".to_string(),
+            source_refs: vec!["obs-1".to_string()],
+            data: serde_json::json!({"kind": "Ghost"}),
+            ts_ms: 11,
+        })
+        .unwrap();
+        m.record_run_event(&RunEventSummary {
+            seq: 1,
+            project_id: "novel-b".to_string(),
+            session_id: "session-b".to_string(),
+            task_id: None,
+            event_type: "writer.observation".to_string(),
+            source_refs: Vec::new(),
+            data: serde_json::json!({"reason": "Other"}),
+            ts_ms: 12,
+        })
+        .unwrap();
+
+        let events = m.list_run_events("novel-a", "session-a", 10).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(events[0].event_type, "writer.observation");
+        assert_eq!(events[1].task_id.as_deref(), Some("prop-1"));
+        assert_eq!(
+            events[1].data.get("kind").and_then(|value| value.as_str()),
+            Some("Ghost")
         );
     }
 

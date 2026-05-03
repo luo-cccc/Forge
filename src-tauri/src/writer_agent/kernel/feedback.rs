@@ -134,6 +134,7 @@ impl WriterAgentKernel {
             }
         }
 
+        self.record_feedback_run_event(&feedback, feedback_result.as_deref());
         self.feedback_events.push(feedback);
         Ok(())
     }

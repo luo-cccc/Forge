@@ -12,7 +12,7 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only behind `WriterAgentKernel.prepare_task_run()` / `WriterAgentPreparedRun.run()`. `ask_agent` in lib.rs calls the kernel path, with no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are re-exported through `writer_agent::kernel` and implemented in `writer_agent/kernel_run_loop.rs`.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 47 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers `pub async fn` command handlers. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 49 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers `pub async fn` command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
@@ -22,6 +22,16 @@ P1 is in progress:
 - Chapter Mission save calibration can mark completed, drifted, or needs_review states based on save observations.
 - Promise Ledger now classifies promise kinds including plot promise, emotional debt, object whereabouts, character commitment, mystery clue, and relationship tension.
 - Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency.
+- P4 has started with an append-only `WriterRunEventStore`: observation, task-packet, proposal, operation-lifecycle, feedback, and failure events are recorded with monotonic sequence numbers, persisted in WriterMemory SQLite, and exported through trajectory JSONL as `writer.run_event`.
+- P4 Planning / Review mode now has a backend read-only task path: `WriterAgentTask::PlanningReview` uses a dedicated context profile, AnalyzeText task packet, read-only project tool inventory, no memory-write feedback contract, and a prompt that outputs objective understanding, evidence, risks, candidate actions, and author-confirmation questions.
+- P4 WriterTaskReceipt / failure evidence first slice is implemented for chapter generation: built chapter contexts carry a `WriterTaskReceipt`, saves validate receipt task/chapter/revision/evidence/artifact before writing, receipt mismatch blocks writes, and structured `WriterFailureEvidenceBundle` records provider/save/receipt failures into `writer.error` run events and trajectory export.
+- P4 memory correction / reinforcement first slice now reuses reviewed feedback: accepted memory candidates create reinforcement signals, rejected/edited memory candidates create correction signals, and correction suppresses future same-slot memory extraction even after prior reinforcement.
+- P4 Project Brain knowledge index / graph first slice now builds `knowledge_index.json` from vector chunks, outline, and lorebook; nodes carry source refs, keywords, and summaries, shared-keyword graph edges preserve evidence refs, and knowledge index file reads have a path guard.
+- P4 isolated research / diagnostic subtask first slice now creates per-subtask artifact workspaces under `agent_subtasks/<subtask_id>/artifacts`, enforces relative artifact paths, applies research/diagnostic/drafting tool policies, and returns evidence-only results with attempted writes captured as blocked operation kinds.
+- P4 Inspector / trajectory first slice now derives an inspector-only timeline from trace snapshots, keeps the default companion summary free of task packets/raw run events/operation lifecycle internals, and adds redaction warning plus `local_only` metadata to trajectory exports.
+- P4 provider budget first slice now estimates token/cost budgets for long provider tasks, returns allowed/warn/approval-required/blocked decisions with remediation, and gates chapter draft generation before the real provider call with `PROVIDER_BUDGET_APPROVAL_REQUIRED` failure evidence when approval is needed.
+- P4 post-write diagnostics first slice now records `WriterPostWriteDiagnosticReport` after save observations, including severity/category counts, evidence refs, remediation, `writer.post_write_diagnostics` run events, trace snapshot entries, and trajectory export events.
+- P4 external tool remediation first slice now adds structured remediation to `ToolExecution` failures for unregistered tools, approval/permission denial, missing binary/resource, workspace unavailable, unknown tool/agent, doom-loop detection, and generic handler failures.
 - Companion Panel write mode remains quiet and now summarizes acceptance/save health instead of exposing raw operation traces.
 - `agent-evals` now includes 10 long-form product scenario checks in `agent-evals/src/product_scenarios.rs`, covering multi-chapter promise tracking, result feedback handoff, payoff timing, resolved-promise quieting, object whereabouts, mission drift, canon guardrails, style feedback, decision metrics, and context explainability. More realistic fixtures are still needed before product value can be called proven.
 - Writer Agent context relevance ranking now prioritizes Canon / Promise ledger slices by mission, next beat, result feedback, recent decisions, cursor-local story signals, open promises, and lightweight scene-type matches, with `WHY writing_relevance` explanations on retrieved entries. Project Brain / vector chunks are now reranked after semantic retrieval using the same writing-focus, scene-type, and avoid-term signals; standalone `query_project_brain` also injects active WriterMemory focus into retrieval and rerank. Scene-type explanations prioritize setup/payoff and reveal over generic action/description signals, and Project Brain rerank now extracts author-project terms from indexed keywords/phrase boundaries.
@@ -78,18 +88,20 @@ P1 is in progress:
 - Manual `ask_agent` requests now run through WriterAgentKernel.prepare_task_run() with ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
 - Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs.
 - Operation lifecycle is tracked end-to-end: proposed → approved → applied → durably_saved → feedback_recorded, with durable-save-before-feedback enforcement.
-- A static command boundary audit classifies all 47 Tauri commands by risk level and verifies audit coverage for write paths.
+- A static command boundary audit classifies all 49 Tauri commands by risk level and verifies audit coverage for write paths.
 - Product metrics are derived from trace data and emitted in trajectory JSONL as `writer.product_metrics`.
+- Writer run events now have a persisted replay path via `writer_run_events`, with `writer_agent:append_only_run_event_store` covering monotonic seq replay and trajectory export; failure bundles are recorded as `writer.error` run events.
+- Inspector timeline backend views now separate debug/internal replay from the default companion summary, and trajectory export warns about manuscript/project-memory/feedback leakage before any sharing.
 
 ## Current Verification Baseline
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 169 passing
+- `cargo test -p agent-writer`: 179 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 99/99 passing
+- `cargo run -p agent-evals`: 119/119 passing
 - `npm run check:p2`: 9/9 passing
-- `npm run check:audit`: 47 commands, 0 issues
+- `npm run check:audit`: 49 commands, 0 issues
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing
@@ -116,3 +128,4 @@ The expected local baseline is:
 - P2.2 memory-write gates now cover Canon / Promise proposal creation, safe same-entity attribute merge proposals, foundation quality guards, and Style memory validation with a lightweight taxonomy for dialogue subtext, prose sentence length, exposition density, sensory description, POV distance, action clarity, chapter hooks, and tone/voice. Style preference writes now support polarity-aware same-slot merging into normalized `style:<slot>` keys; remaining Style work is richer author-editable taxonomy and UI review of merged preferences.
 - P2.3 context relevance now covers Writer Agent ledger context for Canon / Promise slices plus Project Brain / vector chunk rerank, including standalone `query_project_brain` WriterMemory focus injection. Eval coverage now includes ordinary semantic-similarity distractors, scene-type relevance signals, active-mission focus overriding a surface-similar query, query-only retrieval misses, avoid-term noise suppression over multi-chapter Project Brain fixtures, preservation of old-clue payoff chunks near avoid terms, complex must_not boundary parsing, and author-project term recall/explanation. The remaining retrieval gap is calibration on real author projects rather than synthetic fixtures.
 - P2.4-P2.6 architecture splitting is complete for the current plan: `lib.rs` is glue-only, `writer_agent/kernel.rs` is a facade/state owner with implementation blocks split into focused modules, and `agent-evals/src/evals.rs` is split into responsibility-based eval modules. Further splitting should be driven by new feature pressure rather than line-count targets.
+- P4 backend first slices now cover replayable run events, Planning / Review read-only mode, chapter-generation TaskReceipt/failure evidence bundles, memory correction/reinforcement signals for reviewed memory candidates, Project Brain knowledge index/path guard, isolated research/diagnostic subtask workspace boundaries, inspector-only timeline views, companion-safe timeline summaries, trajectory redaction warnings, provider budget reports with chapter-generation preflight, post-write diagnostic reports, and external tool failure remediation. Remaining P4 gaps are Project Brain graph UI, embedding provider abstraction, real subtask run-loop integration, provider-budget UI/approval propagation and enforcement before all real provider calls, richer post-write diagnostics UI/accepted-operation coverage, remediation mapping into failure bundles/inspector, and longer continuous-writing fixtures.

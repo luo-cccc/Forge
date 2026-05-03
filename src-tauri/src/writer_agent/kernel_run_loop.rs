@@ -14,6 +14,7 @@ pub enum WriterAgentTask {
     InlineRewrite,
     GhostWriting,
     ChapterGeneration,
+    PlanningReview,
     ContinuityDiagnostic,
     CanonMaintenance,
     ProposalEvaluation,
@@ -26,6 +27,7 @@ impl WriterAgentTask {
             WriterAgentTask::InlineRewrite => AgentTask::InlineRewrite,
             WriterAgentTask::GhostWriting => AgentTask::GhostWriting,
             WriterAgentTask::ChapterGeneration => AgentTask::ChapterGeneration,
+            WriterAgentTask::PlanningReview => AgentTask::PlanningReview,
             WriterAgentTask::ContinuityDiagnostic => AgentTask::ContinuityDiagnostic,
             WriterAgentTask::CanonMaintenance => AgentTask::CanonMaintenance,
             WriterAgentTask::ProposalEvaluation => AgentTask::ProposalEvaluation,
@@ -119,6 +121,14 @@ where
 
     pub fn proposals(&self) -> &[AgentProposal] {
         &self.proposals
+    }
+
+    pub fn context_pack_summary(&self) -> &WriterAgentContextPackSummary {
+        &self.context_pack_summary
+    }
+
+    pub fn tool_inventory(&self) -> &EffectiveToolInventory {
+        &self.tool_inventory
     }
 
     pub async fn run(mut self) -> Result<WriterAgentRunResult, String> {

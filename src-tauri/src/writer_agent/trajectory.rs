@@ -5,6 +5,7 @@ use super::kernel::{
     WriterOperationLifecycleTrace, WriterProposalTrace, WriterTaskPacketTrace,
 };
 use super::memory::ContextRecallSummary;
+use super::run_events::WriterRunEvent;
 
 const TRAJECTORY_SCHEMA: &str = "forge-writer-agent-trajectory";
 const SCHEMA_VERSION: u8 = 1;
@@ -17,6 +18,8 @@ pub struct WriterTrajectoryExport {
     pub schema_version: u8,
     pub project_id: String,
     pub session_id: String,
+    pub redaction_warning: String,
+    pub local_only: bool,
     pub event_count: usize,
     pub jsonl: String,
 }
@@ -138,6 +141,40 @@ pub fn export_trace_snapshot(
             },
         );
     }
+    for run_event in &snapshot.run_events {
+        seq += 1;
+        push_event(
+            &mut lines,
+            TrajectoryEvent {
+                trace_schema: TRAJECTORY_SCHEMA,
+                schema_version: SCHEMA_VERSION,
+                trace_id: &trace_id,
+                project_id,
+                session_id,
+                seq,
+                event_type: "writer.run_event",
+                ts_ms: run_event.ts_ms,
+                data: run_event,
+            },
+        );
+    }
+    for report in &snapshot.post_write_diagnostics {
+        seq += 1;
+        push_event(
+            &mut lines,
+            TrajectoryEvent {
+                trace_schema: TRAJECTORY_SCHEMA,
+                schema_version: SCHEMA_VERSION,
+                trace_id: &trace_id,
+                project_id,
+                session_id,
+                seq,
+                event_type: "writer.post_write_diagnostics",
+                ts_ms: report.created_at_ms,
+                data: report,
+            },
+        );
+    }
     for recall in &snapshot.context_recalls {
         seq += 1;
         push_event(
@@ -181,6 +218,8 @@ pub fn export_trace_snapshot(
         schema_version: SCHEMA_VERSION,
         project_id: project_id.to_string(),
         session_id: session_id.to_string(),
+        redaction_warning: redaction_warning(),
+        local_only: true,
         event_count: lines.len(),
         jsonl: if lines.is_empty() {
             String::new()
@@ -188,6 +227,10 @@ pub fn export_trace_snapshot(
             format!("{}\n", lines.join("\n"))
         },
     }
+}
+
+fn redaction_warning() -> String {
+    "Trajectory export may contain manuscript text, project memory, author feedback, prompts, tool results, and internal reasoning metadata. Review or redact before sharing; exports are local-only by default.".to_string()
 }
 
 fn push_event<T: Serialize>(lines: &mut Vec<String>, event: TrajectoryEvent<'_, T>) {
@@ -227,6 +270,7 @@ fn _assert_trace_types(
     _proposal: &WriterProposalTrace,
     _feedback: &WriterFeedbackTrace,
     _lifecycle: &WriterOperationLifecycleTrace,
+    _run_event: &WriterRunEvent,
     _recall: &ContextRecallSummary,
 ) {
 }
@@ -254,6 +298,8 @@ mod tests {
                 created_at: 20,
             }],
             operation_lifecycle: Vec::new(),
+            run_events: Vec::new(),
+            post_write_diagnostics: Vec::new(),
             context_source_trends: Vec::new(),
             context_recalls: Vec::new(),
             product_metrics: Default::default(),

@@ -1,3 +1,4 @@
+use agent_harness_core::provider::LlmMessage;
 use agent_harness_core::{
     FeedbackContract, Intent, RequiredContext, TaskBelief, TaskPacket, TaskScope,
     ToolPolicyContract, ToolSideEffectLevel, VectorDB,
@@ -5,6 +6,13 @@ use agent_harness_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::writer_agent::context_relevance::{format_text_chunk_relevance, rerank_text_chunks};
+use crate::writer_agent::provider_budget::{
+    evaluate_provider_budget, WriterProviderBudgetDecision, WriterProviderBudgetReport,
+    WriterProviderBudgetRequest, WriterProviderBudgetTask,
+};
+use crate::writer_agent::task_receipt::{
+    WriterFailureCategory, WriterFailureEvidenceBundle, WriterTaskReceipt,
+};
 use crate::{llm_runtime, storage};
 
 pub const PHASE_STARTED: &str = "chapter_generation_started";
@@ -31,6 +39,7 @@ const DEFAULT_RAG_CHUNK_COUNT: usize = 5;
 const DEFAULT_OUTPUT_SOFT_CAP_CHARS: usize = 12_000;
 const DEFAULT_OUTPUT_HARD_CAP_CHARS: usize = 30_000;
 const PROVIDER_TIMEOUT_SECS: u64 = 120;
+const CHAPTER_GENERATION_OUTPUT_TOKENS: u64 = DEFAULT_OUTPUT_SOFT_CAP_CHARS as u64 / 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,6 +235,7 @@ pub struct BuiltChapterContext {
     pub sources: Vec<ChapterContextSource>,
     pub budget: ChapterContextBudgetReport,
     pub warnings: Vec<String>,
+    pub receipt: WriterTaskReceipt,
 }
 
 #[derive(Debug, Clone)]
@@ -247,6 +257,8 @@ pub struct ChapterGenerationError {
     pub recoverable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<WriterFailureEvidenceBundle>,
 }
 
 impl ChapterGenerationError {
@@ -256,6 +268,7 @@ impl ChapterGenerationError {
             message: message.into(),
             recoverable,
             details: None,
+            evidence: None,
         }
     }
 
@@ -270,7 +283,13 @@ impl ChapterGenerationError {
             message: message.into(),
             recoverable,
             details: Some(details.into()),
+            evidence: None,
         }
+    }
+
+    pub fn with_evidence(mut self, evidence: WriterFailureEvidenceBundle) -> Self {
+        self.evidence = Some(evidence);
+        self
     }
 }
 
@@ -315,6 +334,7 @@ pub struct SaveGeneratedChapterInput {
     pub base_revision: String,
     pub save_mode: SaveMode,
     pub frontend_state: Option<FrontendChapterStateSnapshot>,
+    pub receipt: WriterTaskReceipt,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -339,6 +359,8 @@ pub struct ChapterGenerationEvent {
     pub sources: Option<Vec<ChapterContextSource>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<ChapterContextBudgetReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<WriterTaskReceipt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved: Option<SaveGeneratedChapterOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -784,14 +806,25 @@ pub fn build_chapter_context(
     let (prompt_context, sources, budget_report) = composer.finish();
     let warnings = budget_report.warnings.clone();
 
+    let request_id = input.request_id;
+    let receipt = build_chapter_generation_receipt(
+        &request_id,
+        &target,
+        &base_revision,
+        instruction,
+        &sources,
+        crate::agent_runtime::now_ms(),
+    );
+
     Ok(BuiltChapterContext {
-        request_id: input.request_id,
+        request_id,
         target,
         base_revision,
         prompt_context,
         sources,
         budget: budget_report,
         warnings,
+        receipt,
     })
 }
 
@@ -866,6 +899,58 @@ pub fn build_chapter_generation_task_packet(
         ],
     };
     packet
+}
+
+pub fn build_chapter_generation_receipt(
+    request_id: &str,
+    target: &ChapterTarget,
+    base_revision: &str,
+    user_instruction: &str,
+    sources: &[ChapterContextSource],
+    created_at_ms: u64,
+) -> WriterTaskReceipt {
+    let instruction = user_instruction.trim();
+    let objective = if instruction.is_empty() {
+        format!("Draft '{}' from the built chapter context.", target.title)
+    } else {
+        format!(
+            "Draft '{}' from the built chapter context. Instruction: {}",
+            target.title,
+            snippet_text(instruction, 180)
+        )
+    };
+    let mut required_evidence = vec!["instruction".to_string()];
+    for source in sources.iter().filter(|source| source.included_chars > 0) {
+        if is_required_chapter_source(&source.source_type)
+            && !required_evidence
+                .iter()
+                .any(|existing| existing == &source.source_type)
+        {
+            required_evidence.push(source.source_type.clone());
+        }
+    }
+    let source_refs = sources
+        .iter()
+        .filter(|source| source.included_chars > 0)
+        .map(|source| format!("{}:{}", source.source_type, source.id))
+        .collect::<Vec<_>>();
+
+    WriterTaskReceipt::new(
+        request_id,
+        "ChapterGeneration",
+        Some(target.title.clone()),
+        objective,
+        required_evidence,
+        vec!["chapter_draft".to_string(), "saved_chapter".to_string()],
+        vec![
+            "overwrite_without_revision_match".to_string(),
+            "change_target_chapter_without_new_receipt".to_string(),
+            "ignore_required_context_sources".to_string(),
+        ],
+        source_refs,
+        Some(base_revision.to_string()),
+        created_at_ms,
+    )
 }
 
 fn chapter_context_beliefs(context: &BuiltChapterContext, project_id: &str) -> Vec<TaskBelief> {
@@ -1009,18 +1094,22 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
         context.target.title,
         context.prompt_context
     );
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": user_prompt}),
+    ];
+    let budget_report = chapter_generation_provider_budget(settings, &messages);
+    if budget_report.decision == WriterProviderBudgetDecision::ApprovalRequired {
+        return Err(provider_budget_error(
+            &context.request_id,
+            &context.receipt,
+            budget_report,
+        ));
+    }
 
-    let content = llm_runtime::chat_text(
-        settings,
-        vec![
-            serde_json::json!({"role": "system", "content": system_prompt}),
-            serde_json::json!({"role": "user", "content": user_prompt}),
-        ],
-        false,
-        PROVIDER_TIMEOUT_SECS,
-    )
-    .await
-    .map_err(map_provider_error)?;
+    let content = llm_runtime::chat_text(settings, messages, false, PROVIDER_TIMEOUT_SECS)
+        .await
+        .map_err(map_provider_error)?;
 
     let content = content.trim().to_string();
     validate_generated_content(&content)?;
@@ -1035,10 +1124,80 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
     })
 }
 
+pub fn chapter_generation_provider_budget(
+    settings: &llm_runtime::LlmSettings,
+    messages: &[serde_json::Value],
+) -> WriterProviderBudgetReport {
+    let converted = messages
+        .iter()
+        .map(|message| LlmMessage {
+            role: message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("user")
+                .to_string(),
+            content: message
+                .get("content")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        })
+        .collect::<Vec<_>>();
+    let estimated_input_tokens =
+        agent_harness_core::context_window_guard::estimate_request_tokens(&converted, None);
+    evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ChapterGeneration,
+        settings.model.clone(),
+        estimated_input_tokens,
+        CHAPTER_GENERATION_OUTPUT_TOKENS,
+    ))
+}
+
+pub fn provider_budget_error(
+    request_id: &str,
+    receipt: &WriterTaskReceipt,
+    report: WriterProviderBudgetReport,
+) -> ChapterGenerationError {
+    ChapterGenerationError::new(
+        "PROVIDER_BUDGET_APPROVAL_REQUIRED",
+        "Chapter generation provider budget requires explicit approval before calling the model.",
+        true,
+    )
+    .with_evidence(WriterFailureEvidenceBundle::new(
+        WriterFailureCategory::ProviderFailed,
+        "PROVIDER_BUDGET_APPROVAL_REQUIRED",
+        "Chapter generation provider budget requires explicit approval before calling the model.",
+        true,
+        Some(request_id.to_string()),
+        vec![
+            format!("receipt:{}", receipt.task_id),
+            format!("model:{}", report.model),
+            format!("estimated_tokens:{}", report.estimated_total_tokens),
+            format!("estimated_cost_micros:{}", report.estimated_cost_micros),
+        ],
+        serde_json::json!({
+            "providerBudget": report,
+            "receipt": receipt,
+        }),
+        vec![
+            "Surface the provider token/cost estimate to the author before retrying.".to_string(),
+            "Reduce context budget or requested output length if approval is not granted."
+                .to_string(),
+        ],
+        crate::agent_runtime::now_ms(),
+    ))
+}
+
 pub fn save_generated_chapter(
     app: &tauri::AppHandle,
     input: SaveGeneratedChapterInput,
 ) -> Result<SaveGeneratedChapterOutput, ChapterGenerationError> {
+    if let Some(error) = validate_receipt_for_save(&input) {
+        return Err(error);
+    }
+
     if input.generated_content.trim().is_empty() {
         return Err(ChapterGenerationError::new(
             "CONTENT_EMPTY",
@@ -1128,8 +1287,67 @@ pub fn save_generated_chapter(
             message: format!("Save blocked by {}.", conflict.reason),
             recoverable: true,
             details: serde_json::to_string(&conflict).ok(),
+            evidence: Some(failure_bundle_from_save_conflict(
+                &input.receipt,
+                &conflict,
+                crate::agent_runtime::now_ms(),
+            )),
         }),
     }
+}
+
+fn validate_receipt_for_save(input: &SaveGeneratedChapterInput) -> Option<ChapterGenerationError> {
+    let mismatches = input.receipt.validate_write_attempt(
+        &input.request_id,
+        &input.target.title,
+        &input.base_revision,
+        "saved_chapter",
+    );
+    if mismatches.is_empty() {
+        return None;
+    }
+
+    let evidence_refs = mismatches
+        .iter()
+        .map(|mismatch| {
+            format!(
+                "{}:{}->{}",
+                mismatch.field, mismatch.expected, mismatch.actual
+            )
+        })
+        .collect::<Vec<_>>();
+    let evidence = WriterFailureEvidenceBundle::new(
+        WriterFailureCategory::ReceiptMismatch,
+        "RECEIPT_MISMATCH",
+        "Generated chapter save was blocked because the task receipt no longer matches the write attempt.",
+        true,
+        Some(input.receipt.task_id.clone()),
+        evidence_refs,
+        serde_json::json!({
+            "receipt": input.receipt,
+            "attempt": {
+                "requestId": input.request_id,
+                "chapter": input.target.title,
+                "baseRevision": input.base_revision,
+                "artifact": "saved_chapter",
+            },
+            "mismatches": mismatches,
+        }),
+        vec![
+            "Rebuild the chapter generation context for the current target chapter.".to_string(),
+            "Retry only after the frontend and storage revisions match.".to_string(),
+        ],
+        crate::agent_runtime::now_ms(),
+    );
+
+    Some(
+        ChapterGenerationError::new(
+            "RECEIPT_MISMATCH",
+            "Generated chapter save was blocked because the task receipt no longer matches the write attempt.",
+            true,
+        )
+        .with_evidence(evidence),
+    )
 }
 
 pub fn save_conflict_from_error(error: &ChapterGenerationError) -> Option<SaveConflict> {
@@ -1140,6 +1358,125 @@ pub fn save_conflict_from_error(error: &ChapterGenerationError) -> Option<SaveCo
         .details
         .as_deref()
         .and_then(|details| serde_json::from_str(details).ok())
+}
+
+pub fn failure_bundle_from_chapter_error(
+    request_id: &str,
+    error: &ChapterGenerationError,
+    created_at_ms: u64,
+) -> WriterFailureEvidenceBundle {
+    if let Some(bundle) = error.evidence.clone() {
+        return bundle;
+    }
+    let category = failure_category_for_error_code(&error.code);
+    let mut evidence_refs = vec![format!("error:{}", error.code)];
+    if let Some(details) = error
+        .details
+        .as_ref()
+        .filter(|details| !details.trim().is_empty())
+    {
+        evidence_refs.push(format!("details:{}", snippet_text(details, 120)));
+    }
+    WriterFailureEvidenceBundle::new(
+        category,
+        error.code.clone(),
+        error.message.clone(),
+        error.recoverable,
+        Some(request_id.to_string()),
+        evidence_refs,
+        serde_json::json!({
+            "details": error.details,
+        }),
+        remediation_for_error_code(&error.code),
+        created_at_ms,
+    )
+}
+
+pub fn failure_bundle_from_save_conflict(
+    receipt: &WriterTaskReceipt,
+    conflict: &SaveConflict,
+    created_at_ms: u64,
+) -> WriterFailureEvidenceBundle {
+    WriterFailureEvidenceBundle::new(
+        WriterFailureCategory::SaveFailed,
+        "SAVE_CONFLICT",
+        format!("Save blocked by {}.", conflict.reason),
+        true,
+        Some(receipt.task_id.clone()),
+        vec![
+            format!("chapter:{}", receipt.chapter.clone().unwrap_or_default()),
+            format!("base_revision:{}", conflict.base_revision),
+            format!("current_revision:{}", conflict.current_revision),
+            format!("save_conflict:{}", conflict.reason),
+        ],
+        serde_json::json!({
+            "receipt": receipt,
+            "conflict": conflict,
+        }),
+        vec![
+            "Review the open editor changes before overwriting.".to_string(),
+            "Regenerate from the current chapter revision or save as a draft copy.".to_string(),
+        ],
+        created_at_ms,
+    )
+}
+
+fn failure_category_for_error_code(code: &str) -> WriterFailureCategory {
+    match code {
+        "INSTRUCTION_EMPTY"
+        | "TARGET_CHAPTER_NOT_FOUND"
+        | "TARGET_CHAPTER_AMBIGUOUS"
+        | "CONTEXT_INVALID" => WriterFailureCategory::ContextMissing,
+        "PROVIDER_TIMEOUT"
+        | "PROVIDER_RATE_LIMITED"
+        | "PROVIDER_NOT_CONFIGURED"
+        | "PROVIDER_CALL_FAILED"
+        | "PROVIDER_BUDGET_APPROVAL_REQUIRED"
+        | "MODEL_OUTPUT_EMPTY"
+        | "MODEL_OUTPUT_TOO_LARGE" => WriterFailureCategory::ProviderFailed,
+        "SAVE_CONFLICT"
+        | "CONTENT_EMPTY"
+        | "CONTENT_TOO_LARGE"
+        | "STORAGE_READ_FAILED"
+        | "STORAGE_WRITE_FAILED"
+        | "OUTLINE_LOAD_FAILED"
+        | "OUTLINE_SAVE_FAILED" => WriterFailureCategory::SaveFailed,
+        "RECEIPT_MISMATCH" => WriterFailureCategory::ReceiptMismatch,
+        _ => WriterFailureCategory::ProviderFailed,
+    }
+}
+
+fn remediation_for_error_code(code: &str) -> Vec<String> {
+    match code {
+        "INSTRUCTION_EMPTY" => {
+            vec!["Provide a concrete chapter generation instruction.".to_string()]
+        }
+        "TARGET_CHAPTER_NOT_FOUND" | "TARGET_CHAPTER_AMBIGUOUS" => {
+            vec!["Select a concrete target chapter or fix duplicate outline entries.".to_string()]
+        }
+        "PROVIDER_NOT_CONFIGURED" => vec!["Configure a valid model provider API key.".to_string()],
+        "PROVIDER_BUDGET_APPROVAL_REQUIRED" => vec![
+            "Review and approve the estimated provider token/cost budget before retrying."
+                .to_string(),
+            "Reduce context budget or requested output length if approval is not granted."
+                .to_string(),
+        ],
+        "PROVIDER_TIMEOUT" | "PROVIDER_RATE_LIMITED" | "PROVIDER_CALL_FAILED" => vec![
+            "Retry after provider recovery or switch to another configured provider.".to_string(),
+        ],
+        "MODEL_OUTPUT_EMPTY" | "MODEL_OUTPUT_TOO_LARGE" => vec![
+            "Regenerate with a narrower chapter objective or smaller output budget.".to_string(),
+        ],
+        "RECEIPT_MISMATCH" => {
+            vec!["Rebuild the task receipt from the latest context before saving.".to_string()]
+        }
+        "SAVE_CONFLICT" => {
+            vec!["Resolve editor/storage revision mismatch or save as a draft copy.".to_string()]
+        }
+        _ => vec![
+            "Inspect the failure evidence bundle and retry from the last safe phase.".to_string(),
+        ],
+    }
 }
 
 pub fn update_outline_after_generation(
@@ -1247,6 +1584,7 @@ pub async fn run_chapter_generation_pipeline(
         target_chapter_title: Some(context.target.title.clone()),
         sources: Some(context.sources.clone()),
         budget: Some(context.budget.clone()),
+        receipt: Some(context.receipt.clone()),
         saved: None,
         conflict: None,
         error: None,
@@ -1286,6 +1624,7 @@ pub async fn run_chapter_generation_pipeline(
         base_revision: context.base_revision.clone(),
         save_mode: payload.save_mode,
         frontend_state: payload.frontend_state.clone(),
+        receipt: context.receipt.clone(),
     };
     let saved = match save_generated_chapter(&app, save_input) {
         Ok(saved) => saved,
@@ -1325,6 +1664,7 @@ pub async fn run_chapter_generation_pipeline(
         target_chapter_title: Some(saved.chapter_title.clone()),
         sources: None,
         budget: None,
+        receipt: None,
         saved: Some(saved.clone()),
         conflict: None,
         error: None,
@@ -1355,6 +1695,7 @@ impl ChapterGenerationEvent {
             target_chapter_title,
             sources: None,
             budget: None,
+            receipt: None,
             saved: None,
             conflict: None,
             error: None,
@@ -1372,6 +1713,7 @@ impl ChapterGenerationEvent {
             target_chapter_title: None,
             sources: None,
             budget: None,
+            receipt: None,
             saved: None,
             conflict: None,
             error: Some(error),
@@ -1389,6 +1731,7 @@ impl ChapterGenerationEvent {
             target_chapter_title: conflict.open_chapter_title.clone(),
             sources: None,
             budget: None,
+            receipt: None,
             saved: None,
             conflict: Some(conflict),
             error: None,
@@ -1886,5 +2229,46 @@ mod tests {
     fn maps_http_429_to_provider_rate_limited() {
         let err = map_provider_error("API error 429: too many requests".to_string());
         assert_eq!(err.code, "PROVIDER_RATE_LIMITED");
+    }
+
+    #[test]
+    fn provider_budget_error_preserves_report_evidence() {
+        let target = ChapterTarget {
+            title: "第三章".to_string(),
+            filename: "第三章.md".to_string(),
+            number: Some(3),
+            summary: "林墨发现密道。".to_string(),
+            status: "empty".to_string(),
+        };
+        let receipt = build_chapter_generation_receipt(
+            "budget-test-1",
+            &target,
+            "rev-1",
+            "写第三章。",
+            &[ChapterContextSource {
+                source_type: "instruction".to_string(),
+                id: "user-instruction".to_string(),
+                label: "User instruction".to_string(),
+                original_chars: 5,
+                included_chars: 5,
+                truncated: false,
+                score: None,
+            }],
+            10,
+        );
+        let report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+            WriterProviderBudgetTask::ChapterGeneration,
+            "gpt-4o",
+            90_000,
+            24_000,
+        ));
+
+        let error = provider_budget_error("budget-test-1", &receipt, report);
+
+        assert_eq!(error.code, "PROVIDER_BUDGET_APPROVAL_REQUIRED");
+        let evidence = error.evidence.expect("budget error has evidence");
+        assert_eq!(evidence.category, WriterFailureCategory::ProviderFailed);
+        assert!(evidence.details.get("providerBudget").is_some());
+        assert!(!evidence.remediation.is_empty());
     }
 }

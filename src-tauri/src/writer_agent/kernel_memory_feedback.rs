@@ -160,6 +160,14 @@ fn memory_feedback_key(slot: &str) -> String {
     format!("memory_extract:{}", slot)
 }
 
+pub(crate) fn memory_correction_key(slot: &str) -> String {
+    format!("memory_correction:{}", slot)
+}
+
+pub(crate) fn memory_reinforcement_key(slot: &str) -> String {
+    format!("memory_reinforcement:{}", slot)
+}
+
 pub(crate) fn record_memory_candidate_feedback(
     memory: &WriterMemory,
     proposal: &AgentProposal,
@@ -168,8 +176,18 @@ pub(crate) fn record_memory_candidate_feedback(
     let Some(slot) = memory_operation_slot(proposal) else {
         return;
     };
-    let value = if accepted { "accepted" } else { "rejected" };
+    let value = if accepted {
+        "reinforcement"
+    } else {
+        "correction"
+    };
     let _ = memory.upsert_style_preference(&memory_feedback_key(&slot), value, accepted);
+    let signal_key = if accepted {
+        memory_reinforcement_key(&slot)
+    } else {
+        memory_correction_key(&slot)
+    };
+    let _ = memory.upsert_style_preference(&signal_key, value, accepted);
 }
 
 pub(crate) struct MemoryExtractionFeedback {
@@ -181,13 +199,19 @@ impl MemoryExtractionFeedback {
     pub(crate) fn from_memory(memory: &WriterMemory) -> Self {
         let mut suppressed_slots = HashSet::new();
         let mut preferred_slots = HashSet::new();
-        for preference in memory.list_style_preferences(200).unwrap_or_default() {
+        let preferences = memory.list_style_preferences(400).unwrap_or_default();
+        for preference in &preferences {
+            if let Some(slot) = preference.key.strip_prefix("memory_correction:") {
+                if preference.rejected_count > 0 {
+                    suppressed_slots.insert(slot.to_string());
+                }
+            }
+        }
+        for preference in preferences {
             let Some(slot) = preference.key.strip_prefix("memory_extract:") else {
                 continue;
             };
-            if preference.rejected_count >= 1
-                && preference.rejected_count >= preference.accepted_count
-            {
+            if has_correction_signal(slot, memory) {
                 suppressed_slots.insert(slot.to_string());
             } else if preference.accepted_count > preference.rejected_count {
                 preferred_slots.insert(slot.to_string());
@@ -231,6 +255,15 @@ impl MemoryExtractionFeedback {
             }
         }
     }
+}
+
+fn has_correction_signal(slot: &str, memory: &WriterMemory) -> bool {
+    let correction_key = memory_correction_key(slot);
+    memory
+        .list_style_preferences(400)
+        .unwrap_or_default()
+        .iter()
+        .any(|preference| preference.key == correction_key && preference.rejected_count > 0)
 }
 
 fn preview_fingerprint(preview: &str) -> String {

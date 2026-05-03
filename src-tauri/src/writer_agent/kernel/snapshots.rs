@@ -321,6 +321,13 @@ impl WriterAgentKernel {
                 .take(limit)
                 .cloned()
                 .collect(),
+            run_events: self.run_events(limit),
+            post_write_diagnostics: self
+                .run_events(limit)
+                .into_iter()
+                .filter(|event| event.event_type == "writer.post_write_diagnostics")
+                .filter_map(|event| serde_json::from_value(event.data).ok())
+                .collect(),
             context_source_trends,
             context_recalls: self
                 .memory
@@ -336,6 +343,14 @@ impl WriterAgentKernel {
             &self.session_id,
             &self.trace_snapshot(limit),
         )
+    }
+
+    pub fn inspector_timeline(&self, limit: usize) -> WriterInspectorTimeline {
+        crate::writer_agent::inspector::build_inspector_timeline(&self.trace_snapshot(limit), limit)
+    }
+
+    pub fn companion_timeline_summary(&self) -> WriterInspectorTimeline {
+        crate::writer_agent::inspector::build_companion_timeline_summary(&self.trace_snapshot(20))
     }
 
     fn product_metrics(&self) -> WriterProductMetrics {

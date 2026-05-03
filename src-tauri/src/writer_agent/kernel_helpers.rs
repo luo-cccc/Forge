@@ -22,7 +22,8 @@ pub(crate) fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {
                 required_tool_tags: vec!["project".to_string()],
             }
         }
-        AgentTask::ContinuityDiagnostic
+        AgentTask::PlanningReview
+        | AgentTask::ContinuityDiagnostic
         | AgentTask::CanonMaintenance
         | AgentTask::ProposalEvaluation => ToolPolicyContract {
             max_side_effect_level: ToolSideEffectLevel::Read,
@@ -298,6 +299,18 @@ pub(crate) fn feedback_contract_for_task(task: &AgentTask) -> FeedbackContract {
                 "record result feedback after save".to_string(),
             ],
             memory_writes: vec!["chapter_result_summary".to_string()],
+        },
+        AgentTask::PlanningReview => FeedbackContract {
+            expected_signals: vec![
+                "planning review completed".to_string(),
+                "author confirmation requested".to_string(),
+                "author selected next action".to_string(),
+            ],
+            checkpoints: vec![
+                "record planning evidence in run trace".to_string(),
+                "surface questions without mutating memory".to_string(),
+            ],
+            memory_writes: Vec::new(),
         },
         _ => FeedbackContract {
             expected_signals: vec!["proposal accepted/rejected".to_string()],

@@ -1,8 +1,8 @@
 use crate::fixtures::*;
 use agent_harness_core::{Chunk, VectorDB};
 use agent_writer_lib::brain_service::{
-    rerank_project_brain_results_with_focus, search_project_brain_results_with_focus,
-    ProjectBrainFocus,
+    build_project_brain_knowledge_index, rerank_project_brain_results_with_focus,
+    safe_knowledge_index_file_path, search_project_brain_results_with_focus, ProjectBrainFocus,
 };
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::context_relevance::{
@@ -1642,6 +1642,100 @@ pub fn run_project_brain_author_fixture_rerank_eval() -> EvalResult {
             "queryOnlyTop10ContainsPayoff={} first={} explanation={}",
             query_only_contains_payoff, first_id, first_explanation
         ),
+        errors,
+    )
+}
+
+pub fn run_project_brain_knowledge_index_graph_eval() -> EvalResult {
+    let mut db = VectorDB::new();
+    db.upsert(Chunk {
+        id: "chunk-ring-payoff".to_string(),
+        chapter: "Chapter-5".to_string(),
+        text: "林墨在霜铃塔发现寒玉戒指的裂纹，与张三隐瞒的旧门钥匙有关。".to_string(),
+        embedding: vec![1.0, 0.0],
+        keywords: vec![
+            "寒玉戒指".to_string(),
+            "霜铃塔".to_string(),
+            "旧门钥匙".to_string(),
+        ],
+        topic: Some("寒玉戒指下落".to_string()),
+    });
+    let outline = vec![agent_writer_lib::brain_service::OutlineNode {
+        chapter_title: "Chapter-5".to_string(),
+        summary: "林墨前往霜铃塔，追查寒玉戒指和旧门钥匙的关系。".to_string(),
+        status: "draft".to_string(),
+    }];
+    let lorebook = vec![agent_writer_lib::brain_service::LoreEntry {
+        id: "ring".to_string(),
+        keyword: "寒玉戒指".to_string(),
+        content: "寒玉戒指是林墨母亲留下的遗物，裂纹会在霜铃塔附近显现。".to_string(),
+    }];
+    let index = build_project_brain_knowledge_index("eval", &db, &outline, &lorebook);
+
+    let mut errors = Vec::new();
+    for kind in ["lore", "outline", "chunk"] {
+        if !index.nodes.iter().any(|node| node.kind == kind) {
+            errors.push(format!("knowledge index missing {} node", kind));
+        }
+    }
+    if !index.nodes.iter().any(|node| {
+        node.source_ref == "lorebook:ring" && node.keywords.iter().any(|kw| kw == "寒玉戒指")
+    }) {
+        errors.push("lore node lacks source ref or keyword".to_string());
+    }
+    if !index.edges.iter().any(|edge| {
+        edge.relation.contains("寒玉戒指")
+            && index
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.from && node.kind == "lore")
+            && index
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.to && node.kind != "lore")
+    }) {
+        errors.push(
+            "knowledge graph lacks shared keyword edge from lore to project sources".to_string(),
+        );
+    }
+    if index.source_count != 3 {
+        errors.push(format!(
+            "source count should be 3, got {}",
+            index.source_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_knowledge_index_graph",
+        format!("nodes={} edges={}", index.nodes.len(), index.edges.len()),
+        errors,
+    )
+}
+
+pub fn run_project_brain_knowledge_index_path_guard_eval() -> EvalResult {
+    let root = std::env::temp_dir().join(format!("forge-knowledge-index-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(root.join("notes"));
+    let mut errors = Vec::new();
+
+    if safe_knowledge_index_file_path(&root, "notes/index.md").is_err() {
+        errors.push("safe relative knowledge path was rejected".to_string());
+    }
+    for unsafe_path in ["../secret.md", "notes/../../secret.md"] {
+        if safe_knowledge_index_file_path(&root, unsafe_path).is_ok() {
+            errors.push(format!(
+                "unsafe knowledge path was accepted: {}",
+                unsafe_path
+            ));
+        }
+    }
+    if safe_knowledge_index_file_path(&root, "C:/Windows/system32/drivers/etc/hosts").is_ok() {
+        errors.push("absolute knowledge path was accepted".to_string());
+    }
+    let _ = std::fs::remove_dir_all(&root);
+
+    eval_result(
+        "writer_agent:project_brain_knowledge_index_path_guard",
+        format!("root={}", root.display()),
         errors,
     )
 }

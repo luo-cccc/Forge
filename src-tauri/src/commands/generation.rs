@@ -120,6 +120,17 @@ fn parse_parallel_drafts(raw: &str) -> Vec<ParallelDraft> {
     drafts
 }
 
+fn record_writer_failure_bundle(
+    app: &tauri::AppHandle,
+    bundle: &crate::writer_agent::task_receipt::WriterFailureEvidenceBundle,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_failure_evidence_bundle(bundle);
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -147,8 +158,9 @@ pub async fn batch_generate_chapter(
             },
         );
 
+        let trace_request_id = request_id.clone();
         let payload = GenerateChapterAutonomousPayload {
-            request_id: Some(request_id),
+            request_id: Some(request_id.clone()),
             target_chapter_title: Some(title_clone.clone()),
             target_chapter_number: None,
             user_instruction: format!("帮我写《{}》这一章的完整初稿。", title_clone),
@@ -215,6 +227,25 @@ pub async fn batch_generate_chapter(
                 );
             }
             PipelineTerminal::Conflict(conflict) => {
+                let bundle = crate::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
+                    crate::writer_agent::task_receipt::WriterFailureCategory::SaveFailed,
+                    "SAVE_CONFLICT",
+                    format!("Save blocked by {}.", conflict.reason),
+                    true,
+                    Some(trace_request_id.clone()),
+                    vec![
+                        format!("base_revision:{}", conflict.base_revision),
+                        format!("current_revision:{}", conflict.current_revision),
+                        format!("save_conflict:{}", conflict.reason),
+                    ],
+                    serde_json::json!({ "conflict": conflict }),
+                    vec![
+                        "Resolve editor/storage revision mismatch or save as a draft copy."
+                            .to_string(),
+                    ],
+                    crate::agent_runtime::now_ms(),
+                );
+                record_writer_failure_bundle(&app_clone, &bundle);
                 let _ = app_clone.emit(
                     crate::events::BATCH_STATUS,
                     BatchStatus {
@@ -225,6 +256,12 @@ pub async fn batch_generate_chapter(
                 );
             }
             PipelineTerminal::Failed(error) => {
+                let bundle = crate::chapter_generation::failure_bundle_from_chapter_error(
+                    &trace_request_id,
+                    &error,
+                    crate::agent_runtime::now_ms(),
+                );
+                record_writer_failure_bundle(&app_clone, &bundle);
                 let _ = app_clone.emit(
                     crate::events::BATCH_STATUS,
                     BatchStatus {
@@ -257,6 +294,7 @@ pub async fn generate_chapter_autonomous(
         ..payload
     };
     let app_clone = app.clone();
+    let trace_request_id = request_id.clone();
 
     tokio::spawn(async move {
         let user_instruction = payload.user_instruction.clone();
@@ -295,17 +333,47 @@ pub async fn generate_chapter_autonomous(
         )
         .await;
 
-        if let PipelineTerminal::Completed {
-            saved,
-            generated_content,
-        } = terminal
-        {
-            crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
-            let embed_app = app_clone.clone();
-            tokio::spawn(async move {
-                crate::auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content)
-                    .await;
-            });
+        match terminal {
+            PipelineTerminal::Completed {
+                saved,
+                generated_content,
+            } => {
+                crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
+                let embed_app = app_clone.clone();
+                tokio::spawn(async move {
+                    crate::auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content)
+                        .await;
+                });
+            }
+            PipelineTerminal::Conflict(conflict) => {
+                let bundle = crate::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
+                    crate::writer_agent::task_receipt::WriterFailureCategory::SaveFailed,
+                    "SAVE_CONFLICT",
+                    format!("Save blocked by {}.", conflict.reason),
+                    true,
+                    Some(trace_request_id.clone()),
+                    vec![
+                        format!("base_revision:{}", conflict.base_revision),
+                        format!("current_revision:{}", conflict.current_revision),
+                        format!("save_conflict:{}", conflict.reason),
+                    ],
+                    serde_json::json!({ "conflict": conflict }),
+                    vec![
+                        "Resolve editor/storage revision mismatch or save as a draft copy."
+                            .to_string(),
+                    ],
+                    crate::agent_runtime::now_ms(),
+                );
+                record_writer_failure_bundle(&app_clone, &bundle);
+            }
+            PipelineTerminal::Failed(error) => {
+                let bundle = crate::chapter_generation::failure_bundle_from_chapter_error(
+                    &trace_request_id,
+                    &error,
+                    crate::agent_runtime::now_ms(),
+                );
+                record_writer_failure_bundle(&app_clone, &bundle);
+            }
         }
     });
 

@@ -868,6 +868,7 @@ export interface WriterAgentTraceSnapshot {
   recentProposals: WriterProposalTrace[];
   recentFeedback: WriterFeedbackTrace[];
   operationLifecycle: WriterOperationLifecycleTrace[];
+  runEvents: WriterRunEvent[];
   contextSourceTrends: WriterContextSourceTrend[];
   contextRecalls: ContextRecallSummary[];
   productMetrics: WriterProductMetrics;
@@ -904,6 +905,46 @@ export interface WriterOperationLifecycleTrace {
   saveResult?: string | null;
   feedbackResult?: string | null;
   createdAt: number;
+}
+
+export interface WriterRunEvent {
+  seq: number;
+  tsMs: number;
+  projectId: string;
+  sessionId: string;
+  taskId?: string | null;
+  eventType: string;
+  sourceRefs: string[];
+  data: unknown;
+}
+
+export type WriterTimelineAudience = "companion" | "inspector";
+
+export type WriterTimelineEventKind =
+  | "observation"
+  | "task_packet"
+  | "proposal"
+  | "feedback"
+  | "operation_lifecycle"
+  | "run_event"
+  | "context_recall"
+  | "product_metrics";
+
+export interface WriterTimelineEvent {
+  audience: WriterTimelineAudience;
+  kind: WriterTimelineEventKind;
+  label: string;
+  tsMs: number;
+  taskId?: string | null;
+  sourceRefs: string[];
+  summary: string;
+  detail?: unknown;
+}
+
+export interface WriterInspectorTimeline {
+  audience: WriterTimelineAudience;
+  includesInternalTrace: boolean;
+  events: WriterTimelineEvent[];
 }
 
 export interface WriterTaskPacketTrace {
@@ -1036,6 +1077,8 @@ export const WriterAgentCommands = {
   getWriterAgentLedger: "get_writer_agent_ledger",
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
+  getWriterAgentInspectorTimeline: "get_writer_agent_inspector_timeline",
+  getWriterAgentCompanionTimelineSummary: "get_writer_agent_companion_timeline_summary",
   agentObserve: "agent_observe",
   applyProposalFeedback: "apply_proposal_feedback",
   approveWriterOperation: "approve_writer_operation",

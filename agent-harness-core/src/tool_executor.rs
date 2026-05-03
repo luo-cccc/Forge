@@ -24,7 +24,16 @@ pub struct ToolExecution {
     pub input: serde_json::Value,
     pub output: serde_json::Value,
     pub error: Option<String>,
+    #[serde(default)]
+    pub remediation: Vec<ToolExecutionRemediation>,
     pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolExecutionRemediation {
+    pub code: String,
+    pub message: String,
 }
 
 /// Tracks tool calls to detect doom loops.
@@ -94,6 +103,7 @@ impl<H: ToolHandler> ToolExecutor<H> {
                 input: args,
                 output: serde_json::Value::Null,
                 error: Some(format!("Tool '{}' is not registered", tool_name)),
+                remediation: remediation_for_missing_tool(tool_name),
                 duration_ms: start.elapsed().as_millis() as u64,
             };
         };
@@ -109,6 +119,11 @@ impl<H: ToolHandler> ToolExecutor<H> {
                     tool_name: tool_name.to_string(),
                     input: args,
                     output: serde_json::Value::Null,
+                    remediation: remediation_for_permission_error(
+                        &descriptor.name,
+                        descriptor.requires_approval,
+                        &reason,
+                    ),
                     error: Some(reason),
                     duration_ms: start.elapsed().as_millis() as u64,
                 };
@@ -118,10 +133,15 @@ impl<H: ToolHandler> ToolExecutor<H> {
         // Doom loop check
         let is_doom = self.doom_detector.is_doom_loop(tool_name, &args);
 
-        let (output, error) = match self.handler.execute(tool_name, args.clone()).await {
-            Ok(result) => (result, None),
-            Err(e) => (serde_json::Value::Null, Some(e)),
-        };
+        let (output, error, mut remediation) =
+            match self.handler.execute(tool_name, args.clone()).await {
+                Ok(result) => (result, None, Vec::new()),
+                Err(e) => (
+                    serde_json::Value::Null,
+                    Some(e.clone()),
+                    remediation_for_handler_error(tool_name, &e),
+                ),
+            };
 
         let mut error_msg = error;
         if is_doom {
@@ -129,6 +149,10 @@ impl<H: ToolHandler> ToolExecutor<H> {
                 "DOOM LOOP DETECTED: tool '{}' called with same args 3+ times",
                 tool_name
             ));
+            remediation = vec![ToolExecutionRemediation {
+                code: "tool_doom_loop".to_string(),
+                message: "Stop retrying this identical tool call; change the arguments or return a blocked-tool result to the caller.".to_string(),
+            }];
         }
 
         ToolExecution {
@@ -136,9 +160,100 @@ impl<H: ToolHandler> ToolExecutor<H> {
             input: args,
             output,
             error: error_msg,
+            remediation,
             duration_ms: start.elapsed().as_millis() as u64,
         }
     }
+}
+
+fn remediation_for_missing_tool(tool_name: &str) -> Vec<ToolExecutionRemediation> {
+    vec![ToolExecutionRemediation {
+        code: "tool_not_registered".to_string(),
+        message: format!(
+            "Check the task tool inventory before calling '{}', or register the tool before this run.",
+            tool_name
+        ),
+    }]
+}
+
+fn remediation_for_permission_error(
+    tool_name: &str,
+    requires_approval: bool,
+    reason: &str,
+) -> Vec<ToolExecutionRemediation> {
+    let lower = reason.to_ascii_lowercase();
+    if requires_approval || lower.contains("approval") {
+        return vec![ToolExecutionRemediation {
+            code: "approval_required".to_string(),
+            message: format!(
+                "Surface an explicit approval request before retrying '{}', or choose a read-only/preview tool.",
+                tool_name
+            ),
+        }];
+    }
+    if lower.contains("external access") {
+        return vec![ToolExecutionRemediation {
+            code: "external_access_denied".to_string(),
+            message: format!(
+                "Keep '{}' inside the workspace boundary, or request an external-access policy change before retrying.",
+                tool_name
+            ),
+        }];
+    }
+    vec![ToolExecutionRemediation {
+        code: "tool_denied".to_string(),
+        message: format!(
+            "Use the effective tool inventory to pick an allowed alternative to '{}'.",
+            tool_name
+        ),
+    }]
+}
+
+fn remediation_for_handler_error(tool_name: &str, error: &str) -> Vec<ToolExecutionRemediation> {
+    let lower = error.to_ascii_lowercase();
+    let (code, message) = if lower.contains("unknown tool") || lower.contains("unknown agent") {
+        (
+            "unknown_agent_or_tool",
+            format!(
+                "Verify the external agent/tool name for '{}', refresh the registry, and retry only if it appears in the allowed inventory.",
+                tool_name
+            ),
+        )
+    } else if lower.contains("missing binary")
+        || lower.contains("not found")
+        || lower.contains("no such file")
+        || lower.contains("could not find")
+    {
+        (
+            "missing_binary_or_resource",
+            format!(
+                "Install or configure the binary/resource required by '{}', then run the tool again.",
+                tool_name
+            ),
+        )
+    } else if lower.contains("workspace")
+        && (lower.contains("unavailable") || lower.contains("missing") || lower.contains("denied"))
+    {
+        (
+            "workspace_unavailable",
+            format!(
+                "Recreate or select a valid workspace for '{}', then retry with a workspace-local path.",
+                tool_name
+            ),
+        )
+    } else {
+        (
+            "tool_handler_failed",
+            format!(
+                "Record the failure evidence for '{}' and either retry with narrower arguments or ask the caller for recovery input.",
+                tool_name
+            ),
+        )
+    };
+    vec![ToolExecutionRemediation {
+        code: code.to_string(),
+        message,
+    }]
 }
 
 #[cfg(test)]
@@ -227,6 +342,10 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("not registered")));
+        assert!(result
+            .remediation
+            .iter()
+            .any(|item| item.code == "tool_not_registered"));
     }
 
     #[tokio::test]
@@ -239,6 +358,10 @@ mod tests {
             .as_deref()
             .is_some_and(|error| error.contains("requires explicit approval")));
         assert!(result.output.is_null());
+        assert!(result
+            .remediation
+            .iter()
+            .any(|item| item.code == "approval_required"));
     }
 
     #[tokio::test]
@@ -250,5 +373,6 @@ mod tests {
 
         assert!(result.error.is_none());
         assert_eq!(result.output["tool"], "read_tool");
+        assert!(result.remediation.is_empty());
     }
 }

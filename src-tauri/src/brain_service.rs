@@ -2,6 +2,9 @@ use agent_harness_core::{
     chunk_text,
     vector_db::{Chunk, VectorDB},
 };
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use crate::writer_agent::context_relevance::{
     format_text_chunk_relevance, score_text_for_writing_focus,
@@ -9,15 +12,47 @@ use crate::writer_agent::context_relevance::{
 use crate::writer_agent::kernel::WriterAgentKernel;
 use crate::{llm_runtime, storage};
 
+pub use crate::storage::{LoreEntry, OutlineNode};
+
 const CHUNK_MAX_CHARS: usize = 500;
 const MIN_CHUNK_CHARS: usize = 20;
 const TOP_K: usize = 5;
 const RERANK_CANDIDATE_MULTIPLIER: usize = 6;
+const KNOWLEDGE_INDEX_FILENAME: &str = "knowledge_index.json";
 
 #[derive(Debug, Clone)]
 pub struct ProjectBrainFocus {
     query_text: String,
     memory_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainKnowledgeIndex {
+    pub project_id: String,
+    pub nodes: Vec<ProjectBrainKnowledgeNode>,
+    pub edges: Vec<ProjectBrainKnowledgeEdge>,
+    pub source_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainKnowledgeNode {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+    pub source_ref: String,
+    pub keywords: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainKnowledgeEdge {
+    pub from: String,
+    pub to: String,
+    pub relation: String,
+    pub evidence_ref: String,
 }
 
 impl ProjectBrainFocus {
@@ -157,6 +192,229 @@ pub async fn embed_chapter(
     }
 
     db.save(&path)
+}
+
+pub fn knowledge_index_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(storage::active_project_data_dir(app)?.join(KNOWLEDGE_INDEX_FILENAME))
+}
+
+pub fn rebuild_project_brain_knowledge_index(
+    app: &tauri::AppHandle,
+) -> Result<ProjectBrainKnowledgeIndex, String> {
+    let project_id = storage::active_project_id(app)?;
+    let brain_path = storage::brain_path(app)?;
+    let brain = VectorDB::load(&brain_path).map_err(|e| {
+        format!(
+            "Project Brain index at '{}' is unreadable; restore a backup or rebuild the index: {}",
+            brain_path.display(),
+            e
+        )
+    })?;
+    let outline = storage::load_outline(app)?;
+    let lorebook = storage::load_lorebook(app)?;
+    let index = build_project_brain_knowledge_index(&project_id, &brain, &outline, &lorebook);
+    save_project_brain_knowledge_index(app, &index)?;
+    Ok(index)
+}
+
+pub fn load_project_brain_knowledge_index(
+    app: &tauri::AppHandle,
+) -> Result<ProjectBrainKnowledgeIndex, String> {
+    let path = knowledge_index_path(app)?;
+    if !path.exists() {
+        return rebuild_project_brain_knowledge_index(app);
+    }
+    let data = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read knowledge index '{}': {}", path.display(), e))?;
+    serde_json::from_str(&data).map_err(|e| {
+        format!(
+            "Failed to parse knowledge index '{}': {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+pub fn save_project_brain_knowledge_index(
+    app: &tauri::AppHandle,
+    index: &ProjectBrainKnowledgeIndex,
+) -> Result<(), String> {
+    let path = knowledge_index_path(app)?;
+    let json = serde_json::to_string_pretty(index).map_err(|e| e.to_string())?;
+    storage::atomic_write(&path, &json)
+}
+
+pub fn read_knowledge_index_file(
+    project_data_dir: &Path,
+    relative_path: &str,
+) -> Result<String, String> {
+    let path = safe_knowledge_index_file_path(project_data_dir, relative_path)?;
+    std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "Failed to read knowledge index file '{}': {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+pub fn safe_knowledge_index_file_path(
+    project_data_dir: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let requested = Path::new(relative_path);
+    if requested.is_absolute()
+        || requested
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(format!(
+            "Knowledge index path must stay inside the active project: {}",
+            relative_path
+        ));
+    }
+    let joined = project_data_dir.join(requested);
+    let root = project_data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_data_dir.to_path_buf());
+    let parent = joined
+        .parent()
+        .unwrap_or(project_data_dir)
+        .canonicalize()
+        .unwrap_or_else(|_| project_data_dir.to_path_buf());
+    if !parent.starts_with(&root) {
+        return Err(format!(
+            "Knowledge index path escapes active project: {}",
+            relative_path
+        ));
+    }
+    Ok(joined)
+}
+
+pub fn build_project_brain_knowledge_index(
+    project_id: &str,
+    brain: &VectorDB,
+    outline: &[storage::OutlineNode],
+    lorebook: &[storage::LoreEntry],
+) -> ProjectBrainKnowledgeIndex {
+    let mut nodes = Vec::new();
+
+    for entry in lorebook {
+        nodes.push(ProjectBrainKnowledgeNode {
+            id: format!("lore:{}", stable_node_id(&entry.id, &entry.keyword)),
+            kind: "lore".to_string(),
+            label: entry.keyword.clone(),
+            source_ref: format!("lorebook:{}", entry.id),
+            keywords: unique_keywords(vec![entry.keyword.clone()], &entry.content),
+            summary: snippet_text(&entry.content, 220),
+        });
+    }
+
+    for node in outline {
+        nodes.push(ProjectBrainKnowledgeNode {
+            id: format!(
+                "outline:{}",
+                stable_node_id(&node.chapter_title, &node.summary)
+            ),
+            kind: "outline".to_string(),
+            label: node.chapter_title.clone(),
+            source_ref: format!("outline:{}", node.chapter_title),
+            keywords: unique_keywords(vec![node.chapter_title.clone()], &node.summary),
+            summary: snippet_text(&node.summary, 220),
+        });
+    }
+
+    for chunk in &brain.chunks {
+        let label = if chunk.chapter.trim().is_empty() {
+            chunk.id.clone()
+        } else {
+            chunk.chapter.clone()
+        };
+        nodes.push(ProjectBrainKnowledgeNode {
+            id: format!("chunk:{}", stable_node_id(&chunk.id, &chunk.chapter)),
+            kind: "chunk".to_string(),
+            label,
+            source_ref: format!("project_brain:{}", chunk.id),
+            keywords: unique_keywords(chunk.keywords.clone(), &chunk.text),
+            summary: snippet_text(&chunk.text, 220),
+        });
+    }
+
+    let edges = build_knowledge_edges(&nodes);
+    ProjectBrainKnowledgeIndex {
+        project_id: project_id.to_string(),
+        source_count: lorebook.len() + outline.len() + brain.chunks.len(),
+        nodes,
+        edges,
+    }
+}
+
+fn build_knowledge_edges(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrainKnowledgeEdge> {
+    let mut keyword_to_nodes = BTreeMap::<String, Vec<&ProjectBrainKnowledgeNode>>::new();
+    for node in nodes {
+        for keyword in &node.keywords {
+            keyword_to_nodes
+                .entry(keyword.to_string())
+                .or_default()
+                .push(node);
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut edges = Vec::new();
+    for (keyword, linked_nodes) in keyword_to_nodes {
+        if linked_nodes.len() < 2 {
+            continue;
+        }
+        for left in 0..linked_nodes.len() {
+            for right in left + 1..linked_nodes.len() {
+                let from = &linked_nodes[left].id;
+                let to = &linked_nodes[right].id;
+                let key = if from <= to {
+                    format!("{}|{}|{}", from, to, keyword)
+                } else {
+                    format!("{}|{}|{}", to, from, keyword)
+                };
+                if !seen.insert(key) {
+                    continue;
+                }
+                edges.push(ProjectBrainKnowledgeEdge {
+                    from: from.clone(),
+                    to: to.clone(),
+                    relation: format!("shared_keyword:{}", keyword),
+                    evidence_ref: keyword.clone(),
+                });
+            }
+        }
+    }
+    edges
+}
+
+fn unique_keywords(mut seed: Vec<String>, text: &str) -> Vec<String> {
+    seed.extend(agent_harness_core::extract_keywords(text));
+    let mut seen = HashSet::new();
+    seed.into_iter()
+        .map(|keyword| keyword.trim().to_string())
+        .filter(|keyword| keyword.chars().count() >= 2 && seen.insert(keyword.to_lowercase()))
+        .take(12)
+        .collect()
+}
+
+fn stable_node_id(primary: &str, fallback: &str) -> String {
+    let source = if primary.trim().is_empty() {
+        fallback
+    } else {
+        primary
+    };
+    storage::content_revision(source)
+        .split('-')
+        .next()
+        .unwrap_or("0000000000000000")
+        .to_string()
+}
+
+fn snippet_text(text: &str, limit: usize) -> String {
+    text.chars().take(limit).collect()
 }
 
 pub async fn answer_query(

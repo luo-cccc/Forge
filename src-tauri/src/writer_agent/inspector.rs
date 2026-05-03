@@ -1,0 +1,303 @@
+//! Inspector-safe timeline views derived from Writer Agent trace snapshots.
+//!
+//! The default companion view stays product-facing and omits internal packets,
+//! tool policies, lifecycle traces, and raw run events. The inspector view is
+//! explicit debug surface for replay and diagnosis.
+
+use serde::{Deserialize, Serialize};
+
+use super::kernel::WriterAgentTraceSnapshot;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterTimelineAudience {
+    Companion,
+    Inspector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterTimelineEventKind {
+    Observation,
+    TaskPacket,
+    Proposal,
+    Feedback,
+    OperationLifecycle,
+    RunEvent,
+    ContextRecall,
+    ProductMetrics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterTimelineEvent {
+    pub audience: WriterTimelineAudience,
+    pub kind: WriterTimelineEventKind,
+    pub label: String,
+    pub ts_ms: u64,
+    pub task_id: Option<String>,
+    pub source_refs: Vec<String>,
+    pub summary: String,
+    pub detail: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterInspectorTimeline {
+    pub audience: WriterTimelineAudience,
+    pub includes_internal_trace: bool,
+    pub events: Vec<WriterTimelineEvent>,
+}
+
+pub fn build_inspector_timeline(
+    snapshot: &WriterAgentTraceSnapshot,
+    limit: usize,
+) -> WriterInspectorTimeline {
+    let mut events = Vec::new();
+    for observation in &snapshot.recent_observations {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::Observation,
+            label: "Observation".to_string(),
+            ts_ms: observation.created_at,
+            task_id: Some(observation.id.clone()),
+            source_refs: observation
+                .chapter_title
+                .iter()
+                .map(|chapter| format!("chapter:{}", chapter))
+                .collect(),
+            summary: observation.paragraph_snippet.clone(),
+            detail: Some(serde_json::json!({
+                "reason": observation.reason,
+                "chapterTitle": observation.chapter_title,
+            })),
+        });
+    }
+    for task_packet in &snapshot.task_packets {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::TaskPacket,
+            label: format!("TaskPacket {}", task_packet.task),
+            ts_ms: task_packet.packet.created_at_ms,
+            task_id: Some(task_packet.id.clone()),
+            source_refs: vec![task_packet.observation_id.clone()],
+            summary: task_packet.objective.clone(),
+            detail: Some(serde_json::json!({
+                "scope": task_packet.scope,
+                "intent": task_packet.intent,
+                "maxSideEffectLevel": task_packet.max_side_effect_level,
+                "requiredContextCount": task_packet.required_context_count,
+                "beliefCount": task_packet.belief_count,
+                "feedbackCheckpointCount": task_packet.feedback_checkpoint_count,
+                "foundationComplete": task_packet.foundation_complete,
+            })),
+        });
+    }
+    for proposal in &snapshot.recent_proposals {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::Proposal,
+            label: format!("Proposal {}", proposal.kind),
+            ts_ms: 0,
+            task_id: Some(proposal.id.clone()),
+            source_refs: vec![proposal.observation_id.clone()],
+            summary: proposal.preview_snippet.clone(),
+            detail: Some(serde_json::json!({
+                "priority": proposal.priority,
+                "state": proposal.state,
+                "confidence": proposal.confidence,
+                "evidenceCount": proposal.evidence.len(),
+                "hasContextBudget": proposal.context_budget.is_some(),
+            })),
+        });
+    }
+    for feedback in &snapshot.recent_feedback {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::Feedback,
+            label: format!("Feedback {}", feedback.action),
+            ts_ms: feedback.created_at,
+            task_id: Some(feedback.proposal_id.clone()),
+            source_refs: vec![feedback.proposal_id.clone()],
+            summary: feedback.reason.clone().unwrap_or_default(),
+            detail: None,
+        });
+    }
+    for lifecycle in &snapshot.operation_lifecycle {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::OperationLifecycle,
+            label: format!("Operation {}", lifecycle.operation_kind),
+            ts_ms: lifecycle.created_at,
+            task_id: lifecycle.proposal_id.clone(),
+            source_refs: lifecycle.proposal_id.iter().cloned().collect(),
+            summary: format!("{:?}", lifecycle.state),
+            detail: Some(serde_json::json!({
+                "sourceTask": lifecycle.source_task,
+                "approvalSource": lifecycle.approval_source,
+                "affectedScope": lifecycle.affected_scope,
+                "saveResult": lifecycle.save_result,
+                "feedbackResult": lifecycle.feedback_result,
+            })),
+        });
+    }
+    for run_event in &snapshot.run_events {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::RunEvent,
+            label: run_event.event_type.clone(),
+            ts_ms: run_event.ts_ms,
+            task_id: run_event.task_id.clone(),
+            source_refs: run_event.source_refs.clone(),
+            summary: run_event.event_type.clone(),
+            detail: Some(run_event.data.clone()),
+        });
+    }
+    for recall in &snapshot.context_recalls {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Inspector,
+            kind: WriterTimelineEventKind::ContextRecall,
+            label: format!("Context {}", recall.source),
+            ts_ms: recall.last_recalled_at,
+            task_id: Some(recall.last_proposal_id.clone()),
+            source_refs: vec![recall.reference.clone()],
+            summary: recall.snippet.clone(),
+            detail: Some(serde_json::json!({
+                "recallCount": recall.recall_count,
+                "lastObservationId": recall.last_observation_id,
+            })),
+        });
+    }
+    events.push(WriterTimelineEvent {
+        audience: WriterTimelineAudience::Inspector,
+        kind: WriterTimelineEventKind::ProductMetrics,
+        label: "Product metrics".to_string(),
+        ts_ms: snapshot
+            .recent_feedback
+            .iter()
+            .map(|feedback| feedback.created_at)
+            .max()
+            .unwrap_or(0),
+        task_id: None,
+        source_refs: Vec::new(),
+        summary: format!(
+            "acceptance={:.2} durable_save={:.2}",
+            snapshot.product_metrics.proposal_acceptance_rate,
+            snapshot.product_metrics.durable_save_success_rate
+        ),
+        detail: Some(serde_json::json!(snapshot.product_metrics)),
+    });
+
+    events.sort_by(|left, right| {
+        left.ts_ms
+            .cmp(&right.ts_ms)
+            .then_with(|| event_kind_weight(&left.kind).cmp(&event_kind_weight(&right.kind)))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    let keep = limit.min(events.len());
+    let events = events.into_iter().rev().take(keep).collect::<Vec<_>>();
+    WriterInspectorTimeline {
+        audience: WriterTimelineAudience::Inspector,
+        includes_internal_trace: true,
+        events,
+    }
+}
+
+pub fn build_companion_timeline_summary(
+    snapshot: &WriterAgentTraceSnapshot,
+) -> WriterInspectorTimeline {
+    let metrics = &snapshot.product_metrics;
+    let mut events = Vec::new();
+    events.push(WriterTimelineEvent {
+        audience: WriterTimelineAudience::Companion,
+        kind: WriterTimelineEventKind::ProductMetrics,
+        label: "Writing health".to_string(),
+        ts_ms: snapshot
+            .recent_feedback
+            .iter()
+            .map(|feedback| feedback.created_at)
+            .max()
+            .unwrap_or(0),
+        task_id: None,
+        source_refs: Vec::new(),
+        summary: format!(
+            "acceptance={:.2} ignored={:.2} durable_save={:.2}",
+            metrics.proposal_acceptance_rate,
+            metrics.ignored_repeated_suggestion_rate,
+            metrics.durable_save_success_rate
+        ),
+        detail: Some(serde_json::json!({
+            "proposalCount": metrics.proposal_count,
+            "feedbackCount": metrics.feedback_count,
+            "promiseRecallHitRate": metrics.promise_recall_hit_rate,
+            "chapterMissionCompletionRate": metrics.chapter_mission_completion_rate,
+        })),
+    });
+    for proposal in snapshot.recent_proposals.iter().take(3) {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Companion,
+            kind: WriterTimelineEventKind::Proposal,
+            label: proposal.kind.clone(),
+            ts_ms: 0,
+            task_id: Some(proposal.id.clone()),
+            source_refs: Vec::new(),
+            summary: proposal.preview_snippet.clone(),
+            detail: Some(serde_json::json!({
+                "priority": proposal.priority,
+                "state": proposal.state,
+            })),
+        });
+    }
+
+    WriterInspectorTimeline {
+        audience: WriterTimelineAudience::Companion,
+        includes_internal_trace: false,
+        events,
+    }
+}
+
+fn event_kind_weight(kind: &WriterTimelineEventKind) -> u8 {
+    match kind {
+        WriterTimelineEventKind::Observation => 0,
+        WriterTimelineEventKind::TaskPacket => 1,
+        WriterTimelineEventKind::RunEvent => 2,
+        WriterTimelineEventKind::Proposal => 3,
+        WriterTimelineEventKind::OperationLifecycle => 4,
+        WriterTimelineEventKind::Feedback => 5,
+        WriterTimelineEventKind::ContextRecall => 6,
+        WriterTimelineEventKind::ProductMetrics => 7,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer_agent::kernel::WriterProductMetrics;
+
+    #[test]
+    fn companion_summary_excludes_internal_events() {
+        let snapshot = WriterAgentTraceSnapshot {
+            recent_observations: Vec::new(),
+            task_packets: Vec::new(),
+            recent_proposals: Vec::new(),
+            recent_feedback: Vec::new(),
+            operation_lifecycle: Vec::new(),
+            run_events: Vec::new(),
+            post_write_diagnostics: Vec::new(),
+            context_source_trends: Vec::new(),
+            context_recalls: Vec::new(),
+            product_metrics: WriterProductMetrics::default(),
+        };
+        let summary = build_companion_timeline_summary(&snapshot);
+        assert!(!summary.includes_internal_trace);
+        assert!(summary.events.iter().all(|event| {
+            event.audience == WriterTimelineAudience::Companion
+                && !matches!(
+                    event.kind,
+                    WriterTimelineEventKind::TaskPacket
+                        | WriterTimelineEventKind::RunEvent
+                        | WriterTimelineEventKind::OperationLifecycle
+                )
+        }));
+    }
+}

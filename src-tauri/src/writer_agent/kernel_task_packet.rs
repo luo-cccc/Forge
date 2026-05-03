@@ -53,6 +53,7 @@ pub fn build_task_packet_for_observation(
         AgentTask::InlineRewrite => TaskScope::Selection,
         AgentTask::ChapterGeneration => TaskScope::Chapter,
         AgentTask::ManualRequest => TaskScope::Chapter,
+        AgentTask::PlanningReview => TaskScope::Chapter,
         AgentTask::ContinuityDiagnostic | AgentTask::CanonMaintenance => TaskScope::Scene,
         AgentTask::ProposalEvaluation => TaskScope::Custom,
     };
@@ -67,7 +68,8 @@ pub fn build_task_packet_for_observation(
         AgentTask::GhostWriting | AgentTask::ChapterGeneration | AgentTask::InlineRewrite => {
             agent_harness_core::Intent::GenerateContent
         }
-        AgentTask::ContinuityDiagnostic
+        AgentTask::PlanningReview
+        | AgentTask::ContinuityDiagnostic
         | AgentTask::CanonMaintenance
         | AgentTask::ProposalEvaluation => agent_harness_core::Intent::AnalyzeText,
         AgentTask::ManualRequest => agent_harness_core::Intent::Chat,
@@ -101,6 +103,16 @@ fn constraints_for_task(task: &AgentTask) -> Vec<String> {
         AgentTask::InlineRewrite => {
             constraints
                 .push("Limit edits to the selected range or cursor insertion point.".to_string());
+        }
+        AgentTask::PlanningReview => {
+            constraints.push(
+                "Plan and review only; do not draft manuscript text, propose typed write operations, or write project memory."
+                    .to_string(),
+            );
+            constraints.push(
+                "Separate evidence-backed risks from candidate next actions and author-confirmation questions."
+                    .to_string(),
+            );
         }
         AgentTask::ContinuityDiagnostic | AgentTask::CanonMaintenance => {
             constraints.push("Surface evidence before recommending canon changes.".to_string());

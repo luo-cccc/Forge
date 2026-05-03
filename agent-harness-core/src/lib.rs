@@ -54,7 +54,9 @@ pub use task_packet::{
     FeedbackContract, FoundationCoverage, RequiredContext, TaskBelief, TaskPacket,
     TaskPacketValidationError, TaskScope, ToolPolicyContract,
 };
-pub use tool_executor::{DoomLoopDetector, ToolExecution, ToolExecutor, ToolHandler};
+pub use tool_executor::{
+    DoomLoopDetector, ToolExecution, ToolExecutionRemediation, ToolExecutor, ToolHandler,
+};
 pub use tool_registry::{
     default_writing_tool_registry, EffectiveToolEntry, EffectiveToolInventory, EffectiveToolStatus,
     ToolDescriptor, ToolFilter, ToolRegistry, ToolRegistryError, ToolSideEffectLevel, ToolStage,

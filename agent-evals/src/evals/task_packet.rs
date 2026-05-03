@@ -123,56 +123,66 @@ pub fn run_task_packet_foundation_eval() -> EvalResult {
 }
 
 pub fn run_chapter_generation_task_packet_eval() -> EvalResult {
+    let sources = vec![
+        ChapterContextSource {
+            source_type: "instruction".to_string(),
+            id: "user-instruction".to_string(),
+            label: "User instruction".to_string(),
+            original_chars: 40,
+            included_chars: 40,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "target_beat".to_string(),
+            id: "Chapter-7".to_string(),
+            label: "Current chapter beat".to_string(),
+            original_chars: 80,
+            included_chars: 80,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "lorebook".to_string(),
+            id: "lorebook.json".to_string(),
+            label: "Relevant lorebook entries".to_string(),
+            original_chars: 800,
+            included_chars: 500,
+            truncated: true,
+            score: Some(0.86),
+        },
+        ChapterContextSource {
+            source_type: "project_brain".to_string(),
+            id: "project_brain.json".to_string(),
+            label: "Project Brain relevant chunks".to_string(),
+            original_chars: 600,
+            included_chars: 450,
+            truncated: false,
+            score: Some(0.74),
+        },
+    ];
+    let target = ChapterTarget {
+        title: "Chapter-7".to_string(),
+        filename: "chapter-7.md".to_string(),
+        number: Some(7),
+        summary: "林墨逼问玉佩来源，但不能提前揭露幕后主使。".to_string(),
+        status: "draft".to_string(),
+    };
+    let receipt = build_chapter_generation_receipt(
+        "chapter-eval-1",
+        &target,
+        "rev-7",
+        "帮我写这一章完整初稿，重点是审讯张力。",
+        &sources,
+        now_ms(),
+    );
     let context = BuiltChapterContext {
         request_id: "chapter-eval-1".to_string(),
-        target: ChapterTarget {
-            title: "Chapter-7".to_string(),
-            filename: "chapter-7.md".to_string(),
-            number: Some(7),
-            summary: "林墨逼问玉佩来源，但不能提前揭露幕后主使。".to_string(),
-            status: "draft".to_string(),
-        },
+        target,
         base_revision: "rev-7".to_string(),
         prompt_context: "User instruction\nOutline / beat sheet\nRelevant lorebook entries"
             .to_string(),
-        sources: vec![
-            ChapterContextSource {
-                source_type: "instruction".to_string(),
-                id: "user-instruction".to_string(),
-                label: "User instruction".to_string(),
-                original_chars: 40,
-                included_chars: 40,
-                truncated: false,
-                score: None,
-            },
-            ChapterContextSource {
-                source_type: "target_beat".to_string(),
-                id: "Chapter-7".to_string(),
-                label: "Current chapter beat".to_string(),
-                original_chars: 80,
-                included_chars: 80,
-                truncated: false,
-                score: None,
-            },
-            ChapterContextSource {
-                source_type: "lorebook".to_string(),
-                id: "lorebook.json".to_string(),
-                label: "Relevant lorebook entries".to_string(),
-                original_chars: 800,
-                included_chars: 500,
-                truncated: true,
-                score: Some(0.86),
-            },
-            ChapterContextSource {
-                source_type: "project_brain".to_string(),
-                id: "project_brain.json".to_string(),
-                label: "Project Brain relevant chunks".to_string(),
-                original_chars: 600,
-                included_chars: 450,
-                truncated: false,
-                score: Some(0.74),
-            },
-        ],
+        sources,
         budget: ChapterContextBudgetReport {
             max_chars: 24_000,
             included_chars: 1_070,
@@ -181,6 +191,7 @@ pub fn run_chapter_generation_task_packet_eval() -> EvalResult {
             warnings: vec![],
         },
         warnings: vec![],
+        receipt,
     };
     let packet = build_chapter_generation_task_packet(
         "eval-project",
@@ -357,56 +368,66 @@ pub fn run_task_packet_trace_eval() -> EvalResult {
 pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
+    let sources = vec![
+        ChapterContextSource {
+            source_type: "instruction".to_string(),
+            id: "user-instruction".to_string(),
+            label: "User instruction".to_string(),
+            original_chars: 38,
+            included_chars: 38,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "outline".to_string(),
+            id: "outline.json".to_string(),
+            label: "Outline / beat sheet".to_string(),
+            original_chars: 900,
+            included_chars: 700,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "target_beat".to_string(),
+            id: "Chapter-8".to_string(),
+            label: "Current chapter beat".to_string(),
+            original_chars: 120,
+            included_chars: 120,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "project_brain".to_string(),
+            id: "project_brain.json".to_string(),
+            label: "Project Brain relevant chunks".to_string(),
+            original_chars: 640,
+            included_chars: 480,
+            truncated: false,
+            score: Some(0.72),
+        },
+    ];
+    let target = ChapterTarget {
+        title: "Chapter-8".to_string(),
+        filename: "chapter-8.md".to_string(),
+        number: Some(8),
+        summary: "林墨追查玉佩下落，并把张三逼到选择边缘。".to_string(),
+        status: "draft".to_string(),
+    };
+    let receipt = build_chapter_generation_receipt(
+        "chapter-trace-eval",
+        &target,
+        "rev-8",
+        "继续写这一章完整初稿，重点保持玉佩线的选择压力。",
+        &sources,
+        now_ms(),
+    );
     let context = BuiltChapterContext {
         request_id: "chapter-trace-eval".to_string(),
-        target: ChapterTarget {
-            title: "Chapter-8".to_string(),
-            filename: "chapter-8.md".to_string(),
-            number: Some(8),
-            summary: "林墨追查玉佩下落，并把张三逼到选择边缘。".to_string(),
-            status: "draft".to_string(),
-        },
+        target,
         base_revision: "rev-8".to_string(),
         prompt_context: "User instruction\nCurrent chapter beat\nRelevant lorebook entries"
             .to_string(),
-        sources: vec![
-            ChapterContextSource {
-                source_type: "instruction".to_string(),
-                id: "user-instruction".to_string(),
-                label: "User instruction".to_string(),
-                original_chars: 38,
-                included_chars: 38,
-                truncated: false,
-                score: None,
-            },
-            ChapterContextSource {
-                source_type: "outline".to_string(),
-                id: "outline.json".to_string(),
-                label: "Outline / beat sheet".to_string(),
-                original_chars: 900,
-                included_chars: 700,
-                truncated: false,
-                score: None,
-            },
-            ChapterContextSource {
-                source_type: "target_beat".to_string(),
-                id: "Chapter-8".to_string(),
-                label: "Current chapter beat".to_string(),
-                original_chars: 120,
-                included_chars: 120,
-                truncated: false,
-                score: None,
-            },
-            ChapterContextSource {
-                source_type: "project_brain".to_string(),
-                id: "project_brain.json".to_string(),
-                label: "Project Brain relevant chunks".to_string(),
-                original_chars: 640,
-                included_chars: 480,
-                truncated: false,
-                score: Some(0.72),
-            },
-        ],
+        sources,
         budget: ChapterContextBudgetReport {
             max_chars: 24_000,
             included_chars: 1_338,
@@ -415,6 +436,7 @@ pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
             warnings: vec![],
         },
         warnings: vec![],
+        receipt,
     };
     let packet = build_chapter_generation_task_packet(
         &kernel.project_id,
@@ -473,6 +495,224 @@ pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
             "taskPackets={} recorded={}",
             trace.task_packets.len(),
             recorded.is_some()
+        ),
+        errors,
+    )
+}
+
+pub fn run_chapter_generation_task_receipt_required_eval() -> EvalResult {
+    let sources = vec![
+        ChapterContextSource {
+            source_type: "instruction".to_string(),
+            id: "user-instruction".to_string(),
+            label: "User instruction".to_string(),
+            original_chars: 40,
+            included_chars: 40,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "target_beat".to_string(),
+            id: "Chapter-9".to_string(),
+            label: "Current chapter beat".to_string(),
+            original_chars: 120,
+            included_chars: 120,
+            truncated: false,
+            score: None,
+        },
+        ChapterContextSource {
+            source_type: "project_brain".to_string(),
+            id: "project_brain.json".to_string(),
+            label: "Project Brain relevant chunks".to_string(),
+            original_chars: 600,
+            included_chars: 480,
+            truncated: false,
+            score: Some(0.76),
+        },
+    ];
+    let target = ChapterTarget {
+        title: "Chapter-9".to_string(),
+        filename: "chapter-9.md".to_string(),
+        number: Some(9),
+        summary: "林墨逼近玉佩线索。".to_string(),
+        status: "draft".to_string(),
+    };
+    let receipt = build_chapter_generation_receipt(
+        "receipt-eval-1",
+        &target,
+        "rev-9",
+        "写这一章，重点保持玉佩线压力。",
+        &sources,
+        now_ms(),
+    );
+
+    let mut errors = Vec::new();
+    if receipt.task_id != "receipt-eval-1" {
+        errors.push("receipt task id mismatch".to_string());
+    }
+    if receipt.task_kind != "ChapterGeneration" {
+        errors.push("receipt task kind mismatch".to_string());
+    }
+    if receipt.chapter.as_deref() != Some("Chapter-9") {
+        errors.push("receipt chapter mismatch".to_string());
+    }
+    for required in ["instruction", "target_beat", "project_brain"] {
+        if !receipt
+            .required_evidence
+            .iter()
+            .any(|evidence| evidence == required)
+        {
+            errors.push(format!("receipt missing required evidence {}", required));
+        }
+    }
+    for artifact in ["chapter_draft", "saved_chapter"] {
+        if !receipt
+            .expected_artifacts
+            .iter()
+            .any(|expected| expected == artifact)
+        {
+            errors.push(format!("receipt missing expected artifact {}", artifact));
+        }
+    }
+    if !receipt
+        .must_not
+        .iter()
+        .any(|rule| rule == "overwrite_without_revision_match")
+    {
+        errors.push("receipt missing overwrite guard".to_string());
+    }
+    if !receipt
+        .validate_write_attempt("receipt-eval-1", "Chapter-9", "rev-9", "saved_chapter")
+        .is_empty()
+    {
+        errors.push("valid receipt write attempt produced mismatch".to_string());
+    }
+
+    eval_result(
+        "writer_agent:chapter_generation_task_receipt_required",
+        format!(
+            "requiredEvidence={} artifacts={} mustNot={}",
+            receipt.required_evidence.len(),
+            receipt.expected_artifacts.len(),
+            receipt.must_not.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_task_receipt_mismatch_blocks_write_eval() -> EvalResult {
+    let target = ChapterTarget {
+        title: "Chapter-10".to_string(),
+        filename: "chapter-10.md".to_string(),
+        number: Some(10),
+        summary: "林墨确认玉佩线索。".to_string(),
+        status: "draft".to_string(),
+    };
+    let receipt = build_chapter_generation_receipt(
+        "receipt-eval-2",
+        &target,
+        "rev-10",
+        "写这一章。",
+        &[ChapterContextSource {
+            source_type: "instruction".to_string(),
+            id: "user-instruction".to_string(),
+            label: "User instruction".to_string(),
+            original_chars: 12,
+            included_chars: 12,
+            truncated: false,
+            score: None,
+        }],
+        now_ms(),
+    );
+    let mismatches = receipt.validate_write_attempt(
+        "receipt-eval-2",
+        "Chapter-10",
+        "rev-later",
+        "saved_chapter",
+    );
+    let mut errors = Vec::new();
+    if mismatches.is_empty() {
+        errors.push("receipt mismatch did not block changed revision".to_string());
+    }
+    if !mismatches
+        .iter()
+        .any(|mismatch| mismatch.field == "base_revision")
+    {
+        errors.push("receipt mismatch lacks base_revision evidence".to_string());
+    }
+    let evidence = agent_writer_lib::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
+        agent_writer_lib::writer_agent::task_receipt::WriterFailureCategory::ReceiptMismatch,
+        "RECEIPT_MISMATCH",
+        "receipt mismatch",
+        true,
+        Some(receipt.task_id.clone()),
+        mismatches
+            .iter()
+            .map(|mismatch| format!("{}:{}", mismatch.field, mismatch.actual))
+            .collect(),
+        serde_json::json!({ "mismatches": mismatches }),
+        vec!["rebuild receipt".to_string()],
+        now_ms(),
+    );
+    if evidence.category
+        != agent_writer_lib::writer_agent::task_receipt::WriterFailureCategory::ReceiptMismatch
+    {
+        errors.push("failure bundle category is not receipt_mismatch".to_string());
+    }
+    if evidence.evidence_refs.is_empty() {
+        errors.push("failure bundle lacks mismatch evidence refs".to_string());
+    }
+
+    eval_result(
+        "writer_agent:task_receipt_mismatch_blocks_write",
+        format!("mismatches={}", evidence.evidence_refs.len()),
+        errors,
+    )
+}
+
+pub fn run_failure_evidence_bundle_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let error = ChapterGenerationError::with_details(
+        "PROVIDER_TIMEOUT",
+        "The model provider timed out.",
+        true,
+        "timeout after 120s",
+    );
+    let bundle = failure_bundle_from_chapter_error("receipt-eval-3", &error, now_ms());
+    kernel.record_failure_evidence_bundle(&bundle);
+    let trace = kernel.trace_snapshot(10);
+    let export = kernel.export_trajectory(20);
+
+    let mut errors = Vec::new();
+    if bundle.category
+        != agent_writer_lib::writer_agent::task_receipt::WriterFailureCategory::ProviderFailed
+    {
+        errors.push("provider timeout did not map to provider_failed".to_string());
+    }
+    if bundle.remediation.is_empty() {
+        errors.push("failure bundle lacks remediation".to_string());
+    }
+    if !trace.run_events.iter().any(|event| {
+        event.event_type == "writer.error"
+            && event.data.get("category").and_then(|value| value.as_str())
+                == Some("provider_failed")
+    }) {
+        errors.push("failure bundle was not recorded as writer.error run event".to_string());
+    }
+    if !export.jsonl.lines().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"") && line.contains("\"writer.error\"")
+    }) {
+        errors.push("trajectory export lacks writer.error run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:run_failure_evidence_bundle",
+        format!(
+            "category={:?} runEvents={} trajectoryEvents={}",
+            bundle.category,
+            trace.run_events.len(),
+            export.event_count
         ),
         errors,
     )

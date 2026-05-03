@@ -93,6 +93,11 @@ pub(crate) fn render_run_system_prompt(
         WriterAgentTask::ChapterGeneration => {
             render_chapter_generation_run_system_prompt(request, context_pack)
         }
+        WriterAgentTask::PlanningReview => render_planning_review_run_system_prompt(
+            request,
+            context_pack,
+            &kernel.ledger_snapshot(),
+        ),
         WriterAgentTask::ContinuityDiagnostic
         | WriterAgentTask::CanonMaintenance
         | WriterAgentTask::ProposalEvaluation => {
@@ -191,6 +196,36 @@ ContextPack:\n{}",
     )
 }
 
+pub(crate) fn render_planning_review_run_system_prompt(
+    request: &WriterAgentRunRequest,
+    context_pack: &WritingContextPack,
+    ledger: &WriterAgentLedgerSnapshot,
+) -> String {
+    format!(
+        "你是 Forge 的小说 Planning / Review 只读 Agent。你的职责是帮助作者规划下一步和审查当前章节方向，不是代写正文，也不是修改项目状态。\n\
+硬约束：只读；不得输出可直接粘贴进正文的长段草稿；不得声称已经写入正文、Canon、Promise、Outline、Chapter Mission、Story Contract 或长期记忆；不得提出 typed write operation。\n\
+必须基于 Story Contract、Chapter Mission、Promise Ledger、Canon、Project Brain 和当前稿件证据给判断。如果证据不足，明确列出缺口。\n\
+输出结构必须包含：\n\
+1. Objective understanding\n\
+2. Evidence\n\
+3. Risks\n\
+4. Candidate next actions\n\
+5. Questions needing author confirmation\n\n\
+作者指令: {}\n\
+章节: {}\n\n\
+ContextPack:\n{}\n\n\
+Ledgers:\n{}",
+        request.user_instruction,
+        request
+            .observation
+            .chapter_title
+            .as_deref()
+            .unwrap_or("current chapter"),
+        render_context_pack_for_prompt(context_pack),
+        render_ledger_snapshot_for_prompt(ledger)
+    )
+}
+
 pub(crate) fn render_diagnostic_run_system_prompt(
     request: &WriterAgentRunRequest,
     context_pack: &WritingContextPack,
@@ -279,6 +314,9 @@ pub(crate) fn objective_for_run_task(task: &WriterAgentTask) -> String {
         WriterAgentTask::ChapterGeneration => {
             "Generate chapter prose grounded in story contract, mission, promises, canon, and prior result feedback.".to_string()
         }
+        WriterAgentTask::PlanningReview => {
+            "Plan and review chapter direction using Story Contract, Chapter Mission, Promise Ledger, Canon, Project Brain, and current manuscript evidence without mutating project state.".to_string()
+        }
         WriterAgentTask::ContinuityDiagnostic => {
             "Diagnose continuity, canon, mission, and promise risks using explicit evidence.".to_string()
         }
@@ -311,6 +349,11 @@ pub(crate) fn success_criteria_for_run_task(task: &WriterAgentTask) -> Vec<Strin
             "Chapter draft follows the active chapter mission.".to_string(),
             "Draft records risks around weak story contract or unresolved promises.".to_string(),
             "No durable write is implied without explicit approval and save.".to_string(),
+        ],
+        WriterAgentTask::PlanningReview => vec![
+            "Plan cites evidence from Story Contract, Chapter Mission, Promise Ledger, Canon, Project Brain, or current manuscript context.".to_string(),
+            "Output stays read-only and does not draft manuscript prose or imply project memory writes.".to_string(),
+            "Candidate actions and author-confirmation questions are concrete enough to guide the next writing step.".to_string(),
         ],
         WriterAgentTask::ContinuityDiagnostic
         | WriterAgentTask::CanonMaintenance

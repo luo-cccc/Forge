@@ -27,9 +27,14 @@ use super::memory::{
 };
 use super::observation::WriterObservation;
 use super::operation::{OperationResult, WriterOperation};
+use super::post_write_diagnostics::WriterPostWriteDiagnosticReport;
 use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
+use super::run_events::{WriterRunEvent, WriterRunEventStore};
 use super::{memory, observation, operation, trajectory};
 
+pub use super::inspector::{
+    WriterInspectorTimeline, WriterTimelineAudience, WriterTimelineEvent, WriterTimelineEventKind,
+};
 pub(crate) use super::kernel_chapters::*;
 pub(crate) use super::kernel_ghost::{
     context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
@@ -199,6 +204,8 @@ pub struct WriterAgentTraceSnapshot {
     pub recent_proposals: Vec<WriterProposalTrace>,
     pub recent_feedback: Vec<WriterFeedbackTrace>,
     pub operation_lifecycle: Vec<WriterOperationLifecycleTrace>,
+    pub run_events: Vec<WriterRunEvent>,
+    pub post_write_diagnostics: Vec<WriterPostWriteDiagnosticReport>,
     pub context_source_trends: Vec<WriterContextSourceTrend>,
     pub context_recalls: Vec<ContextRecallSummary>,
     pub product_metrics: WriterProductMetrics,
@@ -308,6 +315,7 @@ pub struct WriterAgentKernel {
     task_packets: Vec<WriterTaskPacketTrace>,
     feedback_events: Vec<ProposalFeedback>,
     operation_lifecycle: Vec<WriterOperationLifecycleTrace>,
+    run_events: WriterRunEventStore,
     superseded_proposals: HashSet<String>,
     suppressed_slots: Vec<SuppressedProposalSlot>,
     ignored_ghost_slots: Vec<IgnoredGhostSlot>,
@@ -348,6 +356,7 @@ impl WriterAgentKernel {
             task_packets: Vec::new(),
             feedback_events: Vec::new(),
             operation_lifecycle: Vec::new(),
+            run_events: WriterRunEventStore::default(),
             superseded_proposals: HashSet::new(),
             suppressed_slots: Vec::new(),
             ignored_ghost_slots: Vec::new(),

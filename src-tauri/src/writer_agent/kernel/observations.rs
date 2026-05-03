@@ -19,6 +19,7 @@ impl WriterAgentKernel {
                 &snippet(&observation.paragraph, 120),
             )
             .ok();
+        self.record_observation_run_event(&observation);
 
         let intent = self.intent.classify(
             &observation.paragraph,
@@ -102,13 +103,23 @@ impl WriterAgentKernel {
                 })
                 .unwrap_or(0);
             let chapter_id = observation.chapter_title.as_deref().unwrap_or("Chapter-1");
-            for diagnostic in self.diagnostics.diagnose(
+            let diagnostics = self.diagnostics.diagnose(
                 &observation.paragraph,
                 paragraph_offset,
                 chapter_id,
                 &observation.project_id,
                 &self.memory,
-            ) {
+            );
+            if observation.reason == super::observation::ObservationReason::Save {
+                let report =
+                    crate::writer_agent::post_write_diagnostics::build_post_write_diagnostic_report(
+                        &observation,
+                        &diagnostics,
+                        observation.created_at,
+                    );
+                self.record_post_write_diagnostic_report(&report);
+            }
+            for diagnostic in diagnostics {
                 proposals.push(diagnostic_to_proposal(
                     diagnostic,
                     &observation,
