@@ -143,6 +143,7 @@ function failureDetail(detail: unknown): {
   category?: string;
   recoverable?: boolean;
   remediation: string[];
+  details: Record<string, unknown>;
 } | null {
   const data = detailRecord(detail);
   if (!("code" in data) && !("category" in data) && !("remediation" in data)) return null;
@@ -151,7 +152,47 @@ function failureDetail(detail: unknown): {
     category: textField(data.category),
     recoverable: typeof data.recoverable === "boolean" ? data.recoverable : undefined,
     remediation: stringArrayField(data.remediation),
+    details: detailRecord(data.details),
   };
+}
+
+function recoveryActionsForFailure(failure: NonNullable<ReturnType<typeof failureDetail>>): Array<{
+  label: string;
+  filter: InspectorFilter;
+}> {
+  const code = (failure.code ?? "").toLowerCase();
+  const category = (failure.category ?? "").toLowerCase();
+  const remediation = failure.remediation.join(" ").toLowerCase();
+  const detailsText = JSON.stringify(failure.details).toLowerCase();
+  const actions: Array<{ label: string; filter: InspectorFilter }> = [];
+  const add = (label: string, filter: InspectorFilter) => {
+    if (!actions.some((action) => action.label === label && action.filter === filter)) {
+      actions.push({ label, filter });
+    }
+  };
+
+  if (code.includes("budget") || detailsText.includes("providerbudget")) {
+    add("Review budget", "run_event");
+  }
+  if (code.includes("save") || category.includes("save")) {
+    add("Review save", "save_completed");
+  }
+  if (code.includes("receipt") || category.includes("receipt")) {
+    add("Review task packet", "task_packet");
+  }
+  if (
+    code.includes("tool") ||
+    category.includes("tool") ||
+    remediation.includes("tool") ||
+    remediation.includes("provider")
+  ) {
+    add("Review run events", "run_event");
+  }
+  if (remediation.includes("context") || detailsText.includes("context")) {
+    add("Review context", "context_recall");
+  }
+  add("Show failures", "failure");
+  return actions.slice(0, 4);
 }
 
 function saveCompletedDetail(detail: unknown): {
@@ -260,6 +301,7 @@ export const WriterInspectorPanel: React.FC = () => {
   const metrics = trace?.productMetrics;
   const trends = trace?.contextSourceTrends ?? [];
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
+  const latestFailureDetail = failureDetail(latestFailure?.detail);
   const latestSaveDetail = saveCompletedDetail(latestSave?.detail);
   const saveCompletedEvents = events.filter((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
@@ -406,6 +448,17 @@ export const WriterInspectorPanel: React.FC = () => {
                             {failure.remediation[0]}
                           </p>
                         )}
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {recoveryActionsForFailure(failure).map((action) => (
+                            <button
+                              key={`${event.taskId ?? event.tsMs}-${action.label}`}
+                              onClick={() => setFilter(action.filter)}
+                              className="rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger hover:bg-danger/20"
+                            >
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                     {saveCompleted && (
@@ -529,8 +582,29 @@ export const WriterInspectorPanel: React.FC = () => {
 
             {latestFailure && (
               <section className="rounded border border-danger/40 bg-danger/10 p-2 text-xs">
-                <div className="mb-1 font-medium text-danger">Latest Failure</div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-medium text-danger">Latest Failure</span>
+                  <button
+                    onClick={() => setFilter("failure")}
+                    className="rounded border border-danger/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-danger hover:bg-danger/10"
+                  >
+                    Open failures
+                  </button>
+                </div>
                 <p className="line-clamp-3 text-text-secondary">{latestFailure.summary}</p>
+                {latestFailureDetail && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {recoveryActionsForFailure(latestFailureDetail).map((action) => (
+                      <button
+                        key={`latest-${action.label}`}
+                        onClick={() => setFilter(action.filter)}
+                        className="rounded border border-danger/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-danger hover:bg-danger/10"
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 

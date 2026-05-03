@@ -38,7 +38,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
 - 当前已验证：`cargo run -p agent-evals` 128/128 passing；完整 `npm run verify` passing。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
-- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，Project Brain 已有 knowledge index / shared-keyword graph，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 第一轮 provider call 前执行 `manual_request` budget preflight，Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event。
+- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，Project Brain 已有 knowledge index / shared-keyword graph，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 第一轮 provider call 前执行 `manual_request` budget preflight，Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
 ### 当前剩余核心矛盾
 
@@ -944,9 +944,10 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已新增 Tauri read-only commands：`get_writer_agent_inspector_timeline`、`get_writer_agent_companion_timeline_summary`。
    - 已新增前端 `src/components/WriterInspectorPanel.tsx` 和 `Inspect` 模式，读取 `get_writer_agent_inspector_timeline` / `get_writer_agent_trace`，支持 failure、save_completed、run_event、task_packet、operation_lifecycle、context_recall、product_metrics 筛选，并在 proposal timeline card 展开 context budget sourceReports。
    - Inspect 模式右侧摘要已覆盖 provider budget、latest failure、latest save、save-to-feedback latency、post-write diagnostics、proposal context budgets 和 context source trends。
+   - Inspect failure card 和 Latest Failure 摘要已根据 failure code/category/remediation/detail 提供 `Review budget`、`Review save`、`Review task packet`、`Review run events`、`Review context`、`Show failures` / `Open failures` 排查跳转；这是只读导航入口，不会自动重试 provider call 或执行写操作。
    - 已新增 eval：`writer_agent:inspector_timeline_hides_from_default_companion`。
-   - 已新增静态检查：`npm run check:p2` 验证默认 write Companion 不读取 inspector timeline，内部时间轴、save_completed、save-to-feedback latency 和 proposal context budget drilldown 只进入 dedicated Inspect mode。
-   - 剩余：可操作恢复入口、外部 trace viewer compatible export。
+   - 已新增静态检查：`npm run check:p2` 验证默认 write Companion 不读取 inspector timeline，内部时间轴、save_completed、save-to-feedback latency、proposal context budget drilldown 和 failure recovery action chips 只进入 dedicated Inspect mode。
+   - 剩余：外部 trace viewer compatible export。
 3. 轨迹导出升级。
    - 保留当前 Forge writer trajectory schema。
    - 当前状态：redaction warning / local-only 第一阶段已完成。
@@ -1003,7 +1004,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；真实 run loop 调度、外部检索工具、inspector 展示仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
-   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、provider budget、save_completed、save-to-feedback latency、proposal context budget drilldown、post-write diagnostics 和 context pressure；外部 trace viewer compatible export 仍未完成。
+   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、provider budget、save_completed、save-to-feedback latency、proposal context budget drilldown、post-write diagnostics、context pressure 和 failure recovery 排查跳转；外部 trace viewer compatible export 仍未完成。
 8. Provider call budget。（第一阶段已完成）
    - 已有 token/cost estimation、approval-required/warn/blocked 决策和 remediation；章节生成 provider call 前置门禁、`writer.provider_budget` run event、Explore 审批卡、已批准 budget 前端传递和后端覆盖校验已接入；Project Brain chat answer provider call 已有后端 preflight / run event / failure bundle；manual request AgentLoop 第一轮 provider call 已有后端 preflight / run event / failure bundle；Project Brain/manual retry UI 和后端批准凭证覆盖校验已接入；外部研究 provider call、AgentLoop 多轮 provider 成本追踪仍未完成。
 9. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）
@@ -1022,10 +1023,10 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 作者对记忆候选的纠错会压制后续同 slot 抽取，采纳会强化同 slot 候选。
 - Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；第一层节点类型过滤、来源/关键词/摘要/关系搜索、邻接高亮和 reference/back-reference 导航已完成。更深的跨引用操作、真实 Story Bible/章节结果来源校准仍未完成。
 - Research / Diagnostic 子任务有隔离 artifact workspace、tool policy、evidence-only 结果边界和 Research tool/provider 失败证据包；真实外部公开资料 provider/tool 调度仍未完成。
-- Inspector timeline 有后端视图和前端 Inspect 只读调试面板，默认 Companion summary 已证明不暴露内部 trace；Inspect 已有 save_completed 专用筛选和 save-to-feedback latency 摘要；trajectory export 有 redaction warning 和 local-only 标记。
+- Inspector timeline 有后端视图和前端 Inspect 只读调试面板，默认 Companion summary 已证明不暴露内部 trace；Inspect 已有 failure 恢复排查跳转、save_completed 专用筛选和 save-to-feedback latency 摘要；trajectory export 有 redaction warning 和 local-only 标记。
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成、Project Brain chat answer、manual request 第一轮 AgentLoop provider call 都已有前置门禁、Explore UI approval surface 和批准凭证覆盖校验；Project Brain / manual request 预算失败会展示审批卡并用前端批准凭证重试。尚未强制接入所有真实 provider call，且外部研究 provider call 与 AgentLoop 多轮 provider 成本追踪仍未完成。
 - 保存观察路径和 accepted operation durable-save 路径已有 post-write diagnostic report、run event 和 trajectory export；Companion Audit UI 和 Inspect 模式已展示最近报告；`writer.save_completed` 已把保存结果与 post-write report 串联，并在 Inspect 中有专用筛选/摘要。
-- 通用 ToolExecution 失败已有 remediation，并已映射到 WriterFailureEvidenceBundle 和 inspector failure surface；Inspect 模式已有 failure 筛选/摘要；Research 子任务失败路径已有后端证据包，真实外部公开资料 provider/tool 集成仍未完成。
+- 通用 ToolExecution 失败已有 remediation，并已映射到 WriterFailureEvidenceBundle 和 inspector failure surface；Inspect 模式已有 failure 筛选/摘要和恢复排查跳转入口；Research 子任务失败路径已有后端证据包，真实外部公开资料 provider/tool 集成仍未完成。
 
 中期完成：
 

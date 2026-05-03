@@ -84,6 +84,14 @@ const checks = [
       inspectorSource.includes("contextBudgetToneClass") &&
       !source.includes("Proposal Context Budgets"),
   },
+  {
+    name: "inspector owns failure recovery action chips",
+    pass:
+      inspectorSource.includes("recoveryActionsForFailure") &&
+      inspectorSource.includes("Review budget") &&
+      inspectorSource.includes("Open failures") &&
+      !source.includes("Review budget"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);
