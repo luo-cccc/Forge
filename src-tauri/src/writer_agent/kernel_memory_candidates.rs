@@ -7,7 +7,7 @@ use super::kernel_memory_feedback::{
     memory_candidate_slot_for_canon, memory_candidate_slot_for_promise, MemoryCandidate,
     MemoryExtractionFeedback,
 };
-use super::memory::{PromiseKind, WriterMemory};
+use super::memory::{CanonEntitySummary, PromiseKind, WriterMemory};
 use super::observation::WriterObservation;
 use super::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
 use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
@@ -37,14 +37,30 @@ pub(crate) fn memory_candidates_from_observation(
         if feedback.is_preferred(&slot) {
             entity.confidence = (entity.confidence + 0.08).min(0.92);
         }
-        proposals.push(canon_candidate_proposal(
-            observation,
-            observation_id,
-            proposal_counter,
-            session_id,
-            entity,
-            CandidateSource::Local,
-        ));
+        match validate_canon_candidate_with_memory(&entity, memory) {
+            MemoryCandidateQuality::Acceptable => proposals.push(canon_candidate_proposal(
+                observation,
+                observation_id,
+                proposal_counter,
+                session_id,
+                entity,
+                CandidateSource::Local,
+            )),
+            MemoryCandidateQuality::Conflict {
+                existing_name,
+                reason,
+            } => proposals.push(canon_conflict_candidate_proposal(
+                observation,
+                observation_id,
+                proposal_counter,
+                session_id,
+                entity,
+                existing_name,
+                reason,
+                CandidateSource::Local,
+            )),
+            MemoryCandidateQuality::Vague { .. } | MemoryCandidateQuality::Duplicate { .. } => {}
+        }
     }
 
     for mut promise in extract_plot_promises(&observation.paragraph, observation)
@@ -58,14 +74,18 @@ pub(crate) fn memory_candidates_from_observation(
         if feedback.is_preferred(&slot) {
             promise.priority = (promise.priority + 1).min(10);
         }
-        proposals.push(promise_candidate_proposal(
-            observation,
-            observation_id,
-            proposal_counter,
-            session_id,
-            promise,
-            CandidateSource::Local,
-        ));
+        if validate_promise_candidate_with_dedup(&promise, memory)
+            == MemoryCandidateQuality::Acceptable
+        {
+            proposals.push(promise_candidate_proposal(
+                observation,
+                observation_id,
+                proposal_counter,
+                session_id,
+                promise,
+                CandidateSource::Local,
+            ));
+        }
     }
 
     proposals
@@ -145,12 +165,73 @@ pub(crate) fn promise_candidate_proposal(
     }
 }
 
+pub(crate) fn canon_conflict_candidate_proposal(
+    observation: &WriterObservation,
+    observation_id: &str,
+    proposal_counter: &mut u64,
+    session_id: &str,
+    entity: CanonEntityOp,
+    existing_name: String,
+    reason: String,
+    source: CandidateSource,
+) -> AgentProposal {
+    let id = proposal_id(session_id, *proposal_counter);
+    *proposal_counter += 1;
+    let preview = format!("设定冲突需确认: {} - {}", entity.name, reason);
+    let source_label = source.label();
+    AgentProposal {
+        id,
+        observation_id: observation_id.to_string(),
+        kind: ProposalKind::ContinuityWarning,
+        priority: ProposalPriority::Urgent,
+        target: observation.cursor.clone(),
+        preview,
+        operations: vec![],
+        rationale: format!(
+            "{} 记忆候选与现有 canon 冲突，必须由作者明确确认后再进入长期记忆。",
+            source_label
+        ),
+        evidence: vec![
+            EvidenceRef {
+                source: EvidenceSource::ChapterText,
+                reference: observation
+                    .chapter_title
+                    .clone()
+                    .unwrap_or_else(|| "current chapter".to_string()),
+                snippet: entity.summary.clone(),
+            },
+            EvidenceRef {
+                source: EvidenceSource::Canon,
+                reference: existing_name,
+                snippet: reason,
+            },
+        ],
+        risks: vec![
+            "未自动写入长期 canon；请先确认是正文临场描述、误抽取，还是需要修改既有设定。"
+                .to_string(),
+        ],
+        alternatives: vec![],
+        confidence: match source {
+            CandidateSource::Local => 0.7,
+            CandidateSource::Llm(_) => 0.82,
+        },
+        expires_at: None,
+    }
+}
+
 pub(crate) enum CandidateSource {
     Local,
     Llm(String),
 }
 
 impl CandidateSource {
+    fn label(&self) -> String {
+        match self {
+            CandidateSource::Local => "本地记忆抽取".to_string(),
+            CandidateSource::Llm(model) => format!("LLM增强记忆抽取: {}.", model),
+        }
+    }
+
     fn canon_metadata(&self) -> (String, f64, Vec<String>) {
         match self {
             CandidateSource::Local => (
@@ -544,8 +625,16 @@ pub(crate) fn sentence_snippet(sentence: &str, limit: usize) -> String {
 #[derive(Debug, PartialEq)]
 pub enum MemoryCandidateQuality {
     Acceptable,
-    Vague { reason: String },
-    Duplicate { existing_name: String },
+    Vague {
+        reason: String,
+    },
+    Duplicate {
+        existing_name: String,
+    },
+    Conflict {
+        existing_name: String,
+        reason: String,
+    },
 }
 
 pub fn validate_canon_candidate(candidate: &CanonEntityOp) -> MemoryCandidateQuality {
@@ -556,15 +645,125 @@ pub fn validate_canon_candidate(candidate: &CanonEntityOp) -> MemoryCandidateQua
         };
     }
     let summary = candidate.summary.trim();
-    if summary.chars().count() < 6 {
+    if summary.chars().count() < 8 {
         return MemoryCandidateQuality::Vague {
             reason: format!(
-                "entity summary too short ({} chars, min 6)",
+                "entity summary too short ({} chars, min 8)",
                 summary.chars().count()
             ),
         };
     }
     MemoryCandidateQuality::Acceptable
+}
+
+pub fn validate_canon_candidate_with_memory(
+    candidate: &CanonEntityOp,
+    memory: &WriterMemory,
+) -> MemoryCandidateQuality {
+    let quality = validate_canon_candidate(candidate);
+    if quality != MemoryCandidateQuality::Acceptable {
+        return quality;
+    }
+
+    let Some(existing) = find_existing_canon_entity(candidate, memory) else {
+        return MemoryCandidateQuality::Acceptable;
+    };
+
+    if existing.kind.trim() != candidate.kind.trim() {
+        return MemoryCandidateQuality::Conflict {
+            existing_name: existing.name.clone(),
+            reason: format!(
+                "kind differs for existing canon '{}': existing={}, candidate={}",
+                existing.name, existing.kind, candidate.kind
+            ),
+        };
+    }
+
+    if let Some((attribute, existing_value, candidate_value)) =
+        conflicting_canon_attribute(candidate, &existing)
+    {
+        return MemoryCandidateQuality::Conflict {
+            existing_name: existing.name.clone(),
+            reason: format!(
+                "{}.{} conflicts: existing={}, candidate={}",
+                existing.name, attribute, existing_value, candidate_value
+            ),
+        };
+    }
+
+    MemoryCandidateQuality::Duplicate {
+        existing_name: existing.name,
+    }
+}
+
+fn find_existing_canon_entity(
+    candidate: &CanonEntityOp,
+    memory: &WriterMemory,
+) -> Option<CanonEntitySummary> {
+    let mut names = Vec::with_capacity(candidate.aliases.len() + 1);
+    names.push(candidate.name.trim().to_string());
+    names.extend(
+        candidate
+            .aliases
+            .iter()
+            .map(|alias| alias.trim().to_string()),
+    );
+
+    let resolved = names
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .filter_map(|name| memory.resolve_canon_entity_name(&name).ok().flatten())
+        .collect::<HashSet<_>>();
+    if resolved.is_empty() {
+        return None;
+    }
+
+    memory
+        .list_canon_entities()
+        .ok()?
+        .into_iter()
+        .find(|entity| resolved.contains(&entity.name))
+}
+
+fn conflicting_canon_attribute(
+    candidate: &CanonEntityOp,
+    existing: &CanonEntitySummary,
+) -> Option<(String, String, String)> {
+    let candidate_attributes = candidate.attributes.as_object()?;
+    let existing_attributes = existing.attributes.as_object()?;
+
+    for (attribute, candidate_value) in candidate_attributes {
+        let Some(candidate_text) = canon_attribute_value(candidate_value) else {
+            continue;
+        };
+        let Some(existing_text) = existing_attributes
+            .get(attribute)
+            .and_then(canon_attribute_value)
+        else {
+            continue;
+        };
+        if existing_text != candidate_text {
+            return Some((attribute.clone(), existing_text, candidate_text));
+        }
+    }
+
+    None
+}
+
+fn canon_attribute_value(value: &serde_json::Value) -> Option<String> {
+    let text = match value {
+        serde_json::Value::Null => return None,
+        serde_json::Value::String(value) => value.trim().to_string(),
+        serde_json::Value::Array(values) if values.is_empty() => return None,
+        serde_json::Value::Object(values) if values.is_empty() => return None,
+        other => other.to_string(),
+    };
+
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 pub fn validate_promise_candidate(candidate: &PlotPromiseOp) -> MemoryCandidateQuality {

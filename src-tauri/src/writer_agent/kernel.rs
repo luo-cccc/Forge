@@ -36,13 +36,13 @@ pub(crate) use super::kernel_ghost::{
 };
 pub use super::kernel_helpers::*;
 pub(crate) use super::kernel_memory_candidates::{
-    canon_candidate_proposal, extract_new_canon_entities, llm_memory_candidates_from_value,
-    memory_candidates_from_observation, promise_candidate_proposal, sentence_snippet,
-    split_sentences, CandidateSource,
+    canon_candidate_proposal, canon_conflict_candidate_proposal, extract_new_canon_entities,
+    llm_memory_candidates_from_value, memory_candidates_from_observation,
+    promise_candidate_proposal, sentence_snippet, split_sentences, CandidateSource,
 };
 pub use super::kernel_memory_candidates::{
-    extract_plot_promises, validate_canon_candidate, validate_promise_candidate,
-    validate_promise_candidate_with_dedup, MemoryCandidateQuality,
+    extract_plot_promises, validate_canon_candidate, validate_canon_candidate_with_memory,
+    validate_promise_candidate, validate_promise_candidate_with_dedup, MemoryCandidateQuality,
 };
 pub(crate) use super::kernel_memory_feedback::{
     proposal_slot_key, record_memory_audit_event, record_memory_candidate_feedback,

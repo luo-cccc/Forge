@@ -188,22 +188,48 @@ impl WriterAgentKernel {
         let mut proposals = Vec::new();
         for candidate in candidates {
             let proposal = match candidate {
-                MemoryCandidate::Canon(entity) => canon_candidate_proposal(
-                    &observation,
-                    &observation.id,
-                    &mut self.proposal_counter,
-                    &self.session_id,
-                    entity,
-                    CandidateSource::Llm(model.to_string()),
-                ),
-                MemoryCandidate::Promise(promise) => promise_candidate_proposal(
-                    &observation,
-                    &observation.id,
-                    &mut self.proposal_counter,
-                    &self.session_id,
-                    promise,
-                    CandidateSource::Llm(model.to_string()),
-                ),
+                MemoryCandidate::Canon(entity) => {
+                    match validate_canon_candidate_with_memory(&entity, &self.memory) {
+                        MemoryCandidateQuality::Acceptable => canon_candidate_proposal(
+                            &observation,
+                            &observation.id,
+                            &mut self.proposal_counter,
+                            &self.session_id,
+                            entity,
+                            CandidateSource::Llm(model.to_string()),
+                        ),
+                        MemoryCandidateQuality::Conflict {
+                            existing_name,
+                            reason,
+                        } => canon_conflict_candidate_proposal(
+                            &observation,
+                            &observation.id,
+                            &mut self.proposal_counter,
+                            &self.session_id,
+                            entity,
+                            existing_name,
+                            reason,
+                            CandidateSource::Llm(model.to_string()),
+                        ),
+                        MemoryCandidateQuality::Vague { .. }
+                        | MemoryCandidateQuality::Duplicate { .. } => continue,
+                    }
+                }
+                MemoryCandidate::Promise(promise) => {
+                    if validate_promise_candidate_with_dedup(&promise, &self.memory)
+                        != MemoryCandidateQuality::Acceptable
+                    {
+                        continue;
+                    }
+                    promise_candidate_proposal(
+                        &observation,
+                        &observation.id,
+                        &mut self.proposal_counter,
+                        &self.session_id,
+                        promise,
+                        CandidateSource::Llm(model.to_string()),
+                    )
+                }
             };
 
             if let Some(registered) = self.register_proposal(proposal, None) {

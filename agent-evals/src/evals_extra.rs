@@ -4,6 +4,7 @@ use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback}
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::ObservationReason;
 use agent_writer_lib::writer_agent::observation::ObservationSource;
+use agent_writer_lib::writer_agent::operation::WriterOperation;
 use agent_writer_lib::writer_agent::proposal::ProposalKind;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 use std::path::Path;
@@ -436,6 +437,204 @@ pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
     eval_result(
         "writer_agent:promise_dedup_against_existing",
         format!("duplicate detected correctly"),
+        errors,
+    )
+}
+
+pub fn run_vague_memory_candidate_rejected_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨收起玉佩，没有解释它的来历。", "Chapter-2");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "刀客追查玉佩",
+                "attributes": {},
+                "confidence": 0.82
+            }],
+            "promises": [{
+                "kind": "mystery_clue",
+                "title": "玉佩",
+                "description": "下落仍未说明",
+                "introducedChapter": "Chapter-2",
+                "expectedPayoff": "Chapter-5",
+                "priority": 4,
+                "confidence": 0.8
+            }]
+        }),
+        "eval-model",
+    );
+
+    let mut errors = Vec::new();
+    if !proposals.is_empty() {
+        errors.push(format!(
+            "vague LLM memory candidates should not create proposals, got {}",
+            proposals.len()
+        ));
+    }
+
+    eval_result(
+        "writer_agent:vague_memory_candidate_rejected",
+        format!("proposals={}", proposals.len()),
+        errors,
+    )
+}
+
+pub fn run_duplicate_memory_candidate_deduped_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "林墨惯用寒影刀的刀客，正在追查玉佩。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.9,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩下落",
+            "张三带走了玉佩，去向不明。",
+            "Chapter-1",
+            "Chapter-5",
+            4,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨按住寒影刀，想起张三带走的玉佩。", "Chapter-2");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "林墨惯用寒影刀的刀客，正在追查玉佩。",
+                "attributes": { "weapon": "寒影刀" },
+                "confidence": 0.88
+            }],
+            "promises": [{
+                "kind": "mystery_clue",
+                "title": "玉佩下落",
+                "description": "张三带走了玉佩，去向不明。",
+                "introducedChapter": "Chapter-1",
+                "expectedPayoff": "Chapter-5",
+                "priority": 4,
+                "confidence": 0.86
+            }]
+        }),
+        "eval-model",
+    );
+
+    let memory_write_count = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| {
+            matches!(
+                operation,
+                WriterOperation::CanonUpsertEntity { .. } | WriterOperation::PromiseAdd { .. }
+            )
+        })
+        .count();
+
+    let mut errors = Vec::new();
+    if memory_write_count > 0 {
+        errors.push(format!(
+            "duplicate candidates should not create memory writes, got {}",
+            memory_write_count
+        ));
+    }
+
+    eval_result(
+        "writer_agent:duplicate_memory_candidate_deduped",
+        format!(
+            "proposals={} memoryWrites={}",
+            proposals.len(),
+            memory_write_count
+        ),
+        errors,
+    )
+}
+
+pub fn run_conflicting_memory_candidate_requires_review_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "林墨惯用寒影刀，不轻易改用其他兵器。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.92,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨拔出长剑，剑锋贴着雨水发亮。", "Chapter-3");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "林墨在雨夜使用长剑压制敌人。",
+                "attributes": { "weapon": "长剑" },
+                "confidence": 0.91
+            }],
+            "promises": []
+        }),
+        "eval-model",
+    );
+
+    let canon_writes = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| matches!(operation, WriterOperation::CanonUpsertEntity { .. }))
+        .count();
+    let conflict_reviews = proposals
+        .iter()
+        .filter(|proposal| {
+            proposal.kind == ProposalKind::ContinuityWarning
+                && proposal.operations.is_empty()
+                && proposal.preview.contains("设定冲突")
+                && proposal.rationale.contains("明确确认")
+        })
+        .count();
+
+    let mut errors = Vec::new();
+    if canon_writes > 0 {
+        errors.push(format!(
+            "conflicting canon candidate should not create direct canon write, got {}",
+            canon_writes
+        ));
+    }
+    if conflict_reviews != 1 {
+        errors.push(format!(
+            "expected one explicit conflict review proposal, got {}",
+            conflict_reviews
+        ));
+    }
+
+    eval_result(
+        "writer_agent:conflicting_memory_candidate_requires_review",
+        format!(
+            "proposals={} canonWrites={} conflictReviews={}",
+            proposals.len(),
+            canon_writes,
+            conflict_reviews
+        ),
         errors,
     )
 }

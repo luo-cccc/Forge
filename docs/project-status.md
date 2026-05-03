@@ -58,6 +58,7 @@ P1 is in progress:
 - Ghost proposal helpers now live in `src-tauri/src/writer_agent/kernel_ghost.rs`, covering local continuation drafts, three-branch alternatives, continuation sanitization, and context evidence mapping with focused unit coverage.
 - Memory feedback and slot helpers now live in `src-tauri/src/writer_agent/kernel_memory_feedback.rs`, covering proposal slot keys, suppression keys, memory extraction preferences, and memory audit/feedback recording with focused unit coverage.
 - Memory candidate extraction, LLM candidate parsing, promise/canon candidate proposal construction, dedupe, sentence splitting, and memory-candidate quality validation now live in `src-tauri/src/writer_agent/kernel_memory_candidates.rs`.
+- Canon / Promise memory candidate quality gates now run on the real local-save and LLM proposal paths: vague candidates are rejected, duplicates are deduped before writes, and conflicting canon candidates become explicit continuity review proposals instead of direct long-term memory writes.
 - Kernel stateful implementation blocks now live under `src-tauri/src/writer_agent/kernel/`: observation handling, context-pack accessors, run-loop methods, proposal creation/registration, feedback, operation execution, snapshots, trace recording, and kernel tests.
 - Writer Agent run-loop data types and `WriterAgentPreparedRun` now live in `src-tauri/src/writer_agent/kernel_run_loop.rs` while preserving the existing `writer_agent::kernel::*` export path.
 - `agent-evals/src/evals.rs` is now a small module facade; the former large eval file is split into focused modules under `agent-evals/src/evals/` for intent, canon, ghost/feedback, context, tool policy, run loop, task packet, foundation, mission, promise, story debt, and trajectory coverage.
@@ -84,7 +85,7 @@ The expected local baseline is:
 
 - `cargo test -p agent-writer`: 165 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 84/84 passing
+- `cargo run -p agent-evals`: 87/87 passing
 - `npm run check:p2`: 9/9 passing
 - `npm run check:audit`: 47 commands, 0 issues
 - `npm run lint`: passing
@@ -109,4 +110,5 @@ The expected local baseline is:
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
+- P2 memory-write gates now cover Canon / Promise proposal creation; the remaining memory quality gap is narrower operation classes for safe same-entity attribute merges and richer Style memory validation.
 - P2 architecture splitting is complete for the current plan: `lib.rs` is glue-only, `writer_agent/kernel.rs` is a facade/state owner with implementation blocks split into focused modules, and `agent-evals/src/evals.rs` is split into responsibility-based eval modules. Further splitting should be driven by new feature pressure rather than line-count targets.

@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、84/84 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、87/87 writer evals。
 
 ### 当前剩余核心矛盾
 
@@ -424,6 +424,8 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 ### P2.2 记忆写入质量门槛
 
+当前状态：核心 Canon / Promise 候选门槛已接入真实 proposal 生成路径。本地保存抽取和 LLM memory candidate 都会过滤模糊、空泛、重复候选；同名 canon 的整实体 upsert 默认 dedupe，避免覆盖既有 attributes；与现有 canon kind 或关键 attributes 冲突的候选不会生成直接写入操作，而是生成高优先级 ContinuityWarning，要求作者明确确认后再处理。新增 eval 已覆盖 `vague_memory_candidate_rejected`、`duplicate_memory_candidate_deduped`、`conflicting_memory_candidate_requires_review`。
+
 任务：
 
 - 记忆候选分级：
@@ -437,9 +439,9 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 验收标准：
 
-- 新增 eval：vague memory rejected。
-- 新增 eval：duplicate memory deduped。
-- 新增 eval：conflicting memory requires explicit approval。
+- 新增 eval：vague memory rejected。（已完成：覆盖 LLM memory proposal 路径）
+- 新增 eval：duplicate memory deduped。（已完成：覆盖 canon/promise duplicate 不产生写操作）
+- 新增 eval：conflicting memory requires explicit approval。（已完成：冲突 canon 不产生直接写入，转为 review proposal）
 
 ### P2.3 检索从“相似文本”升级为“写作相关性”
 
@@ -543,7 +545,7 @@ writer_agent/
 
 ### P2.3 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 84/84 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 87/87 passing。
 
 建议模块：
 
