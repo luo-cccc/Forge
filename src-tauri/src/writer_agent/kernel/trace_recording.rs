@@ -525,6 +525,58 @@ impl WriterAgentKernel {
         );
     }
 
+    pub fn record_tool_called_run_event(
+        &mut self,
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        phase: impl Into<String>,
+        input: Option<&serde_json::Value>,
+        result: Option<&agent_harness_core::ToolExecution>,
+        source_refs: Vec<String>,
+        created_at_ms: u64,
+    ) {
+        let task_id = task_id.into();
+        let tool_name = tool_name.into();
+        let phase = phase.into();
+        let input_keys = input.map(json_object_keys).unwrap_or_default();
+        let input_bytes = input
+            .and_then(|value| serde_json::to_vec(value).ok())
+            .map(|bytes| bytes.len())
+            .unwrap_or(0);
+        let output_bytes = result
+            .and_then(|execution| serde_json::to_vec(&execution.output).ok())
+            .map(|bytes| bytes.len())
+            .unwrap_or(0);
+        let remediation_codes = result
+            .map(|execution| {
+                execution
+                    .remediation
+                    .iter()
+                    .map(|item| item.code.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let success = result.map(|execution| execution.error.is_none());
+        self.record_run_event(
+            "tool_called",
+            created_at_ms,
+            Some(task_id.clone()),
+            source_refs,
+            serde_json::json!({
+                "taskId": task_id,
+                "toolName": tool_name,
+                "phase": phase,
+                "success": success,
+                "durationMs": result.map(|execution| execution.duration_ms),
+                "inputKeys": input_keys,
+                "inputBytes": input_bytes,
+                "outputBytes": output_bytes,
+                "error": result.and_then(|execution| execution.error.clone()),
+                "remediationCodes": remediation_codes,
+            }),
+        );
+    }
+
     fn record_run_event(
         &mut self,
         event_type: &str,
@@ -577,6 +629,13 @@ fn proposal_source_refs(proposal: &AgentProposal) -> Vec<String> {
             .map(|evidence| format!("{:?}:{}", evidence.source, evidence.reference)),
     );
     refs
+}
+
+fn json_object_keys(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_object()
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 fn context_pack_built_reports(

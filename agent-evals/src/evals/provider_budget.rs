@@ -322,6 +322,118 @@ pub fn run_model_started_run_event_eval() -> EvalResult {
     )
 }
 
+pub fn run_tool_called_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let args = serde_json::json!({
+        "query": "玉佩秘密不应进入工具事件原文",
+        "limit": 3,
+    });
+    kernel.record_tool_called_run_event(
+        "tool-call-1",
+        "query_project_brain",
+        "start",
+        Some(&args),
+        None,
+        vec!["tool:query_project_brain".to_string()],
+        now_ms(),
+    );
+    let execution = agent_harness_core::ToolExecution {
+        tool_name: "query_project_brain".to_string(),
+        input: args.clone(),
+        output: serde_json::json!({
+            "answer": "模型返回的正文也不应进入 tool_called 摘要"
+        }),
+        error: None,
+        remediation: Vec::new(),
+        duration_ms: 17,
+    };
+    kernel.record_tool_called_run_event(
+        "tool-call-1",
+        "query_project_brain",
+        "end",
+        Some(&execution.input),
+        Some(&execution),
+        vec!["tool:query_project_brain".to_string()],
+        now_ms(),
+    );
+    let snapshot = kernel.trace_snapshot(20);
+    let export = kernel.export_trajectory(20);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let tool_events = snapshot
+        .run_events
+        .iter()
+        .filter(|event| event.event_type == "writer.tool_called")
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if tool_events.len() != 2 {
+        errors.push(format!(
+            "expected start/end tool_called events, got {}",
+            tool_events.len()
+        ));
+    }
+    if !tool_events.iter().any(|event| {
+        event.data.get("phase").and_then(|value| value.as_str()) == Some("start")
+            && event
+                .data
+                .get("inputKeys")
+                .and_then(|value| value.as_array())
+                .is_some_and(|keys| {
+                    keys.iter().any(|key| key.as_str() == Some("query"))
+                        && keys.iter().any(|key| key.as_str() == Some("limit"))
+                })
+            && event
+                .data
+                .get("success")
+                .is_some_and(|value| value.is_null())
+    }) {
+        errors.push("tool_called start event lacks phase/input key summary".to_string());
+    }
+    if !tool_events.iter().any(|event| {
+        event.data.get("phase").and_then(|value| value.as_str()) == Some("end")
+            && event.data.get("success").and_then(|value| value.as_bool()) == Some(true)
+            && event
+                .data
+                .get("durationMs")
+                .and_then(|value| value.as_u64())
+                == Some(17)
+            && event
+                .data
+                .get("outputBytes")
+                .and_then(|value| value.as_u64())
+                .is_some_and(|bytes| bytes > 0)
+    }) {
+        errors.push("tool_called end event lacks success/duration/output summary".to_string());
+    }
+    let serialized = tool_events
+        .iter()
+        .map(|event| event.data.to_string())
+        .collect::<String>();
+    for leaked in ["玉佩秘密", "模型返回的正文"] {
+        if serialized.contains(leaked) {
+            errors.push(format!("tool_called leaked raw value: {}", leaked));
+        }
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.tool_called\"")
+            && line.contains("\"inputKeys\"")
+    }) {
+        errors.push("trajectory export lacks tool_called run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:tool_called_run_event",
+        format!(
+            "toolEvents={} trajectoryLines={}",
+            tool_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_project_brain_provider_budget_eval() -> EvalResult {
     let long_context = "寒玉戒指仍未归还，旧门钥匙和潮汐祭账互相指向同一条线索。".repeat(2600);
     let messages = vec![
