@@ -396,76 +396,94 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 ### P2.1 Context Pack 质量升级
 
-任务：
+Status：核心已完成，debug / inspector 体验仍可增强。
 
-- 为不同任务定义 context budget profiles：
-  - GhostWriting
-  - InlineRewrite
-  - ManualRequest
-  - ChapterGeneration
-  - ContinuityDiagnostic
-  - ProposalEvaluation
-- 必保来源：
-  - Story Contract
-  - current Chapter Mission
-  - latest Result Feedback
-  - relevant Promise Ledger slice
-  - canon slice
-  - cursor prefix/suffix
-- 增加 context pack explainability：
-  - 为什么选这些来源
-  - 哪些来源被截断
-  - 哪些来源因 budget 被丢弃
+Done：
 
-验收标准：
+- 已为 GhostWriting、InlineRewrite、ManualRequest、ChapterGeneration、ContinuityDiagnostic、ProposalEvaluation 定义 context budget profiles。
+- Story Contract、current Chapter Mission、latest Result Feedback、relevant Promise Ledger slice、canon slice、cursor prefix/suffix 已作为核心 context sources 参与 pack。
+- Context budget trace、source summary、截断信息和 selected source explanation 已进入 Writer Agent trace / eval 路径。
 
-- tight budget 下必保来源不丢。
-- context pack trace 可导出 JSONL。
-- debug view 可查看 context source summary。
+Partial：
+
+- Debug source summary 已有渲染和 eval 覆盖，但还不是完整独立 inspector 趋势视图。
+- Budget 被丢弃来源的解释已经进入 pack/report 层，前端可视化仍偏基础。
+
+Remaining：
+
+- 完善 debug / inspector UI，让作者或开发者能稳定查看 source summary、截断原因和 dropped source。
+- 为长 session 的 context source 变化增加更好的趋势检查。
+
+Verification：
+
+- `writer_agent:context_budget_required_sources`
+- `writer_agent:context_budget_trace`
+- `writer_agent:result_feedback_survives_tight_budget`
+- `writer_agent:context_pack_explainability`
+- `npm run verify`
 
 ### P2.2 记忆写入质量门槛
 
-当前状态：核心 Canon / Promise 候选门槛已接入真实 proposal 生成路径。本地保存抽取和 LLM memory candidate 都会过滤模糊、空泛、重复候选；同名 canon 的整实体 upsert 默认 dedupe，避免覆盖既有 attributes；与现有 canon kind 或关键 attributes 冲突的候选不会生成直接写入操作，而是生成高优先级 ContinuityWarning，要求作者明确确认后再处理。新增 eval 已覆盖 `vague_memory_candidate_rejected`、`duplicate_memory_candidate_deduped`、`conflicting_memory_candidate_requires_review`。
+Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Story Contract / Chapter Mission foundation guard 已存在；Style memory validation 和安全同实体属性合并仍未完全闭环。
 
-任务：
+Done：
 
-- 记忆候选分级：
-  - observation
-  - candidate
-  - approved
-  - rejected
-  - superseded
-- Canon / Promise / Style / Contract 写入分别定义质量规则。
-- 模糊、空泛、重复、互相冲突的记忆不得进入长期记忆。
+- 记忆候选已通过 proposal lifecycle 和 memory feedback 路径覆盖 observation、candidate、approved、rejected、superseded 等状态。
+- 本地保存抽取和 LLM memory candidate 会过滤模糊、空泛、重复候选。
+- Canon / Promise 候选已有 dedupe 和冲突拦截；与现有 canon kind 或关键 attributes 冲突的候选不会直接写入长期记忆，而是生成高优先级 ContinuityWarning。
+- Story Contract / Chapter Mission 写入已有 foundation quality gate，低质量 foundation 不会进入有效 context。
 
-验收标准：
+Partial：
 
-- 新增 eval：vague memory rejected。（已完成：覆盖 LLM memory proposal 路径）
-- 新增 eval：duplicate memory deduped。（已完成：覆盖 canon/promise duplicate 不产生写操作）
-- 新增 eval：conflicting memory requires explicit approval。（已完成：冲突 canon 不产生直接写入，转为 review proposal）
+- Style 写入还缺少与 Canon / Promise 同等级的专用质量规则和 eval。
+- 同名实体当前以整实体 dedupe 为主，尚未实现安全的同实体属性级 merge 操作。
+
+Remaining：
+
+- 增加 Style memory validation eval，覆盖空泛风格、重复风格和互相冲突风格偏好。
+- 为同一 canon entity 的安全属性合并定义窄操作类型和审批上下文。
+- 把 Style / Contract / Mission 的质量门槛在文档和 eval 名称上独立列出，避免被 Canon / Promise 覆盖情况掩盖。
+
+Verification：
+
+- `writer_agent:vague_memory_candidate_rejected`
+- `writer_agent:duplicate_memory_candidate_deduped`
+- `writer_agent:conflicting_memory_candidate_requires_review`
+- `writer_agent:foundation_write_validation`
+- `writer_agent:story_contract_quality_nominal`
+- `npm run verify`
 
 ### P2.3 检索从“相似文本”升级为“写作相关性”
 
-当前状态：已完成第一阶段。`src-tauri/src/writer_agent/context_relevance.rs` 已集中承载 Writer Agent context pack 的写作相关性评分；Canon / Promise slice 会综合当前 chapter mission、next beat、result feedback、recent decisions、cursor 附近正文和 open promises 排序，并在每条被选中的 canon / promise 前输出 `WHY writing_relevance`。本阶段覆盖 Writer Agent ledger context，后续如继续增强外部 project brain / vector DB，可在同一评分语义上接入 rerank。
+Status：部分完成。当前已完成 Writer Agent ledger context ranking；尚未覆盖 project brain / vector DB / 普通语义段落检索 rerank。
 
-任务：
+Done：
 
-- 检索排序引入：
-  - 当前 chapter mission（已完成）
-  - active entities（已完成：Canon slice 相关实体评分）
-  - active promises（已完成：Promise slice 与 canon 关联评分）
-  - recent decisions（已完成）
-  - cursor scene type（部分完成：当前基于 cursor 附近正文、段落、选区和任务上下文抽取写作信号，未单独建模 scene type taxonomy）
-- 不只返回 lore excerpt，还返回“为何相关”。（已完成：`WHY writing_relevance`）
+- `src-tauri/src/writer_agent/context_relevance.rs` 已集中承载 Canon / Promise ledger slice 的写作相关性评分。
+- Canon / Promise slice 会综合当前 chapter mission、next beat、result feedback、recent decisions、cursor 附近正文和 open promises 排序。
+- 被选中的 canon / promise 会输出 `WHY writing_relevance`，说明当前写作相关性来源。
 
-验收标准：
+Partial：
 
-- 新增 eval：同名实体优先返回当前剧情相关实体。（已完成）
-- 新增 eval：promise 相关检索优先于普通语义相似段落。（已完成）
+- Active entities 和 active promises 当前来自 WriterMemory ledger context，不等于外部 project brain 的全量检索 rerank。
+- Cursor scene type 目前由 cursor 附近正文、段落、选区和任务上下文抽取信号近似表达，尚未建立 scene type taxonomy。
+- 当前 promise eval 证明的是 mission-relevant promise 在 ledger slice 内压过低相关 ledger 项，不证明它已压过 vector DB 的普通语义相似段落。
 
-## 9. P2：架构拆分和可维护性
+Remaining：
 
-### P2.1 拆分 `src-tauri/src/lib.rs`
+- 将同一套 writing relevance 语义接入 `query_project_brain` / vector DB 检索结果 rerank。
+- 增加覆盖普通语义段落干扰项的 eval，证明 promise / mission 相关内容优先于浅层相似文本。
+- 建立轻量 scene type taxonomy，并把 scene type 作为显式评分信号和解释原因。
+
+Verification：
+
+- `writer_agent:current_plot_relevance_prioritizes_same_name_entity`（已覆盖 ledger Canon slice）
+- `writer_agent:promise_relevance_beats_plain_similarity`（已覆盖 ledger Promise slice，不覆盖 vector DB 段落 rerank）
+- `npm run verify`
+
+## 9. P2：架构拆分和可维护性（P2.4-P2.6）
+
+### P2.4 拆分 `src-tauri/src/lib.rs`
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
@@ -515,7 +533,7 @@ src-tauri/src/manual_agent.rs
 - Root tests 有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
 
-### P2.2 拆分 `writer_agent/kernel.rs`
+### P2.5 拆分 `writer_agent/kernel.rs`
 
 当前状态：已完成。`writer_agent/kernel.rs` 当前约 450 行，保留 facade、状态结构、公开类型、`new()` 和少量共享转换 helper；对外 `writer_agent::kernel::*` 路径保持稳定。既有 `kernel_chapters.rs`、`kernel_helpers.rs`、`kernel_ops.rs`、`kernel_prompts.rs`、`kernel_review.rs` 继续承接章节、helper、operation、prompt、review 逻辑。`writer_agent/kernel_task_packet.rs` 已承接 TaskPacket 构建、context budget trace 和 trace state expiry helper。`writer_agent/kernel_metrics.rs` 已承接 `WriterProductMetrics` 和 trace-derived product metrics 计算。`writer_agent/kernel_proposals.rs` 已承接 proposal 替换、优先级权重和过期判断 helper。`writer_agent/kernel_ghost.rs` 已承接 ghost 续写草稿、三分支候选、continuation 清理和 context evidence 映射。`writer_agent/kernel_memory_feedback.rs` 已承接 proposal slot、suppression slot、memory extraction feedback、memory audit/feedback helper。`writer_agent/kernel_memory_candidates.rs` 已承接 memory candidate extraction、LLM candidate parsing、canon/promise candidate proposal construction、dedupe、sentence splitting 和 quality validation。`writer_agent/kernel_run_loop.rs` 已承接 run-loop 类型和 `WriterAgentPreparedRun`。`writer_agent/kernel/` 下的子模块已承接 observation handling、context pack accessors、run-loop methods、proposal creation/registration、feedback、operation execution、snapshot、trace recording 和 kernel tests。
 
@@ -526,18 +544,17 @@ writer_agent/
   kernel.rs              // facade / state owner
   kernel_run_loop.rs     // unified task execution types / prepared run（已完成）
   kernel/                // stateful WriterAgentKernel impl blocks（已完成）
-  kernel_ghost.rs        // ghost proposal helpers（已开始）
+  kernel_ghost.rs        // ghost proposal helpers（已完成）
   kernel_memory_feedback.rs // memory feedback / slot helpers（已完成）
   kernel_memory_candidates.rs // memory candidate extraction / validation（已完成）
-  kernel_task_packet.rs   // TaskPacket / context trace helpers（已开始）
-  kernel_metrics.rs       // trace-derived product metrics（已开始）
-  kernel_proposals.rs     // proposal lifecycle helpers（已开始）
-  operation_executor.rs
-  proposal_engine.rs
-  feedback_loop.rs
-  ledger_snapshot.rs
-  foundation_guard.rs
-  policy.rs
+  kernel_task_packet.rs   // TaskPacket / context trace helpers（已完成）
+  kernel_metrics.rs       // trace-derived product metrics（已完成）
+  kernel_proposals.rs     // proposal lifecycle helpers（已完成）
+  kernel/operation.rs      // operation execution impl（已完成）
+  kernel/proposal_creation.rs // proposal creation / registration impl（已完成）
+  kernel/feedback.rs      // feedback impl（已完成）
+  kernel/snapshot.rs      // ledger snapshot impl（已完成）
+  kernel/run_loop.rs      // run_task / prepared-run impl（已完成）
 ```
 
 验收标准：
@@ -546,7 +563,7 @@ writer_agent/
 - operation execution、task packet、feedback、policy 分离。
 - eval 不降级。
 
-### P2.3 拆分 `agent-evals/src/evals.rs`
+### P2.6 拆分 `agent-evals/src/evals.rs`
 
 当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 89/89 passing。
 
@@ -711,7 +728,7 @@ agent-evals/src/
 3. trajectory export 增加指标摘要。
 4. 建立每轮开发必须通过的 product scenario eval。
 
-### 第五轮：P2 架构拆分
+### 第五轮：P2.4-P2.6 架构拆分
 
 1. 拆 `lib.rs` command modules。（已完成）
 2. 抽出 `app_state.rs` 和启动期状态初始化。（已完成）
