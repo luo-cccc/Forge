@@ -1,8 +1,12 @@
 //! Generation, analysis, and creative drafting Tauri commands.
 
+use crate::chapter_generation::{
+    ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
+    PipelineTerminal, SaveMode,
+};
 use crate::llm_runtime;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +39,19 @@ pub(crate) struct ParallelDraftPayload {
     paragraph: String,
     selected_text: String,
     chapter_title: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct BatchStatus {
+    chapter_title: String,
+    status: String,
+    error: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChapterGenerationStart {
+    request_id: String,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -104,6 +121,196 @@ fn parse_parallel_drafts(raw: &str) -> Vec<ParallelDraft> {
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn batch_generate_chapter(
+    app: tauri::AppHandle,
+    chapter_title: String,
+    summary: String,
+    frontend_state: Option<FrontendChapterStateSnapshot>,
+) -> Result<(), String> {
+    let api_key = crate::require_api_key()?;
+    let settings = llm_runtime::settings(api_key);
+    let user_profile_entries = crate::collect_user_profile_entries(&app).unwrap_or_default();
+    let request_id = crate::chapter_generation::make_request_id("batch");
+
+    let app_clone = app.clone();
+    let title_clone = chapter_title.clone();
+
+    tokio::spawn(async move {
+        let _ = app_clone.emit(
+            crate::events::BATCH_STATUS,
+            BatchStatus {
+                chapter_title: title_clone.clone(),
+                status: "generating".to_string(),
+                error: String::new(),
+            },
+        );
+
+        let payload = GenerateChapterAutonomousPayload {
+            request_id: Some(request_id),
+            target_chapter_title: Some(title_clone.clone()),
+            target_chapter_number: None,
+            user_instruction: format!("帮我写《{}》这一章的完整初稿。", title_clone),
+            budget: None,
+            frontend_state,
+            save_mode: SaveMode::ReplaceIfClean,
+            chapter_summary_override: Some(summary),
+        };
+        let user_instruction = payload.user_instruction.clone();
+        let trace_app = app_clone.clone();
+
+        let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
+            app_clone.clone(),
+            settings,
+            payload,
+            user_profile_entries,
+            |event| {
+                let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
+            },
+            move |context| {
+                let state = trace_app.state::<crate::AppState>();
+                let Ok(mut kernel) = state.writer_kernel.lock() else {
+                    return;
+                };
+                let packet = crate::chapter_generation::build_chapter_generation_task_packet(
+                    &kernel.project_id,
+                    &kernel.session_id,
+                    context,
+                    &user_instruction,
+                    crate::agent_runtime::now_ms(),
+                );
+                if let Err(error) = kernel.record_task_packet(
+                    context.request_id.clone(),
+                    "ChapterGeneration",
+                    packet,
+                ) {
+                    tracing::warn!(
+                        "WriterAgent chapter-generation task packet rejected: {}",
+                        error
+                    );
+                }
+            },
+        )
+        .await;
+
+        match terminal {
+            PipelineTerminal::Completed {
+                saved,
+                generated_content,
+            } => {
+                crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
+                let embed_app = app_clone.clone();
+                let embed_title = title_clone.clone();
+                tokio::spawn(async move {
+                    crate::auto_embed_chapter(&embed_app, &embed_title, &generated_content).await;
+                });
+                let _ = app_clone.emit(
+                    crate::events::BATCH_STATUS,
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "complete".to_string(),
+                        error: String::new(),
+                    },
+                );
+            }
+            PipelineTerminal::Conflict(conflict) => {
+                let _ = app_clone.emit(
+                    crate::events::BATCH_STATUS,
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "error".to_string(),
+                        error: format!("save conflict: {}", conflict.reason),
+                    },
+                );
+            }
+            PipelineTerminal::Failed(error) => {
+                let _ = app_clone.emit(
+                    crate::events::BATCH_STATUS,
+                    BatchStatus {
+                        chapter_title: title_clone,
+                        status: "error".to_string(),
+                        error: error.message,
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn generate_chapter_autonomous(
+    app: tauri::AppHandle,
+    payload: GenerateChapterAutonomousPayload,
+) -> Result<ChapterGenerationStart, String> {
+    let api_key = crate::require_api_key()?;
+    let settings = llm_runtime::settings(api_key);
+    let user_profile_entries = crate::collect_user_profile_entries(&app).unwrap_or_default();
+    let request_id = payload
+        .request_id
+        .clone()
+        .unwrap_or_else(|| crate::chapter_generation::make_request_id("chapter"));
+    let payload = GenerateChapterAutonomousPayload {
+        request_id: Some(request_id.clone()),
+        ..payload
+    };
+    let app_clone = app.clone();
+
+    tokio::spawn(async move {
+        let user_instruction = payload.user_instruction.clone();
+        let trace_app = app_clone.clone();
+        let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
+            app_clone.clone(),
+            settings,
+            payload,
+            user_profile_entries,
+            |event: ChapterGenerationEvent| {
+                let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
+            },
+            move |context| {
+                let state = trace_app.state::<crate::AppState>();
+                let Ok(mut kernel) = state.writer_kernel.lock() else {
+                    return;
+                };
+                let packet = crate::chapter_generation::build_chapter_generation_task_packet(
+                    &kernel.project_id,
+                    &kernel.session_id,
+                    context,
+                    &user_instruction,
+                    crate::agent_runtime::now_ms(),
+                );
+                if let Err(error) = kernel.record_task_packet(
+                    context.request_id.clone(),
+                    "ChapterGeneration",
+                    packet,
+                ) {
+                    tracing::warn!(
+                        "WriterAgent chapter-generation task packet rejected: {}",
+                        error
+                    );
+                }
+            },
+        )
+        .await;
+
+        if let PipelineTerminal::Completed {
+            saved,
+            generated_content,
+        } = terminal
+        {
+            crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
+            let embed_app = app_clone.clone();
+            tokio::spawn(async move {
+                crate::auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content)
+                    .await;
+            });
+        }
+    });
+
+    Ok(ChapterGenerationStart { request_id })
+}
 
 #[tauri::command]
 pub async fn analyze_chapter(

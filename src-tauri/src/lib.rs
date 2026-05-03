@@ -15,10 +15,6 @@ mod storage;
 mod tool_bridge;
 pub mod writer_agent;
 use agent_runtime::AgentObservation;
-use chapter_generation::{
-    ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
-    PipelineTerminal, SaveMode,
-};
 
 const KEYRING_SERVICE: &str = "agent-writer";
 pub(crate) mod events {
@@ -299,7 +295,8 @@ use commands::chapters::{
 };
 use commands::diagnostics::{export_diagnostic_logs, export_writer_agent_trajectory};
 use commands::generation::{
-    analyze_chapter, analyze_pacing, ask_project_brain, generate_parallel_drafts,
+    analyze_chapter, analyze_pacing, ask_project_brain, batch_generate_chapter,
+    generate_chapter_autonomous, generate_parallel_drafts,
 };
 use commands::graph::get_project_graph_data;
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
@@ -504,19 +501,6 @@ pub(crate) fn decode_html_entity(entity: &str) -> String {
             .unwrap_or_else(|| format!("&{};", entity)),
         _ => format!("&{};", entity),
     }
-}
-
-#[derive(Serialize, Clone)]
-struct BatchStatus {
-    chapter_title: String,
-    status: String,
-    error: String,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ChapterGenerationStart {
-    request_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1282,199 +1266,6 @@ async fn report_semantic_lint_state(
     });
 
     Ok(())
-}
-
-#[tauri::command]
-async fn batch_generate_chapter(
-    app: tauri::AppHandle,
-    chapter_title: String,
-    summary: String,
-    frontend_state: Option<FrontendChapterStateSnapshot>,
-) -> Result<(), String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-    let user_profile_entries = collect_user_profile_entries(&app).unwrap_or_default();
-    let request_id = chapter_generation::make_request_id("batch");
-
-    let app_clone = app.clone();
-    let title_clone = chapter_title.clone();
-
-    tokio::spawn(async move {
-        let _ = app_clone.emit(
-            events::BATCH_STATUS,
-            BatchStatus {
-                chapter_title: title_clone.clone(),
-                status: "generating".to_string(),
-                error: String::new(),
-            },
-        );
-
-        let payload = GenerateChapterAutonomousPayload {
-            request_id: Some(request_id),
-            target_chapter_title: Some(title_clone.clone()),
-            target_chapter_number: None,
-            user_instruction: format!("帮我写《{}》这一章的完整初稿。", title_clone),
-            budget: None,
-            frontend_state,
-            save_mode: SaveMode::ReplaceIfClean,
-            chapter_summary_override: Some(summary),
-        };
-        let user_instruction = payload.user_instruction.clone();
-        let trace_app = app_clone.clone();
-
-        let terminal = chapter_generation::run_chapter_generation_pipeline(
-            app_clone.clone(),
-            settings,
-            payload,
-            user_profile_entries,
-            |event| {
-                let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
-            },
-            move |context| {
-                let state = trace_app.state::<AppState>();
-                let Ok(mut kernel) = state.writer_kernel.lock() else {
-                    return;
-                };
-                {
-                    let packet = chapter_generation::build_chapter_generation_task_packet(
-                        &kernel.project_id,
-                        &kernel.session_id,
-                        context,
-                        &user_instruction,
-                        agent_runtime::now_ms(),
-                    );
-                    if let Err(error) = kernel.record_task_packet(
-                        context.request_id.clone(),
-                        "ChapterGeneration",
-                        packet,
-                    ) {
-                        tracing::warn!(
-                            "WriterAgent chapter-generation task packet rejected: {}",
-                            error
-                        );
-                    }
-                }
-            },
-        )
-        .await;
-
-        match terminal {
-            PipelineTerminal::Completed {
-                saved,
-                generated_content,
-            } => {
-                observe_generated_chapter_result(&app_clone, &saved, &generated_content);
-                let embed_app = app_clone.clone();
-                let embed_title = title_clone.clone();
-                tokio::spawn(async move {
-                    auto_embed_chapter(&embed_app, &embed_title, &generated_content).await;
-                });
-                let _ = app_clone.emit(
-                    events::BATCH_STATUS,
-                    BatchStatus {
-                        chapter_title: title_clone,
-                        status: "complete".to_string(),
-                        error: String::new(),
-                    },
-                );
-            }
-            PipelineTerminal::Conflict(conflict) => {
-                let _ = app_clone.emit(
-                    events::BATCH_STATUS,
-                    BatchStatus {
-                        chapter_title: title_clone,
-                        status: "error".to_string(),
-                        error: format!("save conflict: {}", conflict.reason),
-                    },
-                );
-            }
-            PipelineTerminal::Failed(error) => {
-                let _ = app_clone.emit(
-                    events::BATCH_STATUS,
-                    BatchStatus {
-                        chapter_title: title_clone,
-                        status: "error".to_string(),
-                        error: error.message,
-                    },
-                );
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn generate_chapter_autonomous(
-    app: tauri::AppHandle,
-    payload: GenerateChapterAutonomousPayload,
-) -> Result<ChapterGenerationStart, String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-    let user_profile_entries = collect_user_profile_entries(&app).unwrap_or_default();
-    let request_id = payload
-        .request_id
-        .clone()
-        .unwrap_or_else(|| chapter_generation::make_request_id("chapter"));
-    let payload = GenerateChapterAutonomousPayload {
-        request_id: Some(request_id.clone()),
-        ..payload
-    };
-    let app_clone = app.clone();
-
-    tokio::spawn(async move {
-        let user_instruction = payload.user_instruction.clone();
-        let trace_app = app_clone.clone();
-        let terminal = chapter_generation::run_chapter_generation_pipeline(
-            app_clone.clone(),
-            settings,
-            payload,
-            user_profile_entries,
-            |event: ChapterGenerationEvent| {
-                let _ = app_clone.emit(events::CHAPTER_GENERATION, event);
-            },
-            move |context| {
-                let state = trace_app.state::<AppState>();
-                let Ok(mut kernel) = state.writer_kernel.lock() else {
-                    return;
-                };
-                {
-                    let packet = chapter_generation::build_chapter_generation_task_packet(
-                        &kernel.project_id,
-                        &kernel.session_id,
-                        context,
-                        &user_instruction,
-                        agent_runtime::now_ms(),
-                    );
-                    if let Err(error) = kernel.record_task_packet(
-                        context.request_id.clone(),
-                        "ChapterGeneration",
-                        packet,
-                    ) {
-                        tracing::warn!(
-                            "WriterAgent chapter-generation task packet rejected: {}",
-                            error
-                        );
-                    }
-                }
-            },
-        )
-        .await;
-
-        if let PipelineTerminal::Completed {
-            saved,
-            generated_content,
-        } = terminal
-        {
-            observe_generated_chapter_result(&app_clone, &saved, &generated_content);
-            let embed_app = app_clone.clone();
-            tokio::spawn(async move {
-                auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content).await;
-            });
-        }
-    });
-
-    Ok(ChapterGenerationStart { request_id })
 }
 
 pub(crate) async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
