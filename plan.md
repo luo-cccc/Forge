@@ -1,6 +1,6 @@
 # Forge Cursor-Style Writing Agent 完整开发计划
 
-Last updated: 2026-05-02
+Last updated: 2026-05-03
 
 ## 0. 北极星
 
@@ -27,6 +27,8 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
 - Command boundary audit 已覆盖 47 个 Tauri commands，并进入 `npm run verify`。
+- Tauri command handlers 已全部移入 `src-tauri/src/commands/*`；`src-tauri/src/lib.rs` 当前不再包含 `#[tauri::command]`。
+- AppState、启动期 Hermes/Writer memory DB 打开、legacy DB migration、kernel seed 逻辑已抽入 `src-tauri/src/app_state.rs`，`lib.rs` 当前约 1872 行。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
 - `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、84/84 writer evals。
 
@@ -35,7 +37,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
 - `agent-evals/src/product_scenarios.rs` 已集中承载 10 个真实长篇产品场景 eval；下一步要继续提升场景真实性和失败解释质量，而不是只堆数量。
-- `src-tauri/src/lib.rs` 和 `writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
+- `src-tauri/src/lib.rs` command 层拆分已完成，但仍保留较多 editor ghost、context injection、observation 转换和测试 glue；`writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
 
 ## 2. 总体原则
 
@@ -454,7 +456,9 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 ### P2.1 拆分 `src-tauri/src/lib.rs`
 
-目标：`lib.rs` 只保留 app setup 和 command registration。
+目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
+
+当前状态：进行中。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 47 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。剩余工作是继续把 editor ghost rendering、semantic lint/context injection、observation conversion 和测试 helper 从 `lib.rs` 拆到职责更窄的模块。
 
 建议模块：
 
@@ -472,13 +476,16 @@ src-tauri/src/commands/
 
 src-tauri/src/events.rs
 src-tauri/src/app_state.rs
+src-tauri/src/editor_realtime.rs
+src-tauri/src/context_injection.rs
 src-tauri/src/manual_agent.rs
 ```
 
 验收标准：
 
-- `lib.rs` 行数明显下降。
-- 所有 command handler 有对应模块。
+- `lib.rs` 行数继续下降，且不再承载业务重的 helper。
+- 所有 command handler 有对应模块。（已完成）
+- AppState / startup DB 初始化有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
 
 ### P2.2 拆分 `writer_agent/kernel.rs`
@@ -665,10 +672,12 @@ agent-evals/src/
 
 ### 第五轮：P2 架构拆分
 
-1. 拆 `lib.rs` command modules。
-2. 拆 `kernel.rs` 内部模块。
-3. 拆 `agent-evals/run_eval.rs`。
-4. 保持 public protocol 稳定。
+1. 拆 `lib.rs` command modules。（已完成）
+2. 抽出 `app_state.rs` 和启动期状态初始化。（已完成）
+3. 继续拆 `lib.rs` 的 editor realtime / context injection / observation glue。
+4. 拆 `kernel.rs` 内部模块。
+5. 拆 `agent-evals/src/evals.rs`。
+6. 保持 public protocol 稳定。
 
 ## 13. 完成定义
 

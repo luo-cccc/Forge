@@ -1,9 +1,6 @@
-use std::sync::{Mutex, MutexGuard};
-
-use agent_harness_core::hermes_memory::HermesDB;
-
 mod agent_runtime;
 mod ambient_agents;
+mod app_state;
 mod brain_service;
 pub mod chapter_generation;
 mod commands;
@@ -13,6 +10,10 @@ mod storage;
 mod tool_bridge;
 pub mod writer_agent;
 use agent_runtime::AgentObservation;
+pub(crate) use app_state::{
+    lock_editor_prediction, lock_harness_state, lock_hermes, startup_error, AppState,
+    EditorPredictionTask, HarnessState,
+};
 
 const KEYRING_SERVICE: &str = "agent-writer";
 pub(crate) mod events {
@@ -101,173 +102,6 @@ pub(crate) fn require_api_key() -> Result<String, String> {
 }
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
-use tokio_util::sync::CancellationToken;
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub(crate) enum HarnessState {
-    Idle,
-}
-
-pub(crate) struct AppState {
-    harness_state: Mutex<HarnessState>,
-    hermes_db: Mutex<HermesDB>,
-    editor_prediction: Mutex<Option<EditorPredictionTask>>,
-    writer_kernel: Mutex<writer_agent::WriterAgentKernel>,
-    manual_agent_history: Mutex<ManualAgentHistory>,
-}
-
-pub(crate) struct EditorPredictionTask {
-    pub(crate) request_id: String,
-    pub(crate) cancel: CancellationToken,
-}
-
-pub(crate) fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
-    state
-        .hermes_db
-        .lock()
-        .map_err(|_| "Hermes memory lock poisoned".to_string())
-}
-
-pub(crate) fn lock_harness_state<'a>(
-    state: &'a AppState,
-) -> Result<MutexGuard<'a, HarnessState>, String> {
-    state
-        .harness_state
-        .lock()
-        .map_err(|_| "Harness state lock poisoned".to_string())
-}
-
-pub(crate) fn lock_editor_prediction<'a>(
-    state: &'a AppState,
-) -> Result<MutexGuard<'a, Option<EditorPredictionTask>>, String> {
-    state
-        .editor_prediction
-        .lock()
-        .map_err(|_| "Editor prediction lock poisoned".to_string())
-}
-
-fn legacy_workspace_db_path(filename: &str) -> Option<std::path::PathBuf> {
-    std::env::current_dir().ok().map(|dir| dir.join(filename))
-}
-
-fn migrate_legacy_db_if_needed(
-    target_path: &std::path::Path,
-    legacy_path: Option<std::path::PathBuf>,
-) -> Result<(), String> {
-    if target_path.exists() {
-        return Ok(());
-    }
-
-    let Some(legacy_path) = legacy_path else {
-        return Ok(());
-    };
-    if legacy_path == target_path || !legacy_path.exists() {
-        return Ok(());
-    }
-
-    if let Some(parent) = target_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "Failed to create memory DB directory '{}': {}",
-                parent.display(),
-                e
-            )
-        })?;
-    }
-
-    std::fs::copy(&legacy_path, target_path).map_err(|e| {
-        format!(
-            "Failed to migrate memory DB from '{}' to '{}': {}",
-            legacy_path.display(),
-            target_path.display(),
-            e
-        )
-    })?;
-    Ok(())
-}
-
-fn active_project_db_path(
-    app: &tauri::AppHandle,
-    filename: &str,
-) -> Result<std::path::PathBuf, String> {
-    Ok(storage::active_project_data_dir(app)?.join(filename))
-}
-
-fn open_app_hermes_db(app: &tauri::AppHandle) -> Result<HermesDB, String> {
-    let path = active_project_db_path(app, storage::HERMES_DB_FILENAME)?;
-    let app_data_legacy = storage::app_data_dir(app)?.join(storage::HERMES_DB_FILENAME);
-    migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
-    migrate_legacy_db_if_needed(&path, legacy_workspace_db_path(storage::HERMES_DB_FILENAME))?;
-    HermesDB::open(&path).map_err(|e| {
-        format!(
-            "Failed to open Hermes memory DB at '{}': {}",
-            path.display(),
-            e
-        )
-    })
-}
-
-fn open_app_writer_kernel(
-    app: &tauri::AppHandle,
-) -> Result<writer_agent::WriterAgentKernel, String> {
-    let project_id = storage::active_project_id(app)?;
-    let path = active_project_db_path(app, storage::WRITER_MEMORY_DB_FILENAME)?;
-    let app_data_legacy = storage::app_data_dir(app)?.join(storage::WRITER_MEMORY_DB_FILENAME);
-    migrate_legacy_db_if_needed(&path, Some(app_data_legacy))?;
-    migrate_legacy_db_if_needed(
-        &path,
-        legacy_workspace_db_path(storage::WRITER_MEMORY_DB_FILENAME),
-    )?;
-    let memory = writer_agent::memory::WriterMemory::open(&path).map_err(|e| {
-        format!(
-            "Failed to open writer memory DB at '{}': {}",
-            path.display(),
-            e
-        )
-    })?;
-    seed_story_model_if_empty(app, &project_id, &memory);
-    Ok(writer_agent::WriterAgentKernel::new(&project_id, memory))
-}
-
-fn seed_story_model_if_empty(
-    app: &tauri::AppHandle,
-    project_id: &str,
-    memory: &writer_agent::memory::WriterMemory,
-) {
-    let project_name = storage::active_project_manifest(app)
-        .map(|manifest| manifest.name)
-        .unwrap_or_else(|_| "Local Project".to_string());
-    let lorebook = storage::load_lorebook(app).unwrap_or_default();
-    let outline = storage::load_outline(app).unwrap_or_default();
-    match writer_agent::context::seed_story_contract_from_project_assets(
-        project_id,
-        &project_name,
-        &lorebook,
-        &outline,
-        memory,
-    ) {
-        Ok(true) => tracing::info!("Seeded initial story contract for project {}", project_id),
-        Ok(false) => {}
-        Err(e) => tracing::warn!("Story contract seed skipped: {}", e),
-    }
-    match writer_agent::context::seed_chapter_missions_from_outline(project_id, &outline, memory) {
-        Ok(count) if count > 0 => {
-            tracing::info!(
-                "Seeded {} chapter missions for project {}",
-                count,
-                project_id
-            )
-        }
-        Ok(_) => {}
-        Err(e) => tracing::warn!("Chapter mission seed skipped: {}", e),
-    }
-}
-
-fn startup_error(message: String) -> Box<dyn std::error::Error> {
-    tracing::error!("{}", message);
-    std::io::Error::new(std::io::ErrorKind::Other, message).into()
-}
-
 #[derive(Serialize, Clone)]
 pub(crate) struct StreamChunk {
     pub(crate) content: String,
@@ -314,7 +148,7 @@ use commands::writer_agent::{
     get_writer_agent_pending_proposals, get_writer_agent_status, get_writer_agent_trace,
     record_implicit_ghost_rejection, record_writer_operation_durable_save,
 };
-use manual_agent::{ManualAgentHistory, ManualAgentTurn};
+pub(crate) use manual_agent::ManualAgentTurn;
 
 pub(crate) fn audit_project_file_write(
     app: &tauri::AppHandle,
@@ -1761,8 +1595,7 @@ pub fn run() {
 
     if let Err(e) = tauri::Builder::default()
         .setup(move |app| {
-            let hermes_db = open_app_hermes_db(app.handle()).map_err(startup_error)?;
-            let writer_kernel = open_app_writer_kernel(app.handle()).map_err(startup_error)?;
+            let app_state = AppState::open(app.handle()).map_err(startup_error)?;
 
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
             let ah = app.handle().clone();
@@ -1778,14 +1611,8 @@ pub fn run() {
                 },
             ));
 
-            app.manage(Mutex::new(event_bus));
-            app.manage(AppState {
-                harness_state: Mutex::new(HarnessState::Idle),
-                hermes_db: Mutex::new(hermes_db),
-                editor_prediction: Mutex::new(None),
-                writer_kernel: Mutex::new(writer_kernel),
-                manual_agent_history: Mutex::new(ManualAgentHistory::default()),
-            });
+            app.manage(std::sync::Mutex::new(event_bus));
+            app.manage(app_state);
             app.manage(cache_for_state);
             Ok(())
         })
@@ -1983,7 +1810,7 @@ mod tests {
 
     #[test]
     fn manual_agent_history_keeps_only_matching_project_recent_first() {
-        let mut history = ManualAgentHistory::default();
+        let mut history = manual_agent::ManualAgentHistory::default();
         history.append(ManualAgentTurn {
             project_id: "novel-a".to_string(),
             created_at: 1,
@@ -2022,7 +1849,7 @@ mod tests {
 
     #[test]
     fn manual_agent_history_applies_turn_and_char_budgets() {
-        let mut history = ManualAgentHistory::default();
+        let mut history = manual_agent::ManualAgentHistory::default();
         for idx in 0..5 {
             history.append(ManualAgentTurn {
                 project_id: "novel-a".to_string(),
@@ -2176,7 +2003,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(&legacy_path, b"legacy-memory").unwrap();
 
-        migrate_legacy_db_if_needed(&target_path, Some(legacy_path.clone())).unwrap();
+        app_state::migrate_legacy_db_if_needed(&target_path, Some(legacy_path.clone())).unwrap();
 
         assert_eq!(std::fs::read(&target_path).unwrap(), b"legacy-memory");
         let _ = std::fs::remove_dir_all(&root);
@@ -2199,7 +2026,7 @@ mod tests {
         std::fs::write(&legacy_path, b"legacy-memory").unwrap();
         std::fs::write(&target_path, b"current-memory").unwrap();
 
-        migrate_legacy_db_if_needed(&target_path, Some(legacy_path)).unwrap();
+        app_state::migrate_legacy_db_if_needed(&target_path, Some(legacy_path)).unwrap();
 
         assert_eq!(std::fs::read(&target_path).unwrap(), b"current-memory");
         let _ = std::fs::remove_dir_all(&root);

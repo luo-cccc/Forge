@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-02
+Last updated: 2026-05-03
 
 ## Positioning
 
@@ -12,7 +12,7 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only in `writer_agent/kernel.rs`. `ask_agent` in lib.rs calls `kernel.prepare_task_run()` + `prepared_run.run()` — no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are defined in the kernel.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 47 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify`. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 47 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers `pub async fn` command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
@@ -43,6 +43,8 @@ P1 is in progress:
   - operation lifecycle tracking
   - derived product metrics
 - The five foundation axes are represented by `TaskPacket` and enforced in trace/eval paths.
+- All Tauri command handlers now live under `src-tauri/src/commands/*`; `src-tauri/src/lib.rs` currently has 0 `#[tauri::command]` handlers.
+- Shared app state and startup memory initialization now live in `src-tauri/src/app_state.rs`, including AppState, lock helpers, Hermes/Writer memory DB opening, legacy DB migration, and kernel seed logic.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
@@ -85,10 +87,10 @@ The expected local baseline is:
 
 ## Remaining Gaps
 
-- `src-tauri/src/lib.rs` is still too large and should be split into command modules after the save-flow risks are fully closed.
+- `src-tauri/src/lib.rs` has completed the command-handler split, but still carries editor realtime ghost rendering, semantic lint/context injection, observation conversion, and tests that should move into narrower modules.
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions (P1).
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
-- `kernel.rs`, `lib.rs`, and `agent-evals/src/evals.rs` still need modular splitting (P2).
+- `writer_agent/kernel.rs` and `agent-evals/src/evals.rs` still need modular splitting (P2); `lib.rs` needs continued helper/glue extraction rather than command-module extraction.
