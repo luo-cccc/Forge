@@ -872,9 +872,41 @@ export interface WriterAgentTraceSnapshot {
   recentFeedback: WriterFeedbackTrace[];
   operationLifecycle: WriterOperationLifecycleTrace[];
   runEvents: WriterRunEvent[];
+  postWriteDiagnostics: WriterPostWriteDiagnosticReport[];
   contextSourceTrends: WriterContextSourceTrend[];
   contextRecalls: ContextRecallSummary[];
   productMetrics: WriterProductMetrics;
+}
+
+export interface WriterPostWriteDiagnosticReport {
+  observationId: string;
+  chapterTitle?: string | null;
+  chapterRevision?: string | null;
+  totalCount: number;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  categories: WriterPostWriteDiagnosticCategoryCount[];
+  diagnostics: WriterPostWriteDiagnosticItem[];
+  sourceRefs: string[];
+  remediation: string[];
+  createdAtMs: number;
+}
+
+export interface WriterPostWriteDiagnosticCategoryCount {
+  category: string;
+  count: number;
+}
+
+export interface WriterPostWriteDiagnosticItem {
+  diagnosticId: string;
+  severity: "Error" | "Warning" | "Info" | string;
+  category: string;
+  message: string;
+  target: { from: number; to: number };
+  evidenceRefs: string[];
+  fixSuggestion?: string | null;
+  operationCount: number;
 }
 
 export interface WriterProductMetrics {

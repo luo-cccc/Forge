@@ -20,6 +20,7 @@ import type {
   StoryContractSummary,
   ChapterMissionSummary,
   WriterAgentTraceSnapshot,
+  WriterPostWriteDiagnosticReport,
   WriterProposalTrace,
   WriterOperation,
 } from "../protocol";
@@ -173,6 +174,28 @@ function storageStatusClass(status: string): string {
   if (status === "missing") return "text-text-muted";
   if (status === "error") return "text-danger";
   return "text-accent";
+}
+
+function postWriteReportTone(report: WriterPostWriteDiagnosticReport): SecondBrainTone {
+  if (report.errorCount > 0) return "danger";
+  if (report.warningCount > 0) return "accent";
+  return "success";
+}
+
+function diagnosticSeverityClass(severity: string): string {
+  if (severity === "Error" || severity === "error") return "bg-danger/20 text-danger";
+  if (severity === "Warning" || severity === "warning") return "bg-accent-subtle text-accent";
+  return "bg-bg-surface text-text-muted";
+}
+
+function postWriteReportLabel(report: WriterPostWriteDiagnosticReport): string {
+  const chapter = report.chapterTitle ?? "saved text";
+  const revision = report.chapterRevision ? ` · ${report.chapterRevision}` : "";
+  return `${chapter}${revision}`;
+}
+
+function postWriteReportCounts(report: WriterPostWriteDiagnosticReport): string {
+  return `${report.errorCount} errors · ${report.warningCount} warnings · ${report.infoCount} info`;
 }
 
 function formatBytes(bytes?: number): string {
@@ -690,7 +713,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
-        invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 12 }),
+        invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
       ]);
       invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
         .then(setStorageDiagnostics)
@@ -1906,9 +1929,71 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           <div className="space-y-2 text-xs">
             {(trace?.recentProposals.length ?? 0) === 0 &&
               (trace?.taskPackets.length ?? 0) === 0 &&
+              (trace?.postWriteDiagnostics.length ?? 0) === 0 &&
               (ledger?.memoryAudit.length ?? 0) === 0 &&
               (trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) === 0 && (
               <p className="text-text-muted">No agent audit events yet.</p>
+            )}
+            {(trace?.postWriteDiagnostics.length ?? 0) > 0 && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Post-write Diagnostics</span>
+                  <span className="text-[10px] text-text-muted">
+                    {trace?.postWriteDiagnostics.length ?? 0} reports
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {trace?.postWriteDiagnostics.slice(0, 4).map((report) => (
+                    <div
+                      key={`${report.observationId}-${report.createdAtMs}`}
+                      className={`rounded border p-2 ${secondBrainToneClass(postWriteReportTone(report))}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-text-secondary" title={postWriteReportLabel(report)}>
+                          {postWriteReportLabel(report)}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                          {postWriteReportCounts(report)}
+                        </span>
+                      </div>
+                      {report.diagnostics.slice(0, 3).map((diagnostic) => (
+                        <div key={diagnostic.diagnosticId} className="mt-2 rounded bg-bg-deep border border-border-subtle p-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-text-secondary" title={diagnostic.message}>
+                              {diagnostic.category}
+                            </span>
+                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${diagnosticSeverityClass(diagnostic.severity)}`}>
+                              {diagnostic.severity}
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-text-muted">
+                            {diagnostic.message}
+                          </p>
+                          {diagnostic.fixSuggestion && (
+                            <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-accent">
+                              {diagnostic.fixSuggestion}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                      {report.sourceRefs.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {report.sourceRefs.slice(0, 5).map((sourceRef) => (
+                            <span key={`${report.observationId}-${sourceRef}`} className="rounded bg-bg-deep px-1.5 py-0.5 text-[10px] text-text-muted">
+                              {sourceRef}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {report.remediation[0] && (
+                        <p className="mt-2 line-clamp-2 text-[10px] leading-snug text-text-secondary">
+                          {report.remediation[0]}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {(trace?.taskPackets.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
