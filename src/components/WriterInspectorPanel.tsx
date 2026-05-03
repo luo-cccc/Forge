@@ -13,6 +13,7 @@ import type {
 type InspectorFilter =
   | "all"
   | "failure"
+  | "save_completed"
   | "run_event"
   | "task_packet"
   | "operation_lifecycle"
@@ -22,6 +23,7 @@ type InspectorFilter =
 const filterLabels: Record<InspectorFilter, string> = {
   all: "All",
   failure: "Failures",
+  save_completed: "Saves",
   run_event: "Run Events",
   task_packet: "Packets",
   operation_lifecycle: "Lifecycle",
@@ -32,6 +34,7 @@ const filterLabels: Record<InspectorFilter, string> = {
 const filterOrder: InspectorFilter[] = [
   "all",
   "failure",
+  "save_completed",
   "run_event",
   "task_packet",
   "operation_lifecycle",
@@ -56,6 +59,13 @@ function formatTime(tsMs: number): string {
 function formatCostMicros(value: number | undefined): string {
   if (value === undefined) return "-";
   return `$${(value / 1_000_000).toFixed(4)}`;
+}
+
+function formatDuration(value: number | null | undefined): string {
+  if (value === undefined || value === null) return "n/a";
+  if (value < 1000) return `${value}ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
+  return `${Math.round(value / 60_000)}m`;
 }
 
 function eventToneClass(kind: WriterTimelineEventKind): string {
@@ -142,12 +152,42 @@ function failureDetail(detail: unknown): {
   };
 }
 
+function saveCompletedDetail(detail: unknown): {
+  chapterTitle?: string;
+  chapterRevision?: string;
+  saveResult?: string;
+  proposalId?: string;
+  operationKind?: string;
+  postWriteReportId?: string;
+  diagnosticTotalCount?: number;
+  diagnosticErrorCount?: number;
+  diagnosticWarningCount?: number;
+} | null {
+  const data = detailRecord(detail);
+  if (!("saveResult" in data) && !("postWriteReportId" in data)) return null;
+  return {
+    chapterTitle: textField(data.chapterTitle),
+    chapterRevision: textField(data.chapterRevision),
+    saveResult: textField(data.saveResult),
+    proposalId: textField(data.proposalId),
+    operationKind: textField(data.operationKind),
+    postWriteReportId: textField(data.postWriteReportId),
+    diagnosticTotalCount: numberField(data.diagnosticTotalCount),
+    diagnosticErrorCount: numberField(data.diagnosticErrorCount),
+    diagnosticWarningCount: numberField(data.diagnosticWarningCount),
+  };
+}
+
 function eventSortValue(event: WriterTimelineEvent): number {
   return event.tsMs || 0;
 }
 
 function matchingFilter(event: WriterTimelineEvent, filter: InspectorFilter): boolean {
-  return filter === "all" || event.kind === filter;
+  if (filter === "all") return true;
+  if (filter === "save_completed") {
+    return event.kind === "run_event" && event.label === "writer.save_completed";
+  }
+  return event.kind === filter;
 }
 
 export const WriterInspectorPanel: React.FC = () => {
@@ -191,6 +231,9 @@ export const WriterInspectorPanel: React.FC = () => {
     for (const event of events) {
       const key = event.kind as InspectorFilter;
       counts.set(key, (counts.get(key) ?? 0) + 1);
+      if (event.kind === "run_event" && event.label === "writer.save_completed") {
+        counts.set("save_completed", (counts.get("save_completed") ?? 0) + 1);
+      }
     }
     return counts;
   }, [events]);
@@ -205,6 +248,10 @@ export const WriterInspectorPanel: React.FC = () => {
   const metrics = trace?.productMetrics;
   const trends = trace?.contextSourceTrends ?? [];
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
+  const latestSaveDetail = saveCompletedDetail(latestSave?.detail);
+  const saveCompletedEvents = events.filter((event) =>
+    event.kind === "run_event" && event.label === "writer.save_completed"
+  );
 
   return (
     <div className="flex h-full flex-col bg-bg-surface">
@@ -283,6 +330,7 @@ export const WriterInspectorPanel: React.FC = () => {
               .map((event, index) => {
                 const budget = providerBudgetDetail(event.detail);
                 const failure = failureDetail(event.detail);
+                const saveCompleted = saveCompletedDetail(event.detail);
                 return (
                   <div
                     key={`${event.kind}-${event.taskId ?? "none"}-${event.tsMs}-${index}`}
@@ -339,6 +387,23 @@ export const WriterInspectorPanel: React.FC = () => {
                         )}
                       </div>
                     )}
+                    {saveCompleted && (
+                      <div className="mt-2 rounded border border-success/30 bg-bg-deep p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-success">
+                            {saveCompleted.saveResult ?? "save completed"}
+                          </span>
+                          <span className="text-[10px] text-text-muted">
+                            {saveCompleted.diagnosticErrorCount ?? 0}e · {saveCompleted.diagnosticWarningCount ?? 0}w
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                          {saveCompleted.chapterTitle && <span>{saveCompleted.chapterTitle}</span>}
+                          {saveCompleted.operationKind && <span>{saveCompleted.operationKind}</span>}
+                          {saveCompleted.postWriteReportId && <span>report {saveCompleted.postWriteReportId}</span>}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -369,6 +434,16 @@ export const WriterInspectorPanel: React.FC = () => {
                   <span className="font-mono text-text-primary">
                     {formatRate(metrics?.ignoredRepeatedSuggestionRate)}
                   </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Save Feedback</span>
+                  <span className="font-mono text-text-primary">
+                    {formatDuration(metrics?.averageSaveToFeedbackMs)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Save Events</span>
+                  <span className="font-mono text-text-primary">{saveCompletedEvents.length}</span>
                 </div>
               </div>
             </section>
@@ -404,8 +479,28 @@ export const WriterInspectorPanel: React.FC = () => {
 
             {latestSave && (
               <section className="rounded border border-border-subtle bg-bg-raised p-2 text-xs">
-                <div className="mb-1 font-medium text-text-primary">Latest Save</div>
-                <p className="line-clamp-3 text-text-secondary">{latestSave.summary}</p>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Latest Save</span>
+                  <span className="text-[10px] text-text-muted">
+                    {formatDuration(metrics?.averageSaveToFeedbackMs)} feedback
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2 text-text-secondary">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{latestSaveDetail?.saveResult ?? latestSave.summary}</span>
+                    <span className={
+                      (latestSaveDetail?.diagnosticErrorCount ?? 0) > 0 ? "text-danger" : "text-success"
+                    }>
+                      {latestSaveDetail?.diagnosticTotalCount ?? 0} diagnostics
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                    {latestSaveDetail?.chapterTitle && <span>{latestSaveDetail.chapterTitle}</span>}
+                    {latestSaveDetail?.operationKind && <span>{latestSaveDetail.operationKind}</span>}
+                    {latestSaveDetail?.proposalId && <span>proposal {latestSaveDetail.proposalId}</span>}
+                    {latestSaveDetail?.postWriteReportId && <span>report {latestSaveDetail.postWriteReportId}</span>}
+                  </div>
+                </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {latestSave.sourceRefs.slice(0, 6).map((source) => (
                     <span key={source} className="rounded bg-bg-deep px-1.5 py-0.5 text-[10px] text-text-muted">

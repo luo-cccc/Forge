@@ -68,6 +68,14 @@ const checks = [
       inspectorSource.includes("Provider Budget") &&
       !source.includes("getWriterAgentInspectorTimeline"),
   },
+  {
+    name: "inspector owns save completed and save feedback latency details",
+    pass:
+      inspectorSource.includes('"save_completed"') &&
+      inspectorSource.includes("writer.save_completed") &&
+      inspectorSource.includes("averageSaveToFeedbackMs") &&
+      !source.includes("writer.save_completed"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);
