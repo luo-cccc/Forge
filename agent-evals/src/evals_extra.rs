@@ -1385,6 +1385,61 @@ pub fn run_project_brain_long_session_candidate_recall_eval() -> EvalResult {
     )
 }
 
+pub fn run_project_brain_avoid_terms_preserve_payoff_eval() -> EvalResult {
+    let chunks = vec![
+        (
+            36.0,
+            (
+                "rumor-noise",
+                "旧门传闻在酒肆里反复扩散，路人只谈旧门传闻和无关闲谈，没有新的线索。",
+            ),
+        ),
+        (
+            1.0,
+            (
+                "old-door-payoff",
+                "林墨回到旧门，发现门缝里的钥匙正是前文伏笔，旧门钥匙揭开密信来源并回收承诺。",
+            ),
+        ),
+    ];
+    let reranked = rerank_text_chunks(
+        chunks,
+        "本章必须回收旧门钥匙伏笔，揭开密信来源；不要被旧门传闻或无关闲谈稀释主线。",
+        |(_, text)| text.to_string(),
+    );
+    let first_id = reranked
+        .first()
+        .map(|(_, _, (id, _))| *id)
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if first_id != "old-door-payoff" {
+        errors.push(format!(
+            "avoid-term rerank should preserve old-door payoff while suppressing rumor noise, got {}",
+            first_id
+        ));
+    }
+    if first_explanation.contains("avoid term 旧门")
+        || !first_explanation.contains("旧门钥匙")
+        || !first_explanation.contains("scene type setup_payoff")
+    {
+        errors.push(format!(
+            "payoff explanation should keep old-door-key relevance without broad old-door avoid penalty: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_avoid_terms_preserve_payoff",
+        format!("first={} explanation={}", first_id, first_explanation),
+        errors,
+    )
+}
+
 pub fn run_end_to_end_ghost_pipeline_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

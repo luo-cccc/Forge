@@ -570,6 +570,7 @@ fn relevance_terms(text: &str) -> Vec<String> {
         "南境林墨",
         "玉佩",
         "密信",
+        "旧门钥匙",
         "钥匙",
         "令牌",
         "真相",
@@ -617,8 +618,13 @@ fn negative_relevance_terms(text: &str) -> Vec<String> {
     for segment in text.split(|ch| matches!(ch, '\n' | '。' | '；' | ';' | '.')) {
         for cue in NEGATIVE_CUES {
             if let Some(cue_start) = segment.find(cue) {
-                let cue_tail = &segment[cue_start..];
-                for term in relevance_terms(cue_tail) {
+                let cue_tail = &segment[cue_start + cue.len()..];
+                let phrase_terms = negative_phrase_terms(cue_tail);
+                for term in phrase_terms.iter().cloned().chain(
+                    relevance_terms(cue_tail)
+                        .into_iter()
+                        .filter(|term| !phrase_terms.iter().any(|phrase| phrase.contains(term))),
+                ) {
                     if seen.insert(term.clone()) {
                         terms.push(term);
                     }
@@ -630,6 +636,40 @@ fn negative_relevance_terms(text: &str) -> Vec<String> {
 }
 
 const NEGATIVE_CUES: &[&str] = &["不要", "不得", "禁止", "避免", "不能"];
+const NEGATIVE_BOUNDARIES: &[&str] = &["稀释", "干扰", "掩盖", "拖慢", "分散", "偏离", "覆盖"];
+
+fn negative_phrase_terms(text: &str) -> Vec<String> {
+    let before_boundary = NEGATIVE_BOUNDARIES
+        .iter()
+        .filter_map(|boundary| text.find(boundary))
+        .min()
+        .map(|idx| &text[..idx])
+        .unwrap_or(text);
+    before_boundary
+        .split(|ch| matches!(ch, '或' | '和' | '、' | '，' | ',' | '/' | '／'))
+        .filter_map(|part| {
+            let term = strip_negative_phrase_filler(part);
+            let count = term.chars().count();
+            if (2..=10).contains(&count) && !is_relevance_stopword(term) {
+                Some(term.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn strip_negative_phrase_filler(raw: &str) -> &str {
+    raw.trim()
+        .trim_start_matches('被')
+        .trim_start_matches('把')
+        .trim_start_matches('将')
+        .trim_start_matches("继续")
+        .trim_start_matches("只是")
+        .trim_start_matches('只')
+        .trim_start_matches('再')
+        .trim()
+}
 
 fn push_relevance_term(terms: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
     let term = raw.trim();
