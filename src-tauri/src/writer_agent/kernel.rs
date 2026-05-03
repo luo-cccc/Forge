@@ -35,6 +35,11 @@ pub(crate) use super::kernel_ghost::{
     context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
 };
 pub use super::kernel_helpers::*;
+pub(crate) use super::kernel_memory_feedback::{
+    memory_candidate_slot_for_canon, memory_candidate_slot_for_promise, proposal_slot_key,
+    record_memory_audit_event, record_memory_candidate_feedback, suppression_slot_key,
+    MemoryCandidate, MemoryExtractionFeedback,
+};
 pub(crate) use super::kernel_metrics::product_metrics_from_trace;
 pub use super::kernel_metrics::WriterProductMetrics;
 pub(crate) use super::kernel_ops::*;
@@ -2232,231 +2237,6 @@ pub(crate) fn snippet(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
 
-fn proposal_slot_key(proposal: &AgentProposal) -> String {
-    let target = proposal
-        .target
-        .as_ref()
-        .map(|target| format!("{}:{}", target.from, target.to))
-        .unwrap_or_else(|| "none".to_string());
-
-    if proposal.kind == ProposalKind::Ghost {
-        return format!("{}|{:?}|{}", proposal.observation_id, proposal.kind, target);
-    }
-
-    if let Some(memory_slot) = memory_operation_slot(proposal) {
-        return memory_slot;
-    }
-
-    let evidence_key = proposal
-        .evidence
-        .first()
-        .map(|evidence| format!("{:?}:{}", evidence.source, evidence.reference))
-        .unwrap_or_default();
-    let preview_key: String = proposal
-        .preview
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(80)
-        .collect();
-
-    format!(
-        "{:?}|{}|{}|{}",
-        proposal.kind, target, evidence_key, preview_key
-    )
-}
-
-fn suppression_slot_key(proposal: &AgentProposal) -> String {
-    let target = proposal
-        .target
-        .as_ref()
-        .map(|target| format!("{}:{}", target.from, target.to))
-        .unwrap_or_else(|| "none".to_string());
-    let evidence_key = proposal
-        .evidence
-        .first()
-        .map(|evidence| format!("{:?}:{}", evidence.source, evidence.reference))
-        .unwrap_or_default();
-
-    if proposal.kind == ProposalKind::Ghost {
-        return ghost_suppression_slot_key(proposal);
-    }
-
-    if let Some(memory_slot) = memory_operation_slot(proposal) {
-        return memory_slot;
-    }
-
-    format!(
-        "{:?}|{}|{}|{}",
-        proposal.kind,
-        target,
-        evidence_key,
-        preview_fingerprint(&proposal.preview)
-    )
-}
-
-fn ghost_suppression_slot_key(proposal: &AgentProposal) -> String {
-    let chapter = proposal
-        .operations
-        .first()
-        .and_then(|operation| match operation {
-            WriterOperation::TextInsert { chapter, .. }
-            | WriterOperation::TextReplace { chapter, .. }
-            | WriterOperation::TextAnnotate { chapter, .. } => Some(chapter.as_str()),
-            _ => None,
-        })
-        .unwrap_or("project");
-    format!(
-        "{:?}|{}|{}",
-        proposal.kind,
-        chapter,
-        preview_fingerprint(&proposal.preview)
-    )
-}
-
-fn memory_operation_slot(proposal: &AgentProposal) -> Option<String> {
-    match proposal.operations.first()? {
-        WriterOperation::CanonUpsertEntity { entity } => {
-            Some(memory_candidate_slot_for_canon(entity))
-        }
-        WriterOperation::PromiseAdd { promise } => Some(memory_candidate_slot_for_promise(promise)),
-        _ => None,
-    }
-}
-
-fn memory_audit_title(proposal: &AgentProposal) -> String {
-    match proposal.operations.first() {
-        Some(WriterOperation::CanonUpsertEntity { entity }) => {
-            format!("{} [{}]", entity.name, entity.kind)
-        }
-        Some(WriterOperation::PromiseAdd { promise }) => {
-            format!("{} [{}]", promise.title, promise.kind)
-        }
-        _ => proposal.preview.clone(),
-    }
-}
-
-fn record_memory_audit_event(
-    memory: &WriterMemory,
-    proposal: &AgentProposal,
-    feedback: &ProposalFeedback,
-) {
-    if memory_operation_slot(proposal).is_none() {
-        return;
-    }
-    let entry = super::memory::MemoryAuditSummary {
-        proposal_id: proposal.id.clone(),
-        kind: format!("{:?}", proposal.kind),
-        action: format!("{:?}", feedback.action),
-        title: memory_audit_title(proposal),
-        evidence: proposal
-            .evidence
-            .first()
-            .map(|evidence| evidence.snippet.clone())
-            .unwrap_or_default(),
-        rationale: proposal.rationale.clone(),
-        reason: feedback.reason.clone(),
-        created_at: feedback.created_at,
-    };
-    memory.record_memory_audit(&entry).ok();
-}
-
-fn memory_candidate_slot_for_canon(entity: &CanonEntityOp) -> String {
-    format!("memory|canon|{}|{}", entity.kind, entity.name)
-}
-
-fn memory_candidate_slot_for_promise(promise: &PlotPromiseOp) -> String {
-    format!("memory|promise|{}|{}", promise.kind, promise.title)
-}
-
-fn memory_feedback_key(slot: &str) -> String {
-    format!("memory_extract:{}", slot)
-}
-
-fn record_memory_candidate_feedback(
-    memory: &WriterMemory,
-    proposal: &AgentProposal,
-    accepted: bool,
-) {
-    let Some(slot) = memory_operation_slot(proposal) else {
-        return;
-    };
-    let value = if accepted { "accepted" } else { "rejected" };
-    let _ = memory.upsert_style_preference(&memory_feedback_key(&slot), value, accepted);
-}
-
-struct MemoryExtractionFeedback {
-    suppressed_slots: std::collections::HashSet<String>,
-    preferred_slots: std::collections::HashSet<String>,
-}
-
-impl MemoryExtractionFeedback {
-    fn from_memory(memory: &WriterMemory) -> Self {
-        let mut suppressed_slots = std::collections::HashSet::new();
-        let mut preferred_slots = std::collections::HashSet::new();
-        for preference in memory.list_style_preferences(200).unwrap_or_default() {
-            let Some(slot) = preference.key.strip_prefix("memory_extract:") else {
-                continue;
-            };
-            if preference.rejected_count >= 1
-                && preference.rejected_count >= preference.accepted_count
-            {
-                suppressed_slots.insert(slot.to_string());
-            } else if preference.accepted_count > preference.rejected_count {
-                preferred_slots.insert(slot.to_string());
-            }
-        }
-        Self {
-            suppressed_slots,
-            preferred_slots,
-        }
-    }
-
-    fn is_suppressed(&self, slot: &str) -> bool {
-        self.suppressed_slots.contains(slot)
-    }
-
-    fn is_preferred(&self, slot: &str) -> bool {
-        self.preferred_slots.contains(slot)
-    }
-
-    fn apply_to_candidate(&self, candidate: MemoryCandidate) -> Option<MemoryCandidate> {
-        match candidate {
-            MemoryCandidate::Canon(mut entity) => {
-                let slot = memory_candidate_slot_for_canon(&entity);
-                if self.is_suppressed(&slot) {
-                    return None;
-                }
-                if self.is_preferred(&slot) {
-                    entity.confidence = (entity.confidence + 0.08).min(0.95);
-                }
-                Some(MemoryCandidate::Canon(entity))
-            }
-            MemoryCandidate::Promise(mut promise) => {
-                let slot = memory_candidate_slot_for_promise(&promise);
-                if self.is_suppressed(&slot) {
-                    return None;
-                }
-                if self.is_preferred(&slot) {
-                    promise.priority = (promise.priority + 1).min(10);
-                }
-                Some(MemoryCandidate::Promise(promise))
-            }
-        }
-    }
-}
-
-fn preview_fingerprint(preview: &str) -> String {
-    preview
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(80)
-        .collect()
-}
-
 fn diagnostic_to_proposal(
     diagnostic: DiagnosticResult,
     observation: &WriterObservation,
@@ -2805,11 +2585,6 @@ pub fn extract_plot_promises(text: &str, observation: &WriterObservation) -> Vec
         });
     }
     promises
-}
-
-enum MemoryCandidate {
-    Canon(CanonEntityOp),
-    Promise(PlotPromiseOp),
 }
 
 fn llm_memory_candidates_from_value(

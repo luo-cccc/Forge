@@ -7,6 +7,7 @@ pub mod kernel;
 pub mod kernel_chapters;
 pub mod kernel_ghost;
 pub mod kernel_helpers;
+pub mod kernel_memory_feedback;
 pub mod kernel_metrics;
 pub mod kernel_ops;
 pub mod kernel_prompts;
