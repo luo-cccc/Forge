@@ -91,6 +91,7 @@ fn main() {
     results.push(run_project_brain_writing_relevance_rerank_eval());
     results.push(run_scene_type_relevance_signal_eval());
     results.push(run_project_brain_uses_writer_memory_focus_eval());
+    results.push(run_project_brain_long_session_candidate_recall_eval());
     results.push(run_end_to_end_ghost_pipeline_eval());
     results.push(run_end_to_end_contract_guard_eval());
     results.push(run_end_to_end_mission_drift_detection_eval());

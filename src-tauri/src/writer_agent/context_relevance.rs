@@ -319,14 +319,21 @@ fn promise_text_contains_terms(promise_text: &str, decision_text: &str) -> bool 
 struct WritingRelevanceFocus {
     raw_text: String,
     terms: Vec<String>,
+    negative_terms: Vec<String>,
     scene_types: Vec<WritingSceneType>,
 }
 
 impl WritingRelevanceFocus {
     fn new(text: &str) -> Self {
+        let negative_terms = negative_relevance_terms(text);
+        let terms = relevance_terms(text)
+            .into_iter()
+            .filter(|term| !negative_terms.contains(term))
+            .collect();
         Self {
             raw_text: text.to_string(),
-            terms: relevance_terms(text),
+            terms,
+            negative_terms,
             scene_types: infer_scene_types(text),
         }
     }
@@ -358,14 +365,13 @@ fn score_text_chunk(focus: &WritingRelevanceFocus, text: &str) -> RelevanceScore
             break;
         }
     }
-    if focus.raw_text.contains("不要") || focus.raw_text.contains("不得") {
-        for term in relevance_terms(&focus.raw_text)
-            .into_iter()
-            .filter(|term| text.contains(term))
-            .take(2)
-        {
-            score.add(10, format!("constraint term {}", term));
-        }
+    for term in focus
+        .negative_terms
+        .iter()
+        .filter(|term| text.contains(term.as_str()))
+        .take(3)
+    {
+        score.add(-72, format!("avoid term {}", term));
     }
     score
 }
@@ -604,6 +610,26 @@ fn relevance_terms(text: &str) -> Vec<String> {
     push_relevance_term(&mut terms, &mut seen, &current);
     terms
 }
+
+fn negative_relevance_terms(text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut seen = HashSet::new();
+    for segment in text.split(|ch| matches!(ch, '\n' | '。' | '；' | ';' | '.')) {
+        for cue in NEGATIVE_CUES {
+            if let Some(cue_start) = segment.find(cue) {
+                let cue_tail = &segment[cue_start..];
+                for term in relevance_terms(cue_tail) {
+                    if seen.insert(term.clone()) {
+                        terms.push(term);
+                    }
+                }
+            }
+        }
+    }
+    terms
+}
+
+const NEGATIVE_CUES: &[&str] = &["不要", "不得", "禁止", "避免", "不能"];
 
 fn push_relevance_term(terms: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
     let term = raw.trim();

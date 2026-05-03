@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、94/94 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、95/95 writer evals。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
@@ -458,7 +458,7 @@ Verification：
 
 ### P2.3 检索从“相似文本”升级为“写作相关性”
 
-Status：部分完成。当前已完成 Writer Agent ledger context ranking，并已把轻量 writing relevance rerank 接入 project brain / vector DB 结果、standalone `query_project_brain` 和章节生成 RAG chunks；scene type taxonomy 已作为显式评分和解释信号接入，剩余缺口是用真实长会话检索数据证明普通语义段落干扰能稳定被压制。
+Status：部分完成。当前已完成 Writer Agent ledger context ranking，并已把轻量 writing relevance rerank 接入 project brain / vector DB 结果、standalone `query_project_brain` 和章节生成 RAG chunks；scene type taxonomy 和 avoid-term 约束已作为显式评分和解释信号接入，剩余缺口是继续用更真实的长会话检索数据证明普通语义段落干扰能稳定被压制。
 
 Done：
 
@@ -471,16 +471,18 @@ Done：
 - `writer_agent:scene_type_relevance_signal` 已证明 reveal / setup-payoff 场景信号能把揭示真相段落排在表层相似的描写段落之前。
 - standalone `query_project_brain` 已注入 WriterMemory focus：active chapter mission、recent chapter result feedback、next beat 和 recent decisions 会参与初筛文本与 rerank focus，避免只依赖用户 query。
 - `writer_agent:project_brain_writer_memory_focus` 已覆盖“用户 query 表层指向旧门传闻，但当前章节任务指向寒玉戒指下落”时，WriterMemory focus 能把任务相关 chunk 提到首位。
+- Writing relevance 会把 `不要` / `不得` / `禁止` / `避免` / `不能` 后的 terms 识别为 avoid terms，避免 mission 的禁止事项在 Project Brain rerank 中反向抬高干扰段落。
+- `writer_agent:project_brain_long_session_candidate_recall` 已用多章节 Project Brain fixture 覆盖 query-only top5 漏召回、focus-aware 检索召回当前任务 chunk、并通过 avoid-term rerank 压制旧门传闻噪声。
 
 Partial：
 
 - Scene type taxonomy 仍是轻量关键词规则，尚未做作者项目级自定义、LLM 校准或真实语料回归分析。
-- Project Brain 初筛候选池已扩大并使用 query + WriterMemory focus，但还需要真实长会话数据验证候选池倍率、召回稳定性和噪声段落压制边界。
+- Project Brain 初筛候选池已扩大并使用 query + WriterMemory focus；已有合成长会话 fixture 覆盖候选召回，仍需要真实作者项目数据验证候选池倍率、召回稳定性和噪声段落压制边界。
 
 Remaining：
 
-- 用真实连续章节的 Project Brain fixtures 扩展 rerank eval，覆盖更多普通语义相似干扰和多章节召回场景。
-- 用更长 Project Brain fixture 验证 standalone `query_project_brain` 的 query + WriterMemory 初筛不会因候选池截断漏掉当前任务相关段落。
+- 用真实连续章节的 Project Brain fixtures 继续扩展 rerank eval，覆盖更多普通语义相似干扰、多章节召回和作者项目特有词汇。
+- 基于真实项目数据校准 Project Brain candidate multiplier 和 avoid-term 负向权重，避免过度压制需要回收的旧线索。
 
 Verification：
 
@@ -489,6 +491,7 @@ Verification：
 - `writer_agent:project_brain_writing_relevance_rerank`（已覆盖 Project Brain / vector chunk rerank 的普通语义干扰）
 - `writer_agent:scene_type_relevance_signal`
 - `writer_agent:project_brain_writer_memory_focus`
+- `writer_agent:project_brain_long_session_candidate_recall`
 - `npm run verify`
 
 ## 9. P2：架构拆分和可维护性（P2.4-P2.6）
@@ -575,7 +578,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 94/94 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 95/95 passing。
 
 建议模块：
 

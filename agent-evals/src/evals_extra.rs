@@ -1,5 +1,9 @@
 use crate::fixtures::*;
-use agent_writer_lib::brain_service::{rerank_project_brain_results_with_focus, ProjectBrainFocus};
+use agent_harness_core::{Chunk, VectorDB};
+use agent_writer_lib::brain_service::{
+    rerank_project_brain_results_with_focus, search_project_brain_results_with_focus,
+    ProjectBrainFocus,
+};
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::context_relevance::{
     format_text_chunk_relevance, rerank_text_chunks, writing_scene_types,
@@ -1220,7 +1224,7 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
             id: "old-door".to_string(),
             chapter: "Chapter-1".to_string(),
             text: "旧门外的风声像传闻中的哭声，林墨反复听见旧门、风声和旧门。".to_string(),
-            embedding: vec![],
+            embedding: vec![1.0, 0.0],
             keywords: vec!["旧门".to_string(), "风声".to_string()],
             topic: Some("旧门传闻".to_string()),
         },
@@ -1264,6 +1268,119 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
     eval_result(
         "writer_agent:project_brain_writer_memory_focus",
         format!("first={} explanation={}", first_id, first_explanation),
+        errors,
+    )
+}
+
+pub fn run_project_brain_long_session_candidate_recall_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-9",
+            "林墨必须追查寒玉戒指下落，并揭开黑衣人把戒指带往北境宗门的来源线索。",
+            "寒玉戒指下落",
+            "不要被旧门传闻或无关闲谈稀释主线",
+            "以戒指来源的新线索收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .record_chapter_result(
+            &agent_writer_lib::writer_agent::memory::ChapterResultSummary {
+                id: 0,
+                project_id: "eval".to_string(),
+                chapter_title: "Chapter-8".to_string(),
+                chapter_revision: "rev-8".to_string(),
+                summary: "黑衣人带着寒玉戒指越过北境界碑，留下宗门旧印。".to_string(),
+                state_changes: vec![],
+                character_progress: vec![],
+                new_conflicts: vec![],
+                new_clues: vec!["寒玉戒指被带往北境宗门".to_string()],
+                promise_updates: vec!["寒玉戒指下落: 北境宗门待查".to_string()],
+                canon_updates: vec![],
+                source_ref: "eval".to_string(),
+                created_at: now_ms(),
+            },
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-9".to_string());
+    let focus = ProjectBrainFocus::from_kernel("旧门风声有什么含义？", &kernel);
+
+    let mut db = VectorDB::new();
+    for i in 0..8 {
+        db.upsert(Chunk {
+            id: format!("old-door-noise-{}", i + 1),
+            chapter: format!("Chapter-{}", i + 1),
+            text: format!(
+                "旧门外的风声在第{}夜反复出现，旧门、风声、旧门传闻、寒玉戒指传闻、北境宗门闲谈、戒指来源闲谈、下落猜测、线索闲谈和林墨的犹疑被路人反复提起。",
+                i + 1
+            ),
+            embedding: vec![],
+            keywords: vec!["旧门".to_string(), "风声".to_string()],
+            topic: Some("旧门风声传闻".to_string()),
+        });
+    }
+    db.upsert(Chunk {
+        id: "ring-long-session".to_string(),
+        chapter: "Chapter-8".to_string(),
+        text: "黑衣人带着寒玉戒指抵达北境宗门，宗门旧印揭开戒指来源线索，林墨必须查清寒玉戒指下落，并以戒指来源线索收束本章承诺。"
+            .to_string(),
+        embedding: vec![0.0, 1.0],
+        keywords: vec![
+            "寒玉戒指".to_string(),
+            "北境".to_string(),
+            "宗门".to_string(),
+        ],
+        topic: Some("寒玉戒指下落".to_string()),
+    });
+
+    let search_text = focus.search_text();
+    let embedding = vec![1.0, 0.0];
+    let query_only_top_five = db.search_hybrid("旧门风声有什么含义？", &embedding, 5);
+    let query_only_contains_ring = query_only_top_five
+        .iter()
+        .any(|(_, chunk)| chunk.id == "ring-long-session");
+    let narrow_focus_top_five = db.search_hybrid(&search_text, &embedding, 5);
+    let narrow_focus_contains_ring = narrow_focus_top_five
+        .iter()
+        .any(|(_, chunk)| chunk.id == "ring-long-session");
+    let reranked = search_project_brain_results_with_focus(&db, &focus, &embedding);
+    let first_id = reranked
+        .first()
+        .map(|(_, _, chunk)| chunk.id.as_str())
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if query_only_contains_ring {
+        errors.push("fixture should prove query-only top-5 would miss mission chunk".to_string());
+    }
+    if first_id != "ring-long-session" {
+        errors.push(format!(
+            "expanded Project Brain candidate pool should recall and prioritize mission chunk, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("寒玉戒指")
+        || !first_explanation.contains("scene type setup_payoff")
+    {
+        errors.push(format!(
+            "rerank explanation missing mission and payoff signals: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_long_session_candidate_recall",
+        format!(
+            "queryOnlyTop5ContainsRing={} narrowFocusTop5ContainsRing={} first={} explanation={}",
+            query_only_contains_ring, narrow_focus_contains_ring, first_id, first_explanation
+        ),
         errors,
     )
 }

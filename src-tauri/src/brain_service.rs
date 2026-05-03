@@ -89,7 +89,7 @@ impl ProjectBrainFocus {
         self.memory_text.as_str()
     }
 
-    fn search_str(&self) -> String {
+    pub fn search_text(&self) -> String {
         [self.query_str(), self.memory_str()]
             .into_iter()
             .filter(|part| !part.trim().is_empty())
@@ -182,7 +182,7 @@ pub async fn answer_query_with_focus(
     focus: &ProjectBrainFocus,
     on_delta: impl FnMut(String) -> Result<llm_runtime::StreamControl, String>,
 ) -> Result<(), String> {
-    let search_text = focus.search_str();
+    let search_text = focus.search_text();
     let query_embedding = llm_runtime::embed(settings, &search_text, 30)
         .await
         .map_err(|e| format!("Embed error: {}", e))?;
@@ -195,14 +195,7 @@ pub async fn answer_query_with_focus(
             e
         )
     })?;
-    let results = rerank_project_brain_results_with_focus(
-        db.search_hybrid(
-            &search_text,
-            &query_embedding,
-            TOP_K * RERANK_CANDIDATE_MULTIPLIER,
-        ),
-        focus,
-    );
+    let results = search_project_brain_results_with_focus(&db, focus, &query_embedding);
     let context = build_context(&results);
 
     let messages = vec![
@@ -229,6 +222,22 @@ pub fn rerank_project_brain_results<'a>(
             query_text: writing_focus.to_string(),
             memory_text: String::new(),
         },
+    )
+}
+
+pub fn search_project_brain_results_with_focus<'a>(
+    db: &'a VectorDB,
+    focus: &ProjectBrainFocus,
+    query_embedding: &[f32],
+) -> Vec<(f32, Vec<String>, &'a Chunk)> {
+    let search_text = focus.search_text();
+    rerank_project_brain_results_with_focus(
+        db.search_hybrid(
+            &search_text,
+            query_embedding,
+            TOP_K * RERANK_CANDIDATE_MULTIPLIER,
+        ),
+        focus,
     )
 }
 
