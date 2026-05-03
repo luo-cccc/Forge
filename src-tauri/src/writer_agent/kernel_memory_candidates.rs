@@ -991,6 +991,8 @@ fn classify_existing_style_preference(
         MemoryCandidateQuality::Duplicate {
             existing_name: existing.key.clone(),
         }
+    } else if style_preference_polarity(&existing.value) == style_preference_polarity(value) {
+        MemoryCandidateQuality::Acceptable
     } else {
         MemoryCandidateQuality::Conflict {
             existing_name: existing.key.clone(),
@@ -1011,6 +1013,8 @@ fn classify_existing_style_taxonomy_preference(
         MemoryCandidateQuality::Duplicate {
             existing_name: existing.key.clone(),
         }
+    } else if style_preference_polarity(&existing.value) == style_preference_polarity(value) {
+        MemoryCandidateQuality::Acceptable
     } else {
         MemoryCandidateQuality::Conflict {
             existing_name: existing.key.clone(),
@@ -1022,6 +1026,12 @@ fn classify_existing_style_taxonomy_preference(
             ),
         }
     }
+}
+
+pub fn style_preference_memory_key(key: &str, value: &str) -> String {
+    comparable_style_preference_slot(key, value)
+        .map(|slot| format!("style:{}", slot.label()))
+        .unwrap_or_else(|| key.trim().to_string())
 }
 
 fn is_vague_style_key(key: &str) -> bool {
@@ -1052,6 +1062,49 @@ fn is_vague_style_value(value: &str) -> bool {
         value.trim(),
         "好" | "不好" | "更好" | "不错" | "可以" | "喜欢" | "不喜欢" | "有感觉" | "没感觉"
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StylePreferencePolarity {
+    Prefer,
+    Avoid,
+    Neutral,
+}
+
+fn style_preference_polarity(value: &str) -> StylePreferencePolarity {
+    let normalized = value.trim().to_ascii_lowercase();
+    if contains_any(
+        &normalized,
+        &[
+            "避免", "不要", "少", "减少", "降低", "拒绝", "别", "不再", "别再", "少用", "克制",
+            "avoid", "less", "reduce", "reject", "without", "no ",
+        ],
+    ) {
+        return StylePreferencePolarity::Avoid;
+    }
+    if contains_any(
+        &normalized,
+        &[
+            "偏",
+            "优先",
+            "保留",
+            "增加",
+            "更多",
+            "多",
+            "强化",
+            "强调",
+            "喜欢",
+            "倾向",
+            "prefer",
+            "more",
+            "keep",
+            "increase",
+            "emphasize",
+        ],
+    ) {
+        return StylePreferencePolarity::Prefer;
+    }
+    StylePreferencePolarity::Neutral
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

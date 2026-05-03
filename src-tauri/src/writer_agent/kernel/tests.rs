@@ -292,7 +292,7 @@ fn execute_operation_upserts_canon_rule_and_style_preference() {
     let preferences = kernel.memory.list_style_preferences(10).unwrap();
     assert!(preferences
         .iter()
-        .any(|pref| pref.key == "dialogue" && pref.value == "prefers_subtext"));
+        .any(|pref| pref.key == "style:dialogue.subtext" && pref.value == "prefers_subtext"));
 }
 
 #[test]
@@ -364,7 +364,7 @@ fn style_preference_operation_enforces_quality_gates() {
     assert_eq!(
         preferences
             .iter()
-            .filter(|preference| preference.key == "dialogue_subtext")
+            .filter(|preference| preference.key == "style:dialogue.subtext")
             .count(),
         1
     );
@@ -408,6 +408,26 @@ fn style_preference_taxonomy_detects_same_slot_conflicts() {
         .error
         .as_ref()
         .is_some_and(|error| error.message.contains("dialogue.subtext")));
+
+    let same_slot_merge = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext_followup".to_string(),
+                value: "对话继续偏潜台词和短句留白，不要把情绪说满".to_string(),
+            },
+            "",
+            Some(&test_approval("style_taxonomy")),
+        )
+        .unwrap();
+    assert!(same_slot_merge.success);
+    let preferences = kernel.memory.list_style_preferences(10).unwrap();
+    assert!(preferences
+        .iter()
+        .any(|pref| pref.key == "style:dialogue.subtext"
+            && pref.value.contains("对话偏短句留白，避免直接解释情绪")
+            && pref
+                .value
+                .contains("对话继续偏潜台词和短句留白，不要把情绪说满")));
 
     let different_slot = kernel
         .approve_editor_operation_with_approval(

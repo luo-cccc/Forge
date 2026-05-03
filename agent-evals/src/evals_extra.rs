@@ -374,8 +374,8 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
 
 pub fn run_style_memory_validation_eval() -> EvalResult {
     use agent_writer_lib::writer_agent::kernel::{
-        style_preference_taxonomy_slot, validate_style_preference_with_memory,
-        MemoryCandidateQuality,
+        style_preference_memory_key, style_preference_taxonomy_slot,
+        validate_style_preference_with_memory, MemoryCandidateQuality,
     };
 
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -431,6 +431,29 @@ pub fn run_style_memory_validation_eval() -> EvalResult {
         )),
     }
     match validate_style_preference_with_memory(
+        "dialogue_subtext_followup",
+        "对话继续偏潜台词和短句留白，不要把情绪说满",
+        &memory,
+    ) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for same-polarity style merge, got {:?}",
+            other
+        )),
+    }
+    match style_preference_memory_key(
+        "dialogue_subtext_followup",
+        "对话继续偏潜台词和短句留白，不要把情绪说满",
+    )
+    .as_str()
+    {
+        "style:dialogue.subtext" => {}
+        other => errors.push(format!(
+            "expected normalized style memory key, got {}",
+            other
+        )),
+    }
+    match validate_style_preference_with_memory(
         "description_sensory_detail",
         "描写优先保留气味、触感和画面细节",
         &memory,
@@ -456,16 +479,34 @@ pub fn run_style_memory_validation_eval() -> EvalResult {
     if result.success {
         errors.push("conflicting style operation should be rejected".to_string());
     }
+    let merge_result = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext_followup".to_string(),
+                value: "对话继续偏潜台词和短句留白，不要把情绪说满".to_string(),
+            },
+            "",
+            Some(&eval_approval("style_memory_validation")),
+        )
+        .unwrap();
+    if !merge_result.success {
+        errors.push(format!(
+            "same-polarity style operation should merge: {:?}",
+            merge_result.error
+        ));
+    }
     let style_count = kernel
         .memory
         .list_style_preferences(20)
         .unwrap()
         .into_iter()
-        .filter(|preference| preference.key == "dialogue_subtext")
+        .filter(|preference| {
+            preference.key == "dialogue_subtext" || preference.key == "style:dialogue.subtext"
+        })
         .count();
-    if style_count != 1 {
+    if style_count != 2 {
         errors.push(format!(
-            "style ledger should keep one dialogue_subtext row, got {}",
+            "style ledger should keep base row plus merged taxonomy row, got {}",
             style_count
         ));
     }
@@ -473,8 +514,8 @@ pub fn run_style_memory_validation_eval() -> EvalResult {
     eval_result(
         "writer_agent:style_memory_validation",
         format!(
-            "operationRejected={} styleRows={} taxonomy=dialogue.subtext",
-            !result.success, style_count
+            "operationRejected={} mergeAccepted={} styleRows={} taxonomy=dialogue.subtext",
+            !result.success, merge_result.success, style_count
         ),
         errors,
     )

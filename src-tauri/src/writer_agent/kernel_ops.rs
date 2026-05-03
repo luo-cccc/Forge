@@ -6,7 +6,7 @@ use super::kernel_helpers::{
     validate_story_contract_summary,
 };
 use super::kernel_memory_candidates::{
-    validate_style_preference_with_memory, MemoryCandidateQuality,
+    style_preference_memory_key, validate_style_preference_with_memory, MemoryCandidateQuality,
 };
 use super::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
 use super::operation::{execute_text_operation, OperationResult, WriterOperation};
@@ -292,17 +292,18 @@ pub(crate) fn execute_writer_operation(
                     });
                 }
             }
+            let memory_key = style_preference_memory_key(key, value);
             memory
-                .upsert_style_preference(key, value, true)
+                .upsert_style_preference(&memory_key, value, true)
                 .map_err(|e| format!("style preference: {}", e))?;
             memory
                 .record_decision(
                     active_chapter.as_deref().unwrap_or("project"),
-                    &format!("Style preference: {}", key),
+                    &format!("Style preference: {}", memory_key),
                     "updated_style_preference",
                     &[],
                     value,
-                    &[format!("style:{}", key)],
+                    &[memory_key],
                 )
                 .ok();
             Ok(OperationResult {

@@ -1080,16 +1080,34 @@ impl WriterMemory {
         value: &str,
         accepted: bool,
     ) -> rusqlite::Result<()> {
+        let existing_value = self
+            .conn
+            .query_row(
+                "SELECT value FROM style_preferences WHERE key=?1",
+                rusqlite::params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        let merged_value = if accepted {
+            existing_value
+                .as_deref()
+                .map(|existing| merge_style_preference_value(existing, value))
+                .unwrap_or_else(|| value.trim().to_string())
+        } else {
+            existing_value.unwrap_or_else(|| value.trim().to_string())
+        };
+
         self.conn.execute(
             "INSERT INTO style_preferences (key, value, accepted_count, rejected_count, updated_at)
              VALUES (?1, ?2, ?3, ?4, datetime('now'))
              ON CONFLICT(key) DO UPDATE SET
+             value=excluded.value,
              accepted_count = accepted_count + ?3,
              rejected_count = rejected_count + ?4,
              updated_at = datetime('now')",
             rusqlite::params![
                 key,
-                value,
+                merged_value,
                 if accepted { 1 } else { 0 },
                 if accepted { 0 } else { 1 }
             ],
@@ -1818,6 +1836,24 @@ impl WriterMemory {
         })?;
         Ok((accepted, rejected))
     }
+}
+
+fn merge_style_preference_value(existing: &str, candidate: &str) -> String {
+    let existing = existing.trim();
+    let candidate = candidate.trim();
+    if existing.is_empty() || existing == candidate {
+        return candidate.to_string();
+    }
+    if candidate.is_empty() {
+        return existing.to_string();
+    }
+    if existing.contains(candidate) {
+        return existing.to_string();
+    }
+    if candidate.contains(existing) {
+        return candidate.to_string();
+    }
+    format!("{}；{}", existing, candidate)
 }
 
 fn initialize_schema(conn: &Connection) -> SqlResult<()> {
