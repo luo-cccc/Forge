@@ -81,6 +81,7 @@ fn main() {
     results.push(run_post_write_diagnostics_after_accepted_operation_eval());
     results.push(run_save_completed_links_post_write_diagnostics_eval());
     results.push(run_memory_candidate_created_run_event_eval());
+    results.push(run_memory_auto_write_cannot_bypass_review_eval());
     results.push(run_operation_approval_decided_run_event_eval());
     results.push(run_context_pack_built_run_event_eval());
     results.push(run_task_packet_trace_eval());

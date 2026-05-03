@@ -781,6 +781,103 @@ pub fn run_memory_candidate_created_run_event_eval() -> EvalResult {
     )
 }
 
+pub fn run_memory_auto_write_cannot_bypass_review_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter(
+        "那个少年名叫沈照，袖中藏着一枚玉佩，却始终没有告诉任何人它的下落。",
+        "Chapter-8",
+    );
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    save.editor_dirty = false;
+
+    let proposals = kernel.observe(save).unwrap();
+    let ledger = kernel.ledger_snapshot();
+    let events = kernel.run_events(50);
+    let memory_events = events
+        .iter()
+        .filter(|event| event.event_type == "writer.memory_candidate_created")
+        .collect::<Vec<_>>();
+
+    let has_canon_candidate =
+        proposals.iter().any(|proposal| {
+            proposal.kind == agent_writer_lib::writer_agent::proposal::ProposalKind::CanonUpdate
+                && matches!(
+                proposal.operations.first(),
+                Some(agent_writer_lib::writer_agent::operation::WriterOperation::CanonUpsertEntity {
+                    ..
+                })
+            )
+        });
+    let has_promise_candidate = proposals.iter().any(|proposal| {
+        proposal.kind == agent_writer_lib::writer_agent::proposal::ProposalKind::PlotPromise
+            && matches!(
+                proposal.operations.first(),
+                Some(agent_writer_lib::writer_agent::operation::WriterOperation::PromiseAdd { .. })
+            )
+    });
+
+    let mut errors = Vec::new();
+    if !has_canon_candidate {
+        errors.push("save observation did not create reviewable Canon candidate".to_string());
+    }
+    if !has_promise_candidate {
+        errors.push("save observation did not create reviewable Promise candidate".to_string());
+    }
+    if ledger
+        .canon_entities
+        .iter()
+        .any(|entity| entity.name == "沈照")
+    {
+        errors.push("Canon candidate bypassed review and wrote ledger".to_string());
+    }
+    if ledger
+        .open_promises
+        .iter()
+        .any(|promise| promise.title.contains("玉佩") || promise.description.contains("玉佩"))
+    {
+        errors.push("Promise candidate bypassed review and wrote ledger".to_string());
+    }
+    if memory_events.len() < 2 {
+        errors.push(format!(
+            "expected memory_candidate_created events for canon and promise, got {}",
+            memory_events.len()
+        ));
+    }
+    for event in memory_events {
+        if event
+            .data
+            .get("requiresAuthorReview")
+            .and_then(|value| value.as_bool())
+            != Some(true)
+            || event
+                .data
+                .get("writesLedgerImmediately")
+                .and_then(|value| value.as_bool())
+                != Some(false)
+        {
+            errors.push(format!(
+                "memory candidate event lacks review/no-write flags: {}",
+                event.data
+            ));
+        }
+    }
+
+    eval_result(
+        "writer_agent:memory_auto_write_cannot_bypass_review",
+        format!(
+            "proposals={} canonCandidate={} promiseCandidate={} canonLedger={} promiseLedger={}",
+            proposals.len(),
+            has_canon_candidate,
+            has_promise_candidate,
+            ledger.canon_entities.len(),
+            ledger.open_promises.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_operation_approval_decided_run_event_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
