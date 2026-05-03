@@ -7,6 +7,7 @@ use crate::{
     agent_runtime, events, llm_runtime, manual_agent, storage, tool_bridge, writer_agent, AppState,
     AskAgentContext, AskAgentMode, HarnessState, InlineWriterOperationEvent, ManualAgentTurn,
 };
+use writer_agent::provider_budget::apply_provider_budget_approval;
 
 const MANUAL_REQUEST_PROVIDER_BUDGET_ERROR: &str =
     "MANUAL_REQUEST_PROVIDER_BUDGET_APPROVAL_REQUIRED";
@@ -238,7 +239,12 @@ pub async fn ask_agent(
         let proposals = prepared.proposals().to_vec();
         (prepared, proposals, has_lore, has_outline)
     };
-    let budget_report = prepared_run.first_round_provider_budget(model.clone());
+    let budget_report = apply_provider_budget_approval(
+        prepared_run.first_round_provider_budget(model.clone()),
+        context_payload
+            .as_ref()
+            .and_then(|payload| payload.provider_budget_approval.as_ref()),
+    );
     let budget_created_at = agent_runtime::now_ms();
     let budget_task_id = format!("manual-request-{}", request_id);
     let budget_source_refs =

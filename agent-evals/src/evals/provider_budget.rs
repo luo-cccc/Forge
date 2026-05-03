@@ -1,8 +1,9 @@
 use super::*;
 
 use agent_writer_lib::writer_agent::provider_budget::{
-    estimate_provider_cost_micros, evaluate_provider_budget, WriterProviderBudgetDecision,
-    WriterProviderBudgetRequest, WriterProviderBudgetTask,
+    apply_provider_budget_approval, estimate_provider_cost_micros, evaluate_provider_budget,
+    WriterProviderBudgetApproval, WriterProviderBudgetDecision, WriterProviderBudgetRequest,
+    WriterProviderBudgetTask,
 };
 
 pub fn run_provider_budget_requires_approval_eval() -> EvalResult {
@@ -287,6 +288,62 @@ pub fn run_project_brain_provider_budget_eval() -> EvalResult {
     )
 }
 
+pub fn run_project_brain_provider_budget_approval_eval() -> EvalResult {
+    let long_context = "寒玉戒指仍未归还，旧门钥匙和潮汐祭账互相指向同一条线索。".repeat(2600);
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": format!(
+            "You are an expert on this novel. Answer using only these excerpts:\n{}",
+            long_context
+        )}),
+        serde_json::json!({"role": "user", "content": "旧门钥匙和潮汐祭账之间是什么关系？"}),
+    ];
+    let report = agent_writer_lib::brain_service::project_brain_query_provider_budget_for_model(
+        "gpt-4o", &messages,
+    );
+    let approval = WriterProviderBudgetApproval {
+        task: report.task,
+        model: report.model.clone(),
+        approved_total_tokens: report.estimated_total_tokens,
+        approved_cost_micros: report.estimated_cost_micros,
+        approved_at_ms: now_ms(),
+        source: "explore_project_brain".to_string(),
+    };
+    let approved = apply_provider_budget_approval(report.clone(), Some(&approval));
+
+    let mut errors = Vec::new();
+    if report.decision != WriterProviderBudgetDecision::ApprovalRequired {
+        errors.push(format!(
+            "fixture should require approval before coverage check, got {:?}",
+            report.decision
+        ));
+    }
+    if approved.decision != WriterProviderBudgetDecision::Warn {
+        errors.push(format!(
+            "covered Project Brain budget should downgrade to warning, got {:?}",
+            approved.decision
+        ));
+    }
+    if approved.approval_required {
+        errors.push("covered Project Brain budget still requires approval".to_string());
+    }
+    if !approved
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("explore_project_brain"))
+    {
+        errors.push("approved Project Brain budget lacks approval source evidence".to_string());
+    }
+
+    eval_result(
+        "writer_agent:project_brain_provider_budget_approval",
+        format!(
+            "before={:?} after={:?} tokens={}",
+            report.decision, approved.decision, approved.estimated_total_tokens
+        ),
+        errors,
+    )
+}
+
 pub fn run_manual_request_provider_budget_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -371,6 +428,90 @@ pub fn run_manual_request_provider_budget_eval() -> EvalResult {
             report.decision,
             report.estimated_total_tokens,
             snapshot.run_events.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_manual_request_provider_budget_approval_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "请完整分析接下来十章每一章的情节推进、伏笔回收和人物关系变化。"
+            .repeat(2400),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            paragraph: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o");
+
+    let mut errors = Vec::new();
+    let Ok(prepared) = prepared else {
+        return eval_result(
+            "writer_agent:manual_request_provider_budget_approval",
+            "prepare failed".to_string(),
+            vec!["manual request prepare_task_run failed".to_string()],
+        );
+    };
+    let report = prepared.first_round_provider_budget("gpt-4o");
+    let approval = WriterProviderBudgetApproval {
+        task: report.task,
+        model: report.model.clone(),
+        approved_total_tokens: report.estimated_total_tokens,
+        approved_cost_micros: report.estimated_cost_micros,
+        approved_at_ms: now_ms(),
+        source: "explore_manual_request".to_string(),
+    };
+    let approved = apply_provider_budget_approval(report.clone(), Some(&approval));
+
+    if report.decision != WriterProviderBudgetDecision::ApprovalRequired {
+        errors.push(format!(
+            "fixture should require approval before coverage check, got {:?}",
+            report.decision
+        ));
+    }
+    if approved.decision != WriterProviderBudgetDecision::Warn {
+        errors.push(format!(
+            "covered manual request budget should downgrade to warning, got {:?}",
+            approved.decision
+        ));
+    }
+    if approved.approval_required {
+        errors.push("covered manual request budget still requires approval".to_string());
+    }
+    if !approved
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("explore_manual_request"))
+    {
+        errors.push("approved manual request budget lacks approval source evidence".to_string());
+    }
+
+    eval_result(
+        "writer_agent:manual_request_provider_budget_approval",
+        format!(
+            "before={:?} after={:?} tokens={}",
+            report.decision, approved.decision, approved.estimated_total_tokens
         ),
         errors,
     )

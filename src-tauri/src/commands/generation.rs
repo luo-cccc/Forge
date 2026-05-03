@@ -5,6 +5,7 @@ use crate::chapter_generation::{
     PipelineTerminal, SaveMode,
 };
 use crate::llm_runtime;
+use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -39,6 +40,13 @@ pub(crate) struct ParallelDraftPayload {
     paragraph: String,
     selected_text: String,
     chapter_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AskProjectBrainPayload {
+    query: String,
+    provider_budget_approval: Option<WriterProviderBudgetApproval>,
 }
 
 #[derive(Serialize, Clone)]
@@ -454,22 +462,39 @@ Output ONLY the JSON object, no explanation outside. Example:
 }
 
 #[tauri::command]
-pub async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
+pub async fn ask_project_brain(
+    app: tauri::AppHandle,
+    query: String,
+    payload: Option<AskProjectBrainPayload>,
+) -> Result<(), String> {
+    let query = payload
+        .as_ref()
+        .map(|payload| payload.query.as_str())
+        .unwrap_or(&query);
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
     let focus = {
         let state = app.state::<crate::AppState>();
         let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-        crate::brain_service::ProjectBrainFocus::from_kernel(&query, &kernel)
+        crate::brain_service::ProjectBrainFocus::from_kernel(query, &kernel)
     };
 
-    crate::brain_service::answer_query_with_focus(&app, &settings, &query, &focus, |content| {
-        let _ = app.emit(
-            crate::events::AGENT_STREAM_CHUNK,
-            crate::StreamChunk { content },
-        );
-        Ok(llm_runtime::StreamControl::Continue)
-    })
+    crate::brain_service::answer_query_with_focus(
+        &app,
+        &settings,
+        query,
+        &focus,
+        payload
+            .as_ref()
+            .and_then(|payload| payload.provider_budget_approval.as_ref()),
+        |content| {
+            let _ = app.emit(
+                crate::events::AGENT_STREAM_CHUNK,
+                crate::StreamChunk { content },
+            );
+            Ok(llm_runtime::StreamControl::Continue)
+        },
+    )
     .await?;
 
     let _ = app.emit(

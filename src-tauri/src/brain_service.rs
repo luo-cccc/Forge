@@ -5,15 +5,15 @@ use agent_harness_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::writer_agent::context_relevance::{
     format_text_chunk_relevance, score_text_for_writing_focus,
 };
 use crate::writer_agent::kernel::WriterAgentKernel;
 use crate::writer_agent::provider_budget::{
-    evaluate_provider_budget, WriterProviderBudgetReport, WriterProviderBudgetRequest,
-    WriterProviderBudgetTask,
+    apply_provider_budget_approval, evaluate_provider_budget, WriterProviderBudgetApproval,
+    WriterProviderBudgetReport, WriterProviderBudgetRequest, WriterProviderBudgetTask,
 };
 use crate::writer_agent::task_receipt::{WriterFailureCategory, WriterFailureEvidenceBundle};
 use crate::{llm_runtime, storage};
@@ -435,6 +435,7 @@ pub async fn answer_query(
         settings,
         query,
         &ProjectBrainFocus::from_query(query),
+        None,
         on_delta,
     )
     .await
@@ -445,6 +446,7 @@ pub async fn answer_query_with_focus(
     settings: &llm_runtime::LlmSettings,
     query: &str,
     focus: &ProjectBrainFocus,
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
     on_delta: impl FnMut(String) -> Result<llm_runtime::StreamControl, String>,
 ) -> Result<(), String> {
     let search_text = focus.search_text();
@@ -471,7 +473,10 @@ pub async fn answer_query_with_focus(
         )}),
         serde_json::json!({"role": "user", "content": query}),
     ];
-    let budget_report = project_brain_query_provider_budget(settings, &messages);
+    let budget_report = apply_provider_budget_approval(
+        project_brain_query_provider_budget(settings, &messages),
+        provider_budget_approval,
+    );
     let created_at_ms = crate::agent_runtime::now_ms();
     let task_id = format!(
         "project-brain-query-{}",
@@ -496,6 +501,7 @@ pub async fn answer_query_with_focus(
             budget_report.clone(),
             created_at_ms,
         );
+        emit_project_brain_provider_budget_error(app, &budget_report);
         return Err("PROJECT_BRAIN_PROVIDER_BUDGET_APPROVAL_REQUIRED".to_string());
     }
 
@@ -609,6 +615,27 @@ fn record_project_brain_budget_failure(
         created_at_ms,
     );
     kernel.record_failure_evidence_bundle(&bundle);
+}
+
+fn emit_project_brain_provider_budget_error(
+    app: &tauri::AppHandle,
+    report: &WriterProviderBudgetReport,
+) {
+    let _ = app.emit(
+        crate::events::AGENT_ERROR,
+        serde_json::json!({
+            "message": "Project Brain provider budget requires explicit approval before calling the model.",
+            "source": "provider_budget",
+            "error": {
+                "code": "PROJECT_BRAIN_PROVIDER_BUDGET_APPROVAL_REQUIRED",
+                "message": "Project Brain provider budget requires explicit approval before calling the model.",
+                "recoverable": true,
+                "details": {
+                    "providerBudget": report,
+                },
+            },
+        }),
+    );
 }
 
 pub fn rerank_project_brain_results<'a>(

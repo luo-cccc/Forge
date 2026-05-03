@@ -187,6 +187,15 @@ export interface SearchStatus {
 export interface AgentError {
   message: string;
   source: string;
+  error?: {
+    code?: string;
+    message?: string;
+    recoverable?: boolean;
+    details?: {
+      providerBudget?: WriterProviderBudgetReport;
+      [key: string]: unknown;
+    };
+  };
 }
 
 export interface Epiphany {
@@ -394,6 +403,21 @@ export interface GenerateChapterAutonomousPayload {
   frontendState?: FrontendChapterStateSnapshot;
   saveMode?: "create_if_missing" | "replace_if_clean" | "save_as_draft";
   chapterSummaryOverride?: string;
+  providerBudgetApproval?: WriterProviderBudgetApproval;
+}
+
+export interface AskAgentContextPayload {
+  chapterTitle?: string;
+  chapterRevision?: string;
+  cursorPosition?: number;
+  dirty?: boolean;
+  mode?: "chat" | "inline_operation" | string;
+  requestId?: string;
+  providerBudgetApproval?: WriterProviderBudgetApproval;
+}
+
+export interface AskProjectBrainPayload {
+  query: string;
   providerBudgetApproval?: WriterProviderBudgetApproval;
 }
 

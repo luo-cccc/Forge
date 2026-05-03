@@ -25,6 +25,8 @@ pub(crate) struct AskAgentContext {
     pub(crate) dirty: Option<bool>,
     pub(crate) mode: Option<AskAgentMode>,
     pub(crate) request_id: Option<String>,
+    pub(crate) provider_budget_approval:
+        Option<writer_agent::provider_budget::WriterProviderBudgetApproval>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

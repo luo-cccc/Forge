@@ -68,6 +68,7 @@ impl ToolHandler for TauriToolBridge {
                     &settings,
                     query,
                     &focus,
+                    None,
                     |content| {
                         result_text.push_str(&content);
                         Ok(crate::llm_runtime::StreamControl::Continue)
