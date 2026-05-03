@@ -496,3 +496,101 @@ pub fn run_post_write_diagnostics_after_accepted_operation_eval() -> EvalResult 
         errors,
     )
 }
+
+pub fn run_save_completed_links_post_write_diagnostics_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角惯用武器是寒影刀",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation_in_chapter("林墨停在门前，低声确认这次不会惊动任何人。", "Chapter-5"),
+            "林墨拔出长剑，逼问玉佩的下落。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let mut approval = eval_approval("save_completed_trace");
+    approval.proposal_id = Some(proposal.id.clone());
+    kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    kernel
+        .record_operation_durable_save_with_post_write(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-5".to_string(),
+            Some("林墨停在门前。林墨拔出长剑，逼问玉佩的下落。".to_string()),
+            Some("Chapter-5".to_string()),
+            Some("rev-5".to_string()),
+        )
+        .unwrap();
+
+    let events = kernel.run_events(50);
+    let export = kernel.export_trajectory(50);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let save_event = events
+        .iter()
+        .find(|event| event.event_type == "writer.save_completed");
+
+    let mut errors = Vec::new();
+    if save_event.is_none() {
+        errors.push("run event store lacks writer.save_completed".to_string());
+    }
+    if let Some(event) = save_event {
+        if event
+            .data
+            .get("postWriteReportId")
+            .and_then(|value| value.as_str())
+            .is_none()
+        {
+            errors.push("save_completed lacks post-write report id".to_string());
+        }
+        if event
+            .data
+            .get("diagnosticErrorCount")
+            .and_then(|value| value.as_u64())
+            == Some(0)
+        {
+            errors.push("save_completed did not carry diagnostic error count".to_string());
+        }
+        if !event
+            .source_refs
+            .iter()
+            .any(|source| source == &format!("proposal:{}", proposal.id))
+        {
+            errors.push(format!(
+                "save_completed lacks proposal source ref: {:?}",
+                event.source_refs
+            ));
+        }
+        if !event
+            .source_refs
+            .iter()
+            .any(|source| source == "operation:text.insert")
+        {
+            errors.push("save_completed lacks operation source ref".to_string());
+        }
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.save_completed\"")
+            && line.contains("\"postWriteReportId\"")
+    }) {
+        errors.push("trajectory export lacks linked save_completed run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:save_completed_links_post_write_diagnostics",
+        format!("events={} trajectoryLines={}", events.len(), lines.len()),
+        errors,
+    )
+}

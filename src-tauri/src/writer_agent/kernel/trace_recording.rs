@@ -248,6 +248,58 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_save_completed_run_event(
+        &mut self,
+        observation_id: impl Into<String>,
+        chapter_title: Option<String>,
+        chapter_revision: Option<String>,
+        save_result: impl Into<String>,
+        proposal_id: Option<String>,
+        operation_kind: Option<String>,
+        report: Option<
+            &crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport,
+        >,
+        created_at_ms: u64,
+    ) {
+        let observation_id = observation_id.into();
+        let save_result = save_result.into();
+        let mut source_refs = vec![observation_id.clone()];
+        if let Some(chapter) = chapter_title.as_ref() {
+            source_refs.push(format!("chapter:{}", chapter));
+        }
+        if let Some(revision) = chapter_revision.as_ref() {
+            source_refs.push(format!("revision:{}", revision));
+        }
+        if let Some(proposal_id) = proposal_id.as_ref() {
+            source_refs.push(format!("proposal:{}", proposal_id));
+        }
+        if let Some(operation_kind) = operation_kind.as_ref() {
+            source_refs.push(format!("operation:{}", operation_kind));
+        }
+        if let Some(report) = report {
+            source_refs.extend(report.source_refs.iter().cloned());
+        }
+
+        self.record_run_event(
+            "save_completed",
+            created_at_ms,
+            Some(observation_id.clone()),
+            source_refs,
+            serde_json::json!({
+                "observationId": observation_id,
+                "chapterTitle": chapter_title,
+                "chapterRevision": chapter_revision,
+                "saveResult": save_result,
+                "proposalId": proposal_id,
+                "operationKind": operation_kind,
+                "postWriteReportId": report.map(|report| report.observation_id.clone()),
+                "diagnosticTotalCount": report.map(|report| report.total_count).unwrap_or(0),
+                "diagnosticErrorCount": report.map(|report| report.error_count).unwrap_or(0),
+                "diagnosticWarningCount": report.map(|report| report.warning_count).unwrap_or(0),
+            }),
+        );
+    }
+
     pub fn record_provider_budget_report(
         &mut self,
         task_id: impl Into<String>,

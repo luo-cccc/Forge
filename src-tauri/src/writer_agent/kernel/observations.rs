@@ -118,6 +118,16 @@ impl WriterAgentKernel {
                         observation.created_at,
                     );
                 self.record_post_write_diagnostic_report(&report);
+                self.record_save_completed_run_event(
+                    observation.id.clone(),
+                    observation.chapter_title.clone(),
+                    observation.chapter_revision.clone(),
+                    "chapter_save:observed",
+                    None,
+                    None,
+                    Some(&report),
+                    observation.created_at,
+                );
             }
             for diagnostic in diagnostics {
                 proposals.push(diagnostic_to_proposal(

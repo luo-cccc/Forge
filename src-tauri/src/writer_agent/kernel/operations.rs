@@ -173,17 +173,31 @@ impl WriterAgentKernel {
             &operation,
             state.clone(),
             approval_source,
-            Some(normalized),
+            Some(normalized.clone()),
             None,
             created_at,
         );
         if state == WriterOperationLifecycleState::DurablySaved {
-            self.record_saved_operation_post_write_diagnostics(
+            let report = self.record_saved_operation_post_write_diagnostics(
                 resolved_proposal_id.as_deref(),
                 &operation,
                 saved_text.as_deref(),
-                chapter_title,
+                chapter_title.clone(),
+                chapter_revision.clone(),
+                created_at,
+            );
+            let observation_id = report
+                .as_ref()
+                .map(|report| report.observation_id.clone())
+                .unwrap_or_else(|| format!("operation-save-{}", created_at));
+            self.record_save_completed_run_event(
+                observation_id,
+                chapter_title.or_else(|| operation_chapter(&operation)),
                 chapter_revision,
+                normalized,
+                resolved_proposal_id,
+                Some(operation_kind_label(&operation).to_string()),
+                report.as_ref(),
                 created_at,
             );
         }
@@ -198,14 +212,14 @@ impl WriterAgentKernel {
         chapter_title: Option<String>,
         chapter_revision: Option<String>,
         created_at: u64,
-    ) {
+    ) -> Option<crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport> {
         let Some(saved_text) = saved_text.map(str::trim).filter(|text| !text.is_empty()) else {
-            return;
+            return None;
         };
         let Some((paragraph, paragraph_offset, cursor)) =
             operation_post_write_diagnostic_window(saved_text, operation)
         else {
-            return;
+            return None;
         };
         let chapter = chapter_title
             .or_else(|| operation_chapter(operation))
@@ -253,6 +267,7 @@ impl WriterAgentKernel {
         }
         extend_unique_source_refs(&mut report.source_refs, source_refs);
         self.record_post_write_diagnostic_report(&report);
+        Some(report)
     }
 
     fn record_operation_result_lifecycle(

@@ -77,6 +77,7 @@ fn main() {
     results.push(run_trajectory_export_has_redaction_warning_eval());
     results.push(run_post_write_diagnostics_recorded_eval());
     results.push(run_post_write_diagnostics_after_accepted_operation_eval());
+    results.push(run_save_completed_links_post_write_diagnostics_eval());
     results.push(run_task_packet_trace_eval());
     results.push(run_chapter_generation_task_packet_trace_eval());
     results.push(run_chapter_generation_task_receipt_required_eval());
