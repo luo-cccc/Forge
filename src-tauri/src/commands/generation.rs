@@ -167,6 +167,18 @@ fn record_chapter_provider_budget_report(
     );
 }
 
+fn record_chapter_context_pack_built(
+    app: &tauri::AppHandle,
+    context: &crate::chapter_generation::BuiltChapterContext,
+    created_at_ms: u64,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_chapter_context_pack_built_run_event(context, created_at_ms);
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -219,6 +231,8 @@ pub async fn batch_generate_chapter(
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
             move |context| {
+                let created_at_ms = crate::agent_runtime::now_ms();
+                record_chapter_context_pack_built(&trace_app, context, created_at_ms);
                 let state = trace_app.state::<crate::AppState>();
                 let Ok(mut kernel) = state.writer_kernel.lock() else {
                     return;
@@ -228,7 +242,7 @@ pub async fn batch_generate_chapter(
                     &kernel.session_id,
                     context,
                     &user_instruction,
-                    crate::agent_runtime::now_ms(),
+                    created_at_ms,
                 );
                 if let Err(error) = kernel.record_task_packet(
                     context.request_id.clone(),
@@ -350,6 +364,8 @@ pub async fn generate_chapter_autonomous(
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
             move |context| {
+                let created_at_ms = crate::agent_runtime::now_ms();
+                record_chapter_context_pack_built(&trace_app, context, created_at_ms);
                 let state = trace_app.state::<crate::AppState>();
                 let Ok(mut kernel) = state.writer_kernel.lock() else {
                     return;
@@ -359,7 +375,7 @@ pub async fn generate_chapter_autonomous(
                     &kernel.session_id,
                     context,
                     &user_instruction,
-                    crate::agent_runtime::now_ms(),
+                    created_at_ms,
                 );
                 if let Err(error) = kernel.record_task_packet(
                     context.request_id.clone(),

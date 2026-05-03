@@ -870,3 +870,122 @@ pub fn run_operation_approval_decided_run_event_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_context_pack_built_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "玉佩线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-10",
+            "林墨在旧门前确认玉佩线索。",
+            "让张三的隐瞒形成新压力",
+            "不要提前揭开玉佩来源",
+            "以林墨必须决定是否追问张三收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_in_motion",
+            "玉佩下落",
+            "张三带走玉佩，需要在后续章节交代去向。",
+            "Chapter-1",
+            "Chapter-12",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let secret_sentence = "林墨停在旧门前，想起张三带走的玉佩。";
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation_in_chapter(secret_sentence, "Chapter-10"),
+            "他把声音压低，先确认门后的呼吸声。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let events = kernel.run_events(50);
+    let export = kernel.export_trajectory(50);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let context_events = events
+        .iter()
+        .filter(|event| event.event_type == "writer.context_pack_built")
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if proposal.evidence.is_empty() {
+        errors.push("ghost proposal did not keep context evidence".to_string());
+    }
+    if context_events.is_empty() {
+        errors.push("run event store lacks writer.context_pack_built".to_string());
+    }
+    if !context_events.iter().any(|event| {
+        event.data.get("task").and_then(|value| value.as_str()) == Some("GhostWriting")
+            && event
+                .data
+                .get("sourceCount")
+                .and_then(|value| value.as_u64())
+                .is_some_and(|count| count >= 3)
+            && event
+                .data
+                .get("budgetLimit")
+                .and_then(|value| value.as_u64())
+                == Some(3000)
+            && event
+                .data
+                .get("sourceReports")
+                .and_then(|value| value.as_array())
+                .is_some_and(|reports| {
+                    reports.iter().any(|report| {
+                        report.get("source").and_then(|value| value.as_str())
+                            == Some("ChapterMission")
+                            && report.get("required").and_then(|value| value.as_bool())
+                                == Some(true)
+                    }) && reports.iter().any(|report| {
+                        report.get("source").and_then(|value| value.as_str())
+                            == Some("PromiseSlice")
+                            && report
+                                .get("provided")
+                                .and_then(|value| value.as_u64())
+                                .is_some_and(|provided| provided > 0)
+                    })
+                })
+    }) {
+        errors.push(
+            "context_pack_built event lacks task, budget, required source, or promise source facts"
+                .to_string(),
+        );
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.context_pack_built\"")
+            && line.contains("\"sourceReports\"")
+    }) {
+        errors.push("trajectory export lacks context_pack_built run event".to_string());
+    }
+    if context_events
+        .iter()
+        .any(|event| event.data.to_string().contains(secret_sentence))
+    {
+        errors.push("context_pack_built event leaked manuscript text".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_pack_built_run_event",
+        format!(
+            "contextEvents={} trajectoryLines={}",
+            context_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}

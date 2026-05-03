@@ -230,6 +230,40 @@ pub struct WriterTaskPacketTrace {
     pub packet: TaskPacket,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterContextPackBuiltRunEvent {
+    pub task_id: String,
+    pub task: String,
+    pub source_count: usize,
+    pub total_chars: usize,
+    pub budget_limit: usize,
+    pub wasted: usize,
+    pub truncated_source_count: usize,
+    pub source_reports: Vec<WriterContextPackBuiltSourceReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterContextPackBuiltSourceReport {
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_chars: Option<usize>,
+    pub provided: usize,
+    pub truncated: bool,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriterObservationTrace {

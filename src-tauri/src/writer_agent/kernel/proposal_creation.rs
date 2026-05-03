@@ -18,6 +18,7 @@ impl WriterAgentKernel {
             observation.reason == super::observation::ObservationReason::ChapterSwitch,
         );
         let context_pack = self.ghost_context_pack(&observation);
+        self.record_context_pack_built_run_event(&observation, &context_pack, now_ms());
         self.record_task_packet_for(
             AgentTask::GhostWriting,
             &observation,
@@ -96,6 +97,7 @@ impl WriterAgentKernel {
             &observation,
             &self.memory,
         );
+        self.record_context_pack_built_run_event(&observation, &context_pack, now_ms());
         let chapter = observation
             .chapter_title
             .clone()

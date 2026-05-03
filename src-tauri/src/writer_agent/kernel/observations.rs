@@ -158,6 +158,11 @@ impl WriterAgentKernel {
                 &observation,
                 &self.memory,
             );
+            self.record_context_pack_built_run_event(
+                &observation,
+                &context_pack,
+                observation.created_at,
+            );
             self.record_task_packet_for(
                 AgentTask::GhostWriting,
                 &observation,

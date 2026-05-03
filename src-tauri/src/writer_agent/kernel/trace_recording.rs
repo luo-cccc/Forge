@@ -232,6 +232,101 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_context_pack_built_run_event(
+        &mut self,
+        observation: &WriterObservation,
+        context_pack: &WritingContextPack,
+        created_at: u64,
+    ) {
+        let task_id = format!(
+            "{}:{}:{:?}:context_pack",
+            self.session_id, observation.id, context_pack.task
+        );
+        let source_reports = context_pack_built_reports(context_pack);
+        let truncated_source_count = source_reports
+            .iter()
+            .filter(|report| report.truncated)
+            .count();
+        let mut source_refs = observation_source_refs(observation);
+        source_refs.extend(
+            context_pack
+                .sources
+                .iter()
+                .map(|source| format!("context_source:{:?}", source.source)),
+        );
+
+        self.record_context_pack_built_event(
+            crate::writer_agent::kernel::WriterContextPackBuiltRunEvent {
+                task_id: task_id.clone(),
+                task: format!("{:?}", context_pack.task),
+                source_count: context_pack.sources.len(),
+                total_chars: context_pack.total_chars,
+                budget_limit: context_pack.budget_limit,
+                wasted: context_pack.budget_report.wasted,
+                truncated_source_count,
+                source_reports,
+            },
+            source_refs,
+            created_at,
+        );
+    }
+
+    pub fn record_chapter_context_pack_built_run_event(
+        &mut self,
+        context: &crate::chapter_generation::BuiltChapterContext,
+        created_at: u64,
+    ) {
+        let task_id = format!(
+            "{}:{}:ChapterGeneration:context_pack",
+            self.session_id, context.request_id
+        );
+        let source_reports = chapter_context_pack_built_reports(context);
+        let mut source_refs = vec![
+            format!("receipt:{}", context.receipt.task_id),
+            format!("chapter:{}", context.target.title),
+            format!("revision:{}", context.base_revision),
+        ];
+        source_refs.extend(
+            context
+                .sources
+                .iter()
+                .filter(|source| source.included_chars > 0)
+                .map(|source| format!("{}:{}", source.source_type, source.id)),
+        );
+        self.record_context_pack_built_event(
+            crate::writer_agent::kernel::WriterContextPackBuiltRunEvent {
+                task_id: task_id.clone(),
+                task: "ChapterGeneration".to_string(),
+                source_count: context.budget.source_count,
+                total_chars: context.budget.included_chars,
+                budget_limit: context.budget.max_chars,
+                wasted: context
+                    .budget
+                    .max_chars
+                    .saturating_sub(context.budget.included_chars),
+                truncated_source_count: context.budget.truncated_source_count,
+                source_reports,
+            },
+            source_refs,
+            created_at,
+        );
+    }
+
+    fn record_context_pack_built_event(
+        &mut self,
+        event: crate::writer_agent::kernel::WriterContextPackBuiltRunEvent,
+        source_refs: Vec<String>,
+        created_at: u64,
+    ) {
+        self.record_run_event(
+            "context_pack_built",
+            created_at,
+            Some(event.task_id.clone()),
+            source_refs,
+            serde_json::json!(event),
+        );
+    }
+
     pub(super) fn record_approval_decided_run_event(
         &mut self,
         operation: &WriterOperation,
@@ -447,4 +542,68 @@ fn proposal_source_refs(proposal: &AgentProposal) -> Vec<String> {
             .map(|evidence| format!("{:?}:{}", evidence.source, evidence.reference)),
     );
     refs
+}
+
+fn context_pack_built_reports(
+    context_pack: &WritingContextPack,
+) -> Vec<crate::writer_agent::kernel::WriterContextPackBuiltSourceReport> {
+    context_pack
+        .budget_report
+        .source_reports
+        .iter()
+        .map(
+            |source| crate::writer_agent::kernel::WriterContextPackBuiltSourceReport {
+                source: source.source.clone(),
+                id: None,
+                label: None,
+                requested: Some(source.requested),
+                original_chars: None,
+                provided: source.provided,
+                truncated: source.truncated,
+                required: context_pack
+                    .task
+                    .required_source_budgets()
+                    .iter()
+                    .any(|(required, _)| format!("{:?}", required) == source.source),
+                reason: Some(source.reason.clone()).filter(|reason| !reason.trim().is_empty()),
+                truncation_reason: source.truncation_reason.clone(),
+            },
+        )
+        .collect()
+}
+
+fn chapter_context_pack_built_reports(
+    context: &crate::chapter_generation::BuiltChapterContext,
+) -> Vec<crate::writer_agent::kernel::WriterContextPackBuiltSourceReport> {
+    context
+        .sources
+        .iter()
+        .map(
+            |source| crate::writer_agent::kernel::WriterContextPackBuiltSourceReport {
+                source: source.source_type.clone(),
+                id: Some(source.id.clone()).filter(|id| !id.trim().is_empty()),
+                label: Some(source.label.clone()).filter(|label| !label.trim().is_empty()),
+                requested: None,
+                original_chars: Some(source.original_chars),
+                provided: source.included_chars,
+                truncated: source.truncated,
+                required: matches!(
+                    source.source_type.as_str(),
+                    "instruction"
+                        | "outline"
+                        | "target_beat"
+                        | "previous_chapters"
+                        | "lorebook"
+                        | "project_brain"
+                ),
+                reason: None,
+                truncation_reason: source.truncated.then(|| {
+                    format!(
+                        "Chapter context budget included {} of {} chars.",
+                        source.included_chars, source.original_chars
+                    )
+                }),
+            },
+        )
+        .collect()
 }
