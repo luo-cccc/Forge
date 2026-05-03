@@ -100,6 +100,9 @@ fn memory_operation_slot(proposal: &AgentProposal) -> Option<String> {
         WriterOperation::CanonUpsertEntity { entity } => {
             Some(memory_candidate_slot_for_canon(entity))
         }
+        WriterOperation::CanonUpdateAttribute {
+            entity, attribute, ..
+        } => Some(format!("memory|canon_attribute|{}|{}", entity, attribute)),
         WriterOperation::PromiseAdd { promise } => Some(memory_candidate_slot_for_promise(promise)),
         _ => None,
     }
@@ -110,6 +113,9 @@ fn memory_audit_title(proposal: &AgentProposal) -> String {
         Some(WriterOperation::CanonUpsertEntity { entity }) => {
             format!("{} [{}]", entity.name, entity.kind)
         }
+        Some(WriterOperation::CanonUpdateAttribute {
+            entity, attribute, ..
+        }) => format!("{}.{}", entity, attribute),
         Some(WriterOperation::PromiseAdd { promise }) => {
             format!("{} [{}]", promise.title, promise.kind)
         }

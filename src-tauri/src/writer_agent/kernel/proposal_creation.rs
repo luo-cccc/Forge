@@ -211,6 +211,19 @@ impl WriterAgentKernel {
                             reason,
                             CandidateSource::Llm(model.to_string()),
                         ),
+                        MemoryCandidateQuality::MergeableAttributes {
+                            existing_name,
+                            attributes,
+                        } => canon_attribute_merge_candidate_proposal(
+                            &observation,
+                            &observation.id,
+                            &mut self.proposal_counter,
+                            &self.session_id,
+                            existing_name,
+                            attributes,
+                            entity.confidence,
+                            CandidateSource::Llm(model.to_string()),
+                        ),
                         MemoryCandidateQuality::Vague { .. }
                         | MemoryCandidateQuality::Duplicate { .. } => continue,
                     }

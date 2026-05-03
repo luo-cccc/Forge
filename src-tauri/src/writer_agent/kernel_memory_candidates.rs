@@ -59,6 +59,19 @@ pub(crate) fn memory_candidates_from_observation(
                 reason,
                 CandidateSource::Local,
             )),
+            MemoryCandidateQuality::MergeableAttributes {
+                existing_name,
+                attributes,
+            } => proposals.push(canon_attribute_merge_candidate_proposal(
+                observation,
+                observation_id,
+                proposal_counter,
+                session_id,
+                existing_name,
+                attributes,
+                entity.confidence,
+                CandidateSource::Local,
+            )),
             MemoryCandidateQuality::Vague { .. } | MemoryCandidateQuality::Duplicate { .. } => {}
         }
     }
@@ -214,6 +227,70 @@ pub(crate) fn canon_conflict_candidate_proposal(
         confidence: match source {
             CandidateSource::Local => 0.7,
             CandidateSource::Llm(_) => 0.82,
+        },
+        expires_at: None,
+    }
+}
+
+pub(crate) fn canon_attribute_merge_candidate_proposal(
+    observation: &WriterObservation,
+    observation_id: &str,
+    proposal_counter: &mut u64,
+    session_id: &str,
+    existing_name: String,
+    attributes: Vec<(String, String)>,
+    confidence: f64,
+    source: CandidateSource,
+) -> AgentProposal {
+    let id = proposal_id(session_id, *proposal_counter);
+    *proposal_counter += 1;
+    let source_label = source.label();
+    let attribute_text = attributes
+        .iter()
+        .map(|(key, value)| format!("{}.{} = {}", existing_name, key, value))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let operations = attributes
+        .iter()
+        .map(|(attribute, value)| WriterOperation::CanonUpdateAttribute {
+            entity: existing_name.clone(),
+            attribute: attribute.clone(),
+            value: value.clone(),
+            confidence,
+        })
+        .collect::<Vec<_>>();
+    AgentProposal {
+        id,
+        observation_id: observation_id.to_string(),
+        kind: ProposalKind::CanonUpdate,
+        priority: ProposalPriority::Ambient,
+        target: observation.cursor.clone(),
+        preview: format!("补充设定属性: {}", attribute_text),
+        operations,
+        rationale: format!(
+            "{} 记忆候选命中既有 canon，只补充缺失属性；需作者确认后合并。",
+            source_label
+        ),
+        evidence: vec![
+            EvidenceRef {
+                source: EvidenceSource::ChapterText,
+                reference: observation
+                    .chapter_title
+                    .clone()
+                    .unwrap_or_else(|| "current chapter".to_string()),
+                snippet: attribute_text.clone(),
+            },
+            EvidenceRef {
+                source: EvidenceSource::Canon,
+                reference: existing_name,
+                snippet: "existing entity; missing non-conflicting attributes only".to_string(),
+            },
+        ],
+        risks: vec!["仅补充缺失属性，不覆盖既有 canon；请确认该属性是长期设定。".to_string()],
+        alternatives: vec![],
+        confidence: match source {
+            CandidateSource::Local => 0.64,
+            CandidateSource::Llm(_) => 0.8,
         },
         expires_at: None,
     }
@@ -631,6 +708,10 @@ pub enum MemoryCandidateQuality {
     Duplicate {
         existing_name: String,
     },
+    MergeableAttributes {
+        existing_name: String,
+        attributes: Vec<(String, String)>,
+    },
     Conflict {
         existing_name: String,
         reason: String,
@@ -691,6 +772,14 @@ pub fn validate_canon_candidate_with_memory(
         };
     }
 
+    let mergeable_attributes = mergeable_canon_attributes(candidate, &existing);
+    if !mergeable_attributes.is_empty() {
+        return MemoryCandidateQuality::MergeableAttributes {
+            existing_name: existing.name,
+            attributes: mergeable_attributes,
+        };
+    }
+
     MemoryCandidateQuality::Duplicate {
         existing_name: existing.name,
     }
@@ -748,6 +837,27 @@ fn conflicting_canon_attribute(
     }
 
     None
+}
+
+fn mergeable_canon_attributes(
+    candidate: &CanonEntityOp,
+    existing: &CanonEntitySummary,
+) -> Vec<(String, String)> {
+    let Some(candidate_attributes) = candidate.attributes.as_object() else {
+        return Vec::new();
+    };
+    let existing_attributes = existing.attributes.as_object().cloned().unwrap_or_default();
+
+    candidate_attributes
+        .iter()
+        .filter_map(|(attribute, candidate_value)| {
+            let candidate_text = canon_attribute_value(candidate_value)?;
+            if existing_attributes.contains_key(attribute) {
+                return None;
+            }
+            Some((attribute.clone(), candidate_text))
+        })
+        .collect()
 }
 
 fn canon_attribute_value(value: &serde_json::Value) -> Option<String> {

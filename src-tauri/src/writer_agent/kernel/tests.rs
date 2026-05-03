@@ -1453,6 +1453,60 @@ fn rejected_memory_candidate_suppresses_future_same_slot() {
 }
 
 #[test]
+fn same_entity_memory_candidate_uses_attribute_merge_operation() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "林墨惯用寒影刀的刀客。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+    let mut obs = observation("林墨的师门是北境寒山宗，他仍握着寒影刀。");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "林墨出身北境寒山宗，惯用寒影刀。",
+                "attributes": { "origin": "北境寒山宗" },
+                "confidence": 0.88
+            }],
+            "promises": []
+        }),
+        "test-model",
+    );
+
+    let merge = proposals
+        .iter()
+        .find_map(|proposal| proposal.operations.first())
+        .expect("expected canon attribute merge operation");
+    assert!(matches!(
+        merge,
+        WriterOperation::CanonUpdateAttribute {
+            entity,
+            attribute,
+            value,
+            ..
+        } if entity == "林墨" && attribute == "origin" && value == "北境寒山宗"
+    ));
+    assert!(!proposals.iter().any(|proposal| {
+        matches!(
+            proposal.operations.first(),
+            Some(WriterOperation::CanonUpsertEntity { .. })
+        )
+    }));
+}
+
+#[test]
 fn accepted_memory_candidate_records_positive_extraction_preference() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);

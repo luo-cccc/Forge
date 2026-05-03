@@ -36,7 +36,8 @@ pub(crate) use super::kernel_ghost::{
 };
 pub use super::kernel_helpers::*;
 pub(crate) use super::kernel_memory_candidates::{
-    canon_candidate_proposal, canon_conflict_candidate_proposal, extract_new_canon_entities,
+    canon_attribute_merge_candidate_proposal, canon_candidate_proposal,
+    canon_conflict_candidate_proposal, extract_new_canon_entities,
     llm_memory_candidates_from_value, memory_candidates_from_observation,
     promise_candidate_proposal, sentence_snippet, split_sentences, CandidateSource,
 };

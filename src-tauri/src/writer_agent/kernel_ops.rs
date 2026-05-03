@@ -276,6 +276,7 @@ pub(crate) fn execute_writer_operation(
                         revision_after: None,
                     });
                 }
+                MemoryCandidateQuality::MergeableAttributes { .. } => {}
                 MemoryCandidateQuality::Conflict {
                     existing_name,
                     reason,

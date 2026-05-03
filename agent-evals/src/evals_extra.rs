@@ -532,6 +532,93 @@ pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
     )
 }
 
+pub fn run_same_entity_attribute_merge_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "林墨惯用寒影刀的刀客。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨的师门是北境寒山宗，他仍握着寒影刀。", "Chapter-4");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "林墨出身北境寒山宗，惯用寒影刀。",
+                "attributes": { "origin": "北境寒山宗" },
+                "confidence": 0.88
+            }],
+            "promises": []
+        }),
+        "eval-model",
+    );
+
+    let merge_ops = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| {
+            matches!(
+                operation,
+                WriterOperation::CanonUpdateAttribute {
+                    entity,
+                    attribute,
+                    value,
+                    ..
+                } if entity == "林墨" && attribute == "origin" && value == "北境寒山宗"
+            )
+        })
+        .count();
+    let entity_upserts = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| matches!(operation, WriterOperation::CanonUpsertEntity { .. }))
+        .count();
+    let conflict_reviews = proposals
+        .iter()
+        .filter(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+        .count();
+
+    let mut errors = Vec::new();
+    if merge_ops != 1 {
+        errors.push(format!(
+            "expected one canon.update_attribute merge op, got {}",
+            merge_ops
+        ));
+    }
+    if entity_upserts != 0 {
+        errors.push(format!(
+            "same-entity merge should not upsert whole entity, got {}",
+            entity_upserts
+        ));
+    }
+    if conflict_reviews != 0 {
+        errors.push(format!(
+            "non-conflicting attribute merge should not create conflict review, got {}",
+            conflict_reviews
+        ));
+    }
+
+    eval_result(
+        "writer_agent:same_entity_attribute_merge",
+        format!(
+            "mergeOps={} entityUpserts={} conflictReviews={}",
+            merge_ops, entity_upserts, conflict_reviews
+        ),
+        errors,
+    )
+}
+
 pub fn run_vague_memory_candidate_rejected_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

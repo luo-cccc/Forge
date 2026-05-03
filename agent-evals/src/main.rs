@@ -81,6 +81,7 @@ fn main() {
     results.push(run_style_memory_validation_eval());
     results.push(run_promise_related_entities_extraction_eval());
     results.push(run_promise_dedup_against_existing_eval());
+    results.push(run_same_entity_attribute_merge_eval());
     results.push(run_vague_memory_candidate_rejected_eval());
     results.push(run_duplicate_memory_candidate_deduped_eval());
     results.push(run_conflicting_memory_candidate_requires_review_eval());
