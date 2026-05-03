@@ -120,6 +120,12 @@ where
     scored
 }
 
+pub fn score_text_for_writing_focus(writing_focus: &str, text: &str) -> (f32, Vec<String>) {
+    let focus = WritingRelevanceFocus::new(writing_focus);
+    let relevance = score_text_chunk(&focus, text);
+    (relevance.score as f32, relevance.reasons)
+}
+
 pub fn format_text_chunk_relevance(reasons: &[String]) -> String {
     let reason = if reasons.is_empty() {
         "semantic similarity".to_string()

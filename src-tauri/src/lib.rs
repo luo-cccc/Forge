@@ -4,7 +4,7 @@ mod ambient_agents;
 mod api_key;
 mod app_paths;
 mod app_state;
-mod brain_service;
+pub mod brain_service;
 pub mod chapter_generation;
 mod commands;
 mod editor_realtime;

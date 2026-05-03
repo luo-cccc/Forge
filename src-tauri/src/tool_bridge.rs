@@ -1,5 +1,6 @@
 use agent_harness_core::tool_executor::ToolHandler;
 use tauri::AppHandle;
+use tauri::Manager;
 
 /// Real tool handler that bridges agent-harness-core tools to the Tauri app's storage layer.
 pub struct TauriToolBridge {
@@ -56,11 +57,22 @@ impl ToolHandler for TauriToolBridge {
                 let api_key =
                     crate::resolve_api_key().ok_or_else(|| "No API key configured".to_string())?;
                 let settings = crate::llm_runtime::settings(api_key);
+                let focus = {
+                    let state = self.app.state::<crate::AppState>();
+                    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+                    crate::brain_service::ProjectBrainFocus::from_kernel(query, &kernel)
+                };
                 let mut result_text = String::new();
-                crate::brain_service::answer_query(&self.app, &settings, query, |content| {
-                    result_text.push_str(&content);
-                    Ok(crate::llm_runtime::StreamControl::Continue)
-                })
+                crate::brain_service::answer_query_with_focus(
+                    &self.app,
+                    &settings,
+                    query,
+                    &focus,
+                    |content| {
+                        result_text.push_str(&content);
+                        Ok(crate::llm_runtime::StreamControl::Continue)
+                    },
+                )
                 .await
                 .map_err(|e| format!("query_project_brain: {}", e))?;
                 Ok(serde_json::json!({"answer": result_text}))

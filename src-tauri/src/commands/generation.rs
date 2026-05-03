@@ -352,8 +352,13 @@ Output ONLY the JSON object, no explanation outside. Example:
 pub async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
+    let focus = {
+        let state = app.state::<crate::AppState>();
+        let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        crate::brain_service::ProjectBrainFocus::from_kernel(&query, &kernel)
+    };
 
-    crate::brain_service::answer_query(&app, &settings, &query, |content| {
+    crate::brain_service::answer_query_with_focus(&app, &settings, &query, &focus, |content| {
         let _ = app.emit(
             crate::events::AGENT_STREAM_CHUNK,
             crate::StreamChunk { content },

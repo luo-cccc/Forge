@@ -1,4 +1,5 @@
 use crate::fixtures::*;
+use agent_writer_lib::brain_service::{rerank_project_brain_results_with_focus, ProjectBrainFocus};
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::context_relevance::{
     format_text_chunk_relevance, rerank_text_chunks, writing_scene_types,
@@ -1175,6 +1176,94 @@ pub fn run_scene_type_relevance_signal_eval() -> EvalResult {
             "first={} scenes={:?} explanation={}",
             first_id, focus_scene_types, first_explanation
         ),
+        errors,
+    )
+}
+
+pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-4",
+            "林墨必须追查寒玉戒指下落，并在本章揭开戒指来源线索。",
+            "寒玉戒指下落",
+            "不要被旧门传闻稀释主线",
+            "以戒指来源的新线索收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .record_chapter_result(
+            &agent_writer_lib::writer_agent::memory::ChapterResultSummary {
+                id: 0,
+                project_id: "eval".to_string(),
+                chapter_title: "Chapter-3".to_string(),
+                chapter_revision: "rev-3".to_string(),
+                summary: "黑衣人夺走寒玉戒指后留下北境雪线脚印。".to_string(),
+                state_changes: vec![],
+                character_progress: vec![],
+                new_conflicts: vec![],
+                new_clues: vec!["寒玉戒指被带往北境".to_string()],
+                promise_updates: vec!["寒玉戒指下落: 待查清".to_string()],
+                canon_updates: vec![],
+                source_ref: "eval".to_string(),
+                created_at: now_ms(),
+            },
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-4".to_string());
+    let focus = ProjectBrainFocus::from_kernel("旧门风声有什么含义？", &kernel);
+    let chunks = vec![
+        agent_harness_core::Chunk {
+            id: "old-door".to_string(),
+            chapter: "Chapter-1".to_string(),
+            text: "旧门外的风声像传闻中的哭声，林墨反复听见旧门、风声和旧门。".to_string(),
+            embedding: vec![],
+            keywords: vec!["旧门".to_string(), "风声".to_string()],
+            topic: Some("旧门传闻".to_string()),
+        },
+        agent_harness_core::Chunk {
+            id: "ring-focus".to_string(),
+            chapter: "Chapter-3".to_string(),
+            text: "黑衣人夺走寒玉戒指后留下北境雪线脚印，林墨必须查清寒玉戒指下落。".to_string(),
+            embedding: vec![],
+            keywords: vec!["寒玉戒指".to_string(), "下落".to_string()],
+            topic: Some("寒玉戒指下落".to_string()),
+        },
+    ];
+    let raw_results = vec![(50.0, &chunks[0]), (1.0, &chunks[1])];
+    let reranked = rerank_project_brain_results_with_focus(raw_results, &focus);
+    let first_id = reranked
+        .first()
+        .map(|(_, _, chunk)| chunk.id.as_str())
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if !focus.as_str().contains("寒玉戒指下落") {
+        errors.push("writer memory focus missing active chapter mission".to_string());
+    }
+    if first_id != "ring-focus" {
+        errors.push(format!(
+            "writer memory focus should lift active mission chunk above query-similar chunk, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("寒玉戒指") {
+        errors.push(format!(
+            "rerank explanation missing memory focus term: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_writer_memory_focus",
+        format!("first={} explanation={}", first_id, first_explanation),
         errors,
     )
 }
