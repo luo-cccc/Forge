@@ -1495,6 +1495,116 @@ pub fn run_project_brain_must_not_boundary_eval() -> EvalResult {
     )
 }
 
+pub fn run_project_brain_author_fixture_rerank_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-17",
+            "阿洛必须追查霜铃塔钥的下落，并揭开它和潮汐祭账之间的旧约。",
+            "霜铃塔钥下落",
+            "别再让盐市流言抢走霜铃塔钥下落",
+            "以潮汐祭账的真实签名收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .record_chapter_result(
+            &agent_writer_lib::writer_agent::memory::ChapterResultSummary {
+                id: 0,
+                project_id: "eval".to_string(),
+                chapter_title: "Chapter-16".to_string(),
+                chapter_revision: "rev-16".to_string(),
+                summary: "阿洛在潮井边确认霜铃塔钥被镜盐会带走，祭账上留下潮汐旧约签名。"
+                    .to_string(),
+                state_changes: vec![],
+                character_progress: vec![],
+                new_conflicts: vec![],
+                new_clues: vec![
+                    "霜铃塔钥被镜盐会带走".to_string(),
+                    "潮汐祭账留下旧约签名".to_string(),
+                ],
+                promise_updates: vec!["霜铃塔钥下落: 镜盐会待追查".to_string()],
+                canon_updates: vec![],
+                source_ref: "eval".to_string(),
+                created_at: now_ms(),
+            },
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-17".to_string());
+    let focus = ProjectBrainFocus::from_kernel("盐市流言到底指向谁？", &kernel);
+
+    let mut db = VectorDB::new();
+    for i in 0..20 {
+        db.upsert(Chunk {
+            id: format!("salt-rumor-noise-{}", i + 1),
+            chapter: format!("Chapter-{}", i + 1),
+            text: format!(
+                "第{}章盐市流言继续扩散，茶摊都在重复盐市、流言、镜盐会、霜铃塔钥传闻和潮汐祭账闲谈，但没有人真正追查塔钥下落。",
+                i + 1
+            ),
+            embedding: vec![1.0, 0.0],
+            keywords: vec!["盐市".to_string(), "流言".to_string()],
+            topic: Some("盐市流言".to_string()),
+        });
+    }
+    db.upsert(Chunk {
+        id: "author-project-payoff".to_string(),
+        chapter: "Chapter-16".to_string(),
+        text: "阿洛在潮井石阶下发现霜铃塔钥的下落：镜盐会把塔钥藏进潮汐祭账封皮，旧约签名揭开真实来源，这条伏笔终于回收。"
+            .to_string(),
+        embedding: vec![0.0, 1.0],
+        keywords: vec!["霜铃塔钥".to_string(), "潮汐祭账".to_string()],
+        topic: Some("霜铃塔钥下落".to_string()),
+    });
+
+    let embedding = vec![1.0, 0.0];
+    let query_only_top_ten = db.search_hybrid("盐市流言到底指向谁？", &embedding, 10);
+    let query_only_contains_payoff = query_only_top_ten
+        .iter()
+        .any(|(_, chunk)| chunk.id == "author-project-payoff");
+    let reranked = search_project_brain_results_with_focus(&db, &focus, &embedding);
+    let first_id = reranked
+        .first()
+        .map(|(_, _, chunk)| chunk.id.as_str())
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if query_only_contains_payoff {
+        errors
+            .push("fixture should prove query-only top-10 misses author payoff chunk".to_string());
+    }
+    if first_id != "author-project-payoff" {
+        errors.push(format!(
+            "author-project fixture should recall and prioritize custom-term payoff chunk, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("霜铃塔钥")
+        || !first_explanation.contains("潮汐祭账")
+        || first_explanation.contains("avoid term 霜铃塔钥")
+    {
+        errors.push(format!(
+            "rerank explanation should include custom positive terms without boundary-after avoid penalty: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_author_fixture_rerank",
+        format!(
+            "queryOnlyTop10ContainsPayoff={} first={} explanation={}",
+            query_only_contains_payoff, first_id, first_explanation
+        ),
+        errors,
+    )
+}
+
 pub fn run_end_to_end_ghost_pipeline_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use agent_harness_core::extract_keywords;
+
 use super::memory::{CanonEntitySummary, CreativeDecisionSummary, PlotPromiseSummary};
 use super::observation::WriterObservation;
 
@@ -328,7 +330,7 @@ impl WritingRelevanceFocus {
         let negative_terms = negative_relevance_terms(text);
         let terms = relevance_terms(text)
             .into_iter()
-            .filter(|term| !negative_terms.contains(term))
+            .filter(|term| !is_blocked_by_negative_terms(term, &negative_terms))
             .collect();
         Self {
             raw_text: text.to_string(),
@@ -349,18 +351,35 @@ fn score_text_chunk(focus: &WritingRelevanceFocus, text: &str) -> RelevanceScore
         28,
         "focus",
     );
-    for term in focus
+    let mut matched_terms = focus
         .terms
         .iter()
         .filter(|term| text.contains(term.as_str()))
-    {
-        let weight = if focus.raw_text.contains(term.as_str()) {
-            1
-        } else {
-            0
-        };
-        let points = 18 + (term.chars().count().min(8) as i32 * 2) + weight;
+        .map(|term| {
+            let weight = if focus.raw_text.contains(term.as_str()) {
+                1
+            } else {
+                0
+            };
+            let points = 18 + (term.chars().count().min(8) as i32 * 2) + weight;
+            (points, term)
+        })
+        .collect::<Vec<_>>();
+    matched_terms.sort_by(|(left_points, left_term), (right_points, right_term)| {
+        right_points
+            .cmp(left_points)
+            .then_with(|| right_term.chars().count().cmp(&left_term.chars().count()))
+    });
+    let mut explained_terms: Vec<&String> = Vec::new();
+    for (points, term) in matched_terms {
+        if explained_terms
+            .iter()
+            .any(|explained| explained.contains(term.as_str()) || term.contains(explained.as_str()))
+        {
+            continue;
+        }
         score.add(points, format!("writing term {}", term));
+        explained_terms.push(term);
         if score.reasons.len() >= 5 {
             break;
         }
@@ -615,6 +634,12 @@ fn relevance_terms(text: &str) -> Vec<String> {
         }
     }
 
+    for keyword in extract_keywords(text) {
+        push_relevance_term(&mut terms, &mut seen, &keyword);
+    }
+
+    add_phrase_relevance_terms(&mut terms, &mut seen, text);
+
     let mut current = String::new();
     for ch in text.chars() {
         if ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&ch) {
@@ -626,6 +651,36 @@ fn relevance_terms(text: &str) -> Vec<String> {
     }
     push_relevance_term(&mut terms, &mut seen, &current);
     terms
+}
+
+fn add_phrase_relevance_terms(terms: &mut Vec<String>, seen: &mut HashSet<String>, text: &str) {
+    let mut phrase_text = text.to_string();
+    for boundary in RELEVANCE_PHRASE_BOUNDARIES {
+        phrase_text = phrase_text.replace(boundary, "\n");
+    }
+    for part in phrase_text.split(|ch| {
+        matches!(
+            ch,
+            '\n' | '\r' | '。' | '；' | ';' | '.' | '，' | ',' | '、' | ':' | '：' | '？' | '?'
+        )
+    }) {
+        push_relevance_term(terms, seen, part);
+    }
+}
+
+const RELEVANCE_PHRASE_BOUNDARIES: &[&str] = &[
+    "必须", "需要", "继续", "追查", "查清", "寻找", "找到", "确认", "揭开", "揭露", "发现", "回收",
+    "收束", "指向", "围绕", "藏进", "带走", "带往", "不要", "不得", "禁止", "避免", "不能", "别再",
+    "别让", "之间", "以及", "或者", "并且", "下落", "来源", "真相", "和", "与", "或", "被", "把",
+    "将", "让", "以", "并", "但", "而",
+];
+
+fn is_blocked_by_negative_terms(term: &str, negative_terms: &[String]) -> bool {
+    negative_terms.iter().any(|negative| {
+        negative == term
+            || (term.chars().count() >= 2 && negative.contains(term))
+            || (negative.chars().count() >= 2 && term.contains(negative))
+    })
 }
 
 fn negative_relevance_terms(text: &str) -> Vec<String> {
@@ -646,9 +701,9 @@ fn negative_relevance_terms(text: &str) -> Vec<String> {
     terms
 }
 
-const NEGATIVE_CUES: &[&str] = &["不要", "不得", "禁止", "避免", "不能"];
+const NEGATIVE_CUES: &[&str] = &["不要", "不得", "禁止", "避免", "不能", "别再", "别让", "别"];
 const NEGATIVE_BOUNDARIES: &[&str] = &[
-    "稀释", "干扰", "掩盖", "拖慢", "分散", "偏离", "覆盖", "盖过", "取代", "代替", "抢走",
+    "稀释", "干扰", "掩盖", "拖慢", "分散", "偏离", "覆盖", "盖过", "取代", "代替", "替代", "抢走",
 ];
 
 fn negative_phrase_terms(text: &str) -> Vec<String> {
@@ -673,22 +728,29 @@ fn negative_phrase_terms(text: &str) -> Vec<String> {
 }
 
 fn strip_negative_phrase_filler(raw: &str) -> &str {
-    raw.trim()
-        .trim_start_matches('被')
-        .trim_start_matches('把')
-        .trim_start_matches('将')
-        .trim_start_matches('让')
-        .trim_start_matches('用')
-        .trim_start_matches('以')
-        .trim_start_matches("继续")
-        .trim_start_matches("只是")
-        .trim_start_matches('只')
-        .trim_start_matches('再')
-        .trim()
+    let mut text = raw.trim();
+    loop {
+        let trimmed = text
+            .trim_start_matches('被')
+            .trim_start_matches('把')
+            .trim_start_matches('将')
+            .trim_start_matches('让')
+            .trim_start_matches('用')
+            .trim_start_matches('以')
+            .trim_start_matches("继续")
+            .trim_start_matches("只是")
+            .trim_start_matches('只')
+            .trim_start_matches('再')
+            .trim();
+        if trimmed == text {
+            return trimmed;
+        }
+        text = trimmed;
+    }
 }
 
 fn push_relevance_term(terms: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
-    let term = raw.trim();
+    let term = raw.trim().trim_end_matches('的');
     let count = term.chars().count();
     if !(2..=10).contains(&count) || is_relevance_stopword(term) {
         return;
@@ -699,10 +761,21 @@ fn push_relevance_term(terms: &mut Vec<String>, seen: &mut HashSet<String>, raw:
 }
 
 fn is_relevance_stopword(term: &str) -> bool {
-    [
+    let normalized = term.trim().to_ascii_lowercase();
+    if normalized.starts_with("chapter-")
+        || normalized.starts_with("chapter_")
+        || normalized.starts_with("rev-")
+        || normalized.starts_with("rev_")
+    {
+        return true;
+    }
+    let stopwords = [
         "章节", "本章", "任务", "目标", "当前", "需要", "继续", "处理", "保持", "推进", "不要",
-        "不得", "后续", "解释", "结果", "摘要", "状态", "变化", "新的", "明确", "作者", "accepted",
-    ]
-    .iter()
-    .any(|stopword| term == *stopword)
+        "不得", "禁止", "避免", "不能", "必须", "追查", "确认", "后续", "解释", "结果", "摘要",
+        "状态", "变化", "新的", "明确", "作者", "哪里", "什么", "accepted", "active", "chapter",
+        "mission", "result", "feedback", "decision", "eval", "rev",
+    ];
+    stopwords
+        .iter()
+        .any(|stopword| term == *stopword || normalized == *stopword)
 }

@@ -94,6 +94,7 @@ fn main() {
     results.push(run_project_brain_long_session_candidate_recall_eval());
     results.push(run_project_brain_avoid_terms_preserve_payoff_eval());
     results.push(run_project_brain_must_not_boundary_eval());
+    results.push(run_project_brain_author_fixture_rerank_eval());
     results.push(run_end_to_end_ghost_pipeline_eval());
     results.push(run_end_to_end_contract_guard_eval());
     results.push(run_end_to_end_mission_drift_detection_eval());
