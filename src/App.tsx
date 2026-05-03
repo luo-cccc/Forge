@@ -7,6 +7,7 @@ import EditorPanel from "./components/EditorPanel";
 import AgentPanel from "./components/AgentPanel";
 import { CompanionPanel } from "./components/CompanionPanel";
 import ProjectTree from "./components/ProjectTree";
+import { WriterInspectorPanel } from "./components/WriterInspectorPanel";
 
 interface SelectionState {
   from: number;
@@ -247,7 +248,13 @@ function App() {
   }, []);
 
   const rightRailWidth =
-    storyMode === "write" ? "w-72" : storyMode === "review" ? "w-[28rem]" : "w-[32rem]";
+    storyMode === "write"
+      ? "w-72"
+      : storyMode === "review"
+        ? "w-[28rem]"
+        : storyMode === "inspect"
+          ? "w-[48rem]"
+          : "w-[32rem]";
   const companionHeight =
     storyMode === "explore" ? "h-[36%]" : storyMode === "review" ? "h-full" : "h-full";
 
@@ -268,8 +275,8 @@ function App() {
       </div>
       <div className={`${rightRailWidth} h-full flex-shrink-0 border-l border-border-subtle flex flex-col min-h-0`}>
         <div className="border-b border-border-subtle px-3 py-2">
-          <div className="grid grid-cols-3 gap-1 rounded bg-bg-deep border border-border-subtle p-1">
-            {(["write", "review", "explore"] as const).map((mode) => (
+          <div className="grid grid-cols-4 gap-1 rounded bg-bg-deep border border-border-subtle p-1">
+            {(["write", "review", "explore", "inspect"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setStoryMode(mode)}
@@ -279,17 +286,29 @@ function App() {
                     : "text-text-muted hover:text-text-secondary"
                 }`}
               >
-                {mode === "write" ? "Write" : mode === "review" ? "Review" : "Explore"}
+                {mode === "write"
+                  ? "Write"
+                  : mode === "review"
+                    ? "Review"
+                    : mode === "explore"
+                      ? "Explore"
+                      : "Inspect"}
               </button>
             ))}
           </div>
         </div>
-        <div className={`${companionHeight} min-h-0 ${storyMode === "explore" ? "border-b border-border-subtle" : ""}`}>
-          <CompanionPanel
-            mode={storyMode}
-            onApplyOperation={handleApplyWriterOperation}
-          />
-        </div>
+        {storyMode === "inspect" ? (
+          <div className="min-h-0 flex-1">
+            <WriterInspectorPanel />
+          </div>
+        ) : (
+          <div className={`${companionHeight} min-h-0 ${storyMode === "explore" ? "border-b border-border-subtle" : ""}`}>
+            <CompanionPanel
+              mode={storyMode}
+              onApplyOperation={handleApplyWriterOperation}
+            />
+          </div>
+        )}
         {storyMode === "explore" && (
           <div className="flex-1 min-h-0">
           <AgentPanel

@@ -2,7 +2,11 @@ const fs = require("fs");
 const path = require("path");
 
 const componentPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.tsx");
+const appPath = path.join(__dirname, "..", "src", "App.tsx");
+const inspectorPath = path.join(__dirname, "..", "src", "components", "WriterInspectorPanel.tsx");
 const source = fs.readFileSync(componentPath, "utf8");
+const appSource = fs.readFileSync(appPath, "utf8");
+const inspectorSource = fs.readFileSync(inspectorPath, "utf8");
 
 const checks = [
   {
@@ -43,6 +47,26 @@ const checks = [
       source.includes("Recent acceptance") &&
       source.includes("productMetrics.proposalAcceptanceRate") &&
       !source.includes("operationLifecycle.map"),
+  },
+  {
+    name: "internal timeline has a dedicated inspect mode",
+    pass:
+      appSource.includes('"inspect"') &&
+      appSource.includes("<WriterInspectorPanel />") &&
+      appSource.includes('storyMode === "inspect"'),
+  },
+  {
+    name: "inspector uses the backend inspector timeline command",
+    pass:
+      inspectorSource.includes("Commands.getWriterAgentInspectorTimeline") &&
+      inspectorSource.includes("WriterInspectorTimeline"),
+  },
+  {
+    name: "inspector keeps failure and provider budget details out of companion tabs",
+    pass:
+      inspectorSource.includes('"failure"') &&
+      inspectorSource.includes("Provider Budget") &&
+      !source.includes("getWriterAgentInspectorTimeline"),
   },
 ];
 

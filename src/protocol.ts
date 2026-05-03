@@ -24,6 +24,8 @@ export const Commands = {
   getWriterAgentPendingProposals: "get_writer_agent_pending_proposals",
   getWriterAgentStatus: "get_writer_agent_status",
   getWriterAgentTrace: "get_writer_agent_trace",
+  getWriterAgentInspectorTimeline: "get_writer_agent_inspector_timeline",
+  getWriterAgentCompanionTimelineSummary: "get_writer_agent_companion_timeline_summary",
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
   getAgentTools: "get_agent_tools",
@@ -201,7 +203,7 @@ export interface ChainOfThoughtStep {
 
 export type AgentMode = "off" | "passive" | "proactive";
 
-export type StoryMode = "write" | "review" | "explore";
+export type StoryMode = "write" | "review" | "explore" | "inspect";
 
 export type AgentObservationReason =
   | "user_typed"
