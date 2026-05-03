@@ -393,6 +393,59 @@ export interface GenerateChapterAutonomousPayload {
   frontendState?: FrontendChapterStateSnapshot;
   saveMode?: "create_if_missing" | "replace_if_clean" | "save_as_draft";
   chapterSummaryOverride?: string;
+  providerBudgetApproval?: WriterProviderBudgetApproval;
+}
+
+export type WriterProviderBudgetTask =
+  | "chapter_generation"
+  | "batch_generation"
+  | "project_brain_rebuild"
+  | "external_research"
+  | "manual_request"
+  | "ghost_preview"
+  | string;
+
+export type WriterProviderBudgetDecision =
+  | "allowed"
+  | "warn"
+  | "approval_required"
+  | "blocked"
+  | string;
+
+export interface WriterProviderBudgetReport {
+  task: WriterProviderBudgetTask;
+  model: string;
+  estimatedInputTokens: number;
+  requestedOutputTokens: number;
+  estimatedTotalTokens: number;
+  estimatedCostMicros: number;
+  maxTotalTokensWithoutApproval: number;
+  maxEstimatedCostMicrosWithoutApproval: number;
+  decision: WriterProviderBudgetDecision;
+  approvalRequired: boolean;
+  reasons: string[];
+  remediation: string[];
+}
+
+export interface WriterProviderBudgetApproval {
+  task: WriterProviderBudgetTask;
+  model: string;
+  approvedTotalTokens: number;
+  approvedCostMicros: number;
+  approvedAtMs: number;
+  source: string;
+}
+
+export interface WriterFailureEvidenceBundle {
+  category: string;
+  code: string;
+  message: string;
+  recoverable: boolean;
+  taskId?: string | null;
+  evidenceRefs: string[];
+  details: unknown;
+  remediation: string[];
+  createdAtMs: number;
 }
 
 export interface ChapterContextSource {
@@ -418,6 +471,7 @@ export interface ChapterGenerationError {
   message: string;
   recoverable: boolean;
   details?: string;
+  evidence?: WriterFailureEvidenceBundle;
 }
 
 export interface ChapterGenerationConflict {

@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::writer_agent::context_relevance::{format_text_chunk_relevance, rerank_text_chunks};
 use crate::writer_agent::provider_budget::{
-    evaluate_provider_budget, WriterProviderBudgetDecision, WriterProviderBudgetReport,
-    WriterProviderBudgetRequest, WriterProviderBudgetTask,
+    apply_provider_budget_approval, evaluate_provider_budget, WriterProviderBudgetApproval,
+    WriterProviderBudgetDecision, WriterProviderBudgetReport, WriterProviderBudgetRequest,
+    WriterProviderBudgetTask,
 };
 use crate::writer_agent::task_receipt::{
     WriterFailureCategory, WriterFailureEvidenceBundle, WriterTaskReceipt,
@@ -59,6 +60,8 @@ pub struct GenerateChapterAutonomousPayload {
     pub save_mode: SaveMode,
     #[serde(default)]
     pub chapter_summary_override: Option<String>,
+    #[serde(default)]
+    pub provider_budget_approval: Option<WriterProviderBudgetApproval>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1068,6 +1071,7 @@ fn snippet_text(text: &str, limit: usize) -> String {
 pub async fn generate_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
 ) -> Result<GenerateChapterDraftOutput, ChapterGenerationError> {
     if context.prompt_context.trim().is_empty() {
         return Err(ChapterGenerationError::new(
@@ -1099,7 +1103,10 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
         serde_json::json!({"role": "system", "content": system_prompt}),
         serde_json::json!({"role": "user", "content": user_prompt}),
     ];
-    let budget_report = chapter_generation_provider_budget(settings, &messages);
+    let budget_report = apply_provider_budget_approval(
+        chapter_generation_provider_budget(settings, &messages),
+        provider_budget_approval,
+    );
     if budget_report.decision == WriterProviderBudgetDecision::ApprovalRequired {
         return Err(provider_budget_error(
             &context.request_id,
@@ -1615,7 +1622,13 @@ pub async fn run_chapter_generation_pipeline(
         Some(context.target.title.clone()),
     ));
 
-    let draft = match generate_chapter_draft(&settings, &context).await {
+    let draft = match generate_chapter_draft(
+        &settings,
+        &context,
+        payload.provider_budget_approval.as_ref(),
+    )
+    .await
+    {
         Ok(draft) => {
             record_provider_budget(&context, &draft.provider_budget);
             draft

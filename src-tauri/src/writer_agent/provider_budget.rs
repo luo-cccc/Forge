@@ -55,6 +55,17 @@ pub struct WriterProviderBudgetReport {
     pub remediation: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterProviderBudgetApproval {
+    pub task: WriterProviderBudgetTask,
+    pub model: String,
+    pub approved_total_tokens: u64,
+    pub approved_cost_micros: u64,
+    pub approved_at_ms: u64,
+    pub source: String,
+}
+
 impl WriterProviderBudgetRequest {
     pub fn new(
         task: WriterProviderBudgetTask,
@@ -74,6 +85,38 @@ impl WriterProviderBudgetRequest {
             already_approved: false,
         }
     }
+}
+
+impl WriterProviderBudgetApproval {
+    pub fn covers(&self, report: &WriterProviderBudgetReport) -> bool {
+        self.task == report.task
+            && self.model == report.model
+            && self.approved_total_tokens >= report.estimated_total_tokens
+            && self.approved_cost_micros >= report.estimated_cost_micros
+    }
+}
+
+pub fn apply_provider_budget_approval(
+    mut report: WriterProviderBudgetReport,
+    approval: Option<&WriterProviderBudgetApproval>,
+) -> WriterProviderBudgetReport {
+    let Some(approval) = approval else {
+        return report;
+    };
+    if report.decision != WriterProviderBudgetDecision::ApprovalRequired
+        || !approval.covers(&report)
+    {
+        return report;
+    }
+
+    report.decision = WriterProviderBudgetDecision::Warn;
+    report.approval_required = false;
+    report.reasons.push(format!(
+        "provider budget approved by {} at {}",
+        approval.source, approval.approved_at_ms
+    ));
+    report.remediation = remediation_for_decision(report.decision, report.task);
+    report
 }
 
 pub fn default_provider_budget_limits(
@@ -229,5 +272,57 @@ mod tests {
         assert!(report.approval_required);
         assert!(!report.reasons.is_empty());
         assert!(!report.remediation.is_empty());
+    }
+
+    #[test]
+    fn matching_budget_approval_downgrades_to_warn() {
+        let report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+            WriterProviderBudgetTask::ChapterGeneration,
+            "gpt-4o",
+            70_000,
+            20_000,
+        ));
+        assert_eq!(
+            report.decision,
+            WriterProviderBudgetDecision::ApprovalRequired
+        );
+
+        let approval = WriterProviderBudgetApproval {
+            task: report.task,
+            model: report.model.clone(),
+            approved_total_tokens: report.estimated_total_tokens,
+            approved_cost_micros: report.estimated_cost_micros,
+            approved_at_ms: 42,
+            source: "test".to_string(),
+        };
+        let approved_report = apply_provider_budget_approval(report, Some(&approval));
+
+        assert_eq!(approved_report.decision, WriterProviderBudgetDecision::Warn);
+        assert!(!approved_report.approval_required);
+    }
+
+    #[test]
+    fn smaller_budget_approval_does_not_cover_larger_request() {
+        let report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+            WriterProviderBudgetTask::ChapterGeneration,
+            "gpt-4o",
+            70_000,
+            20_000,
+        ));
+        let approval = WriterProviderBudgetApproval {
+            task: report.task,
+            model: report.model.clone(),
+            approved_total_tokens: report.estimated_total_tokens.saturating_sub(1),
+            approved_cost_micros: report.estimated_cost_micros,
+            approved_at_ms: 42,
+            source: "test".to_string(),
+        };
+        let approved_report = apply_provider_budget_approval(report, Some(&approval));
+
+        assert_eq!(
+            approved_report.decision,
+            WriterProviderBudgetDecision::ApprovalRequired
+        );
+        assert!(approved_report.approval_required);
     }
 }

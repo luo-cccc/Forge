@@ -15,6 +15,8 @@ import {
   type Epiphany,
   type FrontendChapterStateSnapshot,
   type GenerateChapterAutonomousPayload,
+  type WriterProviderBudgetApproval,
+  type WriterProviderBudgetReport,
   type StoryMode,
   type SearchStatus,
   type StoryboardMarker,
@@ -30,6 +32,11 @@ interface Message {
 interface AgentPanelProps {
   mode: StoryMode;
   getContext: () => { full: string; paragraph: string; selected: string; cursorPosition: number };
+}
+
+interface PendingChapterDraftRetry {
+  payload: GenerateChapterAutonomousPayload;
+  budget: WriterProviderBudgetReport;
 }
 
 function buildAskAgentContext(
@@ -80,6 +87,53 @@ function parseChineseChapterNumber(raw: string): number | null {
   return digitMap[raw] ?? null;
 }
 
+function formatProviderCostMicros(value: number): string {
+  return `$${(value / 1_000_000).toFixed(4)}`;
+}
+
+function providerBudgetFromError(
+  error: ChapterGenerationEvent["error"],
+): WriterProviderBudgetReport | null {
+  const details = error?.evidence?.details;
+  if (!details || typeof details !== "object" || !("providerBudget" in details)) return null;
+  const budget = (details as { providerBudget?: unknown }).providerBudget;
+  if (!budget || typeof budget !== "object") return null;
+  const report = budget as Partial<WriterProviderBudgetReport>;
+  if (
+    typeof report.task !== "string" ||
+    typeof report.model !== "string" ||
+    typeof report.estimatedTotalTokens !== "number" ||
+    typeof report.estimatedCostMicros !== "number"
+  ) {
+    return null;
+  }
+  return {
+    task: report.task,
+    model: report.model,
+    estimatedInputTokens: report.estimatedInputTokens ?? 0,
+    requestedOutputTokens: report.requestedOutputTokens ?? 0,
+    estimatedTotalTokens: report.estimatedTotalTokens,
+    estimatedCostMicros: report.estimatedCostMicros,
+    maxTotalTokensWithoutApproval: report.maxTotalTokensWithoutApproval ?? 0,
+    maxEstimatedCostMicrosWithoutApproval: report.maxEstimatedCostMicrosWithoutApproval ?? 0,
+    decision: report.decision ?? "approval_required",
+    approvalRequired: report.approvalRequired ?? true,
+    reasons: Array.isArray(report.reasons) ? report.reasons : [],
+    remediation: Array.isArray(report.remediation) ? report.remediation : [],
+  };
+}
+
+function approvalFromBudget(budget: WriterProviderBudgetReport): WriterProviderBudgetApproval {
+  return {
+    task: budget.task,
+    model: budget.model,
+    approvedTotalTokens: budget.estimatedTotalTokens,
+    approvedCostMicros: budget.estimatedCostMicros,
+    approvedAtMs: Date.now(),
+    source: "explore_chapter_generation",
+  };
+}
+
 export default function AgentPanel({
   mode,
   getContext,
@@ -113,7 +167,10 @@ export default function AgentPanel({
   const [epiphanies, setEpiphanies] = useState<Epiphany[]>([]);
   const [cotSteps, setCotSteps] = useState<ChainOfThoughtStep[]>([]);
   const [chapterEvents, setChapterEvents] = useState<ChapterGenerationEvent[]>([]);
+  const [pendingChapterDraftRetry, setPendingChapterDraftRetry] =
+    useState<PendingChapterDraftRetry | null>(null);
   const activeChapterRequestRef = useRef<string | null>(null);
+  const activeChapterPayloadRef = useRef<GenerateChapterAutonomousPayload | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rawBufferRef = useRef("");
 
@@ -218,6 +275,24 @@ export default function AgentPanel({
             setIsStreaming(false);
             setIsAgentThinking(false);
             activeChapterRequestRef.current = null;
+            if (event.payload.phase === "chapter_generation_failed") {
+              const budget = providerBudgetFromError(event.payload.error);
+              const retryPayload = activeChapterPayloadRef.current;
+              activeChapterPayloadRef.current = null;
+              if (
+                event.payload.error?.code === "PROVIDER_BUDGET_APPROVAL_REQUIRED" &&
+                budget &&
+                retryPayload
+              ) {
+                setPendingChapterDraftRetry({
+                  payload: retryPayload,
+                  budget,
+                });
+              }
+            } else {
+              activeChapterPayloadRef.current = null;
+              setPendingChapterDraftRetry(null);
+            }
             const finalText =
               event.payload.phase === "chapter_generation_completed"
                 ? `已完成：${event.payload.saved?.chapterTitle ?? event.payload.targetChapterTitle ?? "章节"} 初稿已保存。`
@@ -307,6 +382,8 @@ export default function AgentPanel({
     setIsStreaming(true);
     setIsAgentThinking(true);
     rawBufferRef.current = "";
+    activeChapterPayloadRef.current = null;
+    setPendingChapterDraftRetry(null);
     setChapterEvents([]);
 
     try {
@@ -324,11 +401,13 @@ export default function AgentPanel({
           frontendState,
           saveMode: "replace_if_clean",
         };
+        activeChapterPayloadRef.current = payload;
         const result = await invoke<ChapterGenerationStart>(
           Commands.generateChapterAutonomous,
           { payload },
         );
         activeChapterRequestRef.current = result.requestId;
+        activeChapterPayloadRef.current = { ...payload, requestId: result.requestId };
       } else if (brainMode) {
         await invoke(Commands.askProjectBrain, { query: text });
       } else {
@@ -407,6 +486,42 @@ export default function AgentPanel({
     currentChapterRevision,
     isEditorDirty,
   ]);
+
+  const handleApproveProviderBudget = useCallback(async () => {
+    if (!pendingChapterDraftRetry || isStreaming) return;
+    const payload: GenerateChapterAutonomousPayload = {
+      ...pendingChapterDraftRetry.payload,
+      requestId: undefined,
+      providerBudgetApproval: approvalFromBudget(pendingChapterDraftRetry.budget),
+    };
+    setAgentError(null);
+    setPendingChapterDraftRetry(null);
+    setChapterEvents([]);
+    setIsStreaming(true);
+    setIsAgentThinking(true);
+    rawBufferRef.current = "";
+    activeChapterPayloadRef.current = payload;
+    try {
+      const result = await invoke<ChapterGenerationStart>(
+        Commands.generateChapterAutonomous,
+        { payload },
+      );
+      activeChapterRequestRef.current = result.requestId;
+      activeChapterPayloadRef.current = { ...payload, requestId: result.requestId };
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          content: `Provider budget approved for ${pendingChapterDraftRetry.budget.estimatedTotalTokens} tokens; retrying chapter generation.`,
+        },
+      ]);
+    } catch (e) {
+      setStreaming("");
+      setIsStreaming(false);
+      setIsAgentThinking(false);
+      setMessages((prev) => [...prev, { role: "agent", content: `Error: ${e}` }]);
+    }
+  }, [isStreaming, pendingChapterDraftRetry, setIsAgentThinking]);
 
   return (
     <div className="flex flex-col h-full border-l border-border-subtle">
@@ -587,6 +702,54 @@ export default function AgentPanel({
                 </span>
               </div>
             ))}
+          </div>
+        )}
+        {pendingChapterDraftRetry && (
+          <div className="text-xs max-w-[90%] rounded-sm px-3 py-2 bg-accent-subtle/30 border border-accent/30 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-accent">Provider budget approval</span>
+              <span className="font-mono text-[10px] text-text-muted">
+                {pendingChapterDraftRetry.budget.decision}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded bg-bg-deep p-2">
+                <span className="block text-[10px] text-text-muted">Tokens</span>
+                <span className="font-mono text-text-primary">
+                  {pendingChapterDraftRetry.budget.estimatedTotalTokens}
+                </span>
+              </div>
+              <div className="rounded bg-bg-deep p-2">
+                <span className="block text-[10px] text-text-muted">Estimated Cost</span>
+                <span className="font-mono text-text-primary">
+                  {formatProviderCostMicros(pendingChapterDraftRetry.budget.estimatedCostMicros)}
+                </span>
+              </div>
+            </div>
+            <p className="line-clamp-2 text-text-secondary">
+              {pendingChapterDraftRetry.budget.reasons[0] ??
+                "This provider call needs explicit approval before retrying."}
+            </p>
+            {pendingChapterDraftRetry.budget.remediation[0] && (
+              <p className="line-clamp-2 text-[10px] text-text-muted">
+                {pendingChapterDraftRetry.budget.remediation[0]}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handleApproveProviderBudget}
+                disabled={isStreaming}
+                className="rounded-sm bg-accent px-2 py-1 text-[11px] text-bg-deep disabled:opacity-50"
+              >
+                Approve and Retry
+              </button>
+              <button
+                onClick={() => setPendingChapterDraftRetry(null)}
+                className="rounded-sm border border-border-subtle bg-bg-deep px-2 py-1 text-[11px] text-text-muted hover:text-text-secondary"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
         {agentError && (
