@@ -26,7 +26,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 关键保存风险已处理：dirty state、chapter switching、autosave、inline operation、accepted feedback、batch generation dirty protection。
 - `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
-- Command boundary audit 已覆盖 49 个 Tauri commands，并进入 `npm run verify`。
+- Command boundary audit 已覆盖 50 个 Tauri commands，并进入 `npm run verify`。
 - Tauri command handlers 已全部移入 `src-tauri/src/commands/*`；`src-tauri/src/lib.rs` 当前不再包含 `#[tauri::command]`。
 - AppState、启动期 Hermes/Writer memory DB 打开、legacy DB migration、kernel seed 逻辑已抽入 `src-tauri/src/app_state.rs`。
 - Semantic lint payload/event 和设定/诊断 lint 逻辑已抽入 `src-tauri/src/semantic_lint.rs`。
@@ -512,7 +512,7 @@ Verification：
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 49 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 当前约 170 行，只保留模块 wiring、Tauri setup 和 command registration。
+当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 50 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 当前约 170 行，只保留模块 wiring、Tauri setup 和 command registration。
 
 建议模块：
 
@@ -788,8 +788,10 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已基于 shared keyword 生成 reference graph edge，保留 evidence_ref。
    - 已新增 `knowledge_index.json` rebuild / load / save helper。
    - 已新增 knowledge index 文件读取路径守卫，拒绝 absolute path 和 `..` 逃逸。
+   - 已新增 read-only Tauri command：`get_project_brain_knowledge_graph`。
+   - Graph 页已新增 Brain 模式，可查看 Project Brain knowledge nodes / shared-keyword edges / source refs / keywords，并保留 Ask Brain 入口。
    - 已新增 eval：`writer_agent:project_brain_knowledge_index_graph`、`writer_agent:project_brain_knowledge_index_path_guard`。
-   - 剩余：接入 UI inspector / 可视化 graph、更多真实 Story Bible / 章节结果来源、markdown cross reference / back reference。
+   - 剩余：更细的 graph filtering、cross reference / back reference 操作、更多真实 Story Bible / 章节结果来源。
 4. Project Brain embedding provider 抽象。
    - 明确 provider id、model、维度、input limit、batch status、失败重试策略。
    - 兼容本地和远程 embedding。
@@ -994,7 +996,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 4. Memory correction / reinforcement。（第一阶段已完成）
    - 已让作者对记忆候选的采纳/拒绝改变后续同 slot 候选行为；纠错优先于强化。
 5. Project Brain knowledge index / graph。（第一阶段已完成）
-   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval 已落地；embedding provider 抽象仍未完成。
+   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；embedding provider 抽象仍未完成。
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；真实 run loop 调度、外部检索工具、inspector 展示仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
@@ -1015,7 +1017,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 关键章节生成失败不是字符串，而是可分类的证据包；更多工具/反馈失败路径仍需接入。
 - RunEventStore 可以回放一次 writer run。
 - 作者对记忆候选的纠错会压制后续同 slot 抽取，采纳会强化同 slot 候选。
-- Project Brain knowledge index / graph 有后端 schema、构建函数和路径守卫；UI 可视化仍未完成。
+- Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；更细的过滤和 cross-reference 操作仍未完成。
 - Research / Diagnostic 子任务有隔离 artifact workspace、tool policy、evidence-only 结果边界和 Research tool/provider 失败证据包；真实外部公开资料 provider/tool 调度仍未完成。
 - Inspector timeline 有后端视图和前端 Inspect 只读调试面板，默认 Companion summary 已证明不暴露内部 trace；trajectory export 有 redaction warning 和 local-only 标记。
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成 provider call 已有前置门禁、Explore UI approval surface 和批准凭证覆盖校验；尚未强制接入所有真实 provider call。
@@ -1141,7 +1143,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 2. 增加 Planning / Review 只读模式。（第一阶段已完成：专用 task/context/prompt/tool policy/eval）
 3. 增加 WriterTaskReceipt 和 failure evidence bundle。（第一阶段已完成：章节生成 receipt、保存前校验、writer.error run event、trajectory export）
 4. 增加 memory correction / reinforcement。（第一阶段已完成：reviewed memory candidates 的 correction/reinforcement signal）
-5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / eval）
+5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / eval / Graph 页 Brain 模式）
 6. 增加 isolated research / diagnostic subtask workspace。（第一阶段已完成：artifact workspace / tool policy / evidence-only result / eval）
 7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / redaction warning / local-only export marker）
 8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）

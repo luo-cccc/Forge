@@ -35,6 +35,13 @@ pub(crate) struct ProjectGraphData {
 }
 
 #[tauri::command]
+pub fn get_project_brain_knowledge_graph(
+    app: tauri::AppHandle,
+) -> Result<crate::brain_service::ProjectBrainKnowledgeIndex, String> {
+    crate::brain_service::load_project_brain_knowledge_index(&app)
+}
+
+#[tauri::command]
 pub fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
     let mut entities = Vec::new();
     let mut relationships = Vec::new();

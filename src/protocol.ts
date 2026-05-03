@@ -19,6 +19,7 @@ export const Commands = {
   generateChapterAutonomous: "generate_chapter_autonomous",
   getAgentDomainProfile: "get_agent_domain_profile",
   getAgentKernelStatus: "get_agent_kernel_status",
+  getProjectBrainKnowledgeGraph: "get_project_brain_knowledge_graph",
   getProjectStorageDiagnostics: "get_project_storage_diagnostics",
   getWriterAgentLedger: "get_writer_agent_ledger",
   getWriterAgentPendingProposals: "get_writer_agent_pending_proposals",

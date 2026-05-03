@@ -67,7 +67,7 @@ use commands::generation::{
     analyze_chapter, analyze_pacing, ask_project_brain, batch_generate_chapter,
     generate_chapter_autonomous, generate_parallel_drafts,
 };
-use commands::graph::get_project_graph_data;
+use commands::graph::{get_project_brain_knowledge_graph, get_project_graph_data};
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::manual_agent::ask_agent;
 use commands::outline::{
@@ -165,6 +165,7 @@ pub fn run() {
             analyze_chapter,
             ask_project_brain,
             generate_parallel_drafts,
+            get_project_brain_knowledge_graph,
             get_project_graph_data,
             analyze_pacing,
             rename_chapter_file,

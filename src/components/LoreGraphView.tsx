@@ -24,6 +24,26 @@ interface GraphData {
   relationships: GraphRelationship[];
   chapters: GraphChapter[];
 }
+interface KnowledgeNode {
+  id: string;
+  kind: string;
+  label: string;
+  sourceRef: string;
+  keywords: string[];
+  summary: string;
+}
+interface KnowledgeEdge {
+  from: string;
+  to: string;
+  relation: string;
+  evidenceRef: string;
+}
+interface KnowledgeGraphData {
+  projectId: string;
+  nodes: KnowledgeNode[];
+  edges: KnowledgeEdge[];
+  sourceCount: number;
+}
 
 interface Node2D {
   id: string;
@@ -34,11 +54,16 @@ interface Node2D {
   y: number;
   vx: number;
   vy: number;
+  sourceRef?: string;
+  keywords?: string[];
 }
 
 const COLORS: Record<string, string> = {
   character: "#D4943A",
   character_trait: "#8B5CF6",
+  lore: "#D4943A",
+  outline: "#5A8A6A",
+  chunk: "#8B5CF6",
   default: "#6B7280",
 };
 
@@ -100,53 +125,94 @@ function forceSimulation(
 export default function LoreGraphView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphData | null>(null);
+  const [graphMode, setGraphMode] = useState<"entities" | "brain">("entities");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node2D | null>(null);
   const [nodes, setNodes] = useState<Node2D[]>([]);
   const [edges, setEdges] = useState<{ source: number; target: number; label: string }[]>([]);
   const [viewBox, setViewBox] = useState("0 0 800 600");
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await invoke<GraphData>(Commands.getProjectGraphData);
-        setGraphData(data);
+  const loadGraph = useCallback(async (mode: "entities" | "brain") => {
+    const w = 700;
+    const h = 500;
 
-        const w = 700;
-        const h = 500;
-        setViewBox(`0 0 ${w} ${h}`);
-
-        const simNodes: Node2D[] = data.entities.map((e) => ({
-          id: e.id,
-          name: e.name,
-          category: e.category,
-          description: e.description,
+    try {
+      if (mode === "brain") {
+        const data = await invoke<KnowledgeGraphData>(Commands.getProjectBrainKnowledgeGraph);
+        setKnowledgeGraph(data);
+        const simNodes: Node2D[] = data.nodes.map((node) => ({
+          id: node.id,
+          name: node.label,
+          category: node.kind,
+          description: node.summary,
+          sourceRef: node.sourceRef,
+          keywords: node.keywords,
           x: w / 2 + (Math.random() - 0.5) * 200,
           y: h / 2 + (Math.random() - 0.5) * 200,
           vx: 0,
           vy: 0,
         }));
-
-        const nameToIdx = new Map<string, number>();
-        simNodes.forEach((n, i) => nameToIdx.set(n.name, i));
-
-        const simEdges: { source: number; target: number; label: string }[] = [];
-        for (const rel of data.relationships) {
-          const s = nameToIdx.get(rel.source);
-          const t = nameToIdx.get(rel.target);
-          if (s !== undefined && t !== undefined && s !== t) {
-            simEdges.push({ source: s, target: t, label: rel.label });
-          }
-        }
-
+        const idToIdx = new Map<string, number>();
+        simNodes.forEach((node, index) => idToIdx.set(node.id, index));
+        const simEdges = data.edges.flatMap((edge) => {
+          const source = idToIdx.get(edge.from);
+          const target = idToIdx.get(edge.to);
+          return source !== undefined && target !== undefined && source !== target
+            ? [{ source, target, label: edge.relation }]
+            : [];
+        });
         forceSimulation(simNodes, simEdges, w, h);
+        setLoadError(null);
+        setViewBox(`0 0 ${w} ${h}`);
         setNodes(simNodes);
         setEdges(simEdges);
-      } catch (e) {
-        console.error("Failed to load graph data:", e);
+        return;
       }
-    };
-    load();
+
+      const data = await invoke<GraphData>(Commands.getProjectGraphData);
+      setGraphData(data);
+      const simNodes: Node2D[] = data.entities.map((entity) => ({
+        id: entity.id,
+        name: entity.name,
+        category: entity.category,
+        description: entity.description,
+        x: w / 2 + (Math.random() - 0.5) * 200,
+        y: h / 2 + (Math.random() - 0.5) * 200,
+        vx: 0,
+        vy: 0,
+      }));
+
+      const nameToIdx = new Map<string, number>();
+      simNodes.forEach((node, index) => nameToIdx.set(node.name, index));
+      const simEdges: { source: number; target: number; label: string }[] = [];
+      for (const rel of data.relationships) {
+        const source = nameToIdx.get(rel.source);
+        const target = nameToIdx.get(rel.target);
+        if (source !== undefined && target !== undefined && source !== target) {
+          simEdges.push({ source, target, label: rel.label });
+        }
+      }
+
+      forceSimulation(simNodes, simEdges, w, h);
+      setLoadError(null);
+      setViewBox(`0 0 ${w} ${h}`);
+      setNodes(simNodes);
+      setEdges(simEdges);
+    } catch (e) {
+      setNodes([]);
+      setEdges([]);
+      setLoadError(String(e));
+      console.error("Failed to load graph data:", e);
+    }
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadGraph(graphMode);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [graphMode, loadGraph]);
 
   const handleNodeClick = useCallback((node: Node2D) => {
     setSelectedNode(node);
@@ -154,13 +220,12 @@ export default function LoreGraphView() {
 
   const handleAskBrain = useCallback(() => {
     if (!selectedNode) return;
-    // Trigger a Project Brain query
     invoke(Commands.askProjectBrain, {
       query: `Tell me everything about ${selectedNode.name}`,
     }).catch(console.error);
   }, [selectedNode]);
 
-  if (!graphData) {
+  if (!graphData && graphMode === "entities" && !loadError) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted text-xs">
         Loading graph...
@@ -171,50 +236,77 @@ export default function LoreGraphView() {
   return (
     <div className="flex h-full">
       <div className="flex-1 relative">
-        <div className="px-3 py-2 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider">
-          Entity Graph
+        <div className="px-3 py-2 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider flex items-center justify-between gap-2">
+          <span>{graphMode === "brain" ? "Project Brain Knowledge Graph" : "Entity Graph"}</span>
+          <div className="flex rounded bg-bg-deep border border-border-subtle p-0.5">
+            {(["entities", "brain"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => {
+                  setSelectedNode(null);
+                  setLoadError(null);
+                  setNodes([]);
+                  setEdges([]);
+                  setGraphMode(mode);
+                }}
+                className={`px-2 py-0.5 rounded-sm text-[10px] ${
+                  graphMode === mode
+                    ? "bg-accent text-bg-deep"
+                    : "text-text-muted hover:text-text-secondary"
+                }`}
+              >
+                {mode === "entities" ? "Entities" : "Brain"}
+              </button>
+            ))}
+          </div>
         </div>
-        <svg ref={svgRef} viewBox={viewBox} className="w-full h-[calc(100%-36px)]">
-          {edges.map((e, i) => (
+        {loadError ? (
+          <div className="p-4 text-xs text-danger">{loadError}</div>
+        ) : nodes.length === 0 ? (
+          <div className="p-4 text-xs text-text-muted">No graph nodes available yet.</div>
+        ) : (
+          <svg ref={svgRef} viewBox={viewBox} className="w-full h-[calc(100%-36px)]">
+          {edges.map((edge, index) => (
             <line
-              key={`edge-${i}`}
-              x1={nodes[e.source]?.x ?? 0}
-              y1={nodes[e.source]?.y ?? 0}
-              x2={nodes[e.target]?.x ?? 0}
-              y2={nodes[e.target]?.y ?? 0}
+              key={`edge-${index}`}
+              x1={nodes[edge.source]?.x ?? 0}
+              y1={nodes[edge.source]?.y ?? 0}
+              x2={nodes[edge.target]?.x ?? 0}
+              y2={nodes[edge.target]?.y ?? 0}
               stroke="#3D3934"
               strokeWidth={1}
               strokeOpacity={0.6}
             />
           ))}
-          {nodes.map((n) => (
+          {nodes.map((node) => (
             <g
-              key={n.id}
-              onClick={() => handleNodeClick(n)}
+              key={node.id}
+              onClick={() => handleNodeClick(node)}
               className="cursor-pointer"
             >
               <circle
-                cx={n.x}
-                cy={n.y}
-                r={n.category === "character" ? 12 : 8}
-                fill={COLORS[n.category] || COLORS.default}
+                cx={node.x}
+                cy={node.y}
+                r={node.category === "character" || node.category === "lore" ? 12 : 8}
+                fill={COLORS[node.category] || COLORS.default}
                 fillOpacity={0.8}
-                stroke={selectedNode?.id === n.id ? "#E4DAC8" : COLORS[n.category] || COLORS.default}
-                strokeWidth={selectedNode?.id === n.id ? 2 : 1}
+                stroke={selectedNode?.id === node.id ? "#E4DAC8" : COLORS[node.category] || COLORS.default}
+                strokeWidth={selectedNode?.id === node.id ? 2 : 1}
               />
               <text
-                x={n.x}
-                y={n.y + 20}
+                x={node.x}
+                y={node.y + 20}
                 textAnchor="middle"
                 fill="#8A8278"
                 fontSize={10}
                 fontFamily="system-ui"
               >
-                {n.name.length > 10 ? n.name.substring(0, 10) + "…" : n.name}
+                {node.name.length > 10 ? node.name.substring(0, 10) + "..." : node.name}
               </text>
             </g>
           ))}
         </svg>
+        )}
       </div>
       {selectedNode && (
         <div className="w-56 border-l border-border-subtle p-3 space-y-2 overflow-y-auto">
@@ -239,12 +331,31 @@ export default function LoreGraphView() {
           <p className="text-xs text-text-secondary leading-relaxed">
             {selectedNode.description}
           </p>
+          {selectedNode.sourceRef && (
+            <div className="text-[10px] text-text-muted">
+              Source: {selectedNode.sourceRef}
+            </div>
+          )}
+          {(selectedNode.keywords?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {selectedNode.keywords?.slice(0, 8).map((keyword) => (
+                <span key={keyword} className="rounded bg-bg-deep px-1.5 py-0.5 text-[10px] text-text-muted">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          )}
           <button
             onClick={handleAskBrain}
             className="w-full text-xs px-2 py-1.5 rounded-sm bg-accent/20 hover:bg-accent/30 text-accent transition-colors"
           >
             Ask Brain about {selectedNode.name}
           </button>
+          {graphMode === "brain" && knowledgeGraph && (
+            <div className="rounded bg-bg-deep p-2 text-[10px] text-text-muted">
+              {knowledgeGraph.nodes.length} nodes · {knowledgeGraph.edges.length} edges · {knowledgeGraph.sourceCount} sources
+            </div>
+          )}
         </div>
       )}
     </div>
