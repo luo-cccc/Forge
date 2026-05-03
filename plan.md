@@ -43,7 +43,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
 - `agent-evals/src/product_scenarios.rs` 已集中承载 10 个真实长篇产品场景 eval；下一步要继续提升场景真实性和失败解释质量，而不是只堆数量。
-- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 仍过大，后续功能继续堆叠会降低可维护性。
+- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 已开始内部拆分，TaskPacket/context trace helper 已抽入 `writer_agent/kernel_task_packet.rs`，但 kernel facade 仍过大，后续功能继续堆叠会降低可维护性。
 
 ## 2. 总体原则
 
@@ -512,13 +512,15 @@ src-tauri/src/manual_agent.rs
 
 ### P2.2 拆分 `writer_agent/kernel.rs`
 
+当前状态：进行中。`writer_agent/kernel.rs` 已有 `kernel_chapters.rs`、`kernel_helpers.rs`、`kernel_ops.rs`、`kernel_prompts.rs`、`kernel_review.rs` 等辅助模块；本轮新增 `writer_agent/kernel_task_packet.rs`，承接 TaskPacket 构建、context budget trace 和 trace state expiry helper，并保持 `writer_agent::kernel::build_task_packet_for_observation` 对外路径稳定。`kernel.rs` 当前约 4810 行，下一步继续拆 run-loop / proposal / feedback / memory candidate 责任。
+
 建议模块：
 
 ```text
 writer_agent/
   kernel.rs              // facade / state owner
   run_loop.rs            // unified task execution
-  task_packet_builder.rs
+  kernel_task_packet.rs   // TaskPacket / context trace helpers（已开始）
   operation_executor.rs
   proposal_engine.rs
   feedback_loop.rs
@@ -702,7 +704,7 @@ agent-evals/src/
 6. 抽出 `editor_realtime.rs`。（已完成）
 7. 抽出 root utility / event / audit / writer observation helper。（已完成）
 8. 抽出 root tests。（已完成）
-9. 拆 `kernel.rs` 内部模块。
+9. 抽出 `kernel_task_packet.rs`。（已完成）
 10. 拆 `agent-evals/src/evals.rs`。
 11. 保持 public protocol 稳定。
 

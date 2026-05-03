@@ -51,6 +51,7 @@ P1 is in progress:
 - Editor realtime ghost rendering, ambient output forwarding, editor prediction cleanup, realtime cowrite gating, and LLM ghost proposal flow now live in `src-tauri/src/editor_realtime.rs`.
 - API key resolution, path helpers, event constants, event payloads, Agent status payloads, project write audit helpers, and chapter-save observation/canon-refresh/context-render helpers now live in focused root helper modules (`api_key.rs`, `app_paths.rs`, `events.rs`, `event_payloads.rs`, `agent_status.rs`, `project_audit.rs`, `writer_observer.rs`).
 - The root lib test suite now lives in `src-tauri/src/tests.rs`; `src-tauri/src/lib.rs` is down to roughly 170 lines of module wiring, Tauri setup, and command registration.
+- Writer Agent kernel splitting has started beyond the existing helper modules: TaskPacket construction, context budget trace conversion, and trace state expiry helpers now live in `src-tauri/src/writer_agent/kernel_task_packet.rs` while preserving the existing `writer_agent::kernel::build_task_packet_for_observation` export path.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
@@ -99,4 +100,4 @@ The expected local baseline is:
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
-- `writer_agent/kernel.rs` and `agent-evals/src/evals.rs` still need modular splitting (P2); `lib.rs` is now mostly module wiring, Tauri setup, and command registration.
+- `writer_agent/kernel.rs` is still large, but TaskPacket/context-trace helpers have moved into `kernel_task_packet.rs`; remaining kernel split targets are run-loop, proposal, feedback, and memory-candidate responsibilities. `agent-evals/src/evals.rs` still needs modular splitting (P2).
