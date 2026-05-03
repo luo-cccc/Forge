@@ -1,18 +1,28 @@
 mod agent_runtime;
+mod agent_status;
 mod ambient_agents;
+mod api_key;
+mod app_paths;
 mod app_state;
 mod brain_service;
 pub mod chapter_generation;
 mod commands;
 mod editor_realtime;
+mod event_payloads;
+mod events;
 mod llm_runtime;
 mod manual_agent;
 mod memory_context;
 mod observation_bridge;
+mod project_audit;
 mod semantic_lint;
 mod storage;
 mod tool_bridge;
 pub mod writer_agent;
+mod writer_observer;
+pub(crate) use agent_status::AgentKernelStatus;
+pub(crate) use api_key::{require_api_key, resolve_api_key};
+pub(crate) use app_paths::{log_dir, safe_filename_component};
 pub(crate) use app_state::{
     lock_editor_prediction, lock_harness_state, lock_hermes, startup_error, AppState,
     EditorPredictionTask, HarnessState,
@@ -22,9 +32,10 @@ pub(crate) use editor_realtime::{
     emit_writer_ghost_proposal, realtime_cowrite_enabled, spawn_llm_ghost_proposal,
     EditorGhostRenderTarget,
 };
+pub(crate) use event_payloads::{InlineWriterOperationEvent, StreamChunk, StreamEnd};
 pub(crate) use memory_context::{
     auto_embed_chapter, build_context_injection, collect_user_profile_entries,
-    extract_skills_from_recent, spawn_llm_memory_proposals,
+    extract_skills_from_recent,
 };
 pub(crate) use observation_bridge::{
     build_manual_writer_observation, build_writer_observation_from_editor_state,
@@ -32,114 +43,16 @@ pub(crate) use observation_bridge::{
 };
 #[cfg(test)]
 pub(crate) use observation_bridge::{split_context_for_cursor, test_editor_state_payload};
+pub(crate) use project_audit::{audit_project_file_write, backup_target_label};
 pub(crate) use semantic_lint::{
     find_semantic_lint, semantic_lint_enabled, EditorSemanticLint, SemanticLintPayload,
 };
+pub(crate) use writer_observer::{
+    char_tail, html_to_plain_text, observe_chapter_save, observe_generated_chapter_result,
+    refresh_kernel_canon_from_lorebook, render_writer_context_pack,
+};
 
-const KEYRING_SERVICE: &str = "agent-writer";
-pub(crate) mod events {
-    pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
-    pub const AGENT_EPIPHANY: &str = "agent-epiphany";
-    pub const AGENT_ERROR: &str = "agent-error";
-    pub const AGENT_PROPOSAL: &str = "agent-proposal";
-    pub const AGENT_SUGGESTION: &str = "agent-suggestion";
-    pub const AGENT_STREAM_CHUNK: &str = "agent-stream-chunk";
-    pub const AGENT_STREAM_END: &str = "agent-stream-end";
-    pub const BATCH_STATUS: &str = "batch-status";
-    pub const CHAPTER_GENERATION: &str = "chapter-generation";
-    pub const EDITOR_GHOST_CHUNK: &str = "editor-ghost-chunk";
-    pub const EDITOR_GHOST_END: &str = "editor-ghost-end";
-    pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
-    pub const EDITOR_ENTITY_CARD: &str = "editor-entity-card";
-    pub const EDITOR_HOVER_HINT: &str = "editor-hover-hint";
-    pub const INLINE_WRITER_OPERATION: &str = "inline-writer-operation";
-    pub const STORYBOARD_MARKER: &str = "storyboard-marker";
-}
-
-fn load_api_key_from_keychain() -> Option<String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, "openai").ok()?;
-    entry.get_password().ok()
-}
-
-pub(crate) fn safe_filename_component(raw: &str) -> String {
-    let mut safe = String::new();
-    let mut last_was_dash = false;
-    for ch in raw.trim().to_lowercase().chars() {
-        let next = if ch.is_ascii_alphanumeric() {
-            Some(ch)
-        } else if ch == ' ' || ch == '-' || ch == '_' {
-            Some('-')
-        } else {
-            None
-        };
-
-        if let Some(ch) = next {
-            if ch == '-' {
-                if last_was_dash {
-                    continue;
-                }
-                last_was_dash = true;
-            } else {
-                last_was_dash = false;
-            }
-            safe.push(ch);
-        }
-    }
-    let safe = safe.trim_matches('-');
-    if safe.is_empty() {
-        "default".to_string()
-    } else {
-        safe.to_string()
-    }
-}
-
-pub(crate) fn log_dir() -> Result<std::path::PathBuf, String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .map(|p| {
-                std::path::PathBuf::from(p)
-                    .join("agent-writer")
-                    .join("logs")
-            })
-            .map_err(|_| "APPDATA not set".to_string())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        dirs::home_dir()
-            .map(|p| p.join(".config").join("agent-writer").join("logs"))
-            .ok_or_else(|| "Home dir not found".to_string())
-    }
-}
-
-pub(crate) fn resolve_api_key() -> Option<String> {
-    load_api_key_from_keychain()
-        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-        .filter(|k| !k.is_empty())
-}
-
-pub(crate) fn require_api_key() -> Result<String, String> {
-    resolve_api_key().ok_or_else(|| "API key not set. Go to Settings.".to_string())
-}
-use serde::Serialize;
-use tauri::{Emitter, Manager};
-#[derive(Serialize, Clone)]
-pub(crate) struct StreamChunk {
-    pub(crate) content: String,
-}
-
-#[derive(Serialize, Clone)]
-pub(crate) struct StreamEnd {
-    pub(crate) reason: String,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InlineWriterOperationEvent {
-    pub(crate) request_id: String,
-    pub(crate) proposal: writer_agent::proposal::AgentProposal,
-    pub(crate) operation: writer_agent::operation::WriterOperation,
-}
+use tauri::Manager;
 
 use commands::backups::{get_project_storage_diagnostics, list_file_backups, restore_file_backup};
 use commands::chapters::{
@@ -168,285 +81,6 @@ use commands::writer_agent::{
     record_implicit_ghost_rejection, record_writer_operation_durable_save,
 };
 pub(crate) use manual_agent::ManualAgentTurn;
-
-pub(crate) fn audit_project_file_write(
-    app: &tauri::AppHandle,
-    scope: &str,
-    title: &str,
-    decision: &str,
-    rationale: &str,
-    sources: &[String],
-) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    let Ok(kernel) = state.writer_kernel.lock() else {
-        return;
-    };
-    if let Err(e) = kernel
-        .memory
-        .record_decision(scope, title, decision, &[], rationale, sources)
-    {
-        tracing::warn!("WriterAgent file-write audit failed: {}", e);
-    }
-}
-
-pub(crate) fn backup_target_label(target: &storage::BackupTarget) -> String {
-    match target {
-        storage::BackupTarget::Lorebook => "lorebook".to_string(),
-        storage::BackupTarget::Outline => "outline".to_string(),
-        storage::BackupTarget::ProjectBrain => "project_brain".to_string(),
-        storage::BackupTarget::Chapter { title } => format!("chapter:{}", title),
-    }
-}
-
-pub(crate) fn observe_chapter_save(
-    app: &tauri::AppHandle,
-    title: &str,
-    content: &str,
-    revision: &str,
-) -> Result<(), String> {
-    let project_id = storage::active_project_id(app)?;
-    let text = html_to_plain_text(content);
-    let paragraph = last_meaningful_paragraph(&text).unwrap_or_else(|| char_tail(&text, 400));
-    let cursor = text.chars().count();
-    let observation = writer_agent::observation::WriterObservation {
-        id: format!("save-{}", agent_runtime::now_ms()),
-        created_at: agent_runtime::now_ms(),
-        source: writer_agent::observation::ObservationSource::ChapterSave,
-        reason: writer_agent::observation::ObservationReason::Save,
-        project_id,
-        chapter_title: Some(title.to_string()),
-        chapter_revision: Some(revision.to_string()),
-        cursor: Some(writer_agent::observation::TextRange {
-            from: cursor,
-            to: cursor,
-        }),
-        selection: None,
-        prefix: char_tail(&text, 3_000),
-        suffix: String::new(),
-        paragraph,
-        full_text_digest: Some(storage::content_revision(&text)),
-        editor_dirty: false,
-    };
-
-    let state = app.state::<AppState>();
-    let proposals = {
-        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-        refresh_kernel_canon_from_lorebook(app, &mut kernel);
-        kernel.observe(observation.clone())?
-    };
-    for proposal in proposals {
-        app.emit(events::AGENT_PROPOSAL, proposal)
-            .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
-    }
-
-    if resolve_api_key().is_some() {
-        spawn_llm_memory_proposals(app.clone(), observation);
-    }
-
-    Ok(())
-}
-
-pub(crate) fn observe_generated_chapter_result(
-    app: &tauri::AppHandle,
-    saved: &chapter_generation::SaveGeneratedChapterOutput,
-    generated_content: &str,
-) {
-    if let Err(e) = observe_chapter_save(
-        app,
-        &saved.chapter_title,
-        generated_content,
-        &saved.new_revision,
-    ) {
-        tracing::warn!(
-            "WriterAgent generated-chapter result feedback failed for '{}': {}",
-            saved.chapter_title,
-            e
-        );
-    }
-}
-
-pub(crate) fn last_meaningful_paragraph(text: &str) -> Option<String> {
-    text.split('\n')
-        .rev()
-        .map(str::trim)
-        .find(|line| line.chars().count() >= 8)
-        .map(ToString::to_string)
-}
-
-pub(crate) fn html_to_plain_text(html: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    let mut entity = String::new();
-    let mut in_entity = false;
-
-    for ch in html.chars() {
-        if in_tag {
-            if ch == '>' {
-                in_tag = false;
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-            continue;
-        }
-
-        if in_entity {
-            if ch == ';' {
-                out.push_str(&decode_html_entity(&entity));
-                entity.clear();
-                in_entity = false;
-            } else if entity.chars().count() < 12 {
-                entity.push(ch);
-            } else {
-                out.push('&');
-                out.push_str(&entity);
-                out.push(ch);
-                entity.clear();
-                in_entity = false;
-            }
-            continue;
-        }
-
-        match ch {
-            '<' => in_tag = true,
-            '&' => in_entity = true,
-            '\r' => {}
-            _ => out.push(ch),
-        }
-    }
-
-    if in_entity {
-        out.push('&');
-        out.push_str(&entity);
-    }
-
-    out.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn decode_html_entity(entity: &str) -> String {
-    match entity {
-        "amp" => "&".to_string(),
-        "lt" => "<".to_string(),
-        "gt" => ">".to_string(),
-        "quot" => "\"".to_string(),
-        "apos" => "'".to_string(),
-        "nbsp" => " ".to_string(),
-        entity if entity.starts_with("#x") || entity.starts_with("#X") => {
-            u32::from_str_radix(&entity[2..], 16)
-                .ok()
-                .and_then(char::from_u32)
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| format!("&{};", entity))
-        }
-        entity if entity.starts_with('#') => entity[1..]
-            .parse::<u32>()
-            .ok()
-            .and_then(char::from_u32)
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| format!("&{};", entity)),
-        _ => format!("&{};", entity),
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AgentKernelStatus {
-    tool_generation: u64,
-    tool_count: usize,
-    effective_tool_count: usize,
-    blocked_tool_count: usize,
-    model_callable_tool_count: usize,
-    approval_required_tool_count: usize,
-    write_tool_count: usize,
-    domain_id: String,
-    capability_count: usize,
-    quality_gate_count: usize,
-    trace_enabled: bool,
-}
-
-pub(crate) fn refresh_kernel_canon_from_lorebook(
-    app: &tauri::AppHandle,
-    kernel: &mut writer_agent::WriterAgentKernel,
-) {
-    let entries = match storage::load_lorebook(app) {
-        Ok(entries) => entries,
-        Err(e) => {
-            tracing::warn!("WriterAgent canon refresh skipped lorebook: {}", e);
-            return;
-        }
-    };
-
-    for entry in entries {
-        let keyword = entry.keyword.trim();
-        if keyword.is_empty() {
-            continue;
-        }
-
-        let mut attributes = serde_json::Map::new();
-        if let Some(weapon) = extract_weapon_from_lore(&entry.content) {
-            attributes.insert("weapon".to_string(), serde_json::Value::String(weapon));
-        }
-
-        if attributes.is_empty() {
-            continue;
-        }
-
-        let summary: String = entry.content.chars().take(240).collect();
-        let aliases = Vec::<String>::new();
-        let _ = kernel.memory.upsert_canon_entity(
-            "character",
-            keyword,
-            &aliases,
-            &summary,
-            &serde_json::Value::Object(attributes),
-            0.8,
-        );
-    }
-}
-
-fn extract_weapon_from_lore(content: &str) -> Option<String> {
-    if !["武器", "惯用", "用刀", "用剑", "佩刀", "佩剑", "兵器"]
-        .iter()
-        .any(|cue| content.contains(cue))
-    {
-        return None;
-    }
-
-    [
-        "寒影刀",
-        "长剑",
-        "短剑",
-        "匕首",
-        "弓",
-        "枪",
-        "棍",
-        "鞭",
-        "斧",
-        "刀",
-        "剑",
-    ]
-    .iter()
-    .find(|weapon| content.contains(**weapon))
-    .map(|weapon| (*weapon).to_string())
-}
-
-pub(crate) fn render_writer_context_pack(
-    pack: &writer_agent::context::WritingContextPack,
-) -> String {
-    writer_agent::kernel::render_context_pack_for_prompt(pack)
-}
-
-pub(crate) fn char_tail(text: &str, max_chars: usize) -> String {
-    let mut chars = text.chars().rev().take(max_chars).collect::<Vec<_>>();
-    chars.reverse();
-    chars.into_iter().collect()
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -826,7 +460,9 @@ mod tests {
 
     #[test]
     fn last_meaningful_paragraph_ignores_short_trailing_lines() {
-        let paragraph = last_meaningful_paragraph("第一段很长。\n短\n最后一段足够长。").unwrap();
+        let paragraph =
+            writer_observer::last_meaningful_paragraph("第一段很长。\n短\n最后一段足够长。")
+                .unwrap();
         assert_eq!(paragraph, "最后一段足够长。");
     }
 

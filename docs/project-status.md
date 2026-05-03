@@ -49,6 +49,7 @@ P1 is in progress:
 - Manual context injection, user profile reads, chapter embedding, skill extraction, and LLM memory candidate generation now live in `src-tauri/src/memory_context.rs`.
 - Agent/editor/manual observation payloads and WriterObservation conversion now live in `src-tauri/src/observation_bridge.rs`.
 - Editor realtime ghost rendering, ambient output forwarding, editor prediction cleanup, realtime cowrite gating, and LLM ghost proposal flow now live in `src-tauri/src/editor_realtime.rs`.
+- API key resolution, path helpers, event constants, event payloads, Agent status payloads, project write audit helpers, and chapter-save observation/canon-refresh/context-render helpers now live in focused root helper modules (`api_key.rs`, `app_paths.rs`, `events.rs`, `event_payloads.rs`, `agent_status.rs`, `project_audit.rs`, `writer_observer.rs`).
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
@@ -91,10 +92,10 @@ The expected local baseline is:
 
 ## Remaining Gaps
 
-- `src-tauri/src/lib.rs` has completed the command-handler, AppState, semantic-lint, memory/context, observation-bridge, and editor-realtime splits, but still carries tests and final app setup glue that should move into narrower modules.
+- `src-tauri/src/lib.rs` has completed the command-handler, AppState, semantic-lint, memory/context, observation-bridge, editor-realtime, utility, event, audit, and writer-observer splits, but still carries tests and final app setup glue that should move into narrower modules.
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions (P1).
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
-- `writer_agent/kernel.rs` and `agent-evals/src/evals.rs` still need modular splitting (P2); `lib.rs` needs continued helper/glue extraction rather than command-module extraction.
+- `writer_agent/kernel.rs` and `agent-evals/src/evals.rs` still need modular splitting (P2); `lib.rs` is now mostly module wiring, Tauri setup, command registration, and tests.
