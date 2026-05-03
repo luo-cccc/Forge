@@ -23,6 +23,7 @@ fn main() {
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
+    results.push(run_context_source_trend_eval());
     results.push(run_context_window_guard_eval());
     results.push(run_compaction_latest_user_anchor_eval());
     results.push(run_tool_permission_guard_eval());

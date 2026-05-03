@@ -254,6 +254,7 @@ mod tests {
                 created_at: 20,
             }],
             operation_lifecycle: Vec::new(),
+            context_source_trends: Vec::new(),
             context_recalls: Vec::new(),
             product_metrics: Default::default(),
         };

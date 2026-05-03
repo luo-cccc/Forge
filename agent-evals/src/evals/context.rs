@@ -113,6 +113,98 @@ pub fn run_context_budget_trace_eval() -> EvalResult {
     eval_result("writer_agent:context_budget_trace", actual, errors)
 }
 
+pub fn run_context_source_trend_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。林墨必须在复仇和守护之间做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-3",
+            "承接上一章玉佩线索，并让林墨发现张三的新隐瞒。",
+            "玉佩线索",
+            "提前揭开玉佩来源",
+            "以张三隐瞒的新证据收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀，正在追查玉佩线。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-3".to_string());
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨深吸一口气，说道：“这件事我本来不该告诉你，可玉佩线索已经把我们推到这里。”他停在门外，没有立刻回头。",
+            "Chapter-3",
+        ))
+        .unwrap();
+    let trace = kernel.trace_snapshot(10);
+    let trends = &trace.context_source_trends;
+    let cursor = trends.iter().find(|trend| trend.source == "CursorPrefix");
+    let mission = trends.iter().find(|trend| trend.source == "ChapterMission");
+    let any_budget_sources = trace
+        .recent_proposals
+        .iter()
+        .filter_map(|proposal| proposal.context_budget.as_ref())
+        .flat_map(|budget| budget.source_reports.iter())
+        .count();
+
+    let mut errors = Vec::new();
+    if proposals.is_empty() {
+        errors.push("fixture should produce at least one proposal".to_string());
+    }
+    if any_budget_sources == 0 {
+        errors.push("fixture should expose proposal context budget reports".to_string());
+    }
+    if trends.is_empty() {
+        errors.push("trace missing context source trends".to_string());
+    }
+    if !cursor.is_some_and(|trend| {
+        trend.appearances >= 1
+            && trend.provided_count >= 1
+            && trend.total_provided > 0
+            && trend.average_provided > 0.0
+    }) {
+        errors.push(format!("cursor trend missing or empty: {:?}", cursor));
+    }
+    if !mission.is_some_and(|trend| trend.appearances >= 1 && trend.provided_count >= 1) {
+        errors.push(format!(
+            "chapter mission trend missing or empty: {:?}",
+            mission
+        ));
+    }
+
+    eval_result(
+        "writer_agent:context_source_trend",
+        format!(
+            "trends={} budgetSources={} cursorProvided={} missionProvided={}",
+            trends.len(),
+            any_budget_sources,
+            cursor.map(|trend| trend.provided_count).unwrap_or_default(),
+            mission
+                .map(|trend| trend.provided_count)
+                .unwrap_or_default()
+        ),
+        errors,
+    )
+}
+
 pub fn run_context_window_guard_eval() -> EvalResult {
     let messages = vec![agent_harness_core::provider::LlmMessage {
         role: "user".to_string(),

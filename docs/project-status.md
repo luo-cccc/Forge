@@ -85,9 +85,9 @@ P1 is in progress:
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 168 passing
+- `cargo test -p agent-writer`: 169 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 98/98 passing
+- `cargo run -p agent-evals`: 99/99 passing
 - `npm run check:p2`: 9/9 passing
 - `npm run check:audit`: 47 commands, 0 issues
 - `npm run lint`: passing
@@ -111,7 +111,8 @@ The expected local baseline is:
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
-- Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
+- Product metrics and context source trends are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug inspector that visualizes budget pressure, dropped sources, and truncation trends (P1).
+- P2.1 context pack debugging now exposes backend source trends in `WriterAgentTraceSnapshot.contextSourceTrends`, with eval coverage for CursorPrefix and ChapterMission budget participation. The remaining gap is UI inspector visualization and real long-session calibration.
 - P2.2 memory-write gates now cover Canon / Promise proposal creation, safe same-entity attribute merge proposals, foundation quality guards, and Style memory validation with a lightweight taxonomy for dialogue subtext, prose sentence length, exposition density, sensory description, POV distance, action clarity, chapter hooks, and tone/voice. Style preference writes now support polarity-aware same-slot merging into normalized `style:<slot>` keys; remaining Style work is richer author-editable taxonomy and UI review of merged preferences.
 - P2.3 context relevance now covers Writer Agent ledger context for Canon / Promise slices plus Project Brain / vector chunk rerank, including standalone `query_project_brain` WriterMemory focus injection. Eval coverage now includes ordinary semantic-similarity distractors, scene-type relevance signals, active-mission focus overriding a surface-similar query, query-only retrieval misses, avoid-term noise suppression over multi-chapter Project Brain fixtures, preservation of old-clue payoff chunks near avoid terms, complex must_not boundary parsing, and author-project term recall/explanation. The remaining retrieval gap is calibration on real author projects rather than synthetic fixtures.
 - P2.4-P2.6 architecture splitting is complete for the current plan: `lib.rs` is glue-only, `writer_agent/kernel.rs` is a facade/state owner with implementation blocks split into focused modules, and `agent-evals/src/evals.rs` is split into responsibility-based eval modules. Further splitting should be driven by new feature pressure rather than line-count targets.

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 impl WriterAgentKernel {
     pub fn status(&self) -> WriterAgentStatus {
@@ -221,6 +222,40 @@ impl WriterAgentKernel {
             .unwrap_or_default();
         let persisted_proposals = self.memory.list_proposal_traces(limit).unwrap_or_default();
         let persisted_feedback = self.memory.list_feedback_traces(limit).unwrap_or_default();
+        let recent_proposals = if persisted_proposals.is_empty() {
+            self.proposals
+                .iter()
+                .rev()
+                .take(limit)
+                .map(|proposal| WriterProposalTrace {
+                    id: proposal.id.clone(),
+                    observation_id: proposal.observation_id.clone(),
+                    kind: format!("{:?}", proposal.kind),
+                    priority: format!("{:?}", proposal.priority),
+                    state: self.proposal_state(proposal, now),
+                    confidence: proposal.confidence,
+                    preview_snippet: snippet(&proposal.preview, 120),
+                    evidence: proposal.evidence.clone(),
+                    context_budget: self.proposal_context_budgets.get(&proposal.id).cloned(),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            persisted_proposals
+                .into_iter()
+                .map(|proposal| WriterProposalTrace {
+                    id: proposal.id,
+                    observation_id: proposal.observation_id,
+                    kind: proposal.kind,
+                    priority: proposal.priority,
+                    state: trace_state_with_expiry(&proposal.state, proposal.expires_at, now),
+                    confidence: proposal.confidence,
+                    preview_snippet: proposal.preview_snippet,
+                    evidence: proposal.evidence,
+                    context_budget: proposal.context_budget,
+                })
+                .collect::<Vec<_>>()
+        };
+        let context_source_trends = context_source_trends(&recent_proposals);
 
         WriterAgentTraceSnapshot {
             recent_observations: if persisted_observations.is_empty() {
@@ -255,39 +290,7 @@ impl WriterAgentKernel {
                 .take(limit)
                 .cloned()
                 .collect(),
-            recent_proposals: if persisted_proposals.is_empty() {
-                self.proposals
-                    .iter()
-                    .rev()
-                    .take(limit)
-                    .map(|proposal| WriterProposalTrace {
-                        id: proposal.id.clone(),
-                        observation_id: proposal.observation_id.clone(),
-                        kind: format!("{:?}", proposal.kind),
-                        priority: format!("{:?}", proposal.priority),
-                        state: self.proposal_state(proposal, now),
-                        confidence: proposal.confidence,
-                        preview_snippet: snippet(&proposal.preview, 120),
-                        evidence: proposal.evidence.clone(),
-                        context_budget: self.proposal_context_budgets.get(&proposal.id).cloned(),
-                    })
-                    .collect()
-            } else {
-                persisted_proposals
-                    .into_iter()
-                    .map(|proposal| WriterProposalTrace {
-                        id: proposal.id,
-                        observation_id: proposal.observation_id,
-                        kind: proposal.kind,
-                        priority: proposal.priority,
-                        state: trace_state_with_expiry(&proposal.state, proposal.expires_at, now),
-                        confidence: proposal.confidence,
-                        preview_snippet: proposal.preview_snippet,
-                        evidence: proposal.evidence,
-                        context_budget: proposal.context_budget,
-                    })
-                    .collect()
-            },
+            recent_proposals,
             recent_feedback: if persisted_feedback.is_empty() {
                 self.feedback_events
                     .iter()
@@ -318,6 +321,7 @@ impl WriterAgentKernel {
                 .take(limit)
                 .cloned()
                 .collect(),
+            context_source_trends,
             context_recalls: self
                 .memory
                 .list_context_recalls(&self.project_id, limit)
@@ -343,4 +347,77 @@ impl WriterAgentKernel {
             self.memory.list_chapter_missions(&self.project_id, 250),
         )
     }
+}
+
+#[derive(Default)]
+struct ContextSourceTrendAccumulator {
+    appearances: usize,
+    provided_count: usize,
+    truncated_count: usize,
+    dropped_count: usize,
+    total_requested: usize,
+    total_provided: usize,
+    last_reason: Option<String>,
+    last_truncation_reason: Option<String>,
+}
+
+fn context_source_trends(proposals: &[WriterProposalTrace]) -> Vec<WriterContextSourceTrend> {
+    let mut trends = BTreeMap::<String, ContextSourceTrendAccumulator>::new();
+    for report in proposals
+        .iter()
+        .filter_map(|proposal| proposal.context_budget.as_ref())
+        .flat_map(|budget| budget.source_reports.iter())
+    {
+        let trend = trends.entry(report.source.clone()).or_default();
+        trend.appearances += 1;
+        trend.total_requested += report.requested;
+        trend.total_provided += report.provided;
+        if report.provided > 0 {
+            trend.provided_count += 1;
+        } else {
+            trend.dropped_count += 1;
+        }
+        if report.truncated {
+            trend.truncated_count += 1;
+        }
+        if !report.reason.trim().is_empty() {
+            trend.last_reason = Some(report.reason.clone());
+        }
+        if let Some(reason) = report
+            .truncation_reason
+            .as_ref()
+            .filter(|reason| !reason.trim().is_empty())
+        {
+            trend.last_truncation_reason = Some(reason.clone());
+        }
+    }
+
+    let mut trends = trends
+        .into_iter()
+        .map(|(source, trend)| WriterContextSourceTrend {
+            source,
+            appearances: trend.appearances,
+            provided_count: trend.provided_count,
+            truncated_count: trend.truncated_count,
+            dropped_count: trend.dropped_count,
+            total_requested: trend.total_requested,
+            total_provided: trend.total_provided,
+            average_provided: if trend.appearances == 0 {
+                0.0
+            } else {
+                trend.total_provided as f64 / trend.appearances as f64
+            },
+            last_reason: trend.last_reason,
+            last_truncation_reason: trend.last_truncation_reason,
+        })
+        .collect::<Vec<_>>();
+    trends.sort_by(|left, right| {
+        right
+            .truncated_count
+            .cmp(&left.truncated_count)
+            .then_with(|| right.dropped_count.cmp(&left.dropped_count))
+            .then_with(|| right.appearances.cmp(&left.appearances))
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    trends
 }

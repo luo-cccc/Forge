@@ -421,7 +421,7 @@ pub fn assemble_context_pack(
     }
 
     for draft in raw_sources {
-        if draft.consumed > 0 {
+        if draft.consumed > 0 || draft.raw.chars().count() > 0 {
             source_reports.push(SourceReport {
                 source: format!("{:?}", draft.source),
                 requested: draft.requested,
@@ -458,6 +458,20 @@ struct SourceDraft {
 }
 
 fn source_inclusion_reason(task: &AgentTask, draft: &SourceDraft) -> String {
+    if draft.consumed == 0 {
+        return if draft.required_budget > 0 {
+            format!(
+                "{:?} required source could not be included because the context budget was exhausted.",
+                task
+            )
+        } else {
+            format!(
+                "{:?} priority {} source was dropped because the context budget was exhausted before allocation.",
+                task, draft.priority
+            )
+        };
+    }
+
     if draft.required_budget > 0 {
         format!(
             "{:?} required source reserved {} chars before priority fill.",
@@ -1056,6 +1070,36 @@ mod tests {
             .source_reports
             .iter()
             .any(|report| report.source == "CanonSlice" && report.provided > 0));
+    }
+
+    #[test]
+    fn test_budget_report_records_dropped_sources() {
+        let provider = |s: ContextSource| -> Option<String> {
+            match s {
+                ContextSource::CursorPrefix => Some("长前文。".repeat(200)),
+                ContextSource::ChapterMission => Some("本章必须追查玉佩。".repeat(40)),
+                ContextSource::AuthorStyle => Some("对白保持克制，用动作暗示情绪。".repeat(40)),
+                _ => None,
+            }
+        };
+        let pack = assemble_context_pack(AgentTask::GhostWriting, &provider, 240);
+
+        assert!(pack.total_chars <= 240);
+        assert!(pack
+            .budget_report
+            .source_reports
+            .iter()
+            .any(|report| report.source == "CursorPrefix" && report.provided > 0));
+        let dropped = pack
+            .budget_report
+            .source_reports
+            .iter()
+            .find(|report| report.source == "AuthorStyle")
+            .expect("budget report should include dropped source with available content");
+        assert_eq!(dropped.provided, 0);
+        assert!(dropped.reason.contains("dropped"));
+        assert!(dropped.truncated);
+        assert!(dropped.truncation_reason.is_some());
     }
 
     #[test]

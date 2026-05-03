@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、98/98 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、99/99 writer evals。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
@@ -403,21 +403,23 @@ Done：
 - 已为 GhostWriting、InlineRewrite、ManualRequest、ChapterGeneration、ContinuityDiagnostic、ProposalEvaluation 定义 context budget profiles。
 - Story Contract、current Chapter Mission、latest Result Feedback、relevant Promise Ledger slice、canon slice、cursor prefix/suffix 已作为核心 context sources 参与 pack。
 - Context budget trace、source summary、截断信息和 selected source explanation 已进入 Writer Agent trace / eval 路径。
+- `WriterAgentTraceSnapshot.context_source_trends` 已按最近 proposal 的 context budget reports 聚合 source appearances、provided/truncated/dropped 次数、总请求/提供字符、平均提供量和最后截断原因，作为 debug inspector 的后端趋势数据。
 
 Partial：
 
-- Debug source summary 已有渲染和 eval 覆盖，但还不是完整独立 inspector 趋势视图。
+- Debug source summary 和后端 source trend 聚合已有 eval 覆盖，但还不是完整独立 inspector 趋势视图。
 - Budget 被丢弃来源的解释已经进入 pack/report 层，前端可视化仍偏基础。
 
 Remaining：
 
-- 完善 debug / inspector UI，让作者或开发者能稳定查看 source summary、截断原因和 dropped source。
-- 为长 session 的 context source 变化增加更好的趋势检查。
+- 完善 debug / inspector UI，让作者或开发者能稳定查看 source summary、截断原因、dropped source 和 context source trends。
+- 用真实长 session fixtures 继续验证 context source trends 是否能暴露预算挤压、关键来源缺失和截断异常。
 
 Verification：
 
 - `writer_agent:context_budget_required_sources`
 - `writer_agent:context_budget_trace`
+- `writer_agent:context_source_trend`
 - `writer_agent:result_feedback_survives_tight_budget`
 - `writer_agent:context_pack_explainability`
 - `npm run verify`
@@ -587,7 +589,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 98/98 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 99/99 passing。
 
 建议模块：
 

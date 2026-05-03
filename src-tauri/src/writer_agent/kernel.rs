@@ -199,6 +199,7 @@ pub struct WriterAgentTraceSnapshot {
     pub recent_proposals: Vec<WriterProposalTrace>,
     pub recent_feedback: Vec<WriterFeedbackTrace>,
     pub operation_lifecycle: Vec<WriterOperationLifecycleTrace>,
+    pub context_source_trends: Vec<WriterContextSourceTrend>,
     pub context_recalls: Vec<ContextRecallSummary>,
     pub product_metrics: WriterProductMetrics,
 }
@@ -252,6 +253,21 @@ pub struct WriterFeedbackTrace {
     pub action: String,
     pub reason: Option<String>,
     pub created_at: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterContextSourceTrend {
+    pub source: String,
+    pub appearances: usize,
+    pub provided_count: usize,
+    pub truncated_count: usize,
+    pub dropped_count: usize,
+    pub total_requested: usize,
+    pub total_provided: usize,
+    pub average_provided: f64,
+    pub last_reason: Option<String>,
+    pub last_truncation_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]

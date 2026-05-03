@@ -868,6 +868,7 @@ export interface WriterAgentTraceSnapshot {
   recentProposals: WriterProposalTrace[];
   recentFeedback: WriterFeedbackTrace[];
   operationLifecycle: WriterOperationLifecycleTrace[];
+  contextSourceTrends: WriterContextSourceTrend[];
   contextRecalls: ContextRecallSummary[];
   productMetrics: WriterProductMetrics;
 }
@@ -997,6 +998,19 @@ export interface ContextSourceBudgetTrace {
   truncated: boolean;
   reason: string;
   truncationReason?: string;
+}
+
+export interface WriterContextSourceTrend {
+  source: string;
+  appearances: number;
+  providedCount: number;
+  truncatedCount: number;
+  droppedCount: number;
+  totalRequested: number;
+  totalProvided: number;
+  averageProvided: number;
+  lastReason?: string;
+  lastTruncationReason?: string;
 }
 
 export interface WriterFeedbackTrace {
