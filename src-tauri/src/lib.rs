@@ -1,8 +1,7 @@
 use std::sync::{Mutex, MutexGuard};
 
 use agent_harness_core::{
-    ambient::EditorEvent, hermes_memory::HermesDB, provider::openai_compat::OpenAiCompatProvider,
-    AgentLoopEvent,
+    hermes_memory::HermesDB, provider::openai_compat::OpenAiCompatProvider, AgentLoopEvent,
 };
 
 mod agent_runtime;
@@ -15,14 +14,14 @@ mod manual_agent;
 mod storage;
 mod tool_bridge;
 pub mod writer_agent;
-use agent_runtime::{AgentObservation, AgentObserveResult};
+use agent_runtime::AgentObservation;
 use chapter_generation::{
     ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
     PipelineTerminal, SaveMode,
 };
 
 const KEYRING_SERVICE: &str = "agent-writer";
-mod events {
+pub(crate) mod events {
     pub const AGENT_CHAIN_OF_THOUGHT: &str = "agent-chain-of-thought";
     pub const AGENT_EPIPHANY: &str = "agent-epiphany";
     pub const AGENT_ERROR: &str = "agent-error";
@@ -97,13 +96,13 @@ pub(crate) fn log_dir() -> Result<std::path::PathBuf, String> {
     }
 }
 
-fn resolve_api_key() -> Option<String> {
+pub(crate) fn resolve_api_key() -> Option<String> {
     load_api_key_from_keychain()
         .or_else(|| std::env::var("OPENAI_API_KEY").ok())
         .filter(|k| !k.is_empty())
 }
 
-fn require_api_key() -> Result<String, String> {
+pub(crate) fn require_api_key() -> Result<String, String> {
     resolve_api_key().ok_or_else(|| "API key not set. Go to Settings.".to_string())
 }
 use serde::{Deserialize, Serialize};
@@ -128,7 +127,7 @@ struct EditorPredictionTask {
     cancel: CancellationToken,
 }
 
-fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
+pub(crate) fn lock_hermes<'a>(state: &'a AppState) -> Result<MutexGuard<'a, HermesDB>, String> {
     state
         .hermes_db
         .lock()
@@ -274,13 +273,13 @@ fn startup_error(message: String) -> Box<dyn std::error::Error> {
 }
 
 #[derive(Serialize, Clone)]
-struct StreamChunk {
-    content: String,
+pub(crate) struct StreamChunk {
+    pub(crate) content: String,
 }
 
 #[derive(Serialize, Clone)]
-struct StreamEnd {
-    reason: String,
+pub(crate) struct StreamEnd {
+    pub(crate) reason: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -294,8 +293,15 @@ struct InlineWriterOperationEvent {
 use agent_harness_core::truncate_context;
 
 use commands::backups::{get_project_storage_diagnostics, list_file_backups, restore_file_backup};
-use commands::chapters::{create_chapter, get_chapter_revision, load_chapter, read_project_dir};
+use commands::chapters::{
+    create_chapter, get_chapter_revision, load_chapter, read_project_dir, rename_chapter_file,
+    save_chapter,
+};
 use commands::diagnostics::{export_diagnostic_logs, export_writer_agent_trajectory};
+use commands::generation::{
+    analyze_chapter, analyze_pacing, ask_project_brain, generate_parallel_drafts,
+};
+use commands::graph::get_project_graph_data;
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::outline::{
     delete_outline_node, get_outline, reorder_outline_nodes, save_outline_node,
@@ -303,10 +309,11 @@ use commands::outline::{
 };
 use commands::settings::{check_api_key, set_api_key};
 use commands::writer_agent::{
-    apply_proposal_feedback, get_agent_domain_profile, get_agent_kernel_status, get_agent_tools,
-    get_effective_agent_tool_inventory, get_story_debt_snapshot, get_story_review_queue,
-    get_writer_agent_ledger, get_writer_agent_pending_proposals, get_writer_agent_status,
-    get_writer_agent_trace, record_implicit_ghost_rejection, record_writer_operation_durable_save,
+    agent_observe, apply_proposal_feedback, approve_writer_operation, get_agent_domain_profile,
+    get_agent_kernel_status, get_agent_tools, get_effective_agent_tool_inventory,
+    get_story_debt_snapshot, get_story_review_queue, get_writer_agent_ledger,
+    get_writer_agent_pending_proposals, get_writer_agent_status, get_writer_agent_trace,
+    record_implicit_ghost_rejection, record_writer_operation_durable_save,
 };
 use manual_agent::{
     lock_manual_agent_history, manual_agent_history_messages, merge_manual_agent_history,
@@ -345,48 +352,7 @@ pub(crate) fn backup_target_label(target: &storage::BackupTarget) -> String {
     }
 }
 
-#[tauri::command]
-fn save_chapter(app: tauri::AppHandle, title: String, content: String) -> Result<String, String> {
-    let revision = storage::save_chapter_content_and_revision(&app, &title, &content)?;
-    audit_project_file_write(
-        &app,
-        &title,
-        &format!("Chapter saved: {}", title),
-        "saved_chapter",
-        &format!(
-            "Chapter '{}' saved with revision {} ({} chars).",
-            title,
-            revision,
-            html_to_plain_text(&content).chars().count()
-        ),
-        &[format!("chapter:{}:{}", title, revision)],
-    );
-    if let Err(e) = observe_chapter_save(&app, &title, &content, &revision) {
-        tracing::warn!("WriterAgent chapter-save observation failed: {}", e);
-    }
-
-    if let Some(bus_state) = app.try_state::<Mutex<agent_harness_core::AmbientEventBus>>() {
-        if let Ok(bus) = bus_state.lock() {
-            let _ = bus.publish(EditorEvent::ChapterSaved {
-                chapter: title.clone(),
-                content_length: content.chars().count(),
-                revision: revision.clone(),
-            });
-        }
-    }
-
-    // Background auto-embed
-    let app_clone = app.clone();
-    let title_clone = title.clone();
-    let content_clone = content.clone();
-    tokio::spawn(async move {
-        auto_embed_chapter(&app_clone, &title_clone, &content_clone).await;
-    });
-
-    Ok(revision)
-}
-
-fn observe_chapter_save(
+pub(crate) fn observe_chapter_save(
     app: &tauri::AppHandle,
     title: &str,
     content: &str,
@@ -434,7 +400,7 @@ fn observe_chapter_save(
     Ok(())
 }
 
-fn observe_generated_chapter_result(
+pub(crate) fn observe_generated_chapter_result(
     app: &tauri::AppHandle,
     saved: &chapter_generation::SaveGeneratedChapterOutput,
     generated_content: &str,
@@ -453,7 +419,7 @@ fn observe_generated_chapter_result(
     }
 }
 
-fn last_meaningful_paragraph(text: &str) -> Option<String> {
+pub(crate) fn last_meaningful_paragraph(text: &str) -> Option<String> {
     text.split('\n')
         .rev()
         .map(str::trim)
@@ -461,7 +427,7 @@ fn last_meaningful_paragraph(text: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn html_to_plain_text(html: &str) -> String {
+pub(crate) fn html_to_plain_text(html: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
     let mut entity = String::new();
@@ -515,7 +481,7 @@ fn html_to_plain_text(html: &str) -> String {
         .join("\n")
 }
 
-fn decode_html_entity(entity: &str) -> String {
+pub(crate) fn decode_html_entity(entity: &str) -> String {
     match entity {
         "amp" => "&".to_string(),
         "lt" => "<".to_string(),
@@ -630,16 +596,6 @@ struct SemanticLintPayload {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ParallelDraftPayload {
-    prefix: String,
-    suffix: String,
-    paragraph: String,
-    selected_text: String,
-    chapter_title: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct AskAgentContext {
     chapter_title: Option<String>,
     chapter_revision: Option<String>,
@@ -654,14 +610,6 @@ struct AskAgentContext {
 enum AskAgentMode {
     Chat,
     InlineOperation,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ParallelDraft {
-    id: String,
-    label: String,
-    text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -824,70 +772,6 @@ fn emit_writer_ghost_proposal(
         emit_editor_ghost_end(app, target, "complete")?;
     }
     Ok(())
-}
-
-fn trim_parallel_draft(text: &str) -> String {
-    text.trim_matches(|c: char| c == '`' || c.is_whitespace())
-        .chars()
-        .take(1200)
-        .collect::<String>()
-}
-
-fn parse_parallel_drafts(raw: &str) -> Vec<ParallelDraft> {
-    let labels = ["A 顺势推进", "B 冲突加压", "C 情绪转折"];
-    let ids = ["a", "b", "c"];
-    let mut drafts = Vec::new();
-    let mut current_idx: Option<usize> = None;
-    let mut current_text = String::new();
-
-    let flush = |drafts: &mut Vec<ParallelDraft>,
-                 current_idx: &mut Option<usize>,
-                 current_text: &mut String| {
-        let Some(idx) = current_idx.take() else {
-            current_text.clear();
-            return;
-        };
-        let text = trim_parallel_draft(current_text);
-        current_text.clear();
-        if text.is_empty() {
-            return;
-        }
-        drafts.push(ParallelDraft {
-            id: ids[idx].to_string(),
-            label: labels[idx].to_string(),
-            text,
-        });
-    };
-
-    for line in raw.lines() {
-        let trimmed = line.trim_start();
-        let marker = trimmed
-            .split_once(':')
-            .or_else(|| trimmed.split_once('：'))
-            .and_then(|(head, body)| {
-                let idx = match head.trim().chars().next().map(|c| c.to_ascii_uppercase()) {
-                    Some('A') => 0,
-                    Some('B') => 1,
-                    Some('C') => 2,
-                    _ => return None,
-                };
-                Some((idx, body.trim_start()))
-            });
-
-        if let Some((idx, body)) = marker {
-            flush(&mut drafts, &mut current_idx, &mut current_text);
-            current_idx = Some(idx);
-            current_text.push_str(body);
-        } else if current_idx.is_some() {
-            if !current_text.is_empty() {
-                current_text.push('\n');
-            }
-            current_text.push_str(line);
-        }
-    }
-    flush(&mut drafts, &mut current_idx, &mut current_text);
-    drafts.truncate(3);
-    drafts
 }
 
 fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_core::AgentOutput) {
@@ -1593,7 +1477,7 @@ async fn generate_chapter_autonomous(
     Ok(ChapterGenerationStart { request_id })
 }
 
-async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
+pub(crate) async fn auto_embed_chapter(app: &tauri::AppHandle, chapter_title: &str, content: &str) {
     let Some(api_key) = resolve_api_key() else {
         return;
     };
@@ -1759,7 +1643,7 @@ fn build_context_injection(app: &tauri::AppHandle, query: &str) -> String {
     parts.join("\n")
 }
 
-fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+pub(crate) fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
     let state = app.state::<AppState>();
     let db = lock_hermes(&state)?;
     let profiles = db
@@ -1778,387 +1662,7 @@ fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec<String>, S
         .collect())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReviewItem {
-    quote: String,
-    #[serde(rename = "type")]
-    review_type: String,
-    issue: String,
-    suggestion: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReviewReport {
-    reviews: Vec<ReviewItem>,
-}
-
-#[tauri::command]
-async fn analyze_chapter(
-    _app: tauri::AppHandle,
-    content: String,
-) -> Result<Vec<ReviewItem>, String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-
-    let system_prompt = r#"You are a professional novel editor. Analyze the chapter and output a JSON object with a "reviews" array.
-
-Each review must have:
-- "quote": exact text from the chapter (copy verbatim, at least 10 characters)
-- "type": one of "logic" | "ooc" | "pacing" | "prose"
-- "issue": what the problem is
-- "suggestion": how to fix it (in Chinese, specific rewrite suggestion)
-
-Output ONLY the JSON object, no explanation outside. Example:
-{"reviews":[{"quote":"他走出了房间","type":"prose","issue":"缺乏画面感","suggestion":"他推开吱呀作响的木门，幽暗的走廊里只有自己的脚步声在回荡。"}]}"#;
-
-    let truncated = truncate_context(&content, 8000);
-    let body = llm_runtime::chat_json(
-        &settings,
-        vec![
-            serde_json::json!({"role": "system", "content": system_prompt}),
-            serde_json::json!({"role": "user", "content": format!("Analyze this chapter:\n\n{}", truncated)}),
-        ],
-        60,
-    )
-    .await?;
-
-    let report: ReviewReport =
-        serde_json::from_value(body).map_err(|e| format!("Failed to parse review JSON: {}", e))?;
-
-    Ok(report.reviews)
-}
-
-#[tauri::command]
-async fn ask_project_brain(app: tauri::AppHandle, query: String) -> Result<(), String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-
-    brain_service::answer_query(&app, &settings, &query, |content| {
-        let _ = app.emit(events::AGENT_STREAM_CHUNK, StreamChunk { content });
-        Ok(llm_runtime::StreamControl::Continue)
-    })
-    .await?;
-
-    let _ = app.emit(
-        events::AGENT_STREAM_END,
-        StreamEnd {
-            reason: "complete".to_string(),
-        },
-    );
-    Ok(())
-}
-
-#[tauri::command]
-async fn generate_parallel_drafts(
-    payload: ParallelDraftPayload,
-) -> Result<Vec<ParallelDraft>, String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-    let chapter = payload
-        .chapter_title
-        .as_deref()
-        .filter(|title| !title.trim().is_empty())
-        .unwrap_or("当前章节");
-    let focus = if payload.selected_text.trim().is_empty() {
-        payload.paragraph.trim()
-    } else {
-        payload.selected_text.trim()
-    };
-
-    let prompt = format!(
-        "你是中文小说共创写手。请顺着用户已有文本，生成三个不同方向的平行草稿。\n\
-         输出格式必须严格为：\n\
-         A: ...\nB: ...\nC: ...\n\
-         每个版本 2-5 句，可以分段；不要解释，不要 Markdown。\n\
-         A 偏顺势推进，B 偏冲突加压，C 偏情绪转折。\n\
-         ## 章节\n{}\n## 光标前文\n{}\n## 光标后文\n{}\n## 当前焦点\n{}",
-        chapter,
-        truncate_context(&payload.prefix, 3000),
-        truncate_context(&payload.suffix, 1000),
-        focus,
-    );
-
-    let text = llm_runtime::chat_text(
-        &settings,
-        vec![serde_json::json!({"role": "user", "content": prompt})],
-        false,
-        45,
-    )
-    .await?;
-    let drafts = parse_parallel_drafts(&text);
-    if drafts.is_empty() {
-        let fallback = trim_parallel_draft(&text);
-        if fallback.is_empty() {
-            return Ok(Vec::new());
-        }
-        return Ok(vec![ParallelDraft {
-            id: "a".to_string(),
-            label: "A 顺势推进".to_string(),
-            text: fallback,
-        }]);
-    }
-    Ok(drafts)
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct GraphEntity {
-    id: String,
-    name: String,
-    category: String,
-    description: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct GraphRelationship {
-    source: String,
-    target: String,
-    label: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct GraphChapter {
-    title: String,
-    summary: String,
-    status: String,
-    word_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProjectGraphData {
-    entities: Vec<GraphEntity>,
-    relationships: Vec<GraphRelationship>,
-    chapters: Vec<GraphChapter>,
-}
-
-#[tauri::command]
-fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
-    let mut entities = Vec::new();
-    let mut relationships = Vec::new();
-    let mut chapters = Vec::new();
-
-    // 1. Entities from Lorebook
-    let lore_entries = storage::load_lorebook(&app)?;
-    for entry in lore_entries {
-        entities.push(GraphEntity {
-            id: format!("lore-{}", entry.id),
-            name: entry.keyword.clone(),
-            category: "character".to_string(),
-            description: entry.content.clone(),
-        });
-    }
-
-    // 2. Entities from agent_skills (extracted character rules)
-    let state = app.state::<AppState>();
-    let db = lock_hermes(&state)?;
-    if let Ok(skills) = db.get_active_skills() {
-        for skill in skills {
-            if skill.category == "character" {
-                // Extract entity name from skill description
-                let name = skill.skill.chars().take(30).collect::<String>();
-                entities.push(GraphEntity {
-                    id: format!("skill-{}", skill.id),
-                    name,
-                    category: "character_trait".to_string(),
-                    description: skill.skill.clone(),
-                });
-            }
-        }
-    }
-    drop(db);
-
-    // 3. Chapters from file tree + outline
-    let dir = storage::project_dir(&app)?;
-    match storage::load_outline(&app) {
-        Ok(outline_nodes) => {
-            for node in outline_nodes {
-                // Count words in chapter file
-                let filename =
-                    format!("{}.md", node.chapter_title.replace(' ', "-").to_lowercase());
-                let path = dir.join(&filename);
-                let word_count = if path.exists() {
-                    std::fs::read_to_string(&path)
-                        .map(|s| s.split_whitespace().count())
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
-                chapters.push(GraphChapter {
-                    title: node.chapter_title.clone(),
-                    summary: node.summary.clone(),
-                    status: node.status.clone(),
-                    word_count,
-                });
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Project graph skipped outline because it failed to load: {}",
-                e
-            );
-        }
-    }
-
-    // If outline is empty, derive chapters from file tree
-    if chapters.is_empty() {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    let title = path
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    let content = std::fs::read_to_string(&path).unwrap_or_default();
-                    let word_count = content.split_whitespace().count();
-                    chapters.push(GraphChapter {
-                        title,
-                        summary: String::new(),
-                        status: "empty".to_string(),
-                        word_count,
-                    });
-                }
-            }
-        }
-    }
-
-    // 4. Relationships: co-occurrence of entities in same chapter
-    let entity_names: Vec<String> = entities.iter().map(|e| e.name.clone()).collect();
-    for chapter in &chapters {
-        let filename = format!("{}.md", chapter.title.replace(' ', "-").to_lowercase());
-        let path = dir.join(&filename);
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            let content_lower = content.to_lowercase();
-            let found: Vec<&String> = entity_names
-                .iter()
-                .filter(|name| content_lower.contains(&name.to_lowercase()))
-                .collect();
-            if found.len() >= 2 {
-                for i in 0..found.len() {
-                    for j in i + 1..found.len() {
-                        let exists = relationships.iter().any(|r: &GraphRelationship| {
-                            (r.source == *found[i] && r.target == *found[j])
-                                || (r.source == *found[j] && r.target == *found[i])
-                        });
-                        if !exists {
-                            relationships.push(GraphRelationship {
-                                source: found[i].clone(),
-                                target: found[j].clone(),
-                                label: format!("Co-occur in {}", chapter.title),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(ProjectGraphData {
-        entities,
-        relationships,
-        chapters,
-    })
-}
-
-#[tauri::command]
-fn approve_writer_operation(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    operation: writer_agent::operation::WriterOperation,
-    current_revision: String,
-    approval: Option<writer_agent::operation::OperationApproval>,
-) -> Result<writer_agent::operation::OperationResult, String> {
-    if let writer_agent::operation::WriterOperation::OutlineUpdate { node_id, patch } = &operation {
-        {
-            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-            let preflight = kernel.approve_editor_operation_with_approval(
-                operation.clone(),
-                &current_revision,
-                approval.as_ref(),
-            )?;
-            if !preflight
-                .error
-                .as_ref()
-                .is_some_and(|error| error.code == "invalid")
-            {
-                return Ok(preflight);
-            }
-        }
-        let result = approve_outline_update_operation(
-            &app,
-            operation.clone(),
-            node_id,
-            patch.clone(),
-            approval.as_ref(),
-        )?;
-        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-        if !result.success {
-            let save_result = result
-                .error
-                .as_ref()
-                .map(|error| format!("{}:{}", error.code, error.message))
-                .unwrap_or_else(|| "outline_storage:failed".to_string());
-            kernel.record_operation_durable_save(
-                approval
-                    .as_ref()
-                    .and_then(|context| context.proposal_id.clone()),
-                operation,
-                save_result,
-            )?;
-            return Ok(result);
-        }
-        if let Some(context) = approval
-            .as_ref()
-            .filter(|context| context.is_valid_for_write())
-        {
-            kernel.record_operation_durable_save(
-                context.proposal_id.clone(),
-                operation,
-                "outline_storage:ok".to_string(),
-            )?;
-        }
-        return Ok(result);
-    }
-
-    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-    kernel.approve_editor_operation_with_approval(operation, &current_revision, approval.as_ref())
-}
-
-fn approve_outline_update_operation(
-    app: &tauri::AppHandle,
-    operation: writer_agent::operation::WriterOperation,
-    node_id: &str,
-    patch: serde_json::Value,
-    approval: Option<&writer_agent::operation::OperationApproval>,
-) -> Result<writer_agent::operation::OperationResult, String> {
-    if !approval.is_some_and(|context| context.is_valid_for_write()) {
-        return Ok(writer_agent::operation::OperationResult {
-            success: false,
-            operation,
-            error: Some(writer_agent::operation::OperationError::approval_required(
-                "outline.update requires an explicit surfaced approval context",
-            )),
-            revision_after: None,
-        });
-    }
-
-    match storage::patch_outline_node(app, node_id.to_string(), patch) {
-        Ok(_) => Ok(writer_agent::operation::OperationResult {
-            success: true,
-            operation,
-            error: None,
-            revision_after: None,
-        }),
-        Err(e) => Ok(writer_agent::operation::OperationResult {
-            success: false,
-            operation,
-            error: Some(writer_agent::operation::OperationError::invalid(&e)),
-            revision_after: None,
-        }),
-    }
-}
-
-fn to_writer_observation(
+pub(crate) fn to_writer_observation(
     observation: &AgentObservation,
     project_id: &str,
 ) -> writer_agent::observation::WriterObservation {
@@ -2208,7 +1712,7 @@ fn to_writer_observation(
     }
 }
 
-fn refresh_kernel_canon_from_lorebook(
+pub(crate) fn refresh_kernel_canon_from_lorebook(
     app: &tauri::AppHandle,
     kernel: &mut writer_agent::WriterAgentKernel,
 ) {
@@ -2575,7 +2079,7 @@ fn writer_agent_memory_messages(
     ]
 }
 
-fn spawn_llm_memory_proposals(
+pub(crate) fn spawn_llm_memory_proposals(
     app: tauri::AppHandle,
     observation: writer_agent::observation::WriterObservation,
 ) {
@@ -2613,7 +2117,7 @@ fn spawn_llm_memory_proposals(
     });
 }
 
-fn spawn_llm_ghost_proposal(
+pub(crate) fn spawn_llm_ghost_proposal(
     app: tauri::AppHandle,
     observation: writer_agent::observation::WriterObservation,
     context_pack: writer_agent::context::WritingContextPack,
@@ -2672,173 +2176,6 @@ fn spawn_llm_ghost_proposal(
             let _ = emit_writer_ghost_proposal(&app, &target, &proposal, true, true);
         }
     });
-}
-
-#[tauri::command]
-fn agent_observe(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    observation: AgentObservation,
-) -> Result<AgentObserveResult, String> {
-    let request_id = format!("agent-{}", agent_runtime::now_ms());
-    let now = agent_runtime::now_ms();
-    let decision = agent_runtime::attention_policy(&observation, now);
-    let observation_id = observation.id.clone();
-
-    let mut emitted_proposal_id = None;
-    if matches!(observation.mode, agent_runtime::AgentMode::Proactive) {
-        let project_id = storage::active_project_id(&app)?;
-        let writer_observation = to_writer_observation(&observation, &project_id);
-        let writer_observation_for_llm = writer_observation.clone();
-        let proposals = {
-            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-            refresh_kernel_canon_from_lorebook(&app, &mut kernel);
-            kernel.observe(writer_observation)?
-        };
-        let should_spawn_llm = proposals
-            .iter()
-            .any(|proposal| proposal.kind == writer_agent::proposal::ProposalKind::Ghost);
-        let context_pack_for_llm = if should_spawn_llm && resolve_api_key().is_some() {
-            let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
-            Some(kernel.ghost_context_pack(&writer_observation_for_llm))
-        } else {
-            None
-        };
-
-        for proposal in proposals {
-            emitted_proposal_id.get_or_insert_with(|| proposal.id.clone());
-            app.emit(events::AGENT_PROPOSAL, proposal)
-                .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
-        }
-
-        if let Some(context_pack) = context_pack_for_llm {
-            spawn_llm_ghost_proposal(app.clone(), writer_observation_for_llm, context_pack, None);
-        }
-    }
-
-    if emitted_proposal_id.is_some() {
-        return Ok(AgentObserveResult {
-            request_id,
-            observation_id,
-            decision: "writer_proposal".to_string(),
-            reason: decision.reason,
-            suggestion_id: emitted_proposal_id,
-        });
-    }
-
-    if !decision.should_suggest {
-        return Ok(AgentObserveResult {
-            request_id,
-            observation_id,
-            decision: "noop".to_string(),
-            reason: decision.reason,
-            suggestion_id: None,
-        });
-    }
-
-    let outline_summary = observation
-        .chapter_title
-        .as_ref()
-        .and_then(|chapter_title| match storage::load_outline(&app) {
-            Ok(nodes) => nodes
-                .into_iter()
-                .find(|node| &node.chapter_title == chapter_title)
-                .map(|node| node.summary)
-                .filter(|summary| !summary.trim().is_empty()),
-            Err(e) => {
-                tracing::warn!("Agent observe skipped outline summary: {}", e);
-                None
-            }
-        });
-
-    let paragraph_lower = observation.current_paragraph.to_lowercase();
-    let nearby_lower = observation.nearby_text.to_lowercase();
-    let lore_entries = match storage::load_lorebook(&app) {
-        Ok(entries) => entries,
-        Err(e) => {
-            tracing::warn!("Agent observe skipped lore hits: {}", e);
-            Vec::new()
-        }
-    };
-    let lore_hits = lore_entries
-        .into_iter()
-        .filter(|entry| {
-            let keyword = entry.keyword.to_lowercase();
-            !keyword.is_empty()
-                && (paragraph_lower.contains(&keyword) || nearby_lower.contains(&keyword))
-        })
-        .map(|entry| (entry.keyword, entry.content))
-        .collect::<Vec<_>>();
-
-    let profile_count = collect_user_profile_entries(&app)
-        .map(|entries| entries.len())
-        .unwrap_or(0);
-    let source_summaries = agent_runtime::build_source_summaries(
-        &observation,
-        outline_summary,
-        lore_hits,
-        profile_count,
-    );
-    let suggestion = agent_runtime::build_suggestion(
-        &observation,
-        request_id.clone(),
-        &decision,
-        source_summaries,
-    );
-    let suggestion_id = suggestion.id.clone();
-    app.emit(events::AGENT_SUGGESTION, suggestion)
-        .map_err(|e| format!("Failed to emit agent suggestion: {}", e))?;
-
-    Ok(AgentObserveResult {
-        request_id,
-        observation_id,
-        decision: "suggestion".to_string(),
-        reason: decision.reason,
-        suggestion_id: Some(suggestion_id),
-    })
-}
-
-#[tauri::command]
-async fn analyze_pacing(summaries: String) -> Result<String, String> {
-    let api_key = require_api_key()?;
-    let settings = llm_runtime::settings(api_key);
-    let text = llm_runtime::chat_text(
-        &settings,
-        vec![
-            serde_json::json!({"role": "system", "content": "You are a structural editor. Analyze the chapter sequence for pacing issues, slow sections, abrupt transitions, and unresolved arcs. Be specific and concise."}),
-            serde_json::json!({"role": "user", "content": format!("Chapter summaries:\n{}", summaries)}),
-        ],
-        false,
-        60,
-    )
-    .await?;
-
-    Ok(if text.is_empty() {
-        "No analysis generated".to_string()
-    } else {
-        text
-    })
-}
-
-#[tauri::command]
-fn rename_chapter_file(
-    app: tauri::AppHandle,
-    old_name: String,
-    new_name: String,
-) -> Result<(), String> {
-    storage::rename_chapter_file(&app, old_name.clone(), new_name.clone())?;
-    audit_project_file_write(
-        &app,
-        &new_name,
-        &format!("Chapter renamed: {} -> {}", old_name, new_name),
-        "renamed_chapter",
-        &format!("Author renamed chapter '{}' to '{}'.", old_name, new_name),
-        &[
-            format!("chapter:{}", old_name),
-            format!("chapter:{}", new_name),
-        ],
-    );
-    Ok(())
 }
 
 #[tauri::command]
@@ -3147,19 +2484,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_parallel_drafts_keeps_multiline_branches() {
-        let drafts = parse_parallel_drafts(
-            "A: 林墨没有立刻回答。\n他只是把刀压低。\nB：门外忽然传来脚步声。\nC: 她看见他眼里的犹豫。",
-        );
-
-        assert_eq!(drafts.len(), 3);
-        assert_eq!(drafts[0].id, "a");
-        assert!(drafts[0].text.contains("把刀压低"));
-        assert_eq!(drafts[1].label, "B 冲突加压");
-        assert_eq!(drafts[2].id, "c");
-    }
-
-    #[test]
     fn frontend_protocol_does_not_expose_legacy_commands_or_xml_actions() {
         let protocol = include_str!("../../src/protocol.ts");
         assert!(!protocol.contains("harness_echo"));
@@ -3262,14 +2586,6 @@ mod tests {
         assert!(user_content.contains("# ContextPack Budget"));
         assert!(user_content.contains("used/budget: 18/32"));
         assert!(user_content.contains("truncated true"));
-    }
-
-    #[test]
-    fn trim_parallel_draft_removes_markdown_fence_noise() {
-        assert_eq!(
-            trim_parallel_draft("```\n林墨停下脚步。\n```"),
-            "林墨停下脚步。"
-        );
     }
 
     #[test]

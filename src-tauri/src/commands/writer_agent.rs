@@ -1,6 +1,7 @@
-//! Writer agent Tauri commands — status, ledger, proposals, feedback.
+//! Writer agent Tauri commands — status, ledger, proposals, feedback, approval, observe.
 
 use crate::AppState;
+use tauri::Emitter;
 
 #[tauri::command]
 pub fn get_agent_tools() -> Result<Vec<crate::agent_runtime::AgentToolDescriptor>, String> {
@@ -121,4 +122,234 @@ pub fn record_writer_operation_durable_save(
 ) -> Result<(), String> {
     let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     kernel.record_operation_durable_save(proposal_id, operation, save_result)
+}
+
+#[tauri::command]
+pub fn approve_writer_operation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    operation: crate::writer_agent::operation::WriterOperation,
+    current_revision: String,
+    approval: Option<crate::writer_agent::operation::OperationApproval>,
+) -> Result<crate::writer_agent::operation::OperationResult, String> {
+    use crate::writer_agent::operation::WriterOperation;
+    if let WriterOperation::OutlineUpdate { node_id, patch } = &operation {
+        {
+            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            let preflight = kernel.approve_editor_operation_with_approval(
+                operation.clone(),
+                &current_revision,
+                approval.as_ref(),
+            )?;
+            if !preflight
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code == "invalid")
+            {
+                return Ok(preflight);
+            }
+        }
+        let result = approve_outline_update_operation(
+            &app,
+            operation.clone(),
+            node_id,
+            patch.clone(),
+            approval.as_ref(),
+        )?;
+        let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+        if !result.success {
+            let save_result = result
+                .error
+                .as_ref()
+                .map(|error| format!("{}:{}", error.code, error.message))
+                .unwrap_or_else(|| "outline_storage:failed".to_string());
+            kernel.record_operation_durable_save(
+                approval
+                    .as_ref()
+                    .and_then(|context| context.proposal_id.clone()),
+                operation,
+                save_result,
+            )?;
+            return Ok(result);
+        }
+        if let Some(context) = approval
+            .as_ref()
+            .filter(|context| context.is_valid_for_write())
+        {
+            kernel.record_operation_durable_save(
+                context.proposal_id.clone(),
+                operation,
+                "outline_storage:ok".to_string(),
+            )?;
+        }
+        return Ok(result);
+    }
+
+    let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    kernel.approve_editor_operation_with_approval(operation, &current_revision, approval.as_ref())
+}
+
+fn approve_outline_update_operation(
+    app: &tauri::AppHandle,
+    operation: crate::writer_agent::operation::WriterOperation,
+    node_id: &str,
+    patch: serde_json::Value,
+    approval: Option<&crate::writer_agent::operation::OperationApproval>,
+) -> Result<crate::writer_agent::operation::OperationResult, String> {
+    if !approval.is_some_and(|context| context.is_valid_for_write()) {
+        return Ok(crate::writer_agent::operation::OperationResult {
+            success: false,
+            operation,
+            error: Some(
+                crate::writer_agent::operation::OperationError::approval_required(
+                    "outline.update requires an explicit surfaced approval context",
+                ),
+            ),
+            revision_after: None,
+        });
+    }
+
+    match crate::storage::patch_outline_node(app, node_id.to_string(), patch) {
+        Ok(_) => Ok(crate::writer_agent::operation::OperationResult {
+            success: true,
+            operation,
+            error: None,
+            revision_after: None,
+        }),
+        Err(e) => Ok(crate::writer_agent::operation::OperationResult {
+            success: false,
+            operation,
+            error: Some(crate::writer_agent::operation::OperationError::invalid(&e)),
+            revision_after: None,
+        }),
+    }
+}
+
+#[tauri::command]
+pub fn agent_observe(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    observation: crate::agent_runtime::AgentObservation,
+) -> Result<crate::agent_runtime::AgentObserveResult, String> {
+    let request_id = format!("agent-{}", crate::agent_runtime::now_ms());
+    let now = crate::agent_runtime::now_ms();
+    let decision = crate::agent_runtime::attention_policy(&observation, now);
+    let observation_id = observation.id.clone();
+
+    let mut emitted_proposal_id = None;
+    if matches!(observation.mode, crate::agent_runtime::AgentMode::Proactive) {
+        let project_id = crate::storage::active_project_id(&app)?;
+        let writer_observation = crate::to_writer_observation(&observation, &project_id);
+        let writer_observation_for_llm = writer_observation.clone();
+        let proposals = {
+            let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            crate::refresh_kernel_canon_from_lorebook(&app, &mut kernel);
+            kernel.observe(writer_observation)?
+        };
+        let should_spawn_llm = proposals
+            .iter()
+            .any(|proposal| proposal.kind == crate::writer_agent::proposal::ProposalKind::Ghost);
+        let context_pack_for_llm = if should_spawn_llm && crate::resolve_api_key().is_some() {
+            let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+            Some(kernel.ghost_context_pack(&writer_observation_for_llm))
+        } else {
+            None
+        };
+
+        for proposal in proposals {
+            emitted_proposal_id.get_or_insert_with(|| proposal.id.clone());
+            app.emit(crate::events::AGENT_PROPOSAL, proposal)
+                .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
+        }
+
+        if let Some(context_pack) = context_pack_for_llm {
+            crate::spawn_llm_ghost_proposal(
+                app.clone(),
+                writer_observation_for_llm,
+                context_pack,
+                None,
+            );
+        }
+    }
+
+    if emitted_proposal_id.is_some() {
+        return Ok(crate::agent_runtime::AgentObserveResult {
+            request_id,
+            observation_id,
+            decision: "writer_proposal".to_string(),
+            reason: decision.reason,
+            suggestion_id: emitted_proposal_id,
+        });
+    }
+
+    if !decision.should_suggest {
+        return Ok(crate::agent_runtime::AgentObserveResult {
+            request_id,
+            observation_id,
+            decision: "noop".to_string(),
+            reason: decision.reason,
+            suggestion_id: None,
+        });
+    }
+
+    let outline_summary = observation
+        .chapter_title
+        .as_ref()
+        .and_then(|chapter_title| match crate::storage::load_outline(&app) {
+            Ok(nodes) => nodes
+                .into_iter()
+                .find(|node| &node.chapter_title == chapter_title)
+                .map(|node| node.summary)
+                .filter(|summary| !summary.trim().is_empty()),
+            Err(e) => {
+                tracing::warn!("Agent observe skipped outline summary: {}", e);
+                None
+            }
+        });
+
+    let paragraph_lower = observation.current_paragraph.to_lowercase();
+    let nearby_lower = observation.nearby_text.to_lowercase();
+    let lore_entries = match crate::storage::load_lorebook(&app) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("Agent observe skipped lore hits: {}", e);
+            Vec::new()
+        }
+    };
+    let lore_hits = lore_entries
+        .into_iter()
+        .filter(|entry| {
+            let keyword = entry.keyword.to_lowercase();
+            !keyword.is_empty()
+                && (paragraph_lower.contains(&keyword) || nearby_lower.contains(&keyword))
+        })
+        .map(|entry| (entry.keyword, entry.content))
+        .collect::<Vec<_>>();
+
+    let profile_count = crate::collect_user_profile_entries(&app)
+        .map(|entries| entries.len())
+        .unwrap_or(0);
+    let source_summaries = crate::agent_runtime::build_source_summaries(
+        &observation,
+        outline_summary,
+        lore_hits,
+        profile_count,
+    );
+    let suggestion = crate::agent_runtime::build_suggestion(
+        &observation,
+        request_id.clone(),
+        &decision,
+        source_summaries,
+    );
+    let suggestion_id = suggestion.id.clone();
+    app.emit(crate::events::AGENT_SUGGESTION, suggestion)
+        .map_err(|e| format!("Failed to emit agent suggestion: {}", e))?;
+
+    Ok(crate::agent_runtime::AgentObserveResult {
+        request_id,
+        observation_id,
+        decision: "suggestion".to_string(),
+        reason: decision.reason,
+        suggestion_id: Some(suggestion_id),
+    })
 }

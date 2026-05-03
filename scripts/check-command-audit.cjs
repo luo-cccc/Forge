@@ -11,7 +11,7 @@ function collectCommands(dirPath) {
     } else if (entry.name.endsWith(".rs")) {
       const source = fs.readFileSync(full, "utf8");
       const commandPattern =
-        /#\[tauri::command\]\s*\n(?:\/\/.*\n)*\s*(?:async\s+)?(?:pub\s+)?fn\s+(\w+)/g;
+        /#\[tauri::command\]\s*\n(?:\/\/.*\n)*\s*(?:(?:pub\s+)?async\s+|pub\s+)?fn\s+(\w+)/g;
       let match;
       while ((match = commandPattern.exec(source)) !== null) {
         results.push({ name: match[1], file: full });
