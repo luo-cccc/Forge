@@ -5,11 +5,17 @@ use agent_harness_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 use crate::writer_agent::context_relevance::{
     format_text_chunk_relevance, score_text_for_writing_focus,
 };
 use crate::writer_agent::kernel::WriterAgentKernel;
+use crate::writer_agent::provider_budget::{
+    evaluate_provider_budget, WriterProviderBudgetReport, WriterProviderBudgetRequest,
+    WriterProviderBudgetTask,
+};
+use crate::writer_agent::task_receipt::{WriterFailureCategory, WriterFailureEvidenceBundle};
 use crate::{llm_runtime, storage};
 
 pub use crate::storage::{LoreEntry, OutlineNode};
@@ -19,6 +25,7 @@ const MIN_CHUNK_CHARS: usize = 20;
 const TOP_K: usize = 5;
 const RERANK_CANDIDATE_MULTIPLIER: usize = 6;
 const KNOWLEDGE_INDEX_FILENAME: &str = "knowledge_index.json";
+const PROJECT_BRAIN_QUERY_OUTPUT_TOKENS: u64 = 4_096;
 
 #[derive(Debug, Clone)]
 pub struct ProjectBrainFocus {
@@ -464,10 +471,144 @@ pub async fn answer_query_with_focus(
         )}),
         serde_json::json!({"role": "user", "content": query}),
     ];
+    let budget_report = project_brain_query_provider_budget(settings, &messages);
+    let created_at_ms = crate::agent_runtime::now_ms();
+    let task_id = format!(
+        "project-brain-query-{}",
+        storage::content_revision(&format!("{}:{}", query, created_at_ms))
+            .split('-')
+            .next()
+            .unwrap_or("0000000000000000")
+    );
+    let source_refs = project_brain_query_source_refs(query, &results, &budget_report);
+    record_project_brain_provider_budget(
+        app,
+        &task_id,
+        &budget_report,
+        source_refs.clone(),
+        created_at_ms,
+    );
+    if budget_report.approval_required {
+        record_project_brain_budget_failure(
+            app,
+            task_id,
+            source_refs,
+            budget_report.clone(),
+            created_at_ms,
+        );
+        return Err("PROJECT_BRAIN_PROVIDER_BUDGET_APPROVAL_REQUIRED".to_string());
+    }
 
     llm_runtime::stream_chat(settings, messages, 60, on_delta).await?;
 
     Ok(())
+}
+
+pub fn project_brain_query_provider_budget(
+    settings: &llm_runtime::LlmSettings,
+    messages: &[serde_json::Value],
+) -> WriterProviderBudgetReport {
+    project_brain_query_provider_budget_for_model(settings.model.clone(), messages)
+}
+
+pub fn project_brain_query_provider_budget_for_model(
+    model: impl Into<String>,
+    messages: &[serde_json::Value],
+) -> WriterProviderBudgetReport {
+    let converted = messages
+        .iter()
+        .map(|message| agent_harness_core::provider::LlmMessage {
+            role: message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("user")
+                .to_string(),
+            content: message
+                .get("content")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        })
+        .collect::<Vec<_>>();
+    let estimated_input_tokens =
+        agent_harness_core::context_window_guard::estimate_request_tokens(&converted, None);
+    evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ProjectBrainQuery,
+        model.into(),
+        estimated_input_tokens,
+        PROJECT_BRAIN_QUERY_OUTPUT_TOKENS,
+    ))
+}
+
+fn project_brain_query_source_refs(
+    query: &str,
+    results: &[(f32, Vec<String>, &Chunk)],
+    report: &WriterProviderBudgetReport,
+) -> Vec<String> {
+    let query_hash = storage::content_revision(query)
+        .split('-')
+        .next()
+        .unwrap_or("0000000000000000")
+        .to_string();
+    let mut refs = vec![
+        format!("project_brain_query:{}", query_hash),
+        format!("model:{}", report.model),
+        format!("estimated_tokens:{}", report.estimated_total_tokens),
+        format!("estimated_cost_micros:{}", report.estimated_cost_micros),
+    ];
+    refs.extend(results.iter().flat_map(|(_, _, chunk)| {
+        [
+            format!("project_brain:{}", chunk.id),
+            format!("chapter:{}", chunk.chapter),
+        ]
+    }));
+    refs
+}
+
+fn record_project_brain_provider_budget(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    report: &WriterProviderBudgetReport,
+    source_refs: Vec<String>,
+    created_at_ms: u64,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_provider_budget_report(task_id.to_string(), report, source_refs, created_at_ms);
+}
+
+fn record_project_brain_budget_failure(
+    app: &tauri::AppHandle,
+    task_id: String,
+    source_refs: Vec<String>,
+    report: WriterProviderBudgetReport,
+    created_at_ms: u64,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    let bundle = WriterFailureEvidenceBundle::new(
+        WriterFailureCategory::ProviderFailed,
+        "PROJECT_BRAIN_PROVIDER_BUDGET_APPROVAL_REQUIRED",
+        "Project Brain answer provider budget requires explicit approval before calling the model.",
+        true,
+        Some(task_id),
+        source_refs,
+        serde_json::json!({ "providerBudget": report }),
+        vec![
+            "Surface the Project Brain token/cost estimate to the author before retrying."
+                .to_string(),
+            "Narrow the query or reduce Project Brain context if approval is not granted."
+                .to_string(),
+        ],
+        created_at_ms,
+    );
+    kernel.record_failure_evidence_bundle(&bundle);
 }
 
 pub fn rerank_project_brain_results<'a>(

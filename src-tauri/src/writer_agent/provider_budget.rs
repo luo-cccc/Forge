@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub enum WriterProviderBudgetTask {
     ChapterGeneration,
     BatchGeneration,
+    ProjectBrainQuery,
     ProjectBrainRebuild,
     ExternalResearch,
     ManualRequest,
@@ -125,6 +126,7 @@ pub fn default_provider_budget_limits(
     let (tokens, cost_micros) = match task {
         WriterProviderBudgetTask::GhostPreview => (8_000, 150_000),
         WriterProviderBudgetTask::ManualRequest => (18_000, 450_000),
+        WriterProviderBudgetTask::ProjectBrainQuery => (24_000, 650_000),
         WriterProviderBudgetTask::ChapterGeneration => (55_000, 1_200_000),
         WriterProviderBudgetTask::BatchGeneration => (85_000, 1_800_000),
         WriterProviderBudgetTask::ProjectBrainRebuild => (120_000, 2_500_000),
@@ -171,6 +173,7 @@ pub fn evaluate_provider_budget(
         request.task,
         WriterProviderBudgetTask::ChapterGeneration
             | WriterProviderBudgetTask::BatchGeneration
+            | WriterProviderBudgetTask::ProjectBrainQuery
             | WriterProviderBudgetTask::ProjectBrainRebuild
             | WriterProviderBudgetTask::ExternalResearch
     ) && estimated_total_tokens

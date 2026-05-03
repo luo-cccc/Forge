@@ -400,6 +400,7 @@ export interface GenerateChapterAutonomousPayload {
 export type WriterProviderBudgetTask =
   | "chapter_generation"
   | "batch_generation"
+  | "project_brain_query"
   | "project_brain_rebuild"
   | "external_research"
   | "manual_request"

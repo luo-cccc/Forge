@@ -220,3 +220,69 @@ pub fn run_provider_budget_records_run_event_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_project_brain_provider_budget_eval() -> EvalResult {
+    let long_context = "寒玉戒指仍未归还，旧门钥匙和潮汐祭账互相指向同一条线索。".repeat(2600);
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": format!(
+            "You are an expert on this novel. Answer using only these excerpts:\n{}",
+            long_context
+        )}),
+        serde_json::json!({"role": "user", "content": "旧门钥匙和潮汐祭账之间是什么关系？"}),
+    ];
+    let report = agent_writer_lib::brain_service::project_brain_query_provider_budget_for_model(
+        "gpt-4o", &messages,
+    );
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.record_provider_budget_report(
+        "project-brain-budget-1",
+        &report,
+        vec![
+            "project_brain_query:test".to_string(),
+            "project_brain:chunk-1".to_string(),
+        ],
+        now_ms(),
+    );
+    let snapshot = kernel.trace_snapshot(20);
+
+    let mut errors = Vec::new();
+    if report.task != WriterProviderBudgetTask::ProjectBrainQuery {
+        errors.push(format!("unexpected budget task {:?}", report.task));
+    }
+    if report.decision != WriterProviderBudgetDecision::ApprovalRequired {
+        errors.push(format!(
+            "long Project Brain query should require approval, got {:?}",
+            report.decision
+        ));
+    }
+    if !report.approval_required {
+        errors.push("Project Brain budget report did not require approval".to_string());
+    }
+    if report.remediation.is_empty() {
+        errors.push("Project Brain budget report lacks remediation".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.provider_budget"
+            && event.task_id.as_deref() == Some("project-brain-budget-1")
+            && event
+                .data
+                .get("providerBudget")
+                .and_then(|budget| budget.get("task"))
+                .and_then(|value| value.as_str())
+                == Some("project_brain_query")
+    }) {
+        errors.push("Project Brain provider budget was not recorded as a run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:project_brain_provider_budget_preflight",
+        format!(
+            "decision={:?} tokens={} runEvents={}",
+            report.decision,
+            report.estimated_total_tokens,
+            snapshot.run_events.len()
+        ),
+        errors,
+    )
+}
