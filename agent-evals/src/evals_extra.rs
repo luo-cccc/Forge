@@ -1,5 +1,8 @@
 use crate::fixtures::*;
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
+use agent_writer_lib::writer_agent::context_relevance::{
+    format_text_chunk_relevance, rerank_text_chunks,
+};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::ObservationReason;
@@ -1050,6 +1053,60 @@ pub fn run_promise_relevance_beats_plain_similarity_eval() -> EvalResult {
     eval_result(
         "writer_agent:promise_relevance_beats_plain_similarity",
         format!("ringPos={} rumorPos={}", ring_pos, rumor_pos),
+        errors,
+    )
+}
+
+pub fn run_project_brain_writing_relevance_rerank_eval() -> EvalResult {
+    let chunks = vec![
+        (
+            50.0,
+            (
+                "semantic-distractor",
+                "旧门外的风声像传闻中的哭声，林墨反复听见旧门、风声、旧门和风声。",
+            ),
+        ),
+        (
+            1.0,
+            (
+                "mission-relevant",
+                "黑衣人夺走寒玉戒指后留下北境雪线脚印，林墨必须查清寒玉戒指下落。",
+            ),
+        ),
+    ];
+    let reranked = rerank_text_chunks(
+        chunks,
+        "本章必须追查寒玉戒指下落，不要被旧门传闻稀释主线。",
+        |(_, text)| text.to_string(),
+    );
+    let first_id = reranked
+        .first()
+        .map(|(_, _, (id, _))| *id)
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if first_id != "mission-relevant" {
+        errors.push(format!(
+            "mission-relevant project brain chunk should outrank semantic distractor, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("WHY writing_relevance")
+        || !first_explanation.contains("寒玉戒指")
+    {
+        errors.push(format!(
+            "missing writing relevance explanation for reranked chunk: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_writing_relevance_rerank",
+        format!("first={} explanation={}", first_id, first_explanation),
         errors,
     )
 }

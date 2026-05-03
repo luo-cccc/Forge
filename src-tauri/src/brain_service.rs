@@ -3,6 +3,7 @@ use agent_harness_core::{
     vector_db::{Chunk, VectorDB},
 };
 
+use crate::writer_agent::context_relevance::{format_text_chunk_relevance, rerank_text_chunks};
 use crate::{llm_runtime, storage};
 
 const CHUNK_MAX_CHARS: usize = 500;
@@ -88,7 +89,8 @@ pub async fn answer_query(
             e
         )
     })?;
-    let results = db.search_hybrid(query, &query_embedding, TOP_K);
+    let results =
+        rerank_project_brain_results(db.search_hybrid(query, &query_embedding, TOP_K), query);
     let context = build_context(&results);
 
     let messages = vec![
@@ -105,7 +107,25 @@ pub async fn answer_query(
     Ok(())
 }
 
-fn build_context(results: &[(f32, &Chunk)]) -> String {
+pub fn rerank_project_brain_results<'a>(
+    results: Vec<(f32, &'a Chunk)>,
+    writing_focus: &str,
+) -> Vec<(f32, Vec<String>, &'a Chunk)> {
+    rerank_text_chunks(results, writing_focus, |chunk| {
+        format!(
+            "{}\n{}\n{}\n{}",
+            chunk.chapter,
+            chunk.keywords.join("\n"),
+            chunk.topic.clone().unwrap_or_default(),
+            chunk.text
+        )
+    })
+    .into_iter()
+    .take(TOP_K)
+    .collect()
+}
+
+fn build_context(results: &[(f32, Vec<String>, &Chunk)]) -> String {
     if results.is_empty() {
         return "No relevant chunks found in the book.".to_string();
     }
@@ -113,12 +133,13 @@ fn build_context(results: &[(f32, &Chunk)]) -> String {
     results
         .iter()
         .enumerate()
-        .map(|(i, (score, chunk))| {
+        .map(|(i, (score, reasons, chunk))| {
             format!(
-                "[Chunk {} · {} · score {:.3}]\n{}",
+                "[Chunk {} · {} · score {:.3}]\n{}\n{}",
                 i + 1,
                 chunk.chapter,
                 score,
+                format_text_chunk_relevance(reasons),
                 chunk.text
             )
         })

@@ -65,6 +65,37 @@ impl WritingRelevance {
     }
 }
 
+pub fn rerank_text_chunks<'a, T, F>(
+    chunks: Vec<(f32, T)>,
+    writing_focus: &str,
+    text_for_chunk: F,
+) -> Vec<(f32, Vec<String>, T)>
+where
+    F: Fn(&T) -> String,
+{
+    let focus = WritingRelevanceFocus::new(writing_focus);
+    let mut scored = chunks
+        .into_iter()
+        .map(|(base_score, chunk)| {
+            let text = text_for_chunk(&chunk);
+            let relevance = score_text_chunk(&focus, &text);
+            let combined = base_score + relevance.score as f32;
+            (combined, relevance.reasons, chunk)
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+}
+
+pub fn format_text_chunk_relevance(reasons: &[String]) -> String {
+    let reason = if reasons.is_empty() {
+        "semantic similarity".to_string()
+    } else {
+        relevance_reason_text(reasons)
+    };
+    format!("WHY writing_relevance: {}", reason)
+}
+
 pub(crate) fn score_canon_entity(
     entity: &CanonEntitySummary,
     observation: &WriterObservation,
@@ -202,6 +233,50 @@ fn promise_text_contains_terms(promise_text: &str, decision_text: &str) -> bool 
         .into_iter()
         .take(6)
         .any(|term| promise_text.contains(&term))
+}
+
+struct WritingRelevanceFocus {
+    raw_text: String,
+    terms: Vec<String>,
+}
+
+impl WritingRelevanceFocus {
+    fn new(text: &str) -> Self {
+        Self {
+            raw_text: text.to_string(),
+            terms: relevance_terms(text),
+        }
+    }
+}
+
+fn score_text_chunk(focus: &WritingRelevanceFocus, text: &str) -> RelevanceScore {
+    let mut score = RelevanceScore::default();
+    for term in focus
+        .terms
+        .iter()
+        .filter(|term| text.contains(term.as_str()))
+    {
+        let weight = if focus.raw_text.contains(term.as_str()) {
+            1
+        } else {
+            0
+        };
+        let points = 18 + (term.chars().count().min(8) as i32 * 2) + weight;
+        score.add(points, format!("writing term {}", term));
+        if score.reasons.len() >= 5 {
+            break;
+        }
+    }
+    if focus.raw_text.contains("不要") || focus.raw_text.contains("不得") {
+        for term in relevance_terms(&focus.raw_text)
+            .into_iter()
+            .filter(|term| text.contains(term))
+            .take(2)
+        {
+            score.add(10, format!("constraint term {}", term));
+        }
+    }
+    score
 }
 
 fn relevance_reason_text(reasons: &[String]) -> String {

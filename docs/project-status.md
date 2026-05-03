@@ -24,7 +24,7 @@ P1 is in progress:
 - Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency.
 - Companion Panel write mode remains quiet and now summarizes acceptance/save health instead of exposing raw operation traces.
 - `agent-evals` now includes 10 long-form product scenario checks in `agent-evals/src/product_scenarios.rs`, covering multi-chapter promise tracking, result feedback handoff, payoff timing, resolved-promise quieting, object whereabouts, mission drift, canon guardrails, style feedback, decision metrics, and context explainability. More realistic fixtures are still needed before product value can be called proven.
-- Writer Agent context relevance ranking now prioritizes Canon / Promise ledger slices by mission, next beat, result feedback, recent decisions, cursor-local story signals, and open promises, with `WHY writing_relevance` explanations on retrieved entries.
+- Writer Agent context relevance ranking now prioritizes Canon / Promise ledger slices by mission, next beat, result feedback, recent decisions, cursor-local story signals, and open promises, with `WHY writing_relevance` explanations on retrieved entries. Project Brain / vector chunks are now reranked after semantic retrieval using the same writing-focus terms and include `WHY writing_relevance` explanations.
 
 ## What Is Solid Now
 
@@ -60,7 +60,7 @@ P1 is in progress:
 - Memory feedback and slot helpers now live in `src-tauri/src/writer_agent/kernel_memory_feedback.rs`, covering proposal slot keys, suppression keys, memory extraction preferences, and memory audit/feedback recording with focused unit coverage.
 - Memory candidate extraction, LLM candidate parsing, promise/canon candidate proposal construction, dedupe, sentence splitting, and memory-candidate quality validation now live in `src-tauri/src/writer_agent/kernel_memory_candidates.rs`.
 - Canon / Promise memory candidate quality gates now run on the real local-save and LLM proposal paths: vague candidates are rejected, duplicates are deduped before writes, conflicting canon candidates become explicit continuity review proposals, and same-entity non-conflicting attribute additions use narrow `canon.update_attribute` approval operations instead of whole-entity upserts. Style preference writes now reject vague, duplicate, same-key conflicting, and same-taxonomy-slot conflicting entries before they can pollute the style ledger.
-- Canon / Promise context slices now use writing-relevance ranking instead of plain mention matching or fixed ledger order, so current-plot entities and payoff-relevant promises are surfaced with explicit relevance reasons.
+- Canon / Promise context slices and Project Brain / vector chunks now use writing-relevance ranking instead of plain mention matching, fixed ledger order, or raw semantic similarity only, so current-plot entities, payoff-relevant promises, and mission-relevant RAG chunks are surfaced with explicit relevance reasons.
 - Kernel stateful implementation blocks now live under `src-tauri/src/writer_agent/kernel/`: observation handling, context-pack accessors, run-loop methods, proposal creation/registration, feedback, operation execution, snapshots, trace recording, and kernel tests.
 - Writer Agent run-loop data types and `WriterAgentPreparedRun` now live in `src-tauri/src/writer_agent/kernel_run_loop.rs` while preserving the existing `writer_agent::kernel::*` export path.
 - `agent-evals/src/evals.rs` is now a small module facade; the former large eval file is split into focused modules under `agent-evals/src/evals/` for intent, canon, ghost/feedback, context, tool policy, run loop, task packet, foundation, mission, promise, story debt, and trajectory coverage.
@@ -87,7 +87,7 @@ The expected local baseline is:
 
 - `cargo test -p agent-writer`: 168 passing
 - `cargo test -p agent-harness-core`: 79 passing
-- `cargo run -p agent-evals`: 91/91 passing
+- `cargo run -p agent-evals`: 92/92 passing
 - `npm run check:p2`: 9/9 passing
 - `npm run check:audit`: 47 commands, 0 issues
 - `npm run lint`: passing
@@ -113,5 +113,5 @@ The expected local baseline is:
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
 - P2.2 memory-write gates now cover Canon / Promise proposal creation, safe same-entity attribute merge proposals, foundation quality guards, and Style memory validation with a lightweight taxonomy for dialogue subtext, prose sentence length, exposition density, sensory description, POV distance, action clarity, chapter hooks, and tone/voice. Remaining Style work is richer author-editable taxonomy and polarity-aware preference merging.
-- P2.3 context relevance now covers Writer Agent ledger context for Canon / Promise slices only; the remaining retrieval gap is applying the same writing-relevance semantics to project-brain/vector-DB rerank paths and proving it against ordinary semantic-similarity distractors.
+- P2.3 context relevance now covers Writer Agent ledger context for Canon / Promise slices plus Project Brain / vector chunk rerank, with eval coverage for ordinary semantic-similarity distractors. The remaining retrieval gap is richer scene-type taxonomy and real long-session Project Brain fixtures.
 - P2.4-P2.6 architecture splitting is complete for the current plan: `lib.rs` is glue-only, `writer_agent/kernel.rs` is a facade/state owner with implementation blocks split into focused modules, and `agent-evals/src/evals.rs` is split into responsibility-based eval modules. Further splitting should be driven by new feature pressure rather than line-count targets.

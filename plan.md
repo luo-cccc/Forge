@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、91/91 writer evals。
+- `npm run verify` 当前通过：lint、build、P2 checks、audit、Rust tests、92/92 writer evals。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 
 ### 当前剩余核心矛盾
@@ -458,30 +458,31 @@ Verification：
 
 ### P2.3 检索从“相似文本”升级为“写作相关性”
 
-Status：部分完成。当前已完成 Writer Agent ledger context ranking；尚未覆盖 project brain / vector DB / 普通语义段落检索 rerank。
+Status：部分完成。当前已完成 Writer Agent ledger context ranking，并已把轻量 writing relevance rerank 接入 project brain / vector DB 结果和章节生成 RAG chunks；仍未建立完整 scene type taxonomy，也未用真实长会话检索数据证明所有普通语义段落干扰都被压制。
 
 Done：
 
 - `src-tauri/src/writer_agent/context_relevance.rs` 已集中承载 Canon / Promise ledger slice 的写作相关性评分。
 - Canon / Promise slice 会综合当前 chapter mission、next beat、result feedback、recent decisions、cursor 附近正文和 open promises 排序。
 - 被选中的 canon / promise 会输出 `WHY writing_relevance`，说明当前写作相关性来源。
+- `query_project_brain` 和 chapter generation 的 Project Brain / RAG chunk 会在 hybrid/vector/关键词初筛后按 writing relevance rerank，并输出 `WHY writing_relevance` 解释。
+- `writer_agent:project_brain_writing_relevance_rerank` 已覆盖普通语义相似段落干扰：即使干扰段落初始相似分更高，mission/promise 相关段落也会排到前面。
 
 Partial：
 
-- Active entities 和 active promises 当前来自 WriterMemory ledger context，不等于外部 project brain 的全量检索 rerank。
 - Cursor scene type 目前由 cursor 附近正文、段落、选区和任务上下文抽取信号近似表达，尚未建立 scene type taxonomy。
-- 当前 promise eval 证明的是 mission-relevant promise 在 ledger slice 内压过低相关 ledger 项，不证明它已压过 vector DB 的普通语义相似段落。
+- Project Brain rerank 当前使用 query / generation request 作为 writing focus；还没有把 WriterMemory 的 active mission、result feedback、recent decisions 全部注入独立 `query_project_brain` 的 rerank focus。
 
 Remaining：
 
-- 将同一套 writing relevance 语义接入 `query_project_brain` / vector DB 检索结果 rerank。
-- 增加覆盖普通语义段落干扰项的 eval，证明 promise / mission 相关内容优先于浅层相似文本。
 - 建立轻量 scene type taxonomy，并把 scene type 作为显式评分信号和解释原因。
+- 用真实连续章节的 Project Brain fixtures 扩展 rerank eval，覆盖更多普通语义相似干扰和多章节召回场景。
 
 Verification：
 
 - `writer_agent:current_plot_relevance_prioritizes_same_name_entity`（已覆盖 ledger Canon slice）
-- `writer_agent:promise_relevance_beats_plain_similarity`（已覆盖 ledger Promise slice，不覆盖 vector DB 段落 rerank）
+- `writer_agent:promise_relevance_beats_plain_similarity`（已覆盖 ledger Promise slice）
+- `writer_agent:project_brain_writing_relevance_rerank`（已覆盖 Project Brain / vector chunk rerank 的普通语义干扰）
 - `npm run verify`
 
 ## 9. P2：架构拆分和可维护性（P2.4-P2.6）
@@ -568,7 +569,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 91/91 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 92/92 passing。
 
 建议模块：
 

@@ -4,6 +4,7 @@ use agent_harness_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::writer_agent::context_relevance::{format_text_chunk_relevance, rerank_text_chunks};
 use crate::{llm_runtime, storage};
 
 pub const PHASE_STARTED: &str = "chapter_generation_started";
@@ -735,10 +736,14 @@ pub fn build_chapter_context(
     if !rag_chunks.is_empty() {
         let rag_text = rag_chunks
             .iter()
-            .map(|(score, chunk)| {
+            .map(|(score, reasons, chunk)| {
                 format!(
-                    "[{} · {} · score {:.1}]\n{}",
-                    chunk.id, chunk.chapter, score, chunk.text
+                    "[{} · {} · score {:.1}]\n{}\n{}",
+                    chunk.id,
+                    chunk.chapter,
+                    score,
+                    format_text_chunk_relevance(reasons),
+                    chunk.text
                 )
             })
             .collect::<Vec<_>>()
@@ -752,7 +757,7 @@ pub fn build_chapter_context(
             Some(
                 rag_chunks
                     .first()
-                    .map(|(score, _)| *score)
+                    .map(|(score, _, _)| *score)
                     .unwrap_or_default(),
             ),
         );
@@ -1619,7 +1624,7 @@ fn select_rag_chunks(
     app: &tauri::AppHandle,
     query: &str,
     max_count: usize,
-) -> Vec<(f32, agent_harness_core::Chunk)> {
+) -> Vec<(f32, Vec<String>, agent_harness_core::Chunk)> {
     let Ok(path) = storage::brain_path(app) else {
         return vec![];
     };
@@ -1635,7 +1640,7 @@ fn select_rag_chunks(
         }
     };
 
-    let mut scored = db
+    let scored = db
         .chunks
         .into_iter()
         .map(|chunk| {
@@ -1650,9 +1655,18 @@ fn select_rag_chunks(
         })
         .filter(|(score, _)| *score > 0.0)
         .collect::<Vec<_>>();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(max_count);
-    scored
+    rerank_text_chunks(scored, query, |chunk| {
+        format!(
+            "{}\n{}\n{}\n{}",
+            chunk.chapter,
+            chunk.keywords.join("\n"),
+            chunk.topic.clone().unwrap_or_default(),
+            chunk.text
+        )
+    })
+    .into_iter()
+    .take(max_count)
+    .collect()
 }
 
 fn relevance_score(query: &str, haystack: &str) -> f32 {
