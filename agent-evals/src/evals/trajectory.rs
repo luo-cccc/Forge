@@ -315,6 +315,107 @@ pub fn run_trajectory_export_has_redaction_warning_eval() -> EvalResult {
     )
 }
 
+pub fn run_trajectory_trace_viewer_export_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角惯用武器是寒影刀",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation("林墨拔出长剑，指向门外的人。"))
+        .unwrap();
+    if let Some(proposal) = proposals.first() {
+        kernel
+            .apply_feedback(ProposalFeedback {
+                proposal_id: proposal.id.clone(),
+                action: FeedbackAction::Rejected,
+                final_text: None,
+                reason: Some("trace viewer eval".to_string()),
+                created_at: now_ms(),
+            })
+            .unwrap();
+    }
+    let export = kernel.export_trajectory(50);
+    let lines = export.trace_viewer_jsonl.lines().collect::<Vec<_>>();
+    let values = lines
+        .iter()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if export.trace_viewer_schema != "claude-code-jsonl-for-hf-agent-trace-viewer" {
+        errors.push(format!(
+            "unexpected trace viewer schema {}",
+            export.trace_viewer_schema
+        ));
+    }
+    if export.trace_viewer_event_count == 0 || values.len() != export.trace_viewer_event_count {
+        errors.push(format!(
+            "trace viewer count mismatch count={} parsed={}",
+            export.trace_viewer_event_count,
+            values.len()
+        ));
+    }
+    if export.trace_viewer_event_count < export.event_count {
+        errors.push(format!(
+            "trace viewer export lost events traceViewer={} forge={}",
+            export.trace_viewer_event_count, export.event_count
+        ));
+    }
+    if !values.iter().all(|value| {
+        value.get("type").and_then(|v| v.as_str()).is_some()
+            && value.get("message").and_then(|v| v.as_object()).is_some()
+            && value.get("uuid").and_then(|v| v.as_str()).is_some()
+            && value.get("sessionId").and_then(|v| v.as_str()).is_some()
+            && value.get("timestamp").and_then(|v| v.as_str()).is_some()
+    }) {
+        errors.push("trace viewer export lacks required Claude-style fields".to_string());
+    }
+    if !values
+        .iter()
+        .skip(1)
+        .all(|value| value.get("parentUuid").and_then(|v| v.as_str()).is_some())
+    {
+        errors.push("trace viewer export lacks parentUuid chain after metadata".to_string());
+    }
+    if !values.iter().any(|value| {
+        value.get("forgeEventType").and_then(|v| v.as_str()) == Some("writer.observation")
+            && value.get("type").and_then(|v| v.as_str()) == Some("user")
+    }) {
+        errors.push("trace viewer export lacks user observation event".to_string());
+    }
+    if !values.iter().any(|value| {
+        value.get("forgeEventType").and_then(|v| v.as_str()) == Some("writer.run_event")
+            && value.get("forgeEvent").is_some()
+    }) {
+        errors.push("trace viewer export lacks bridged Forge run event".to_string());
+    }
+    if !values.iter().any(|value| {
+        value
+            .get("redactionWarning")
+            .and_then(|v| v.as_str())
+            .is_some_and(|warning| warning.contains("manuscript"))
+    }) {
+        errors.push("trace viewer export lacks redaction warning metadata".to_string());
+    }
+
+    eval_result(
+        "writer_agent:trajectory_trace_viewer_export",
+        format!(
+            "forgeEvents={} traceViewerEvents={}",
+            export.event_count, export.trace_viewer_event_count
+        ),
+        errors,
+    )
+}
+
 pub fn run_post_write_diagnostics_recorded_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

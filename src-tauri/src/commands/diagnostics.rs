@@ -46,17 +46,32 @@ pub fn export_diagnostic_logs(app: tauri::AppHandle) -> Result<String, String> {
 pub fn export_writer_agent_trajectory(
     state: tauri::State<'_, AppState>,
     limit: Option<usize>,
+    format: Option<String>,
 ) -> Result<String, String> {
     let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
     let export = kernel.export_trajectory(limit.unwrap_or(200).min(1_000));
     let dir = crate::log_dir()?.join("trajectory");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let trace_viewer_format = matches!(
+        format.as_deref(),
+        Some("trace_viewer" | "claude_code" | "hf_agent_trace_viewer")
+    );
     let file_name = format!(
-        "writer-agent-{}-{}.jsonl",
+        "writer-agent-{}-{}{}.jsonl",
         crate::safe_filename_component(&export.project_id),
-        crate::agent_runtime::now_ms()
+        crate::agent_runtime::now_ms(),
+        if trace_viewer_format {
+            "-trace-viewer"
+        } else {
+            ""
+        }
     );
     let path = dir.join(file_name);
-    std::fs::write(&path, export.jsonl).map_err(|e| e.to_string())?;
+    let jsonl = if trace_viewer_format {
+        export.trace_viewer_jsonl
+    } else {
+        export.jsonl
+    };
+    std::fs::write(&path, jsonl).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
 }

@@ -114,6 +114,22 @@ export default function SettingsView() {
     }
   }, []);
 
+  const handleExportTrajectory = useCallback(async (format?: "trace_viewer") => {
+    try {
+      const path = await invoke<string>(Commands.exportWriterAgentTrajectory, {
+        limit: 200,
+        ...(format ? { format } : {}),
+      });
+      setLogs(
+        format === "trace_viewer"
+          ? `Trace viewer trajectory exported to: ${path}`
+          : `Forge trajectory exported to: ${path}`,
+      );
+    } catch (e) {
+      setLogs(`Trajectory export failed: ${e}`);
+    }
+  }, []);
+
   const handleRestore = useCallback(async (
     item: (typeof RECOVERY_TARGETS)[number],
     backup: FileBackupInfo,
@@ -176,6 +192,18 @@ export default function SettingsView() {
           className="text-xs px-3 py-1.5 rounded-sm bg-bg-raised border border-border-subtle text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
         >
           Export Diagnostic Logs
+        </button>
+        <button
+          onClick={() => handleExportTrajectory()}
+          className="text-xs px-3 py-1.5 rounded-sm bg-bg-raised border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+        >
+          Export Forge Trace
+        </button>
+        <button
+          onClick={() => handleExportTrajectory("trace_viewer")}
+          className="text-xs px-3 py-1.5 rounded-sm bg-bg-raised border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+        >
+          Export Trace Viewer JSONL
         </button>
       </div>
 

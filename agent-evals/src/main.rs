@@ -75,6 +75,7 @@ fn main() {
     results.push(run_append_only_run_event_store_eval());
     results.push(run_inspector_timeline_hides_from_default_companion_eval());
     results.push(run_trajectory_export_has_redaction_warning_eval());
+    results.push(run_trajectory_trace_viewer_export_eval());
     results.push(run_post_write_diagnostics_recorded_eval());
     results.push(run_post_write_diagnostics_after_accepted_operation_eval());
     results.push(run_save_completed_links_post_write_diagnostics_eval());
