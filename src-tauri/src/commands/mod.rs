@@ -5,6 +5,7 @@ pub mod editor;
 pub mod generation;
 pub mod graph;
 pub mod lore;
+pub mod manual_agent;
 pub mod outline;
 pub mod settings;
 pub mod writer_agent;
