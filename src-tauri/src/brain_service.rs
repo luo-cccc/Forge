@@ -504,6 +504,13 @@ pub async fn answer_query_with_focus(
         emit_project_brain_provider_budget_error(app, &budget_report);
         return Err("PROJECT_BRAIN_PROVIDER_BUDGET_APPROVAL_REQUIRED".to_string());
     }
+    record_project_brain_model_started(
+        app,
+        &task_id,
+        &budget_report,
+        source_refs,
+        crate::agent_runtime::now_ms(),
+    );
 
     llm_runtime::stream_chat(settings, messages, 60, on_delta).await?;
 
@@ -585,6 +592,29 @@ fn record_project_brain_provider_budget(
         return;
     };
     kernel.record_provider_budget_report(task_id.to_string(), report, source_refs, created_at_ms);
+}
+
+fn record_project_brain_model_started(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    report: &WriterProviderBudgetReport,
+    source_refs: Vec<String>,
+    created_at_ms: u64,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_model_started_run_event(
+        task_id.to_string(),
+        report.task,
+        report.model.clone(),
+        "openai-compatible",
+        true,
+        source_refs,
+        Some(report),
+        created_at_ms,
+    );
 }
 
 fn record_project_brain_budget_failure(

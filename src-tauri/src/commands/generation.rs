@@ -167,6 +167,48 @@ fn record_chapter_provider_budget_report(
     );
 }
 
+fn chapter_model_source_refs(
+    context: &crate::chapter_generation::BuiltChapterContext,
+    report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+) -> Vec<String> {
+    let mut source_refs = vec![
+        format!("receipt:{}", context.receipt.task_id),
+        format!("chapter:{}", context.target.title),
+        format!("model:{}", report.model),
+        format!("estimated_tokens:{}", report.estimated_total_tokens),
+        format!("estimated_cost_micros:{}", report.estimated_cost_micros),
+    ];
+    source_refs.extend(
+        context
+            .sources
+            .iter()
+            .filter(|source| source.included_chars > 0)
+            .map(|source| format!("{}:{}", source.source_type, source.id)),
+    );
+    source_refs
+}
+
+fn record_chapter_model_started(
+    app: &tauri::AppHandle,
+    context: &crate::chapter_generation::BuiltChapterContext,
+    report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_model_started_run_event(
+        context.request_id.clone(),
+        report.task,
+        report.model.clone(),
+        "openai-compatible",
+        false,
+        chapter_model_source_refs(context, report),
+        Some(report),
+        crate::agent_runtime::now_ms(),
+    );
+}
+
 fn record_chapter_context_pack_built(
     app: &tauri::AppHandle,
     context: &crate::chapter_generation::BuiltChapterContext,
@@ -221,6 +263,7 @@ pub async fn batch_generate_chapter(
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
         let budget_app = app_clone.clone();
+        let model_app = app_clone.clone();
 
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
@@ -257,6 +300,9 @@ pub async fn batch_generate_chapter(
             },
             move |context, report| {
                 record_chapter_provider_budget_report(&budget_app, context, report);
+            },
+            move |context, report| {
+                record_chapter_model_started(&model_app, context, report);
             },
         )
         .await;
@@ -355,6 +401,7 @@ pub async fn generate_chapter_autonomous(
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
         let budget_app = app_clone.clone();
+        let model_app = app_clone.clone();
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
             settings,
@@ -390,6 +437,9 @@ pub async fn generate_chapter_autonomous(
             },
             move |context, report| {
                 record_chapter_provider_budget_report(&budget_app, context, report);
+            },
+            move |context, report| {
+                record_chapter_model_started(&model_app, context, report);
             },
         )
         .await;

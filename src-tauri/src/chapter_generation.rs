@@ -1072,6 +1072,7 @@ pub async fn generate_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
     provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> Result<GenerateChapterDraftOutput, ChapterGenerationError> {
     if context.prompt_context.trim().is_empty() {
         return Err(ChapterGenerationError::new(
@@ -1114,6 +1115,7 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
             budget_report,
         ));
     }
+    record_model_started(context, &budget_report);
 
     let content = llm_runtime::chat_text(settings, messages, false, PROVIDER_TIMEOUT_SECS)
         .await
@@ -1558,6 +1560,7 @@ pub async fn run_chapter_generation_pipeline(
     mut emit: impl FnMut(ChapterGenerationEvent) + Send,
     mut record_task_packet: impl FnMut(&BuiltChapterContext) + Send,
     mut record_provider_budget: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+    mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> PipelineTerminal {
     let request_id = payload
         .request_id
@@ -1626,6 +1629,7 @@ pub async fn run_chapter_generation_pipeline(
         &settings,
         &context,
         payload.provider_budget_approval.as_ref(),
+        |context, report| record_model_started(context, report),
     )
     .await
     {

@@ -222,6 +222,106 @@ pub fn run_provider_budget_records_run_event_eval() -> EvalResult {
     )
 }
 
+pub fn run_model_started_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let blocked_report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ChapterGeneration,
+        "gpt-4o",
+        90_000,
+        24_000,
+    ));
+    if !blocked_report.approval_required {
+        return eval_result(
+            "writer_agent:model_started_run_event",
+            "blocked fixture did not require approval".to_string(),
+            vec!["blocked fixture should require approval before model_started check".to_string()],
+        );
+    }
+    let allowed_report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ManualRequest,
+        "gpt-4o-mini",
+        1_200,
+        512,
+    ));
+    kernel.record_provider_budget_report(
+        "model-start-1",
+        &allowed_report,
+        vec!["manual_request:model-start".to_string()],
+        now_ms(),
+    );
+    kernel.record_model_started_run_event(
+        "model-start-1",
+        allowed_report.task,
+        allowed_report.model.clone(),
+        "openai-compatible",
+        true,
+        vec!["manual_request:model-start".to_string()],
+        Some(&allowed_report),
+        now_ms(),
+    );
+    let snapshot = kernel.trace_snapshot(20);
+    let export = kernel.export_trajectory(20);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if snapshot
+        .run_events
+        .iter()
+        .any(|event| event.event_type == "writer.model_started" && event.task_id.is_none())
+    {
+        errors.push("model_started event lacks task id".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.model_started"
+            && event.task_id.as_deref() == Some("model-start-1")
+            && event.data.get("task").and_then(|value| value.as_str()) == Some("manual_request")
+            && event.data.get("model").and_then(|value| value.as_str()) == Some("gpt-4o-mini")
+            && event.data.get("provider").and_then(|value| value.as_str())
+                == Some("openai-compatible")
+            && event.data.get("stream").and_then(|value| value.as_bool()) == Some(true)
+            && event
+                .data
+                .get("approvalRequired")
+                .and_then(|value| value.as_bool())
+                == Some(false)
+            && event
+                .data
+                .get("estimatedTotalTokens")
+                .and_then(|value| value.as_u64())
+                == Some(allowed_report.estimated_total_tokens)
+    }) {
+        errors.push("model_started event lacks model/provider/budget facts".to_string());
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.model_started\"")
+            && line.contains("\"estimatedTotalTokens\"")
+    }) {
+        errors.push("trajectory export lacks model_started run event".to_string());
+    }
+    if snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.model_started"
+            && event
+                .data
+                .get("approvalRequired")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+    }) {
+        errors.push("model_started recorded an approval-required call".to_string());
+    }
+
+    eval_result(
+        "writer_agent:model_started_run_event",
+        format!(
+            "runEvents={} trajectoryLines={}",
+            snapshot.run_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_project_brain_provider_budget_eval() -> EvalResult {
     let long_context = "寒玉戒指仍未归还，旧门钥匙和潮汐祭账互相指向同一条线索。".repeat(2600);
     let messages = vec![

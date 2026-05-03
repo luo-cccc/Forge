@@ -54,6 +54,29 @@ fn record_manual_provider_budget_report(
     kernel.record_provider_budget_report(task_id.to_string(), report, source_refs, created_at_ms);
 }
 
+fn record_manual_model_started(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    report: &writer_agent::provider_budget::WriterProviderBudgetReport,
+    source_refs: Vec<String>,
+    created_at_ms: u64,
+) {
+    let state = app.state::<AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_model_started_run_event(
+        task_id.to_string(),
+        report.task,
+        report.model.clone(),
+        "openai-compatible",
+        true,
+        source_refs,
+        Some(report),
+        created_at_ms,
+    );
+}
+
 fn record_manual_provider_budget_failure(
     app: &tauri::AppHandle,
     task_id: String,
@@ -268,6 +291,13 @@ pub async fn ask_agent(
         set_harness_idle(&state)?;
         return Err(MANUAL_REQUEST_PROVIDER_BUDGET_ERROR.to_string());
     }
+    record_manual_model_started(
+        &app,
+        &budget_task_id,
+        &budget_report,
+        budget_source_refs,
+        agent_runtime::now_ms(),
+    );
 
     for proposal in emitted_proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)

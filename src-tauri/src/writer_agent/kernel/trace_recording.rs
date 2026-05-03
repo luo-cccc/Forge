@@ -490,6 +490,41 @@ impl WriterAgentKernel {
         );
     }
 
+    pub fn record_model_started_run_event(
+        &mut self,
+        task_id: impl Into<String>,
+        task: crate::writer_agent::provider_budget::WriterProviderBudgetTask,
+        model: impl Into<String>,
+        provider: impl Into<String>,
+        stream: bool,
+        source_refs: Vec<String>,
+        report: Option<&crate::writer_agent::provider_budget::WriterProviderBudgetReport>,
+        created_at_ms: u64,
+    ) {
+        let task_id = task_id.into();
+        let model = model.into();
+        let provider = provider.into();
+        self.record_run_event(
+            "model_started",
+            created_at_ms,
+            Some(task_id.clone()),
+            source_refs,
+            serde_json::json!({
+                "taskId": task_id,
+                "task": task,
+                "model": model,
+                "provider": provider,
+                "stream": stream,
+                "estimatedInputTokens": report.map(|report| report.estimated_input_tokens),
+                "requestedOutputTokens": report.map(|report| report.requested_output_tokens),
+                "estimatedTotalTokens": report.map(|report| report.estimated_total_tokens),
+                "estimatedCostMicros": report.map(|report| report.estimated_cost_micros),
+                "budgetDecision": report.map(|report| report.decision),
+                "approvalRequired": report.map(|report| report.approval_required).unwrap_or(false),
+            }),
+        );
+    }
+
     fn record_run_event(
         &mut self,
         event_type: &str,
