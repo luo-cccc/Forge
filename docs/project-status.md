@@ -48,6 +48,7 @@ P1 is in progress:
 - Semantic lint payload/event handling and lore/diagnostic lint logic now live in `src-tauri/src/semantic_lint.rs`.
 - Manual context injection, user profile reads, chapter embedding, skill extraction, and LLM memory candidate generation now live in `src-tauri/src/memory_context.rs`.
 - Agent/editor/manual observation payloads and WriterObservation conversion now live in `src-tauri/src/observation_bridge.rs`.
+- Editor realtime ghost rendering, ambient output forwarding, editor prediction cleanup, realtime cowrite gating, and LLM ghost proposal flow now live in `src-tauri/src/editor_realtime.rs`.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
@@ -90,7 +91,7 @@ The expected local baseline is:
 
 ## Remaining Gaps
 
-- `src-tauri/src/lib.rs` has completed the command-handler, AppState, semantic-lint, memory/context, and observation-bridge splits, but still carries editor realtime ghost rendering and tests that should move into narrower modules.
+- `src-tauri/src/lib.rs` has completed the command-handler, AppState, semantic-lint, memory/context, observation-bridge, and editor-realtime splits, but still carries tests and final app setup glue that should move into narrower modules.
 - Story Contract and Chapter Mission now have basic authoring/editing UX; the remaining gap is richer guidance, validation, and per-chapter navigation for missions (P1).
 - Tool policy now has surfaced approval context for WriterOperation writes and audit coverage for legacy direct save commands; the remaining gap is richer policy rules per operation class (P1).
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
