@@ -577,6 +577,43 @@ impl WriterAgentKernel {
         );
     }
 
+    pub fn record_subtask_started_run_event(
+        &mut self,
+        payload: &crate::writer_agent::research_subtask::WriterSubtaskRunEventPayload,
+        created_at_ms: u64,
+    ) {
+        self.record_subtask_run_event("subtask_started", payload, created_at_ms);
+    }
+
+    pub fn record_subtask_completed_run_event(
+        &mut self,
+        payload: &crate::writer_agent::research_subtask::WriterSubtaskRunEventPayload,
+        created_at_ms: u64,
+    ) {
+        self.record_subtask_run_event("subtask_completed", payload, created_at_ms);
+    }
+
+    fn record_subtask_run_event(
+        &mut self,
+        event_type: &str,
+        payload: &crate::writer_agent::research_subtask::WriterSubtaskRunEventPayload,
+        created_at_ms: u64,
+    ) {
+        let source_refs = payload
+            .evidence_refs
+            .iter()
+            .cloned()
+            .chain(payload.artifact_refs.iter().cloned())
+            .collect::<Vec<_>>();
+        self.record_run_event(
+            event_type,
+            created_at_ms,
+            Some(payload.subtask_id.clone()),
+            source_refs,
+            serde_json::to_value(payload).unwrap_or_else(|_| serde_json::json!({})),
+        );
+    }
+
     fn record_run_event(
         &mut self,
         event_type: &str,

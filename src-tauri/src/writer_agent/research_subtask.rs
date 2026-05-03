@@ -45,6 +45,31 @@ pub struct WriterSubtaskResult {
     pub created_at_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterSubtaskRunEventPayload {
+    pub subtask_id: String,
+    pub kind: WriterSubtaskKind,
+    pub status: String,
+    pub objective: String,
+    pub summary: String,
+    pub evidence_count: usize,
+    pub artifact_count: usize,
+    pub blocked_operation_count: usize,
+    pub evidence_refs: Vec<String>,
+    pub artifact_refs: Vec<String>,
+    pub blocked_operation_kinds: Vec<String>,
+    pub tool_policy: WriterSubtaskToolPolicySummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterSubtaskToolPolicySummary {
+    pub max_side_effect_level: String,
+    pub allow_approval_required: bool,
+    pub required_tool_tags: Vec<String>,
+}
+
 pub fn create_subtask_workspace(
     project_data_dir: &Path,
     kind: WriterSubtaskKind,
@@ -159,6 +184,57 @@ pub fn tool_filter_for_subtask(kind: WriterSubtaskKind) -> ToolFilter {
         include_disabled: false,
         max_side_effect_level: Some(policy.max_side_effect_level),
         required_tags: policy.required_tool_tags,
+    }
+}
+
+pub fn subtask_started_payload(
+    kind: WriterSubtaskKind,
+    workspace: &WriterSubtaskWorkspace,
+    objective: &str,
+) -> WriterSubtaskRunEventPayload {
+    WriterSubtaskRunEventPayload {
+        subtask_id: workspace.subtask_id.clone(),
+        kind,
+        status: "started".to_string(),
+        objective: objective.trim().to_string(),
+        summary: "Subtask workspace and tool policy prepared.".to_string(),
+        evidence_count: 0,
+        artifact_count: 0,
+        blocked_operation_count: 0,
+        evidence_refs: Vec::new(),
+        artifact_refs: Vec::new(),
+        blocked_operation_kinds: Vec::new(),
+        tool_policy: subtask_tool_policy_summary(kind),
+    }
+}
+
+pub fn subtask_completed_payload(result: &WriterSubtaskResult) -> WriterSubtaskRunEventPayload {
+    WriterSubtaskRunEventPayload {
+        subtask_id: result.subtask_id.clone(),
+        kind: result.kind,
+        status: "completed".to_string(),
+        objective: result.objective.clone(),
+        summary: result.summary.clone(),
+        evidence_count: result.evidence_refs.len(),
+        artifact_count: result.artifact_refs.len(),
+        blocked_operation_count: result.blocked_operation_kinds.len(),
+        evidence_refs: result
+            .evidence_refs
+            .iter()
+            .map(|evidence| evidence.reference.clone())
+            .collect(),
+        artifact_refs: result.artifact_refs.clone(),
+        blocked_operation_kinds: result.blocked_operation_kinds.clone(),
+        tool_policy: subtask_tool_policy_summary(result.kind),
+    }
+}
+
+pub fn subtask_tool_policy_summary(kind: WriterSubtaskKind) -> WriterSubtaskToolPolicySummary {
+    let policy = tool_policy_for_subtask(kind);
+    WriterSubtaskToolPolicySummary {
+        max_side_effect_level: format!("{:?}", policy.max_side_effect_level),
+        allow_approval_required: policy.allow_approval_required,
+        required_tool_tags: policy.required_tool_tags,
     }
 }
 
@@ -410,6 +486,48 @@ mod tests {
 
         assert!(validate_evidence_only_subtask_result(&result).is_empty());
         assert_eq!(result.blocked_operation_kinds, vec!["text.replace"]);
+    }
+
+    #[test]
+    fn subtask_run_event_payloads_redact_evidence_snippets() {
+        let workspace = WriterSubtaskWorkspace {
+            subtask_id: "research-4".to_string(),
+            kind: WriterSubtaskKind::Research,
+            workspace_dir: "C:/project/agent_subtasks/research-4".to_string(),
+            artifact_dir: "C:/project/agent_subtasks/research-4/artifacts".to_string(),
+        };
+        let started = subtask_started_payload(
+            WriterSubtaskKind::Research,
+            &workspace,
+            "Find the ring clue.",
+        );
+        let result = build_evidence_only_subtask_result(
+            WriterSubtaskKind::Research,
+            "research-4",
+            "Find the ring clue.",
+            "Project Brain confirms the clue.",
+            vec![EvidenceRef {
+                source: EvidenceSource::ChapterText,
+                reference: "project_brain:chunk-ring".to_string(),
+                snippet: "sensitive manuscript evidence".to_string(),
+            }],
+            vec!["subtask:research-4:artifact:evidence/ring.json".to_string()],
+            &[],
+            4,
+        )
+        .unwrap();
+        let completed = subtask_completed_payload(&result);
+
+        assert_eq!(started.status, "started");
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.evidence_refs, vec!["project_brain:chunk-ring"]);
+        assert!(!serde_json::to_string(&completed)
+            .unwrap()
+            .contains("sensitive manuscript evidence"));
+        assert!(!completed
+            .artifact_refs
+            .iter()
+            .any(|artifact| artifact.contains("C:/")));
     }
 
     #[test]

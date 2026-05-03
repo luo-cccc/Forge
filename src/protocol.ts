@@ -1073,6 +1073,7 @@ export type WriterTimelineEventKind =
   | "operation_lifecycle"
   | "run_event"
   | "failure"
+  | "subtask"
   | "context_recall"
   | "product_metrics";
 

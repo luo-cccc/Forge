@@ -16,6 +16,7 @@ type InspectorFilter =
   | "all"
   | "failure"
   | "save_completed"
+  | "subtask"
   | "run_event"
   | "task_packet"
   | "operation_lifecycle"
@@ -26,6 +27,7 @@ const filterLabels: Record<InspectorFilter, string> = {
   all: "All",
   failure: "Failures",
   save_completed: "Saves",
+  subtask: "Subtasks",
   run_event: "Run Events",
   task_packet: "Packets",
   operation_lifecycle: "Lifecycle",
@@ -37,6 +39,7 @@ const filterOrder: InspectorFilter[] = [
   "all",
   "failure",
   "save_completed",
+  "subtask",
   "run_event",
   "task_packet",
   "operation_lifecycle",
@@ -72,6 +75,7 @@ function formatDuration(value: number | null | undefined): string {
 
 function eventToneClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "border-danger/40 bg-danger/10";
+  if (kind === "subtask") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "run_event") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "product_metrics") return "border-success/30 bg-success/10";
   return "border-border-subtle bg-bg-raised";
@@ -79,6 +83,7 @@ function eventToneClass(kind: WriterTimelineEventKind): string {
 
 function eventBadgeClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "bg-danger/20 text-danger";
+  if (kind === "subtask") return "bg-accent-subtle text-accent";
   if (kind === "run_event") return "bg-accent-subtle text-accent";
   if (kind === "product_metrics") return "bg-success/10 text-success";
   return "bg-bg-deep text-text-muted";

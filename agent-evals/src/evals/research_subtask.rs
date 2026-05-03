@@ -5,8 +5,8 @@ use agent_writer_lib::writer_agent::proposal::{EvidenceRef, EvidenceSource};
 use agent_writer_lib::writer_agent::research_subtask::{
     build_evidence_only_subtask_result, create_subtask_workspace,
     failure_bundle_from_subtask_tool_execution, safe_subtask_artifact_path,
-    tool_filter_for_subtask, validate_evidence_only_subtask_result, write_subtask_artifact,
-    WriterSubtaskKind,
+    subtask_completed_payload, subtask_started_payload, tool_filter_for_subtask,
+    validate_evidence_only_subtask_result, write_subtask_artifact, WriterSubtaskKind,
 };
 
 pub fn run_research_subtask_uses_isolated_workspace_eval() -> EvalResult {
@@ -109,6 +109,103 @@ pub fn run_research_subtask_outputs_evidence_only_eval() -> EvalResult {
             result.evidence_refs.len(),
             result.artifact_refs.len(),
             result.blocked_operation_kinds.join(",")
+        ),
+        errors,
+    )
+}
+
+pub fn run_research_subtask_run_events_eval() -> EvalResult {
+    let workspace = agent_writer_lib::writer_agent::research_subtask::WriterSubtaskWorkspace {
+        subtask_id: "research-run-1".to_string(),
+        kind: WriterSubtaskKind::Research,
+        workspace_dir: "C:/project/agent_subtasks/research-run-1".to_string(),
+        artifact_dir: "C:/project/agent_subtasks/research-run-1/artifacts".to_string(),
+    };
+    let result = build_evidence_only_subtask_result(
+        WriterSubtaskKind::Research,
+        "research-run-1",
+        "Verify whether the public-source clue should affect Chapter-5.",
+        "The subtask found evidence but did not emit a write operation.",
+        vec![EvidenceRef {
+            source: EvidenceSource::ChapterText,
+            reference: "project_brain:chunk-ring-payoff".to_string(),
+            snippet: "林墨在霜铃塔发现寒玉戒指的裂纹。".to_string(),
+        }],
+        vec!["subtask:research-run-1:artifact:evidence/public-source.json".to_string()],
+        &[WriterOperation::PromiseResolve {
+            promise_id: "ring-crack".to_string(),
+            chapter: "Chapter-5".to_string(),
+        }],
+        now_ms(),
+    )
+    .unwrap();
+    let started = subtask_started_payload(
+        WriterSubtaskKind::Research,
+        &workspace,
+        "Verify whether the public-source clue should affect Chapter-5.",
+    );
+    let completed = subtask_completed_payload(&result);
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.record_subtask_started_run_event(&started, now_ms());
+    kernel.record_subtask_completed_run_event(&completed, result.created_at_ms);
+    let snapshot = kernel.trace_snapshot(20);
+    let inspector = kernel.inspector_timeline(20);
+    let trajectory = kernel.export_trajectory(20);
+
+    let mut errors = Vec::new();
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.subtask_started"
+            && event.task_id.as_deref() == Some("research-run-1")
+            && event.data.get("toolPolicy").is_some()
+    }) {
+        errors.push("snapshot lacks subtask_started run event with policy".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.subtask_completed"
+            && event.task_id.as_deref() == Some("research-run-1")
+            && event.data.get("blockedOperationKinds").is_some()
+            && event
+                .data
+                .get("evidenceRefs")
+                .and_then(|value| value.as_array())
+                .is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item.as_str() == Some("project_brain:chunk-ring-payoff"))
+                })
+    }) {
+        errors.push("snapshot lacks subtask_completed evidence-only run event".to_string());
+    }
+    if snapshot.run_events.iter().any(|event| {
+        serde_json::to_string(&event.data)
+            .unwrap_or_default()
+            .contains("林墨在霜铃塔")
+    }) {
+        errors.push("subtask run event leaked evidence snippet".to_string());
+    }
+    if !inspector.events.iter().any(|event| {
+        event.kind == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::Subtask
+            && event.task_id.as_deref() == Some("research-run-1")
+            && event.summary.contains("blocked_ops=1")
+    }) {
+        errors.push("inspector does not expose subtask timeline event".to_string());
+    }
+    if !trajectory
+        .jsonl
+        .contains(r#""eventType":"writer.run_event""#)
+        || !trajectory.jsonl.contains("writer.subtask_completed")
+    {
+        errors.push("trajectory export lacks subtask run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:research_subtask_run_events",
+        format!(
+            "runEvents={} inspectorEvents={} trajectoryEvents={}",
+            snapshot.run_events.len(),
+            inspector.events.len(),
+            trajectory.event_count
         ),
         errors,
     )

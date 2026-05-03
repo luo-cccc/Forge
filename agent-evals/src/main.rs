@@ -122,6 +122,7 @@ fn main() {
     results.push(run_project_brain_embedding_provider_limits_eval());
     results.push(run_research_subtask_uses_isolated_workspace_eval());
     results.push(run_research_subtask_outputs_evidence_only_eval());
+    results.push(run_research_subtask_run_events_eval());
     results.push(run_diagnostic_subtask_denies_writes_eval());
     results.push(run_research_subtask_tool_failure_records_bundle_eval());
     results.push(run_provider_budget_requires_approval_eval());

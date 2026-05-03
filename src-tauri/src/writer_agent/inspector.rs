@@ -26,6 +26,7 @@ pub enum WriterTimelineEventKind {
     OperationLifecycle,
     RunEvent,
     Failure,
+    Subtask,
     ContextRecall,
     ProductMetrics,
 }
@@ -146,6 +147,12 @@ pub fn build_inspector_timeline(
     for run_event in &snapshot.run_events {
         if run_event.event_type == "writer.error" {
             events.push(failure_event_from_run_event(run_event));
+            continue;
+        }
+        if run_event.event_type == "writer.subtask_started"
+            || run_event.event_type == "writer.subtask_completed"
+        {
+            events.push(subtask_event_from_run_event(run_event));
             continue;
         }
         events.push(WriterTimelineEvent {
@@ -276,12 +283,66 @@ fn event_kind_weight(kind: &WriterTimelineEventKind) -> u8 {
         WriterTimelineEventKind::Observation => 0,
         WriterTimelineEventKind::TaskPacket => 1,
         WriterTimelineEventKind::RunEvent => 2,
-        WriterTimelineEventKind::Failure => 3,
-        WriterTimelineEventKind::Proposal => 4,
-        WriterTimelineEventKind::OperationLifecycle => 5,
-        WriterTimelineEventKind::Feedback => 6,
-        WriterTimelineEventKind::ContextRecall => 7,
-        WriterTimelineEventKind::ProductMetrics => 8,
+        WriterTimelineEventKind::Subtask => 3,
+        WriterTimelineEventKind::Failure => 4,
+        WriterTimelineEventKind::Proposal => 5,
+        WriterTimelineEventKind::OperationLifecycle => 6,
+        WriterTimelineEventKind::Feedback => 7,
+        WriterTimelineEventKind::ContextRecall => 8,
+        WriterTimelineEventKind::ProductMetrics => 9,
+    }
+}
+
+fn subtask_event_from_run_event(run_event: &WriterRunEvent) -> WriterTimelineEvent {
+    let kind = run_event
+        .data
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .unwrap_or("subtask");
+    let status = run_event
+        .data
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("recorded");
+    let summary = run_event
+        .data
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            run_event
+                .data
+                .get("objective")
+                .and_then(|value| value.as_str())
+        })
+        .unwrap_or("Writer subtask event recorded.");
+    let evidence_count = run_event
+        .data
+        .get("evidenceCount")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let artifact_count = run_event
+        .data
+        .get("artifactCount")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let blocked_count = run_event
+        .data
+        .get("blockedOperationCount")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    WriterTimelineEvent {
+        audience: WriterTimelineAudience::Inspector,
+        kind: WriterTimelineEventKind::Subtask,
+        label: format!("Subtask {} {}", kind, status),
+        ts_ms: run_event.ts_ms,
+        task_id: run_event.task_id.clone(),
+        source_refs: run_event.source_refs.clone(),
+        summary: format!(
+            "{} evidence={} artifacts={} blocked_ops={}",
+            summary, evidence_count, artifact_count, blocked_count
+        ),
+        detail: Some(run_event.data.clone()),
     }
 }
 
@@ -358,6 +419,7 @@ mod tests {
                     WriterTimelineEventKind::TaskPacket
                         | WriterTimelineEventKind::RunEvent
                         | WriterTimelineEventKind::Failure
+                        | WriterTimelineEventKind::Subtask
                         | WriterTimelineEventKind::OperationLifecycle
                 )
         }));
