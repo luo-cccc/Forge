@@ -42,8 +42,9 @@ pub(crate) use super::kernel_memory_candidates::{
     promise_candidate_proposal, sentence_snippet, split_sentences, CandidateSource,
 };
 pub use super::kernel_memory_candidates::{
-    extract_plot_promises, validate_canon_candidate, validate_canon_candidate_with_memory,
-    validate_promise_candidate, validate_promise_candidate_with_dedup, validate_style_preference,
+    extract_plot_promises, style_preference_taxonomy_slot, validate_canon_candidate,
+    validate_canon_candidate_with_memory, validate_promise_candidate,
+    validate_promise_candidate_with_dedup, validate_style_preference,
     validate_style_preference_with_memory, MemoryCandidateQuality,
 };
 pub(crate) use super::kernel_memory_feedback::{

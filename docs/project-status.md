@@ -59,7 +59,7 @@ P1 is in progress:
 - Ghost proposal helpers now live in `src-tauri/src/writer_agent/kernel_ghost.rs`, covering local continuation drafts, three-branch alternatives, continuation sanitization, and context evidence mapping with focused unit coverage.
 - Memory feedback and slot helpers now live in `src-tauri/src/writer_agent/kernel_memory_feedback.rs`, covering proposal slot keys, suppression keys, memory extraction preferences, and memory audit/feedback recording with focused unit coverage.
 - Memory candidate extraction, LLM candidate parsing, promise/canon candidate proposal construction, dedupe, sentence splitting, and memory-candidate quality validation now live in `src-tauri/src/writer_agent/kernel_memory_candidates.rs`.
-- Canon / Promise memory candidate quality gates now run on the real local-save and LLM proposal paths: vague candidates are rejected, duplicates are deduped before writes, conflicting canon candidates become explicit continuity review proposals, and same-entity non-conflicting attribute additions use narrow `canon.update_attribute` approval operations instead of whole-entity upserts. Style preference writes now reject vague, duplicate, and same-key conflicting entries before they can pollute the style ledger.
+- Canon / Promise memory candidate quality gates now run on the real local-save and LLM proposal paths: vague candidates are rejected, duplicates are deduped before writes, conflicting canon candidates become explicit continuity review proposals, and same-entity non-conflicting attribute additions use narrow `canon.update_attribute` approval operations instead of whole-entity upserts. Style preference writes now reject vague, duplicate, same-key conflicting, and same-taxonomy-slot conflicting entries before they can pollute the style ledger.
 - Canon / Promise context slices now use writing-relevance ranking instead of plain mention matching or fixed ledger order, so current-plot entities and payoff-relevant promises are surfaced with explicit relevance reasons.
 - Kernel stateful implementation blocks now live under `src-tauri/src/writer_agent/kernel/`: observation handling, context-pack accessors, run-loop methods, proposal creation/registration, feedback, operation execution, snapshots, trace recording, and kernel tests.
 - Writer Agent run-loop data types and `WriterAgentPreparedRun` now live in `src-tauri/src/writer_agent/kernel_run_loop.rs` while preserving the existing `writer_agent::kernel::*` export path.
@@ -85,7 +85,7 @@ P1 is in progress:
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 167 passing
+- `cargo test -p agent-writer`: 168 passing
 - `cargo test -p agent-harness-core`: 79 passing
 - `cargo run -p agent-evals`: 91/91 passing
 - `npm run check:p2`: 9/9 passing
@@ -112,6 +112,6 @@ The expected local baseline is:
 - Companion Panel should continue moving debug/audit internals into a dedicated inspector, even though write mode now hides raw traces by default (P1).
 - Product validation now has the first 10 long-form scenario evals; the remaining gap is making those fixtures closer to real author sessions and tracking failures over longer sessions (P1).
 - Product metrics are currently derived locally from trace data; the remaining gap is richer per-session metric history and a debug view for trend inspection (P1).
-- P2.2 memory-write gates now cover Canon / Promise proposal creation, safe same-entity attribute merge proposals, foundation quality guards, and basic Style memory validation; the remaining memory quality gap is richer style taxonomy.
+- P2.2 memory-write gates now cover Canon / Promise proposal creation, safe same-entity attribute merge proposals, foundation quality guards, and Style memory validation with a lightweight taxonomy for dialogue subtext, prose sentence length, exposition density, sensory description, POV distance, action clarity, chapter hooks, and tone/voice. Remaining Style work is richer author-editable taxonomy and polarity-aware preference merging.
 - P2.3 context relevance now covers Writer Agent ledger context for Canon / Promise slices only; the remaining retrieval gap is applying the same writing-relevance semantics to project-brain/vector-DB rerank paths and proving it against ordinary semantic-similarity distractors.
 - P2.4-P2.6 architecture splitting is complete for the current plan: `lib.rs` is glue-only, `writer_agent/kernel.rs` is a facade/state owner with implementation blocks split into focused modules, and `agent-evals/src/evals.rs` is split into responsibility-based eval modules. Further splitting should be driven by new feature pressure rather than line-count targets.

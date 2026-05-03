@@ -424,7 +424,7 @@ Verification：
 
 ### P2.2 记忆写入质量门槛
 
-Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Story Contract / Chapter Mission foundation guard 已存在；Style memory validation 已覆盖显式 style operation 和反馈派生 style ledger 写入；同名 canon entity 的缺失属性补充已使用窄 `canon.update_attribute` 审批操作，避免整实体覆盖。
+Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Story Contract / Chapter Mission foundation guard 已存在；Style memory validation 已覆盖显式 style operation、反馈派生 style ledger 写入和基础风格 taxonomy 冲突识别；同名 canon entity 的缺失属性补充已使用窄 `canon.update_attribute` 审批操作，避免整实体覆盖。
 
 Done：
 
@@ -432,16 +432,18 @@ Done：
 - 本地保存抽取和 LLM memory candidate 会过滤模糊、空泛、重复候选。
 - Canon / Promise 候选已有 dedupe 和冲突拦截；与现有 canon kind 或关键 attributes 冲突的候选不会直接写入长期记忆，而是生成高优先级 ContinuityWarning。
 - Story Contract / Chapter Mission 写入已有 foundation quality gate，低质量 foundation 不会进入有效 context。
-- Style preference 写入已有质量门槛：空泛、重复、同 key 冲突的偏好不会污染 style ledger；反馈派生的 style preference 只有足够具体时才会写入。
+- Style preference 写入已有质量门槛：空泛、重复、同 key 冲突和同 taxonomy slot 冲突的偏好不会污染 style ledger；反馈派生的 style preference 只有足够具体时才会写入。
+- Style preference 已有轻量 taxonomy slot：dialogue.subtext、prose.sentence_length、exposition.density、description.sensory_detail、pov.distance、action.clarity、structure.hook、tone.voice；不同 key 但落在同一 slot 的冲突偏好会被拦截。
 - 同名 canon entity 的非冲突缺失属性会生成可审批的 `canon.update_attribute` 窄操作，不再用整实体 upsert 覆盖既有 attributes。
 
 Partial：
 
-- Style validation 仍是 key/value 层面的轻量规则，后续可继续增强为更细的风格 taxonomy。
+- Style taxonomy 仍是轻量关键词规则，尚未做 polarity-aware merge、作者可编辑 taxonomy 或更细粒度风格维度。
 
 Remaining：
 
 - 把 Contract / Mission 的质量门槛在文档和 eval 名称上继续独立维护，避免被 Canon / Promise 覆盖情况掩盖。
+- 后续如继续扩展 Style，可把 taxonomy slot 做成可审阅的作者偏好模型，而不是继续增加散落关键词。
 
 Verification：
 

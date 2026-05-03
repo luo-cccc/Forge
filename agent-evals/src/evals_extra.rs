@@ -366,7 +366,8 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
 
 pub fn run_style_memory_validation_eval() -> EvalResult {
     use agent_writer_lib::writer_agent::kernel::{
-        validate_style_preference_with_memory, MemoryCandidateQuality,
+        style_preference_taxonomy_slot, validate_style_preference_with_memory,
+        MemoryCandidateQuality,
     };
 
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -398,6 +399,37 @@ pub fn run_style_memory_validation_eval() -> EvalResult {
         MemoryCandidateQuality::Conflict { .. } => {}
         other => errors.push(format!(
             "expected Conflict for same-key style change, got {:?}",
+            other
+        )),
+    }
+    match style_preference_taxonomy_slot("dialogue_subtext", "对话偏短句留白，避免直接解释情绪")
+        .as_deref()
+    {
+        Some("dialogue.subtext") => {}
+        other => errors.push(format!(
+            "expected dialogue.subtext taxonomy slot, got {:?}",
+            other
+        )),
+    }
+    match validate_style_preference_with_memory(
+        "dialogue_emotion_explanation",
+        "对话要完整解释每个角色的真实情绪",
+        &memory,
+    ) {
+        MemoryCandidateQuality::Conflict { reason, .. } if reason.contains("dialogue.subtext") => {}
+        other => errors.push(format!(
+            "expected Conflict for same taxonomy slot, got {:?}",
+            other
+        )),
+    }
+    match validate_style_preference_with_memory(
+        "description_sensory_detail",
+        "描写优先保留气味、触感和画面细节",
+        &memory,
+    ) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for different taxonomy slot, got {:?}",
             other
         )),
     }
@@ -433,7 +465,7 @@ pub fn run_style_memory_validation_eval() -> EvalResult {
     eval_result(
         "writer_agent:style_memory_validation",
         format!(
-            "operationRejected={} styleRows={}",
+            "operationRejected={} styleRows={} taxonomy=dialogue.subtext",
             !result.success, style_count
         ),
         errors,

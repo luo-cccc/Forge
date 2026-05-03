@@ -371,6 +371,58 @@ fn style_preference_operation_enforces_quality_gates() {
 }
 
 #[test]
+fn style_preference_taxonomy_detects_same_slot_conflicts() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+
+    assert_eq!(
+        style_preference_taxonomy_slot("dialogue_subtext", "对话偏短句留白，避免直接解释情绪")
+            .as_deref(),
+        Some("dialogue.subtext")
+    );
+
+    let first = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_subtext".to_string(),
+                value: "对话偏短句留白，避免直接解释情绪".to_string(),
+            },
+            "",
+            Some(&test_approval("style_taxonomy")),
+        )
+        .unwrap();
+    assert!(first.success);
+
+    let same_slot_conflict = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "dialogue_emotion_explanation".to_string(),
+                value: "对话要完整解释每个角色的真实情绪".to_string(),
+            },
+            "",
+            Some(&test_approval("style_taxonomy")),
+        )
+        .unwrap();
+    assert!(!same_slot_conflict.success);
+    assert!(same_slot_conflict
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message.contains("dialogue.subtext")));
+
+    let different_slot = kernel
+        .approve_editor_operation_with_approval(
+            WriterOperation::StyleUpdatePreference {
+                key: "description_sensory_detail".to_string(),
+                value: "描写优先保留气味、触感和画面细节".to_string(),
+            },
+            "",
+            Some(&test_approval("style_taxonomy")),
+        )
+        .unwrap();
+    assert!(different_slot.success);
+}
+
+#[test]
 fn pure_kernel_rejects_outline_update_without_project_runtime() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);
