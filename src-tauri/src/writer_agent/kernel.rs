@@ -53,8 +53,9 @@ pub use super::kernel_memory_candidates::{
     validate_style_preference_with_memory, MemoryCandidateQuality,
 };
 pub(crate) use super::kernel_memory_feedback::{
-    proposal_slot_key, record_memory_audit_event, record_memory_candidate_feedback,
-    suppression_slot_key, MemoryCandidate, MemoryExtractionFeedback,
+    memory_operation_slot, proposal_slot_key, record_memory_audit_event,
+    record_memory_candidate_feedback, suppression_slot_key, MemoryCandidate,
+    MemoryExtractionFeedback,
 };
 pub(crate) use super::kernel_metrics::product_metrics_from_trace;
 pub use super::kernel_metrics::WriterProductMetrics;

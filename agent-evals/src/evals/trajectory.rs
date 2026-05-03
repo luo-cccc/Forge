@@ -695,3 +695,88 @@ pub fn run_save_completed_links_post_write_diagnostics_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_memory_candidate_created_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut save = observation_in_chapter("新来的护卫名叫沈照，他随身带着玉佩。", "Chapter-8");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    save.editor_dirty = false;
+    let proposals = kernel.observe(save).unwrap();
+    let events = kernel.run_events(50);
+    let export = kernel.export_trajectory(50);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let memory_candidate_events = events
+        .iter()
+        .filter(|event| event.event_type == "writer.memory_candidate_created")
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if !proposals.iter().any(|proposal| {
+        matches!(
+            proposal.kind,
+            agent_writer_lib::writer_agent::proposal::ProposalKind::CanonUpdate
+                | agent_writer_lib::writer_agent::proposal::ProposalKind::PlotPromise
+        )
+    }) {
+        errors.push("save observation did not surface memory candidate proposal".to_string());
+    }
+    if memory_candidate_events.is_empty() {
+        errors.push("run event store lacks writer.memory_candidate_created".to_string());
+    }
+    for event in &memory_candidate_events {
+        if event
+            .data
+            .get("slot")
+            .and_then(|value| value.as_str())
+            .is_none()
+        {
+            errors.push("memory candidate event lacks slot".to_string());
+        }
+        if event
+            .data
+            .get("requiresAuthorReview")
+            .and_then(|value| value.as_bool())
+            != Some(true)
+        {
+            errors.push("memory candidate event does not mark author review".to_string());
+        }
+        if event
+            .data
+            .get("writesLedgerImmediately")
+            .and_then(|value| value.as_bool())
+            != Some(false)
+        {
+            errors.push("memory candidate event implies direct ledger write".to_string());
+        }
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.memory_candidate_created\"")
+            && line.contains("\"requiresAuthorReview\":true")
+    }) {
+        errors.push(
+            "trajectory export lacks reviewable memory_candidate_created run event".to_string(),
+        );
+    }
+    let ledger = kernel.ledger_snapshot();
+    if ledger
+        .canon_entities
+        .iter()
+        .any(|entity| entity.name == "沈照")
+    {
+        errors.push("memory candidate was written to canon before author approval".to_string());
+    }
+
+    eval_result(
+        "writer_agent:memory_candidate_created_run_event",
+        format!(
+            "proposals={} memoryEvents={} trajectoryLines={}",
+            proposals.len(),
+            memory_candidate_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}

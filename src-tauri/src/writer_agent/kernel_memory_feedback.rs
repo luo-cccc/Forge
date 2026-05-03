@@ -95,7 +95,7 @@ fn ghost_suppression_slot_key(proposal: &AgentProposal) -> String {
     )
 }
 
-fn memory_operation_slot(proposal: &AgentProposal) -> Option<String> {
+pub(crate) fn memory_operation_slot(proposal: &AgentProposal) -> Option<String> {
     match proposal.operations.first()? {
         WriterOperation::CanonUpsertEntity { entity } => {
             Some(memory_candidate_slot_for_canon(entity))

@@ -73,6 +73,9 @@ impl WriterAgentKernel {
             )
             .ok();
         self.record_proposal_run_event(&proposal, created_at);
+        if let Some(slot) = memory_operation_slot(&proposal) {
+            self.record_memory_candidate_created_run_event(&proposal, slot, created_at);
+        }
         for operation in proposal
             .operations
             .iter()

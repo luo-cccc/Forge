@@ -202,6 +202,36 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_memory_candidate_created_run_event(
+        &mut self,
+        proposal: &AgentProposal,
+        slot: String,
+        created_at: u64,
+    ) {
+        let operation_kinds = proposal
+            .operations
+            .iter()
+            .map(|operation| operation_kind_label(operation).to_string())
+            .collect::<Vec<_>>();
+        self.record_run_event(
+            "memory_candidate_created",
+            created_at,
+            Some(proposal.id.clone()),
+            proposal_source_refs(proposal),
+            serde_json::json!({
+                "proposalId": proposal.id,
+                "observationId": proposal.observation_id,
+                "kind": proposal.kind,
+                "slot": slot,
+                "operationKinds": operation_kinds,
+                "evidenceCount": proposal.evidence.len(),
+                "previewSnippet": snippet(&proposal.preview, 160),
+                "requiresAuthorReview": true,
+                "writesLedgerImmediately": false,
+            }),
+        );
+    }
+
     pub(super) fn record_feedback_run_event(
         &mut self,
         feedback: &ProposalFeedback,
