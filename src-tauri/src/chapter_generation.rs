@@ -303,6 +303,7 @@ pub struct GenerateChapterDraftOutput {
     pub provider: String,
     pub output_chars: usize,
     pub base_revision: String,
+    pub provider_budget: WriterProviderBudgetReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1121,6 +1122,7 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
         model: settings.model.clone(),
         provider: "openai-compatible".to_string(),
         base_revision: context.base_revision.clone(),
+        provider_budget: budget_report,
     })
 }
 
@@ -1188,6 +1190,18 @@ pub fn provider_budget_error(
         ],
         crate::agent_runtime::now_ms(),
     ))
+}
+
+pub fn provider_budget_report_from_error(
+    error: &ChapterGenerationError,
+) -> Option<WriterProviderBudgetReport> {
+    let budget = error
+        .evidence
+        .as_ref()?
+        .details
+        .get("providerBudget")?
+        .clone();
+    serde_json::from_value(budget).ok()
 }
 
 pub fn save_generated_chapter(
@@ -1536,6 +1550,7 @@ pub async fn run_chapter_generation_pipeline(
     user_profile_entries: Vec<String>,
     mut emit: impl FnMut(ChapterGenerationEvent) + Send,
     mut record_task_packet: impl FnMut(&BuiltChapterContext) + Send,
+    mut record_provider_budget: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> PipelineTerminal {
     let request_id = payload
         .request_id
@@ -1601,8 +1616,14 @@ pub async fn run_chapter_generation_pipeline(
     ));
 
     let draft = match generate_chapter_draft(&settings, &context).await {
-        Ok(draft) => draft,
+        Ok(draft) => {
+            record_provider_budget(&context, &draft.provider_budget);
+            draft
+        }
         Err(error) => {
+            if let Some(report) = provider_budget_report_from_error(&error) {
+                record_provider_budget(&context, &report);
+            }
             emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
             return PipelineTerminal::Failed(error);
         }

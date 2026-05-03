@@ -131,6 +131,34 @@ fn record_writer_failure_bundle(
     kernel.record_failure_evidence_bundle(bundle);
 }
 
+fn record_chapter_provider_budget_report(
+    app: &tauri::AppHandle,
+    context: &crate::chapter_generation::BuiltChapterContext,
+    report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+) {
+    let state = app.state::<crate::AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    let mut source_refs = vec![
+        format!("receipt:{}", context.receipt.task_id),
+        format!("chapter:{}", context.target.title),
+    ];
+    source_refs.extend(
+        context
+            .sources
+            .iter()
+            .filter(|source| source.included_chars > 0)
+            .map(|source| format!("{}:{}", source.source_type, source.id)),
+    );
+    kernel.record_provider_budget_report(
+        context.request_id.clone(),
+        report,
+        source_refs,
+        crate::agent_runtime::now_ms(),
+    );
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -171,6 +199,7 @@ pub async fn batch_generate_chapter(
         };
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
+        let budget_app = app_clone.clone();
 
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
@@ -202,6 +231,9 @@ pub async fn batch_generate_chapter(
                         error
                     );
                 }
+            },
+            move |context, report| {
+                record_chapter_provider_budget_report(&budget_app, context, report);
             },
         )
         .await;
@@ -299,6 +331,7 @@ pub async fn generate_chapter_autonomous(
     tokio::spawn(async move {
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
+        let budget_app = app_clone.clone();
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
             app_clone.clone(),
             settings,
@@ -329,6 +362,9 @@ pub async fn generate_chapter_autonomous(
                         error
                     );
                 }
+            },
+            move |context, report| {
+                record_chapter_provider_budget_report(&budget_app, context, report);
             },
         )
         .await;

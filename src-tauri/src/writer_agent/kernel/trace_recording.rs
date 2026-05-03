@@ -248,6 +248,34 @@ impl WriterAgentKernel {
         );
     }
 
+    pub fn record_provider_budget_report(
+        &mut self,
+        task_id: impl Into<String>,
+        report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+        source_refs: Vec<String>,
+        created_at_ms: u64,
+    ) {
+        let task_id = task_id.into();
+        self.record_run_event(
+            "provider_budget",
+            created_at_ms,
+            Some(task_id.clone()),
+            source_refs,
+            serde_json::json!({
+                "taskId": task_id,
+                "task": report.task,
+                "model": report.model,
+                "decision": report.decision,
+                "approvalRequired": report.approval_required,
+                "estimatedTotalTokens": report.estimated_total_tokens,
+                "estimatedCostMicros": report.estimated_cost_micros,
+                "reasons": &report.reasons,
+                "remediation": &report.remediation,
+                "providerBudget": report,
+            }),
+        );
+    }
+
     fn record_run_event(
         &mut self,
         event_type: &str,

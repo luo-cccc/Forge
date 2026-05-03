@@ -160,3 +160,63 @@ pub fn run_chapter_generation_provider_budget_preflight_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_provider_budget_records_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let report = evaluate_provider_budget(WriterProviderBudgetRequest::new(
+        WriterProviderBudgetTask::ChapterGeneration,
+        "gpt-4o",
+        44_000,
+        12_000,
+    ));
+    kernel.record_provider_budget_report(
+        "budget-run-event-1",
+        &report,
+        vec![
+            "receipt:budget-run-event-1".to_string(),
+            "chapter:Chapter-9".to_string(),
+        ],
+        now_ms(),
+    );
+    let snapshot = kernel.trace_snapshot(20);
+    let export = kernel.export_trajectory(20);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.provider_budget"
+            && event.task_id.as_deref() == Some("budget-run-event-1")
+            && event
+                .data
+                .get("providerBudget")
+                .and_then(|budget| budget.get("estimatedTotalTokens"))
+                .and_then(|value| value.as_u64())
+                == Some(report.estimated_total_tokens)
+            && event
+                .data
+                .get("decision")
+                .and_then(|value| value.as_str())
+                .is_some()
+    }) {
+        errors.push("trace snapshot lacks provider budget run event detail".to_string());
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.provider_budget\"")
+            && line.contains("\"providerBudget\"")
+    }) {
+        errors.push("trajectory export lacks provider budget run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:provider_budget_records_run_event",
+        format!(
+            "decision={:?} runEvents={} trajectoryLines={}",
+            report.decision,
+            snapshot.run_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}

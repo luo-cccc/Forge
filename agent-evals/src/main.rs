@@ -118,6 +118,7 @@ fn main() {
     results.push(run_research_subtask_tool_failure_records_bundle_eval());
     results.push(run_provider_budget_requires_approval_eval());
     results.push(run_chapter_generation_provider_budget_preflight_eval());
+    results.push(run_provider_budget_records_run_event_eval());
     results.push(run_end_to_end_ghost_pipeline_eval());
     results.push(run_end_to_end_contract_guard_eval());
     results.push(run_end_to_end_mission_drift_detection_eval());
