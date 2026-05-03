@@ -286,3 +286,92 @@ pub fn run_project_brain_provider_budget_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_manual_request_provider_budget_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "请完整分析接下来十章每一章的情节推进、伏笔回收和人物关系变化。"
+            .repeat(2400),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            paragraph: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o");
+
+    let mut errors = Vec::new();
+    let Ok(prepared) = prepared else {
+        return eval_result(
+            "writer_agent:manual_request_provider_budget_preflight",
+            "prepare failed".to_string(),
+            vec!["manual request prepare_task_run failed".to_string()],
+        );
+    };
+    let report = prepared.first_round_provider_budget("gpt-4o");
+    kernel.record_provider_budget_report(
+        "manual-budget-1",
+        &report,
+        vec!["manual_request:eval".to_string()],
+        now_ms(),
+    );
+    let snapshot = kernel.trace_snapshot(20);
+
+    if report.task != WriterProviderBudgetTask::ManualRequest {
+        errors.push(format!("unexpected manual budget task {:?}", report.task));
+    }
+    if report.decision != WriterProviderBudgetDecision::ApprovalRequired {
+        errors.push(format!(
+            "long manual request should require approval, got {:?}",
+            report.decision
+        ));
+    }
+    if !report.approval_required {
+        errors.push("manual request budget report did not require approval".to_string());
+    }
+    if report.remediation.is_empty() {
+        errors.push("manual request budget report lacks remediation".to_string());
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.provider_budget"
+            && event.task_id.as_deref() == Some("manual-budget-1")
+            && event
+                .data
+                .get("providerBudget")
+                .and_then(|budget| budget.get("task"))
+                .and_then(|value| value.as_str())
+                == Some("manual_request")
+    }) {
+        errors.push("manual request provider budget was not recorded as run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:manual_request_provider_budget_preflight",
+        format!(
+            "decision={:?} tokens={} runEvents={}",
+            report.decision,
+            report.estimated_total_tokens,
+            snapshot.run_events.len()
+        ),
+        errors,
+    )
+}

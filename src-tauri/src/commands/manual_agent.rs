@@ -8,6 +8,9 @@ use crate::{
     AskAgentContext, AskAgentMode, HarnessState, InlineWriterOperationEvent, ManualAgentTurn,
 };
 
+const MANUAL_REQUEST_PROVIDER_BUDGET_ERROR: &str =
+    "MANUAL_REQUEST_PROVIDER_BUDGET_APPROVAL_REQUIRED";
+
 pub(crate) fn writer_agent_inline_operation_messages(
     message: &str,
     observation: &writer_agent::observation::WriterObservation,
@@ -34,6 +37,97 @@ pub(crate) fn writer_agent_inline_operation_messages(
             )
         }),
     ]
+}
+
+fn record_manual_provider_budget_report(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    report: &writer_agent::provider_budget::WriterProviderBudgetReport,
+    source_refs: Vec<String>,
+    created_at_ms: u64,
+) {
+    let state = app.state::<AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    kernel.record_provider_budget_report(task_id.to_string(), report, source_refs, created_at_ms);
+}
+
+fn record_manual_provider_budget_failure(
+    app: &tauri::AppHandle,
+    task_id: String,
+    source_refs: Vec<String>,
+    report: writer_agent::provider_budget::WriterProviderBudgetReport,
+    created_at_ms: u64,
+) {
+    let state = app.state::<AppState>();
+    let Ok(mut kernel) = state.writer_kernel.lock() else {
+        return;
+    };
+    let bundle = writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
+        writer_agent::task_receipt::WriterFailureCategory::ProviderFailed,
+        MANUAL_REQUEST_PROVIDER_BUDGET_ERROR,
+        "Manual request provider budget requires explicit approval before entering the agent loop.",
+        true,
+        Some(task_id),
+        source_refs,
+        serde_json::json!({ "providerBudget": report }),
+        vec![
+            "Surface the manual request token/cost estimate to the author before retrying."
+                .to_string(),
+            "Shorten selected context, reduce recent history, or narrow the request if approval is not granted."
+                .to_string(),
+        ],
+        created_at_ms,
+    );
+    kernel.record_failure_evidence_bundle(&bundle);
+}
+
+fn manual_budget_source_refs(
+    request_id: &str,
+    observation: &writer_agent::observation::WriterObservation,
+    report: &writer_agent::provider_budget::WriterProviderBudgetReport,
+) -> Vec<String> {
+    let mut refs = vec![
+        format!("manual_request:{}", request_id),
+        format!("model:{}", report.model),
+        format!("estimated_tokens:{}", report.estimated_total_tokens),
+        format!("estimated_cost_micros:{}", report.estimated_cost_micros),
+    ];
+    if let Some(chapter) = observation.chapter_title.as_deref() {
+        refs.push(format!("chapter:{}", chapter));
+    }
+    if let Some(revision) = observation.chapter_revision.as_deref() {
+        refs.push(format!("revision:{}", revision));
+    }
+    refs
+}
+
+fn emit_manual_provider_budget_error(
+    app: &tauri::AppHandle,
+    report: &writer_agent::provider_budget::WriterProviderBudgetReport,
+) {
+    let _ = app.emit(
+        events::AGENT_ERROR,
+        serde_json::json!({
+            "message": "Manual request provider budget requires explicit approval before calling the model.",
+            "source": "provider_budget",
+            "error": {
+                "code": MANUAL_REQUEST_PROVIDER_BUDGET_ERROR,
+                "message": "Manual request provider budget requires explicit approval before calling the model.",
+                "recoverable": true,
+                "details": {
+                    "providerBudget": report,
+                },
+            },
+        }),
+    );
+}
+
+fn set_harness_idle(state: &tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut s = crate::lock_harness_state(state)?;
+    *s = HarnessState::Idle;
+    Ok(())
 }
 
 #[tauri::command]
@@ -104,6 +198,7 @@ pub async fn ask_agent(
         context_payload.as_ref(),
         &project_id,
     );
+    let request_id = ask_agent_request_id(context_payload.as_ref());
     let (mut prepared_run, emitted_proposals, _has_lore, _has_outline) = {
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
         crate::refresh_kernel_canon_from_lorebook(&app, &mut kernel);
@@ -143,6 +238,30 @@ pub async fn ask_agent(
         let proposals = prepared.proposals().to_vec();
         (prepared, proposals, has_lore, has_outline)
     };
+    let budget_report = prepared_run.first_round_provider_budget(model.clone());
+    let budget_created_at = agent_runtime::now_ms();
+    let budget_task_id = format!("manual-request-{}", request_id);
+    let budget_source_refs =
+        manual_budget_source_refs(&request_id, &manual_observation, &budget_report);
+    record_manual_provider_budget_report(
+        &app,
+        &budget_task_id,
+        &budget_report,
+        budget_source_refs.clone(),
+        budget_created_at,
+    );
+    if budget_report.approval_required {
+        record_manual_provider_budget_failure(
+            &app,
+            budget_task_id,
+            budget_source_refs,
+            budget_report.clone(),
+            budget_created_at,
+        );
+        emit_manual_provider_budget_error(&app, &budget_report);
+        set_harness_idle(&state)?;
+        return Err(MANUAL_REQUEST_PROVIDER_BUDGET_ERROR.to_string());
+    }
 
     for proposal in emitted_proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)

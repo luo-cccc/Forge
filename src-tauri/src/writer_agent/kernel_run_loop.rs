@@ -6,6 +6,10 @@ use super::context::AgentTask;
 use super::observation::WriterObservation;
 use super::operation::WriterOperation;
 use super::proposal::AgentProposal;
+use super::provider_budget::{
+    evaluate_provider_budget, WriterProviderBudgetReport, WriterProviderBudgetRequest,
+    WriterProviderBudgetTask,
+};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -111,6 +115,8 @@ where
     P: Provider,
     H: ToolHandler,
 {
+    const FIRST_ROUND_OUTPUT_TOKENS: u64 = 4_096;
+
     pub fn set_event_callback(&mut self, cb: EventCallback) {
         self.agent.set_event_callback(cb);
     }
@@ -129,6 +135,31 @@ where
 
     pub fn tool_inventory(&self) -> &EffectiveToolInventory {
         &self.tool_inventory
+    }
+
+    pub fn first_round_provider_budget(
+        &self,
+        model: impl Into<String>,
+    ) -> WriterProviderBudgetReport {
+        let mut messages = self.agent.messages.clone();
+        messages.push(LlmMessage {
+            role: "user".to_string(),
+            content: Some(self.request.user_instruction.clone()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        let estimated_input_tokens = self.agent.provider.estimate_tokens(&messages)
+            + (self.agent.config.system_prompt.chars().count() as u64 / 3)
+            + self.tool_inventory.allowed.len() as u64 * 256;
+
+        evaluate_provider_budget(WriterProviderBudgetRequest::new(
+            WriterProviderBudgetTask::ManualRequest,
+            model,
+            estimated_input_tokens,
+            Self::FIRST_ROUND_OUTPUT_TOKENS,
+        ))
     }
 
     pub async fn run(mut self) -> Result<WriterAgentRunResult, String> {
