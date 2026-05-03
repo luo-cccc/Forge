@@ -115,6 +115,7 @@ fn main() {
     results.push(run_research_subtask_uses_isolated_workspace_eval());
     results.push(run_research_subtask_outputs_evidence_only_eval());
     results.push(run_diagnostic_subtask_denies_writes_eval());
+    results.push(run_research_subtask_tool_failure_records_bundle_eval());
     results.push(run_provider_budget_requires_approval_eval());
     results.push(run_chapter_generation_provider_budget_preflight_eval());
     results.push(run_end_to_end_ghost_pipeline_eval());

@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::operation::WriterOperation;
 use super::proposal::EvidenceRef;
+use super::task_receipt::{failure_bundle_from_tool_execution, WriterFailureEvidenceBundle};
 
 const SUBTASK_ROOT_DIR: &str = "agent_subtasks";
 const SUBTASK_ARTIFACT_DIR: &str = "artifacts";
@@ -214,6 +215,74 @@ pub fn validate_evidence_only_subtask_result(result: &WriterSubtaskResult) -> Ve
     errors
 }
 
+pub fn failure_bundle_from_subtask_tool_execution(
+    kind: WriterSubtaskKind,
+    subtask_id: &str,
+    objective: &str,
+    execution: &agent_harness_core::ToolExecution,
+    artifact_refs: Vec<String>,
+    created_at_ms: u64,
+) -> Result<Option<WriterFailureEvidenceBundle>, String> {
+    let subtask_id = normalized_subtask_id(subtask_id)?;
+    let objective = objective.trim();
+    if objective.is_empty() {
+        return Err("Writer Agent subtask objective is empty".to_string());
+    }
+    let artifact_refs = normalize_strings(artifact_refs);
+    for artifact in &artifact_refs {
+        let expected_prefix = format!("subtask:{}:artifact:", subtask_id);
+        if !artifact.starts_with(&expected_prefix) {
+            return Err(format!(
+                "subtask artifact ref is outside the isolated workspace: {}",
+                artifact
+            ));
+        }
+    }
+
+    let Some(mut bundle) =
+        failure_bundle_from_tool_execution(Some(&subtask_id), execution, created_at_ms)
+    else {
+        return Ok(None);
+    };
+    let kind_label = subtask_kind_label(kind);
+    let tool_details = bundle.details.clone();
+    let error = execution.error.as_deref().unwrap_or("unknown tool error");
+    bundle.task_id = Some(subtask_id.clone());
+    bundle.message = format!(
+        "{} subtask '{}' failed while running tool '{}': {}",
+        kind_label, subtask_id, execution.tool_name, error
+    );
+    bundle.evidence_refs = normalize_strings(
+        bundle
+            .evidence_refs
+            .into_iter()
+            .chain([
+                format!("subtask:{}", subtask_id),
+                format!("subtask:{}:kind:{}", subtask_id, kind_label),
+            ])
+            .chain(artifact_refs.iter().cloned())
+            .collect(),
+    );
+    bundle.details = serde_json::json!({
+        "subtaskId": subtask_id,
+        "kind": kind_label,
+        "objective": objective,
+        "artifactRefs": artifact_refs,
+        "toolExecution": tool_details,
+    });
+    bundle.remediation = normalize_strings(
+        bundle
+            .remediation
+            .into_iter()
+            .chain([format!(
+                "subtask_{}_failure: Keep this subtask evidence-only; inspect isolated artifacts and retry only after the tool/provider configuration or query scope changes.",
+                kind_label
+            )])
+            .collect(),
+    );
+    Ok(Some(bundle))
+}
+
 pub fn denied_subtask_operations(
     _kind: WriterSubtaskKind,
     attempted_operations: &[WriterOperation],
@@ -242,6 +311,14 @@ pub fn subtask_operation_kind_label(operation: &WriterOperation) -> &'static str
         WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
         WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
         WriterOperation::OutlineUpdate { .. } => "outline.update",
+    }
+}
+
+fn subtask_kind_label(kind: WriterSubtaskKind) -> &'static str {
+    match kind {
+        WriterSubtaskKind::Research => "research",
+        WriterSubtaskKind::Diagnostic => "diagnostic",
+        WriterSubtaskKind::Drafting => "drafting",
     }
 }
 
@@ -333,5 +410,45 @@ mod tests {
 
         assert!(validate_evidence_only_subtask_result(&result).is_empty());
         assert_eq!(result.blocked_operation_kinds, vec!["text.replace"]);
+    }
+
+    #[test]
+    fn subtask_tool_failure_preserves_subtask_evidence() {
+        let execution = agent_harness_core::ToolExecution {
+            tool_name: "query_project_brain".to_string(),
+            input: serde_json::json!({ "query": "ring crack" }),
+            output: serde_json::Value::Null,
+            error: Some("missing binary for external research adapter".to_string()),
+            remediation: vec![agent_harness_core::ToolExecutionRemediation {
+                code: "missing_binary_or_resource".to_string(),
+                message: "Install the research adapter before retrying.".to_string(),
+            }],
+            duration_ms: 18,
+        };
+        let bundle = failure_bundle_from_subtask_tool_execution(
+            WriterSubtaskKind::Research,
+            "research-3",
+            "Find public evidence for the ring crack.",
+            &execution,
+            vec!["subtask:research-3:artifact:evidence/search.json".to_string()],
+            30,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(bundle.task_id.as_deref(), Some("research-3"));
+        assert!(bundle.message.contains("research subtask"));
+        assert!(bundle
+            .evidence_refs
+            .iter()
+            .any(|reference| reference == "subtask:research-3"));
+        assert_eq!(bundle.details["kind"], "research");
+        assert!(bundle.details["toolExecution"]["remediation"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()));
+        assert!(bundle
+            .remediation
+            .iter()
+            .any(|item| item.contains("subtask_research_failure")));
     }
 }

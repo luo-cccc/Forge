@@ -3,7 +3,8 @@ use super::*;
 use agent_writer_lib::writer_agent::operation::WriterOperation;
 use agent_writer_lib::writer_agent::proposal::{EvidenceRef, EvidenceSource};
 use agent_writer_lib::writer_agent::research_subtask::{
-    build_evidence_only_subtask_result, create_subtask_workspace, safe_subtask_artifact_path,
+    build_evidence_only_subtask_result, create_subtask_workspace,
+    failure_bundle_from_subtask_tool_execution, safe_subtask_artifact_path,
     tool_filter_for_subtask, validate_evidence_only_subtask_result, write_subtask_artifact,
     WriterSubtaskKind,
 };
@@ -205,6 +206,142 @@ pub fn run_diagnostic_subtask_denies_writes_eval() -> EvalResult {
             inventory.allowed.len(),
             model_tool_names.join(","),
             result.blocked_operation_kinds.join(",")
+        ),
+        errors,
+    )
+}
+
+pub fn run_research_subtask_tool_failure_records_bundle_eval() -> EvalResult {
+    struct FailingResearchHandler;
+
+    #[async_trait::async_trait]
+    impl agent_harness_core::ToolHandler for FailingResearchHandler {
+        async fn execute(
+            &self,
+            tool_name: &str,
+            _args: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            Err(format!(
+                "missing binary for external research adapter {}",
+                tool_name
+            ))
+        }
+    }
+
+    let registry = agent_harness_core::default_writing_tool_registry();
+    let policy = agent_harness_core::PermissionPolicy::new(
+        agent_harness_core::PermissionMode::WorkspaceWrite,
+    );
+    let filter = tool_filter_for_subtask(WriterSubtaskKind::Research);
+    let inventory = registry.effective_inventory(&filter, &policy);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut executor = agent_harness_core::ToolExecutor::new(registry, FailingResearchHandler);
+    let execution = runtime.block_on(async {
+        executor
+            .execute(
+                "query_project_brain",
+                serde_json::json!({"query": "寒玉戒指 外部公开线索"}),
+            )
+            .await
+    });
+    let artifact_refs =
+        vec!["subtask:research-fail-1:artifact:evidence/project-brain-query.json".to_string()];
+    let bundle = failure_bundle_from_subtask_tool_execution(
+        WriterSubtaskKind::Research,
+        "research-fail-1",
+        "Verify external/public evidence for the ring clue without writing memory.",
+        &execution,
+        artifact_refs,
+        now_ms(),
+    );
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    if let Ok(Some(bundle)) = bundle.as_ref() {
+        kernel.record_failure_evidence_bundle(bundle);
+    }
+    let snapshot = kernel.trace_snapshot(20);
+    let inspector = kernel.inspector_timeline(20);
+
+    let mut errors = Vec::new();
+    if !inventory
+        .allowed
+        .iter()
+        .any(|tool| tool.name == "query_project_brain")
+    {
+        errors.push("research subtask inventory did not allow provider research tool".to_string());
+    }
+    let bundle = match bundle {
+        Ok(Some(bundle)) => bundle,
+        Ok(None) => {
+            errors.push("failed research tool did not create a failure bundle".to_string());
+            return eval_result(
+                "writer_agent:research_subtask_tool_failure_records_bundle",
+                "bundle=false".to_string(),
+                errors,
+            );
+        }
+        Err(error) => {
+            errors.push(format!("failed to build subtask failure bundle: {}", error));
+            return eval_result(
+                "writer_agent:research_subtask_tool_failure_records_bundle",
+                "bundle=error".to_string(),
+                errors,
+            );
+        }
+    };
+    if bundle.task_id.as_deref() != Some("research-fail-1") {
+        errors.push(format!("bundle task id mismatch: {:?}", bundle.task_id));
+    }
+    if bundle.details.get("kind").and_then(|value| value.as_str()) != Some("research") {
+        errors.push(format!(
+            "bundle lacks research kind detail: {}",
+            bundle.details
+        ));
+    }
+    if !bundle.evidence_refs.iter().any(|reference| {
+        reference == "subtask:research-fail-1:artifact:evidence/project-brain-query.json"
+    }) {
+        errors.push(format!(
+            "bundle lacks isolated artifact evidence ref: {:?}",
+            bundle.evidence_refs
+        ));
+    }
+    if !bundle
+        .remediation
+        .iter()
+        .any(|item| item.contains("subtask_research_failure"))
+    {
+        errors.push(format!(
+            "bundle lacks subtask remediation: {:?}",
+            bundle.remediation
+        ));
+    }
+    if !snapshot.run_events.iter().any(|event| {
+        event.event_type == "writer.error"
+            && event.task_id.as_deref() == Some("research-fail-1")
+            && event
+                .data
+                .get("details")
+                .and_then(|details| details.get("toolExecution"))
+                .is_some()
+    }) {
+        errors.push("writer.error run event lacks subtask tool execution details".to_string());
+    }
+    if !inspector.events.iter().any(|event| {
+        event.kind == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::Failure
+            && event.task_id.as_deref() == Some("research-fail-1")
+            && event.summary.contains("research subtask")
+    }) {
+        errors.push("inspector does not expose research subtask failure event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:research_subtask_tool_failure_records_bundle",
+        format!(
+            "allowed={} runEvents={} inspectorEvents={}",
+            inventory.allowed.len(),
+            snapshot.run_events.len(),
+            inspector.events.len()
         ),
         errors,
     )
