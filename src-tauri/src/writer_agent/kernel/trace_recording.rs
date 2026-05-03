@@ -232,6 +232,43 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_approval_decided_run_event(
+        &mut self,
+        operation: &WriterOperation,
+        approval: Option<&super::operation::OperationApproval>,
+        approved: bool,
+        reason: &str,
+        created_at: u64,
+    ) {
+        let proposal_id = approval.and_then(|context| context.proposal_id.clone());
+        let mut source_refs = Vec::new();
+        if let Some(proposal_id) = proposal_id.as_ref() {
+            source_refs.push(format!("proposal:{}", proposal_id));
+        }
+        if let Some(scope) = operation_affected_scope(operation) {
+            source_refs.push(scope);
+        }
+        if let Some(context) = approval {
+            source_refs.extend(approval_sources(context));
+        }
+        self.record_run_event(
+            "approval_decided",
+            created_at,
+            proposal_id.clone(),
+            source_refs,
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "operationKind": operation_kind_label(operation),
+                "affectedScope": operation_affected_scope(operation),
+                "decision": if approved { "approved" } else { "rejected" },
+                "approvalSource": approval.map(|context| context.source.clone()),
+                "actor": approval.map(|context| context.actor.clone()),
+                "surfacedToUser": approval.map(|context| context.surfaced_to_user).unwrap_or(false),
+                "reason": reason,
+            }),
+        );
+    }
+
     pub(super) fn record_feedback_run_event(
         &mut self,
         feedback: &ProposalFeedback,

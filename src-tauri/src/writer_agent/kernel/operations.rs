@@ -55,7 +55,15 @@ impl WriterAgentKernel {
         approval: Option<&super::operation::OperationApproval>,
     ) -> Result<OperationResult, String> {
         let requires_approval = operation_is_write_capable(&operation);
+        let approval_decided_at = now_ms();
         if requires_approval && !approval.is_some_and(|context| context.is_valid_for_write()) {
+            self.record_approval_decided_run_event(
+                &operation,
+                approval,
+                false,
+                "missing or invalid surfaced approval context",
+                approval_decided_at,
+            );
             let result = OperationResult {
                 success: false,
                 operation,
@@ -85,6 +93,13 @@ impl WriterAgentKernel {
         }
 
         if requires_approval {
+            self.record_approval_decided_run_event(
+                &operation,
+                approval,
+                true,
+                "valid surfaced approval context",
+                approval_decided_at,
+            );
             self.push_operation_lifecycle(
                 approval.and_then(|context| context.proposal_id.clone()),
                 &operation,
@@ -92,7 +107,7 @@ impl WriterAgentKernel {
                 approval.map(|context| context.source.clone()),
                 None,
                 None,
-                now_ms(),
+                approval_decided_at,
             );
         }
 

@@ -780,3 +780,93 @@ pub fn run_memory_candidate_created_run_event_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_operation_approval_decided_run_event_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation_in_chapter("林墨停在门前，低声确认这次不会惊动任何人。", "Chapter-9"),
+            "林墨拔出寒影刀，挡在门前。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let rejected = kernel
+        .approve_editor_operation(operation.clone(), "rev-1")
+        .unwrap();
+    let mut approval = eval_approval("approval_decided_eval");
+    approval.proposal_id = Some(proposal.id.clone());
+    let approved = kernel
+        .approve_editor_operation_with_approval(operation, "rev-1", Some(&approval))
+        .unwrap();
+    let events = kernel.run_events(50);
+    let export = kernel.export_trajectory(50);
+    let lines = export.jsonl.lines().collect::<Vec<_>>();
+    let approval_events = events
+        .iter()
+        .filter(|event| event.event_type == "writer.approval_decided")
+        .collect::<Vec<_>>();
+
+    let mut errors = Vec::new();
+    if rejected.success {
+        errors.push("operation without approval should be rejected".to_string());
+    }
+    if !approved.success {
+        errors.push("operation with approval should be approved/applied".to_string());
+    }
+    if approval_events.len() < 2 {
+        errors.push(format!(
+            "expected rejected and approved approval events, got {}",
+            approval_events.len()
+        ));
+    }
+    if !approval_events.iter().any(|event| {
+        event.data.get("decision").and_then(|value| value.as_str()) == Some("rejected")
+            && event
+                .data
+                .get("surfacedToUser")
+                .and_then(|value| value.as_bool())
+                == Some(false)
+    }) {
+        errors.push("approval event lacks rejected missing-context decision".to_string());
+    }
+    if !approval_events.iter().any(|event| {
+        event.data.get("decision").and_then(|value| value.as_str()) == Some("approved")
+            && event
+                .data
+                .get("approvalSource")
+                .and_then(|value| value.as_str())
+                == Some("approval_decided_eval")
+            && event
+                .data
+                .get("surfacedToUser")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+    }) {
+        errors.push("approval event lacks approved surfaced decision".to_string());
+    }
+    if !lines.iter().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.approval_decided\"")
+            && line.contains("\"decision\":\"approved\"")
+    }) {
+        errors.push("trajectory export lacks approved approval_decided run event".to_string());
+    }
+    if !events.iter().any(|event| {
+        event.event_type == "writer.operation_lifecycle"
+            && event.data.get("state").and_then(|value| value.as_str()) == Some("approved")
+    }) {
+        errors.push("approval decision no longer records approved lifecycle".to_string());
+    }
+
+    eval_result(
+        "writer_agent:operation_approval_decided_run_event",
+        format!(
+            "approvalEvents={} trajectoryLines={}",
+            approval_events.len(),
+            lines.len()
+        ),
+        errors,
+    )
+}
