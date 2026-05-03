@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { Commands } from "../protocol";
 import type {
   WriterAgentTraceSnapshot,
+  WriterProposalTrace,
+  ContextBudgetTrace,
   WriterContextSourceTrend,
   WriterInspectorTimeline,
   WriterPostWriteDiagnosticReport,
@@ -178,6 +180,16 @@ function saveCompletedDetail(detail: unknown): {
   };
 }
 
+function contextBudgetToneClass(report: ContextBudgetTrace): string {
+  if (report.sourceReports.some((source) => source.provided === 0)) {
+    return "border-danger/30 bg-bg-deep";
+  }
+  if (report.sourceReports.some((source) => source.truncated)) {
+    return "border-accent/30 bg-bg-deep";
+  }
+  return "border-border-subtle bg-bg-deep";
+}
+
 function eventSortValue(event: WriterTimelineEvent): number {
   return event.tsMs || 0;
 }
@@ -252,6 +264,13 @@ export const WriterInspectorPanel: React.FC = () => {
   const saveCompletedEvents = events.filter((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
+  const proposalById = useMemo(() => {
+    const proposals = new Map<string, WriterProposalTrace>();
+    for (const proposal of trace?.recentProposals ?? []) {
+      proposals.set(proposal.id, proposal);
+    }
+    return proposals;
+  }, [trace?.recentProposals]);
 
   return (
     <div className="flex h-full flex-col bg-bg-surface">
@@ -331,6 +350,8 @@ export const WriterInspectorPanel: React.FC = () => {
                 const budget = providerBudgetDetail(event.detail);
                 const failure = failureDetail(event.detail);
                 const saveCompleted = saveCompletedDetail(event.detail);
+                const proposalTrace = event.taskId ? proposalById.get(event.taskId) : undefined;
+                const contextBudget = proposalTrace?.contextBudget;
                 return (
                   <div
                     key={`${event.kind}-${event.taskId ?? "none"}-${event.tsMs}-${index}`}
@@ -401,6 +422,42 @@ export const WriterInspectorPanel: React.FC = () => {
                           {saveCompleted.chapterTitle && <span>{saveCompleted.chapterTitle}</span>}
                           {saveCompleted.operationKind && <span>{saveCompleted.operationKind}</span>}
                           {saveCompleted.postWriteReportId && <span>report {saveCompleted.postWriteReportId}</span>}
+                        </div>
+                      </div>
+                    )}
+                    {contextBudget && (
+                      <div className={`mt-2 rounded border p-2 ${contextBudgetToneClass(contextBudget)}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-text-secondary">Context Budget · {contextBudget.task}</span>
+                          <span className="font-mono text-[10px] text-text-muted">
+                            {contextBudget.used}/{contextBudget.totalBudget}
+                          </span>
+                        </div>
+                        <div className="mt-1 space-y-1">
+                          {contextBudget.sourceReports.slice(0, 5).map((source) => (
+                            <div
+                              key={`${event.taskId}-${source.source}-${source.reason}`}
+                              className="rounded border border-border-subtle bg-bg-surface px-1.5 py-1 text-[10px]"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="truncate text-text-secondary" title={source.source}>
+                                  {source.source}
+                                </span>
+                                <span className={
+                                  source.provided === 0
+                                    ? "text-danger"
+                                    : source.truncated
+                                      ? "text-accent"
+                                      : "text-text-muted"
+                                }>
+                                  {source.provided}/{source.requested}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 line-clamp-1 text-text-muted">
+                                {source.truncationReason ?? source.reason}
+                              </p>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -568,6 +625,47 @@ export const WriterInspectorPanel: React.FC = () => {
                   </div>
                 ))}
               </div>
+            </section>
+
+            <section className="rounded border border-border-subtle bg-bg-raised p-2 text-xs">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="font-medium text-text-primary">Proposal Context Budgets</span>
+                <span className="text-[10px] text-text-muted">{proposalById.size} proposals</span>
+              </div>
+              {(trace?.recentProposals ?? [])
+                .filter((proposal) => proposal.contextBudget)
+                .slice(0, 4)
+                .map((proposal) => {
+                  const budget = proposal.contextBudget;
+                  if (!budget) return null;
+                  const truncated = budget.sourceReports.filter((source) => source.truncated).length;
+                  const dropped = budget.sourceReports.filter((source) => source.provided === 0).length;
+                  return (
+                    <div key={proposal.id} className={`mt-1.5 rounded border p-2 ${contextBudgetToneClass(budget)}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-text-secondary" title={proposal.previewSnippet}>
+                          {proposal.kind}
+                        </span>
+                        <span className="font-mono text-[10px] text-text-muted">
+                          {budget.used}/{budget.totalBudget}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex gap-1 text-[10px] text-text-muted">
+                        <span>{budget.sourceReports.length} sources</span>
+                        <span>trunc {truncated}</span>
+                        <span>drop {dropped}</span>
+                      </div>
+                      {budget.sourceReports[0] && (
+                        <p className="mt-1 line-clamp-1 text-[10px] text-text-secondary">
+                          {budget.sourceReports[0].source}: {budget.sourceReports[0].provided}/{budget.sourceReports[0].requested}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              {!(trace?.recentProposals ?? []).some((proposal) => proposal.contextBudget) && (
+                <p className="text-text-muted">No proposal context budgets yet.</p>
+              )}
             </section>
           </div>
         </div>

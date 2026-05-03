@@ -76,6 +76,14 @@ const checks = [
       inspectorSource.includes("averageSaveToFeedbackMs") &&
       !source.includes("writer.save_completed"),
   },
+  {
+    name: "inspector owns proposal context budget drilldown",
+    pass:
+      inspectorSource.includes("Proposal Context Budgets") &&
+      inspectorSource.includes("sourceReports") &&
+      inspectorSource.includes("contextBudgetToneClass") &&
+      !source.includes("Proposal Context Budgets"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);

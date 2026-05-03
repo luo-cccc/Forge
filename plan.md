@@ -940,13 +940,13 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 当前状态：第一阶段已完成，前端只读 Inspect 切片已完成。
    - 已新增 `src-tauri/src/writer_agent/inspector.rs`，从 `WriterAgentTraceSnapshot` 派生 Inspector timeline 和 Companion-safe summary。
    - 默认 Companion summary 不显示 task packet、raw run event、operation lifecycle 等内部 trace，只显示产品健康摘要和少量 proposal 摘要。
-   - Debug/inspector 后端视图可查看 observation、task packet、proposal、feedback、operation lifecycle、run event、context recall、product metrics。
+   - Debug/inspector 后端视图可查看 observation、task packet、proposal、proposal context budget、feedback、operation lifecycle、run event、context recall、product metrics。
    - 已新增 Tauri read-only commands：`get_writer_agent_inspector_timeline`、`get_writer_agent_companion_timeline_summary`。
-   - 已新增前端 `src/components/WriterInspectorPanel.tsx` 和 `Inspect` 模式，读取 `get_writer_agent_inspector_timeline` / `get_writer_agent_trace`，支持 failure、save_completed、run_event、task_packet、operation_lifecycle、context_recall、product_metrics 筛选。
-   - Inspect 模式右侧摘要已覆盖 provider budget、latest failure、latest save、save-to-feedback latency、post-write diagnostics 和 context source trends。
+   - 已新增前端 `src/components/WriterInspectorPanel.tsx` 和 `Inspect` 模式，读取 `get_writer_agent_inspector_timeline` / `get_writer_agent_trace`，支持 failure、save_completed、run_event、task_packet、operation_lifecycle、context_recall、product_metrics 筛选，并在 proposal timeline card 展开 context budget sourceReports。
+   - Inspect 模式右侧摘要已覆盖 provider budget、latest failure、latest save、save-to-feedback latency、post-write diagnostics、proposal context budgets 和 context source trends。
    - 已新增 eval：`writer_agent:inspector_timeline_hides_from_default_companion`。
-   - 已新增静态检查：`npm run check:p2` 验证默认 write Companion 不读取 inspector timeline，内部时间轴、save_completed 和 save-to-feedback latency 只进入 dedicated Inspect mode。
-   - 剩余：context budget 逐 proposal 细节展开、可操作恢复入口、外部 trace viewer compatible export。
+   - 已新增静态检查：`npm run check:p2` 验证默认 write Companion 不读取 inspector timeline，内部时间轴、save_completed、save-to-feedback latency 和 proposal context budget drilldown 只进入 dedicated Inspect mode。
+   - 剩余：可操作恢复入口、外部 trace viewer compatible export。
 3. 轨迹导出升级。
    - 保留当前 Forge writer trajectory schema。
    - 当前状态：redaction warning / local-only 第一阶段已完成。
@@ -1003,7 +1003,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；真实 run loop 调度、外部检索工具、inspector 展示仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
-   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、provider budget、save_completed、save-to-feedback latency、post-write diagnostics 和 context pressure；外部 trace viewer compatible export 仍未完成。
+   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、provider budget、save_completed、save-to-feedback latency、proposal context budget drilldown、post-write diagnostics 和 context pressure；外部 trace viewer compatible export 仍未完成。
 8. Provider call budget。（第一阶段已完成）
    - 已有 token/cost estimation、approval-required/warn/blocked 决策和 remediation；章节生成 provider call 前置门禁、`writer.provider_budget` run event、Explore 审批卡、已批准 budget 前端传递和后端覆盖校验已接入；Project Brain chat answer provider call 已有后端 preflight / run event / failure bundle；manual request AgentLoop 第一轮 provider call 已有后端 preflight / run event / failure bundle；Project Brain/manual retry UI 和后端批准凭证覆盖校验已接入；外部研究 provider call、AgentLoop 多轮 provider 成本追踪仍未完成。
 9. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）
@@ -1148,7 +1148,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 4. 增加 memory correction / reinforcement。（第一阶段已完成：reviewed memory candidates 的 correction/reinforcement signal）
 5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / eval / Graph 页 Brain 模式）
 6. 增加 isolated research / diagnostic subtask workspace。（第一阶段已完成：artifact workspace / tool policy / evidence-only result / eval）
-7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / save_completed filter / save-to-feedback latency / redaction warning / local-only export marker）
+7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / save_completed filter / save-to-feedback latency / proposal context budget drilldown / redaction warning / local-only export marker）
 8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
 9. 增加 post-write diagnostics。（保存观察 + accepted operation + Audit UI + save_completed link 第一阶段已完成：report / run event / trace snapshot / trajectory export / eval / UI summary / save_completed inspector filter）
 10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
