@@ -386,14 +386,16 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 - canon false-positive rate
 - chapter mission completion rate
 - manual ask converted-to-operation rate
+- context pressure coverage / truncated / dropped trend
 
-当前状态：工程第一版已完成，但产品验证不能按真实作者项目完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度，Inspect 模式已展示 manual ask 转可执行 operation 率。多 session 第一阶段已完成：`WriterAgentTraceSnapshot.productMetricsTrend` 会从持久化 `writer_run_events` 按 session 聚合 proposal / feedback / operation lifecycle、manual ask 转 operation 率、最近 session 的 save-to-feedback 平均值、上一 session 对照、总体平均值和 delta，Inspect 模式展示这些趋势，trajectory JSONL 额外导出 `writer.product_metrics_trend`。连续写作验证第一阶段已完成：`writer_agent:continuous_writing_fixture_20_chapters` 用合成 20 章长篇项目覆盖保存观察、任务漂移、伏笔召回、作者反馈和指标趋势。剩余工作是用真实作者项目数据证明这些指标与作者价值相关，并校准阈值。
+当前状态：工程第一版已完成，但产品验证不能按真实作者项目完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度，Inspect 模式已展示 manual ask 转可执行 operation 率。多 session 第一阶段已完成：`WriterAgentTraceSnapshot.productMetricsTrend` 会从持久化 `writer_run_events` 按 session 聚合 proposal / feedback / operation lifecycle、manual ask 转 operation 率、最近 session 的 save-to-feedback 平均值、上一 session 对照、总体平均值和 delta；同时从持久化 `writer.context_pack_built` run events 聚合 context pack count、requested/provided chars、coverage、truncated/dropped source counts 和 recent-vs-previous coverage delta。Inspect 模式展示这些趋势，trajectory JSONL 额外导出 `writer.product_metrics_trend`。连续写作验证第一阶段已完成：`writer_agent:continuous_writing_fixture_20_chapters` 用合成 20 章长篇项目覆盖保存观察、任务漂移、伏笔召回、作者反馈和指标趋势。剩余工作是用真实作者项目数据证明这些指标与作者价值相关，并校准阈值。
 
 验收标准：
 
 - 本地 trajectory export 可包含匿名化指标摘要。（已完成）
 - Companion / debug view 能查看最近写作 session 的 agent 有用程度。（已完成第一阶段：Companion 显示当前摘要，Inspect 显示多 session 趋势）
 - manual ask converted-to-operation rate 进入 Inspect Run Health 和 per-session trend，并由 `writer_agent:product_metrics_manual_ask_conversion` / `writer_agent:product_metrics_manual_ask_conversion_trend` 覆盖。（已完成）
+- context pressure coverage / truncated / dropped 进入 Inspect Session Trend 和 trajectory export，并由 `writer_agent:product_metrics_context_pressure_trend` 覆盖。（已完成）
 - 连续 10-20 章 fixture 能把保存、反馈、伏笔、任务漂移、story debt 和 product metrics 串成同一条可回放证据链。（已完成第一阶段：合成 20 章 fixture）
 
 ## 8. P2：上下文、记忆、检索继续补强
@@ -1025,7 +1027,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 已新增 eval：`writer_agent:trajectory_trace_viewer_export`。
 4. Product metrics 趋势。
    - 当前已有 acceptance rate、ignored suggestion rate、promise recall、canon false-positive、mission completion、durable save、save-to-feedback latency。
-   - 多 session 第一阶段已完成：`productMetricsTrend` 从持久化 `writer_run_events` 按 session 聚合最近/上一 session 的 save-to-feedback latency、总体平均值、delta、采纳率和 durable save 成功率；Inspect 模式展示趋势，trajectory 导出 `writer.product_metrics_trend`。
+   - 多 session 第一阶段已完成：`productMetricsTrend` 从持久化 `writer_run_events` 按 session 聚合最近/上一 session 的 save-to-feedback latency、总体平均值、delta、采纳率、durable save 成功率和 manual ask 转 operation 率；同时从 `writer.context_pack_built` run events 聚合 context pack count、requested/provided chars、coverage、truncated/dropped source counts、overall/recent/previous coverage 和 delta。Inspect Session Trend 展示 `latency`、`ctx`、`ctx packs`、`trunc`、`drop` 等趋势，trajectory 导出 `writer.product_metrics_trend`。
    - 连续写作第一阶段已完成：`writer_agent:continuous_writing_fixture_20_chapters` 使用两段 session / 临时 SQLite 持久化 run event，验证 20 章保存观察、作者反馈、durable save、story debt 和 `writer.product_metrics_trend` 能在同一条轨迹中回放。
    - `promise_recall_hit_rate` 已修正为同时识别 context recall 里的 `PromiseLedger` 和旧 `PromiseSlice` 来源，避免当前证据映射下 promise recall 被错误计为 0。
    - 下一步增加真实作者项目 fixture 对照和更长历史窗口校准。
@@ -1049,6 +1051,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:tool_called_run_event`（已完成）
 - `writer_agent:tool_executor_audit_records_tool_called`（已完成）
 - `writer_agent:product_metrics_multi_session_trend`（已完成）
+- `writer_agent:product_metrics_context_pressure_trend`（已完成）
 - `writer_agent:continuous_writing_fixture_20_chapters`（已完成第一阶段：合成 20 章连续写作 product fixture）
 
 ### 11.7 不建议照搬的机制
@@ -1084,7 +1087,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；subtask started/completed run event、trajectory export 和 Inspect Subtasks 筛选已落地；真实 run loop 自动调度和外部检索工具仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
-   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、task_receipt、task_artifact、provider budget、save_completed、save-to-feedback latency、proposal context budget drilldown、post-write diagnostics、context pressure 和 failure recovery 排查跳转；Forge trajectory 已可额外导出 Claude-Code-style / HF Agent Trace Viewer compatible JSONL。
+   - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、task_receipt、task_artifact、provider budget、save_completed、save-to-feedback latency、multi-session metric trend、proposal context budget drilldown、post-write diagnostics、当前 context pressure、持久化 per-session context pressure trend 和 failure recovery 排查跳转；Forge trajectory 已可额外导出 Claude-Code-style / HF Agent Trace Viewer compatible JSONL。
 8. Provider call budget。（第一阶段已完成）
    - 已有 token/cost estimation、approval-required/warn/blocked 决策和 remediation；章节生成 provider call 前置门禁、`writer.provider_budget` run event、Explore 审批卡、已批准 budget 前端传递和后端覆盖校验已接入；Project Brain chat answer provider call 已有后端 preflight / run event / failure bundle；manual request AgentLoop 每轮 provider call 已有后端 budget guard / run event / failure bundle；external research subtask 已有 provider budget report / failure bundle helper 和 run event 覆盖；Project Brain/manual retry UI 和后端批准凭证覆盖校验已接入；真实外部检索工具调用接入和 external research 审批 UI 仍未完成。
 9. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）

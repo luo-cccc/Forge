@@ -21,8 +21,12 @@ src/                         React + Tiptap writing surfaces
   protocol.ts                Tauri command/event and agent protocol types
 
 src-tauri/                   Product-specific Tauri backend
-  src/lib.rs                 Command bridge, orchestration, event emission
+  src/lib.rs                 Root module wiring, Tauri setup, command registration
+  src/commands/              Tauri command handlers and command audit surface
+  src/app_state.rs           Shared AppState, memory DB initialization, kernel seed
   src/writer_agent/          Writer Agent Kernel
+  src/writer_agent/kernel.rs Kernel facade and stable public API
+  src/writer_agent/kernel/   Stateful kernel implementation modules
   src/chapter_generation.rs  Autonomous chapter generation and save protection
   src/storage.rs             Local project storage and bounded backups
 
@@ -48,7 +52,9 @@ scripts/                     Local static checks
 - Companion Panel quiet mode: current guard state, chapter mission, open promises, canon risk, arc/pacing, and next step.
 - Typed `WriterOperation` flow for text, canon, promise, style, story contract, chapter mission, and outline changes.
 - Effective Tool Inventory and allowlist filtering so model-visible tools respect side-effect limits.
-- Trajectory export as JSONL for observations, proposals, feedback, task packets, and state snapshots.
+- Append-only WriterRunEventStore for privacy-preserving replay of observations, context packs, provider starts, tool calls, proposals, operation lifecycle, feedback, saves, diagnostics, and failures.
+- Inspect mode for internal timeline review, failure evidence, provider budget reports, post-write diagnostics, proposal context budgets, and persisted context pressure trends.
+- Trajectory export as JSONL for observations, proposals, feedback, task packets, state snapshots, product metrics, and Trace Viewer compatible local replay.
 
 ## Local Storage And Secrets
 
