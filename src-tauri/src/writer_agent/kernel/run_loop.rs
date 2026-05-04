@@ -69,6 +69,18 @@ impl WriterAgentKernel {
             format!("{:?}", task),
             task_packet.clone(),
         );
+        let task_receipt = (request.task == WriterAgentTask::ContinuityDiagnostic).then(|| {
+            crate::writer_agent::task_receipt::build_continuity_diagnostic_receipt(
+                task_packet.id.clone(),
+                &request.observation,
+                &task_packet.objective,
+                &context_pack,
+                now_ms(),
+            )
+        });
+        if let Some(receipt) = task_receipt.as_ref() {
+            self.record_task_receipt_run_event(receipt);
+        }
 
         if request.task == WriterAgentTask::ChapterGeneration {
             let quality = self.contract_quality();
@@ -129,6 +141,7 @@ impl WriterAgentKernel {
             proposals,
             operations,
             task_packet,
+            task_receipt,
             context_pack_summary,
             tool_inventory,
             source_refs,

@@ -741,12 +741,14 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 2. 将 planning / diagnosis / generation 的前置阶段整理成 Writer Kernel phase pipeline。
    - 保持现有 `WriterAgentKernel.prepare_task_run()` 作为统一入口。
    - 当前完成度：PlanningReview / ManualRequest / ChapterGeneration 已通过统一 task packet 和 trace 入口；真实写作工作流中的 context pack 组装已进入 `writer.context_pack_built` run event；章节生成 / Project Brain / manual request 的 provider call 启动已进入 `writer.model_started` run event；manual AgentLoop 工具调用 start/end 已进入 `writer.tool_called` run event。`agent-harness-core::ToolExecutor` 现在有可选 audit sink，Tauri 侧已有 `writer_tool_audit_sink` helper，manual AgentLoop 已迁到 executor 层记录；这补上了非 AgentLoop 直接 executor 调用的第一阶段能力，但还需要把未来真实外部工具入口逐个挂上该 sink。
-3. 为 ChapterGeneration、BatchGeneration、长诊断增加 WriterTaskReceipt。（ChapterGeneration / BatchGeneration 第一阶段已完成，长诊断未完成）
+3. 为 ChapterGeneration、BatchGeneration、长诊断增加 WriterTaskReceipt。（第一阶段已完成）
    - 已新增 `src-tauri/src/writer_agent/task_receipt.rs`。
    - `WriterTaskReceipt` 字段包括 task id、task kind、chapter、objective、required evidence、expected artifacts、must_not、source_refs、base_revision、created_at。
    - `BuiltChapterContext` 现在携带 receipt；章节生成保存前校验 task id、chapter、base revision、expected artifact 和 required evidence。
    - receipt mismatch 会阻断写入，并产出结构化错误证据。
-   - 已新增 eval：`writer_agent:chapter_generation_task_receipt_required`、`writer_agent:task_receipt_mismatch_blocks_write`。
+   - ContinuityDiagnostic 第一阶段已接入只读 diagnostic receipt：准备诊断任务时记录 required evidence、expected diagnostic artifacts、must_not 写入类 artifact，并以 `writer.task_receipt` run event 进入 trace / trajectory。
+   - 边界：当前长诊断 receipt 只覆盖后端准备、run event 和 artifact guard；前端 receipt 展示、真实长诊断报告 artifact 持久化、更多失败分类接入 Inspector 仍未完成。
+   - 已新增 eval：`writer_agent:chapter_generation_task_receipt_required`、`writer_agent:continuity_diagnostic_task_receipt`、`writer_agent:task_receipt_mismatch_blocks_write`。
 4. 增加失败证据包。（第一阶段已完成）
    - 已新增 `WriterFailureEvidenceBundle`，分类包括 context_missing、tool_denied、provider_failed、receipt_mismatch、save_failed、feedback_blocked。
    - Provider timeout/rate limit/config/error、save conflict、receipt mismatch 可映射为结构化 failure bundle。
@@ -758,6 +760,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:planning_mode_denies_writes`（已完成）
 - `writer_agent:planning_mode_uses_story_foundation`（已完成）
 - `writer_agent:chapter_generation_task_receipt_required`（已完成）
+- `writer_agent:continuity_diagnostic_task_receipt`（已完成第一阶段：只读诊断 receipt + run event / trajectory）
 - `writer_agent:task_receipt_mismatch_blocks_write`（已完成）
 - `writer_agent:run_failure_evidence_bundle`（已完成）
 
@@ -1046,7 +1049,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 2. Planning / Review 只读模式。（第一阶段已完成）
    - 已把“想清楚”从聊天主路径剥离出后端任务类型，具备只读工具边界和 Story Foundation 上下文。
 3. WriterTaskReceipt + failure evidence bundle。（第一阶段已完成）
-   - ChapterGeneration / BatchGeneration 已有 receipt 和 failure bundle；长诊断 receipt、更多失败分类接入和 inspector 展示仍未完成。
+   - ChapterGeneration / BatchGeneration 已有 receipt 和 failure bundle；ContinuityDiagnostic 已有只读 receipt 和 `writer.task_receipt` run event / trajectory 覆盖；更多失败分类接入和 inspector 展示仍未完成。
 4. Memory correction / reinforcement。（第一阶段已完成）
    - 已让作者对记忆候选的采纳/拒绝改变后续同 slot 候选行为；纠错优先于强化。
 5. Project Brain knowledge index / graph。（第一阶段已完成）
@@ -1068,7 +1071,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 短期完成：
 
 - 只读规划/审稿模式可用，且权限测试证明不能写正文和记忆。
-- ChapterGeneration / BatchGeneration 长生成有 TaskReceipt；长诊断 receipt 仍未完成。
+- ChapterGeneration / BatchGeneration 长生成有 TaskReceipt；ContinuityDiagnostic 长诊断有只读 receipt、expected diagnostic artifact、写入类 artifact guard 和 trajectory 回放。
 - 关键章节生成失败不是字符串，而是可分类的证据包；更多工具/反馈失败路径仍需接入。
 - RunEventStore 可以回放一次 writer run。
 - 作者对记忆候选的纠错会压制后续同 slot 抽取，采纳会强化同 slot 候选；记忆候选进入 review queue 时会写 `writer.memory_candidate_created` run event，但不会绕过作者确认直接写 ledger。

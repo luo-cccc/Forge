@@ -1112,6 +1112,19 @@ export interface WriterTaskPacketTrace {
   packet: TaskPacket;
 }
 
+export interface WriterTaskReceipt {
+  taskId: string;
+  taskKind: string;
+  chapter?: string | null;
+  objective: string;
+  requiredEvidence: string[];
+  expectedArtifacts: string[];
+  mustNot: string[];
+  sourceRefs: string[];
+  baseRevision?: string | null;
+  createdAtMs: number;
+}
+
 export interface TaskPacket {
   id: string;
   objective: string;

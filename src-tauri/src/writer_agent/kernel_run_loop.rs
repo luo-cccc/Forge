@@ -10,6 +10,7 @@ use super::provider_budget::{
     evaluate_provider_budget, WriterProviderBudgetReport, WriterProviderBudgetRequest,
     WriterProviderBudgetTask,
 };
+use super::task_receipt::WriterTaskReceipt;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -82,6 +83,7 @@ pub struct WriterAgentRunResult {
     pub proposals: Vec<AgentProposal>,
     pub operations: Vec<WriterOperation>,
     pub task_packet: TaskPacket,
+    pub task_receipt: Option<WriterTaskReceipt>,
     pub context_pack_summary: WriterAgentContextPackSummary,
     pub tool_inventory: EffectiveToolInventory,
     pub trace_refs: Vec<String>,
@@ -104,6 +106,7 @@ pub struct WriterAgentPreparedRun<P: Provider, H: ToolHandler> {
     pub(crate) proposals: Vec<AgentProposal>,
     pub(crate) operations: Vec<WriterOperation>,
     pub(crate) task_packet: TaskPacket,
+    pub(crate) task_receipt: Option<WriterTaskReceipt>,
     pub(crate) context_pack_summary: WriterAgentContextPackSummary,
     pub(crate) tool_inventory: EffectiveToolInventory,
     pub(crate) source_refs: Vec<String>,
@@ -209,6 +212,7 @@ where
             proposals: self.proposals,
             operations: self.operations,
             task_packet: self.task_packet,
+            task_receipt: self.task_receipt,
             context_pack_summary: self.context_pack_summary,
             tool_inventory: self.tool_inventory,
             trace_refs: self.trace_refs,

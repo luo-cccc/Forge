@@ -397,6 +397,30 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_task_receipt_run_event(
+        &mut self,
+        receipt: &crate::writer_agent::task_receipt::WriterTaskReceipt,
+    ) {
+        let mut source_refs = vec![
+            format!("receipt:{}", receipt.task_id),
+            format!("task_kind:{}", receipt.task_kind),
+        ];
+        if let Some(chapter) = receipt.chapter.as_ref() {
+            source_refs.push(format!("chapter:{}", chapter));
+        }
+        if let Some(revision) = receipt.base_revision.as_ref() {
+            source_refs.push(format!("revision:{}", revision));
+        }
+        source_refs.extend(receipt.source_refs.iter().cloned());
+        self.record_run_event(
+            "task_receipt",
+            receipt.created_at_ms,
+            Some(receipt.task_id.clone()),
+            source_refs,
+            serde_json::json!(receipt),
+        );
+    }
+
     pub(super) fn record_post_write_diagnostic_report(
         &mut self,
         report: &crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport,

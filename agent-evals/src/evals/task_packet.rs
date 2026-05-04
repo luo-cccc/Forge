@@ -775,6 +775,150 @@ pub fn run_chapter_generation_task_receipt_required_eval() -> EvalResult {
     )
 }
 
+pub fn run_continuity_diagnostic_task_receipt_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻悬疑",
+            "玉佩线索推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-8",
+            "林墨审查玉佩线索是否偏离本章目标。",
+            "指出玉佩线索风险",
+            "不要提前揭开玉佩来源",
+            "以诊断后的下一步问题收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀。",
+            &serde_json::json!({ "weapon": "寒影刀" }),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩来源",
+            "玉佩来源必须延后揭示。",
+            "Chapter-1",
+            "Chapter-12",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ContinuityDiagnostic,
+        observation: observation_in_chapter(
+            "林墨发现玉佩来自禁地，但他还没确认张三是否说谎。",
+            "Chapter-8",
+        ),
+        user_instruction: "做一次长诊断，找出连续性、任务和伏笔风险。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨发现玉佩来自禁地，但他还没确认张三是否说谎。".to_string(),
+            paragraph: "林墨发现玉佩来自禁地，但他还没确认张三是否说谎。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::ReadOnly,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o-mini");
+    let trace = kernel.trace_snapshot(20);
+    let receipt_event = trace.run_events.iter().find(|event| {
+        event.event_type == "writer.task_receipt"
+            && event.data.get("taskKind").and_then(|value| value.as_str())
+                == Some("ContinuityDiagnostic")
+    });
+    let receipt = receipt_event.and_then(|event| {
+        serde_json::from_value::<agent_writer_lib::writer_agent::task_receipt::WriterTaskReceipt>(
+            event.data.clone(),
+        )
+        .ok()
+    });
+    let export = kernel.export_trajectory(40);
+
+    let mut errors = Vec::new();
+    if let Err(error) = &prepared {
+        errors.push(format!("failed to prepare diagnostic run: {}", error));
+    }
+    if receipt.is_none() {
+        errors.push("diagnostic task receipt was not recorded".to_string());
+    }
+    if !receipt.as_ref().is_some_and(|receipt| {
+        receipt.task_kind == "ContinuityDiagnostic"
+            && receipt.chapter.as_deref() == Some("Chapter-8")
+            && receipt
+                .required_evidence
+                .iter()
+                .any(|evidence| evidence == "ChapterMission")
+            && receipt
+                .required_evidence
+                .iter()
+                .any(|evidence| evidence == "CanonSlice")
+            && receipt
+                .expected_artifacts
+                .iter()
+                .any(|artifact| artifact == "diagnostic_report")
+            && receipt.must_not.iter().any(|rule| rule == "saved_chapter")
+            && receipt
+                .validate_artifact_attempt(&receipt.task_id, "diagnostic_report")
+                .is_empty()
+    }) {
+        errors.push(
+            "diagnostic receipt lacks required evidence, artifact, or read-only guard".to_string(),
+        );
+    }
+    if !receipt.as_ref().is_some_and(|receipt| {
+        receipt
+            .validate_artifact_attempt(&receipt.task_id, "saved_chapter")
+            .iter()
+            .any(|mismatch| mismatch.field == "expected_artifacts" || mismatch.field == "must_not")
+    }) {
+        errors.push("diagnostic receipt did not block saved_chapter artifact".to_string());
+    }
+    if !export.jsonl.lines().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.task_receipt\"")
+            && line.contains("ContinuityDiagnostic")
+    }) {
+        errors.push("trajectory export lacks diagnostic task receipt run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:continuity_diagnostic_task_receipt",
+        format!(
+            "prepared={} receipt={} runEvents={}",
+            prepared.is_ok(),
+            receipt.is_some(),
+            trace.run_events.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_task_receipt_mismatch_blocks_write_eval() -> EvalResult {
     let target = ChapterTarget {
         title: "Chapter-10".to_string(),
