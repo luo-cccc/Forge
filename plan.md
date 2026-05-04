@@ -649,6 +649,8 @@ agent-evals/src/
 
 ## 10. P3：高级写作伙伴能力
 
+当前状态：P3.1-P3.3 第一阶段全部完成。Multi-Ghost 已有 per-branch evidence grounding，Ambient Lore 空闲实体检测管道已激活，Parallel Drafts 已注入 mission context 并路由至 InlinePreview 生命周期。
+
 这些能力必须在 P0/P1 完成后推进，否则会变成花活。
 
 ### P3.1 Multi-Ghost 情境接力
@@ -665,11 +667,15 @@ agent-evals/src/
   - 依据的角色状态
   - 依据的 chapter mission
   - 可能触碰的 promise
-- Tab 接受当前分支，方向键切换分支。
+- Tab 接受当前分支，方向键切换分支。（已完成）
+
+当前状态：`ProposalAlternative` 已新增 `evidence` 字段，`per_branch_evidence()` 按 Canon/Mission/Promise 为分支 A/B/C 分配依据。Ghost decoration badge 显示 grounding source（如 `[B 言语试探 · 2/3 · ChapterMission]`）。方向键切换、Tab 接受均已就绪。
+
+剩余：接受/拒绝反馈影响后续分支排序（需跨 session 的 proposal feedback 统计）。
 
 验收标准：
 
-- 已有 multi-ghost eval 扩展到 mission / promise / style grounding。
+- 已有 multi-ghost eval 扩展到 mission / promise / style grounding。（已完成：`multi_ghost_branches` eval）
 - 接受 / 拒绝反馈影响后续分支排序。
 
 ### P3.2 Ambient Lore
@@ -681,12 +687,16 @@ agent-evals/src/
 - 实时实体锚点。
 - canon conflict 微提示。
 - hover 显示简短证据，不塞大段 lore。
-- 高风险冲突进入 Companion queue。
+- 高风险冲突进入 Companion queue。（已完成：已有 story debt → Companion queue 管道）
+
+当前状态：`get_ambient_entity_hints` Tauri 命令已上线，EditorPanel 4s 空闲定时器提取当前段落中的 Canon 实体名，后端查 canon_facts 返回摘要。已有 `EntityAnchor` 扩展自动装饰关键词，`EntityHoverCard` 弹窗显示 "关键词 · 章节 · Canon fact"。高风险冲突已通过 story debt 进入 Companion queue。
+
+剩余：大文本 DOM decoration rebuild 性能验证（当前仅覆盖光标附近 ±200 chars），canon conflict 微提示的实时推送。
 
 验收标准：
 
-- DOM decoration 不复制完整 lore 内容。
-- 大文本下 decoration rebuild 不明显卡顿。
+- DOM decoration 不复制完整 lore 内容。（已完成：仅展示 facts[:3] 摘要，不塞原文）
+- 大文本下 decoration rebuild 不明显卡顿。（部分完成：限制 ±200 chars 扫描窗口）
 - 错误提示可拒绝并学习。
 
 ### P3.3 Parallel Drafts
@@ -695,12 +705,13 @@ agent-evals/src/
 
 任务：
 
-- 同一 scene goal 生成 3 个版本：
-  - 保守推进
-  - 情绪加压
-  - 外部打断
-- 允许句段级采纳。
-- 每段采纳都进入 operation lifecycle。
+- 同一 scene goal 生成 3 个版本：（已完成：A 顺势推进、B 冲突加压、C 情绪转折）
+- 允许句段级采纳。（已完成：段落级 splitDraft + 点击插入）
+- 每段采纳都进入 operation lifecycle。（已完成：handleInsertParallelDraft 改为 setInlinePreview → accept/reject → feedback）
+
+当前状态：`ParallelDraftPayload` 已新增 `mission_context` 字段，prompt 注入章节任务约束。段级采纳改为路由到 InlinePreview（而非直接 insertContent），接受后走完整 operation lifecycle → durable save → feedback 闭环。`generate_parallel_drafts` 命令已有 mission/promise 上下文注入。
+
+剩余：agent 主动触发 parallel drafts（当前仅用户手动触发），eval 覆盖。
 
 验收标准：
 

@@ -58,6 +58,7 @@ const classification = {
   get_project_storage_diagnostics: RISK.READ_ONLY,
   list_file_backups: RISK.READ_ONLY,
   get_writer_agent_status: RISK.READ_ONLY,
+  get_ambient_entity_hints: RISK.READ_ONLY,
   get_writer_agent_ledger: RISK.READ_ONLY,
   get_writer_agent_pending_proposals: RISK.READ_ONLY,
   get_story_review_queue: RISK.READ_ONLY,

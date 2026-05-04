@@ -1210,7 +1210,7 @@ export default function EditorPanel({
     } finally {
       setParallelDraftsLoading(false);
     }
-  }, [currentChapter, editor, parallelDraftsLoading]);
+  }, [currentChapter, editor, parallelDraftsLoading, chapterMission]);
 
   const handleInsertParallelDraft = useCallback(
     (text: string) => {
