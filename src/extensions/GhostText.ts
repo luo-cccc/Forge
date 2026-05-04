@@ -19,6 +19,7 @@ export interface GhostTextCandidate {
   id: string;
   label: string;
   text: string;
+  evidence?: { source: string; snippet: string }[];
 }
 
 interface GhostTextMeta {
@@ -57,10 +58,15 @@ function createGhostDecoration(doc: ProseMirrorNode, state: GhostTextState): Dec
         text: state.text,
       };
       span.dataset.intent = state.intent ?? "";
-      span.textContent =
-        state.candidates.length > 1
-          ? ` ${current.text}  [${current.label} · ${state.activeIndex + 1}/${state.candidates.length}]`
-          : state.text;
+      const evidenceSource = current.evidence?.[0]?.source ?? "";
+      let badge = "";
+      if (state.candidates.length > 1) {
+        const extra = evidenceSource ? ` · ${evidenceSource}` : "";
+        badge = `[${current.label} · ${state.activeIndex + 1}/${state.candidates.length}${extra}]`;
+      } else if (evidenceSource) {
+        badge = `[${evidenceSource}]`;
+      }
+      span.textContent = badge ? ` ${current.text}  ${badge}` : state.text;
       return span;
     },
     { side: 1, key: `ghost-${state.requestId}` },

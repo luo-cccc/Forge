@@ -68,6 +68,7 @@ pub(crate) fn ghost_alternatives(
 ) -> Vec<ProposalAlternative> {
     let candidates = ghost_candidate_texts(intent, observation, context_pack);
     let labels = ghost_candidate_labels(intent);
+    let branch_evidence = per_branch_evidence(intent, context_pack);
     candidates
         .into_iter()
         .enumerate()
@@ -83,10 +84,89 @@ pub(crate) fn ghost_alternatives(
                     revision: revision.to_string(),
                 }),
                 rationale: format!("multi-ghost branch {}", id.to_ascii_uppercase()),
+                evidence: branch_evidence[idx].clone(),
                 preview,
             }
         })
         .collect()
+}
+
+fn per_branch_evidence(
+    intent: &WritingIntent,
+    context_pack: &WritingContextPack,
+) -> [Vec<EvidenceRef>; 3] {
+    let mission_snippet = context_pack
+        .sources
+        .iter()
+        .find(|s| s.source == ContextSource::ChapterMission)
+        .map(|s| super::kernel::snippet(&s.content, 80))
+        .unwrap_or_default();
+    let canon_snippet = context_pack
+        .sources
+        .iter()
+        .find(|s| s.source == ContextSource::CanonSlice)
+        .and_then(|s| s.content.lines().next().map(|l| l.to_string()))
+        .unwrap_or_default();
+    let promise_snippet = context_pack
+        .sources
+        .iter()
+        .find(|s| s.source == ContextSource::PromiseSlice)
+        .and_then(|s| s.content.lines().next().map(|l| l.to_string()))
+        .unwrap_or_default();
+
+    let a_evidence = if !canon_snippet.is_empty() {
+        vec![EvidenceRef {
+            source: EvidenceSource::Canon,
+            reference: "current-canon".to_string(),
+            snippet: canon_snippet.clone(),
+        }]
+    } else if !mission_snippet.is_empty() {
+        vec![EvidenceRef {
+            source: EvidenceSource::ChapterMission,
+            reference: "active-mission".to_string(),
+            snippet: mission_snippet.clone(),
+        }]
+    } else {
+        vec![]
+    };
+
+    let b_evidence = if !promise_snippet.is_empty() {
+        vec![EvidenceRef {
+            source: EvidenceSource::PromiseLedger,
+            reference: "open-promise".to_string(),
+            snippet: promise_snippet.clone(),
+        }]
+    } else if !mission_snippet.is_empty() {
+        vec![EvidenceRef {
+            source: EvidenceSource::ChapterMission,
+            reference: "active-mission".to_string(),
+            snippet: mission_snippet.clone(),
+        }]
+    } else {
+        vec![]
+    };
+
+    let c_evidence = if matches!(
+        intent,
+        WritingIntent::ConflictEscalation | WritingIntent::Dialogue
+    ) && !mission_snippet.is_empty()
+    {
+        vec![EvidenceRef {
+            source: EvidenceSource::ChapterMission,
+            reference: "active-mission".to_string(),
+            snippet: mission_snippet.clone(),
+        }]
+    } else if !canon_snippet.is_empty() {
+        vec![EvidenceRef {
+            source: EvidenceSource::Canon,
+            reference: "current-canon".to_string(),
+            snippet: canon_snippet.clone(),
+        }]
+    } else {
+        vec![]
+    };
+
+    [a_evidence, b_evidence, c_evidence]
 }
 
 fn ghost_candidate_texts(

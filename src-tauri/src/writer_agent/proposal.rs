@@ -34,6 +34,8 @@ pub struct ProposalAlternative {
     pub preview: String,
     pub operation: Option<WriterOperation>,
     pub rationale: String,
+    #[serde(default)]
+    pub evidence: Vec<EvidenceRef>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

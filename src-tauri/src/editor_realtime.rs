@@ -25,6 +25,15 @@ struct EditorGhostCandidate {
     id: String,
     label: String,
     text: String,
+    #[serde(default)]
+    evidence: Vec<EditorGhostEvidence>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorGhostEvidence {
+    source: String,
+    snippet: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -158,6 +167,7 @@ pub(crate) fn emit_ambient_output(app: &tauri::AppHandle, output: agent_harness_
                     id: candidate.id,
                     label: candidate.label,
                     text: trim_ghost_completion(&candidate.text),
+                    evidence: vec![],
                 })
                 .filter(|candidate| !candidate.text.is_empty())
                 .collect::<Vec<_>>();
@@ -443,6 +453,7 @@ fn proposal_to_ghost_candidate(
         id: id.to_string(),
         label: label.to_string(),
         text,
+        evidence: vec![],
     })
 }
 
@@ -463,6 +474,14 @@ fn ghost_candidates_from_proposal(
                 id: alternative.id.clone(),
                 label: alternative.label.clone(),
                 text,
+                evidence: alternative
+                    .evidence
+                    .iter()
+                    .map(|e| EditorGhostEvidence {
+                        source: format!("{:?}", e.source),
+                        snippet: e.snippet.clone(),
+                    })
+                    .collect(),
             })
         })
         .collect::<Vec<_>>();
