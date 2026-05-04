@@ -302,6 +302,60 @@ pub fn run_product_metrics_trace_eval() -> EvalResult {
     )
 }
 
+pub fn run_product_metrics_manual_ask_conversion_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    kernel.observe(obs.clone()).unwrap();
+    let proposal = kernel
+        .create_inline_operation_proposal(
+            obs,
+            "把下一句改成更有行动压力的版本",
+            "他抬手按住门环，终于决定当面追问张三。".to_string(),
+            "eval-manual-request",
+        )
+        .unwrap();
+
+    let trace = kernel.trace_snapshot(20);
+    let metrics = trace.product_metrics;
+    let mut errors = Vec::new();
+    if proposal.operations.is_empty() {
+        errors.push("manual ask proposal did not carry an operation".to_string());
+    }
+    if metrics.proposal_count != 1 {
+        errors.push(format!(
+            "manual ask metrics saw {} proposals",
+            metrics.proposal_count
+        ));
+    }
+    if (metrics.manual_ask_converted_to_operation_rate - 1.0).abs() > f64::EPSILON {
+        errors.push(format!(
+            "manual ask conversion rate was {:.2}",
+            metrics.manual_ask_converted_to_operation_rate
+        ));
+    }
+    if !kernel
+        .export_trajectory(20)
+        .jsonl
+        .contains("\"manualAskConvertedToOperationRate\":1.0")
+    {
+        errors.push("trajectory product metrics lacks manual ask conversion rate".to_string());
+    }
+
+    eval_result(
+        "writer_agent:product_metrics_manual_ask_conversion",
+        format!(
+            "manualAskOps={:.2} proposals={} operations={}",
+            metrics.manual_ask_converted_to_operation_rate,
+            metrics.proposal_count,
+            proposal.operations.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_product_metrics_multi_session_trend_eval() -> EvalResult {
     let db_path = std::env::temp_dir().join(format!(
         "forge-product-metrics-trend-{}-{}.sqlite",

@@ -6,6 +6,7 @@ use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::kernel::{WriterOperationLifecycleState, WriterOperationLifecycleTrace};
 use super::kernel_helpers::{operation_affected_scope, operation_kind_label};
 use super::memory::{ChapterMissionSummary, ContextRecallSummary, RunEventSummary};
+use super::observation::{ObservationSource, WriterObservation};
 use super::proposal::{AgentProposal, ProposalKind};
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -63,6 +64,7 @@ pub struct WriterProductMetricSessionTrend {
 }
 
 pub(crate) fn product_metrics_from_trace(
+    observations: &[WriterObservation],
     proposals: &[AgentProposal],
     feedback_events: &[ProposalFeedback],
     operation_lifecycle: &[WriterOperationLifecycleTrace],
@@ -104,22 +106,19 @@ pub(crate) fn product_metrics_from_trace(
     let proposal_acceptance_rate = ratio(accepted_count + edited_count, feedback_count);
     let ignored_repeated_suggestion_rate = ratio(ignored_count, feedback_count);
 
+    let manual_observation_ids = observations
+        .iter()
+        .filter(|observation| observation.source == ObservationSource::ManualRequest)
+        .map(|observation| observation.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
     let manual_proposals = proposals
         .iter()
-        .filter(|proposal| {
-            proposal
-                .evidence
-                .iter()
-                .any(|evidence| evidence.reference.contains("manual_request"))
-        })
+        .filter(|proposal| manual_observation_ids.contains(proposal.observation_id.as_str()))
         .count() as u64;
     let manual_operations = proposals
         .iter()
         .filter(|proposal| {
-            proposal
-                .evidence
-                .iter()
-                .any(|evidence| evidence.reference.contains("manual_request"))
+            manual_observation_ids.contains(proposal.observation_id.as_str())
                 && !proposal.operations.is_empty()
         })
         .count() as u64;

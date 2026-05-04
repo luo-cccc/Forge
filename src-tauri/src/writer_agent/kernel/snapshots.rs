@@ -359,6 +359,7 @@ impl WriterAgentKernel {
 
     fn product_metrics(&self) -> WriterProductMetrics {
         product_metrics_from_trace(
+            &self.observations,
             &self.proposals,
             &self.feedback_events,
             &self.operation_lifecycle,

@@ -645,6 +645,12 @@ export const WriterInspectorPanel: React.FC = () => {
                   </span>
                 </div>
                 <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Ask To Ops</span>
+                  <span className="font-mono text-text-primary">
+                    {formatRate(metrics?.manualAskConvertedToOperationRate)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
                   <span className="block text-[10px] text-text-muted">Save Feedback</span>
                   <span className="font-mono text-text-primary">
                     {formatDuration(metrics?.averageSaveToFeedbackMs)}
