@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use super::feedback::ProposalFeedback;
-use super::memory::{MemoryAuditSummary, WriterMemory};
+use super::memory::{MemoryAuditSummary, MemoryFeedbackSummary, WriterMemory};
 use super::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
 use super::proposal::{AgentProposal, ProposalKind};
 
@@ -172,6 +172,8 @@ pub(crate) fn record_memory_candidate_feedback(
     memory: &WriterMemory,
     proposal: &AgentProposal,
     accepted: bool,
+    reason: Option<&str>,
+    created_at: u64,
 ) {
     let Some(slot) = memory_operation_slot(proposal) else {
         return;
@@ -188,6 +190,30 @@ pub(crate) fn record_memory_candidate_feedback(
         memory_correction_key(&slot)
     };
     let _ = memory.upsert_style_preference(&signal_key, value, accepted);
+    let feedback = MemoryFeedbackSummary {
+        slot,
+        category: memory_feedback_category(proposal).to_string(),
+        action: value.to_string(),
+        confidence_delta: if accepted { 0.08 } else { -0.20 },
+        source_error: if accepted {
+            None
+        } else {
+            Some(
+                reason
+                    .map(str::trim)
+                    .filter(|reason| !reason.is_empty())
+                    .unwrap_or("作者拒绝该记忆候选，来源或推断不可靠。")
+                    .to_string(),
+            )
+        },
+        proposal_id: proposal.id.clone(),
+        reason: reason
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+            .map(ToString::to_string),
+        created_at,
+    };
+    let _ = memory.record_memory_feedback(&feedback);
 }
 
 pub(crate) struct MemoryExtractionFeedback {
@@ -199,11 +225,24 @@ impl MemoryExtractionFeedback {
     pub(crate) fn from_memory(memory: &WriterMemory) -> Self {
         let mut suppressed_slots = HashSet::new();
         let mut preferred_slots = HashSet::new();
+        for feedback in memory.list_memory_feedback(400).unwrap_or_default() {
+            match feedback.action.as_str() {
+                "correction" => {
+                    suppressed_slots.insert(feedback.slot.clone());
+                    preferred_slots.remove(&feedback.slot);
+                }
+                "reinforcement" if !suppressed_slots.contains(&feedback.slot) => {
+                    preferred_slots.insert(feedback.slot);
+                }
+                _ => {}
+            }
+        }
         let preferences = memory.list_style_preferences(400).unwrap_or_default();
         for preference in &preferences {
             if let Some(slot) = preference.key.strip_prefix("memory_correction:") {
                 if preference.rejected_count > 0 {
                     suppressed_slots.insert(slot.to_string());
+                    preferred_slots.remove(slot);
                 }
             }
         }
@@ -213,6 +252,7 @@ impl MemoryExtractionFeedback {
             };
             if has_correction_signal(slot, memory) {
                 suppressed_slots.insert(slot.to_string());
+                preferred_slots.remove(slot);
             } else if preference.accepted_count > preference.rejected_count {
                 preferred_slots.insert(slot.to_string());
             }
@@ -257,7 +297,24 @@ impl MemoryExtractionFeedback {
     }
 }
 
+fn memory_feedback_category(proposal: &AgentProposal) -> &'static str {
+    match proposal.operations.first() {
+        Some(WriterOperation::CanonUpsertEntity { .. }) => "canon",
+        Some(WriterOperation::CanonUpdateAttribute { .. }) => "canon_attribute",
+        Some(WriterOperation::PromiseAdd { .. }) => "promise",
+        _ => "unknown",
+    }
+}
+
 fn has_correction_signal(slot: &str, memory: &WriterMemory) -> bool {
+    if memory
+        .list_memory_feedback_for_slot(slot, 40)
+        .unwrap_or_default()
+        .iter()
+        .any(|feedback| feedback.action == "correction")
+    {
+        return true;
+    }
     let correction_key = memory_correction_key(slot);
     memory
         .list_style_preferences(400)

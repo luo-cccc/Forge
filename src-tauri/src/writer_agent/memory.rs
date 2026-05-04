@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -147,6 +147,18 @@ CREATE TABLE IF NOT EXISTS memory_audit_events (
     created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS memory_feedback_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slot TEXT NOT NULL,
+    category TEXT NOT NULL,
+    action TEXT NOT NULL,
+    confidence_delta REAL DEFAULT 0.0,
+    source_error TEXT DEFAULT '',
+    proposal_id TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS writer_observation_trace (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observation_id TEXT NOT NULL,
@@ -232,6 +244,8 @@ CREATE INDEX IF NOT EXISTS idx_chapter_missions_status ON chapter_missions(statu
 CREATE INDEX IF NOT EXISTS idx_chapter_result_project_created ON chapter_result_snapshots(project_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chapter_result_project_chapter ON chapter_result_snapshots(project_id, chapter_title);
 CREATE INDEX IF NOT EXISTS idx_memory_audit_created_at ON memory_audit_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_feedback_created_at ON memory_feedback_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_feedback_slot_created ON memory_feedback_events(slot, created_at);
 CREATE INDEX IF NOT EXISTS idx_observation_trace_created_at ON writer_observation_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_created_at ON writer_proposal_trace(created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_trace_proposal_id ON writer_proposal_trace(proposal_id);
@@ -651,6 +665,19 @@ pub struct MemoryAuditSummary {
     pub title: String,
     pub evidence: String,
     pub rationale: String,
+    pub reason: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryFeedbackSummary {
+    pub slot: String,
+    pub category: String,
+    pub action: String,
+    pub confidence_delta: f64,
+    pub source_error: Option<String>,
+    pub proposal_id: String,
     pub reason: Option<String>,
     pub created_at: u64,
 }
@@ -1601,6 +1628,56 @@ impl WriterMemory {
         rows.collect()
     }
 
+    pub fn record_memory_feedback(&self, entry: &MemoryFeedbackSummary) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO memory_feedback_events
+             (slot, category, action, confidence_delta, source_error, proposal_id, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                entry.slot,
+                entry.category,
+                entry.action,
+                entry.confidence_delta,
+                entry.source_error.clone().unwrap_or_default(),
+                entry.proposal_id,
+                entry.reason.clone().unwrap_or_default(),
+                entry.created_at as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_memory_feedback(
+        &self,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<MemoryFeedbackSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT slot, category, action, confidence_delta, source_error, proposal_id, reason, created_at
+             FROM memory_feedback_events ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], memory_feedback_from_row)?;
+        rows.collect()
+    }
+
+    pub fn list_memory_feedback_for_slot(
+        &self,
+        slot: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<MemoryFeedbackSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT slot, category, action, confidence_delta, source_error, proposal_id, reason, created_at
+             FROM memory_feedback_events
+             WHERE slot=?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![slot, limit as i64],
+            memory_feedback_from_row,
+        )?;
+        rows.collect()
+    }
+
     // -- Writer Agent Trace --
 
     pub fn record_observation_trace(
@@ -1998,6 +2075,19 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
             source_refs_json TEXT DEFAULT '[]',
             data_json TEXT DEFAULT '{}',
             ts_ms INTEGER NOT NULL
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_feedback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slot TEXT NOT NULL,
+            category TEXT NOT NULL,
+            action TEXT NOT NULL,
+            confidence_delta REAL DEFAULT 0.0,
+            source_error TEXT DEFAULT '',
+            proposal_id TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            created_at INTEGER NOT NULL
         );",
     )?;
     ensure_column(
@@ -2517,6 +2607,55 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "related_entities_json TEXT DEFAULT '[]'",
     )?;
 
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "slot",
+        "slot TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "category",
+        "category TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "action",
+        "action TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "confidence_delta",
+        "confidence_delta REAL DEFAULT 0.0",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "source_error",
+        "source_error TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "proposal_id",
+        "proposal_id TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "reason",
+        "reason TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "memory_feedback_events",
+        "created_at",
+        "created_at INTEGER DEFAULT 0",
+    )?;
+
     Ok(())
 }
 
@@ -2551,6 +2690,30 @@ fn chapter_result_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterR
         promise_updates: string_vec_from_json(row.get::<_, String>(9)?.as_str()),
         canon_updates: string_vec_from_json(row.get::<_, String>(10)?.as_str()),
         source_ref: row.get(11)?,
+        created_at: created_at.max(0) as u64,
+    })
+}
+
+fn memory_feedback_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryFeedbackSummary> {
+    let source_error: String = row.get(4)?;
+    let reason: String = row.get(6)?;
+    let created_at: i64 = row.get(7)?;
+    Ok(MemoryFeedbackSummary {
+        slot: row.get(0)?,
+        category: row.get(1)?,
+        action: row.get(2)?,
+        confidence_delta: row.get(3)?,
+        source_error: if source_error.trim().is_empty() {
+            None
+        } else {
+            Some(source_error)
+        },
+        proposal_id: row.get(5)?,
+        reason: if reason.trim().is_empty() {
+            None
+        } else {
+            Some(reason)
+        },
         created_at: created_at.max(0) as u64,
     })
 }
@@ -2741,6 +2904,49 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].proposal_id, "prop_1");
         assert_eq!(audit[0].reason.as_deref(), Some("approved"));
+    }
+
+    #[test]
+    fn test_memory_feedback_record_and_filter_by_slot() {
+        let m = memory();
+        m.record_memory_feedback(&MemoryFeedbackSummary {
+            slot: "memory|canon|character|沈照".to_string(),
+            category: "canon".to_string(),
+            action: "reinforcement".to_string(),
+            confidence_delta: 0.08,
+            source_error: None,
+            proposal_id: "prop_1".to_string(),
+            reason: Some("accepted after save".to_string()),
+            created_at: 42,
+        })
+        .unwrap();
+        m.record_memory_feedback(&MemoryFeedbackSummary {
+            slot: "memory|promise|mystery_clue|玉佩".to_string(),
+            category: "promise".to_string(),
+            action: "correction".to_string(),
+            confidence_delta: -0.2,
+            source_error: Some("作者指出不是伏笔".to_string()),
+            proposal_id: "prop_2".to_string(),
+            reason: Some("not durable".to_string()),
+            created_at: 43,
+        })
+        .unwrap();
+
+        let feedback = m.list_memory_feedback(10).unwrap();
+        assert_eq!(feedback.len(), 2);
+        assert_eq!(feedback[0].slot, "memory|promise|mystery_clue|玉佩");
+        assert_eq!(feedback[0].action, "correction");
+        assert_eq!(
+            feedback[0].source_error.as_deref(),
+            Some("作者指出不是伏笔")
+        );
+
+        let slot_feedback = m
+            .list_memory_feedback_for_slot("memory|canon|character|沈照", 10)
+            .unwrap();
+        assert_eq!(slot_feedback.len(), 1);
+        assert_eq!(slot_feedback[0].category, "canon");
+        assert_eq!(slot_feedback[0].confidence_delta, 0.08);
     }
 
     #[test]
@@ -3099,6 +3305,9 @@ mod tests {
         assert!(table_has_column(&conn, "chapter_missions", "expected_ending").unwrap());
         assert!(table_exists(&conn, "chapter_result_snapshots").unwrap());
         assert!(table_has_column(&conn, "chapter_result_snapshots", "new_clues_json").unwrap());
+        assert!(table_exists(&conn, "memory_feedback_events").unwrap());
+        assert!(table_has_column(&conn, "memory_feedback_events", "source_error").unwrap());
+        assert!(table_has_column(&conn, "memory_feedback_events", "confidence_delta").unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();

@@ -34,7 +34,13 @@ impl WriterAgentKernel {
 
         if feedback.is_positive() && positive_feedback_ready {
             if let Some(prop) = proposal.as_ref() {
-                record_memory_candidate_feedback(&self.memory, prop, true);
+                record_memory_candidate_feedback(
+                    &self.memory,
+                    prop,
+                    true,
+                    feedback.reason.as_deref(),
+                    feedback.created_at,
+                );
                 record_memory_audit_event(&self.memory, prop, &feedback);
                 record_feedback_style_preference(
                     &self.memory,
@@ -67,7 +73,13 @@ impl WriterAgentKernel {
                     FeedbackAction::Accepted => "accepted",
                 };
                 if feedback.is_negative() || matches!(feedback.action, FeedbackAction::Edited) {
-                    record_memory_candidate_feedback(&self.memory, prop, false);
+                    record_memory_candidate_feedback(
+                        &self.memory,
+                        prop,
+                        false,
+                        feedback.reason.as_deref(),
+                        feedback.created_at,
+                    );
                     record_memory_audit_event(&self.memory, prop, &feedback);
                     self.memory
                         .record_decision(

@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前本轮已验证：`cargo run -p agent-evals --quiet` 153/153 passing，新增 `writer_agent:continuous_writing_fixture_20_chapters` 覆盖两段 session、连续 20 章保存观察、Story Contract / Chapter Mission / Canon / Promise / Style foundation、长线伏笔召回、任务漂移、作者采纳/编辑/拒绝反馈、durable save、multi-session product metrics trend、trajectory save/metrics/context export；并修正 `promise_recall_hit_rate` 统计口径，使当前 context recall 存储中的 `PromiseLedger` 证据源和旧 `PromiseSlice` 名称都计入 promise recall。
+- 当前本轮已验证：`cargo run -p agent-evals --quiet` 154/154 passing。新增 `writer_agent:memory_feedback_schema_records_quality_signals`，覆盖 memory candidate 在作者批准/接受后写入结构化 reinforcement，在作者拒绝后写入带 `source_error` 的 correction，并由该 correction 压制后续同 slot 候选；上一轮新增的 `writer_agent:continuous_writing_fixture_20_chapters` 继续覆盖两段 session、连续 20 章保存观察、Story Contract / Chapter Mission / Canon / Promise / Style foundation、长线伏笔召回、任务漂移、作者采纳/编辑/拒绝反馈、durable save、multi-session product metrics trend、trajectory save/metrics/context export。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 - P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，ContinuityDiagnostic 已有只读 receipt、diagnostic_report task artifact、trajectory 回放和 Inspector receipt/artifact 筛选；记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report，accepted operation 后写诊断已会把诊断结果注册为可审查 proposal / story debt，不自动改写正文；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
@@ -434,6 +434,8 @@ Status：Canon / Promise 质量门槛已接入真实 proposal 生成路径；Sto
 Done：
 
 - 记忆候选已通过 proposal lifecycle 和 memory feedback 路径覆盖 observation、candidate、approved、rejected、superseded 等状态。
+- WriterMemory 已新增结构化 `memory_feedback_events` 第一阶段 schema，记录 memory candidate 的 slot、category、action、confidence_delta、source_error、proposal_id、reason 和 created_at。
+- memory candidate feedback 仍保留旧 style preference 信号兼容层，但 `MemoryExtractionFeedback` 已优先读取结构化 feedback；correction 会覆盖 reinforcement 并压制同 slot 后续候选。
 - 本地保存抽取和 LLM memory candidate 会过滤模糊、空泛、重复候选。
 - Canon / Promise 候选已有 dedupe 和冲突拦截；与现有 canon kind 或关键 attributes 冲突的候选不会直接写入长期记忆，而是生成高优先级 ContinuityWarning。
 - Story Contract / Chapter Mission 写入已有 foundation quality gate，低质量 foundation 不会进入有效 context。
@@ -458,6 +460,7 @@ Verification：
 - `writer_agent:conflicting_memory_candidate_requires_review`
 - `writer_agent:style_memory_validation`
 - `writer_agent:same_entity_attribute_merge`
+- `writer_agent:memory_feedback_schema_records_quality_signals`
 - `writer_agent:foundation_write_validation`
 - `writer_agent:story_contract_quality_nominal`
 - `npm run verify`
@@ -779,16 +782,19 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 任务：
 
-1. 为 WriterMemory 增加 memory confidence / category / source error 语义。（未完成）
+1. 为 WriterMemory 增加 memory confidence / category / source error 语义。（第一阶段已完成）
    - Canon、Promise、Style、Contract、Mission 分别保留现有 typed schema。
    - 不把所有记忆压平成通用 fact。
+   - 已新增 `memory_feedback_events` 结构化反馈表：slot、category、action、confidence_delta、source_error、proposal_id、reason、created_at。
+   - memory candidate 的 accepted/rejected feedback 会分别写入 reinforcement/correction；accepted 记录正向 confidence delta，rejected 记录负向 confidence delta 和作者纠错原因作为 source error。
+   - 边界：这还不是把 confidence/source error 下沉到 Canon/Promise/Style/Contract/Mission 每一条 ledger row 的完整模型，也未覆盖作者撤销、手工纠错入口或 UI 审阅。
 2. 增加作者纠错和正反馈校准。（第一阶段已完成）
-   - 已复用现有 `proposal_feedback`、`memory_audit_events` 和 style preference 计数作为反馈持久化底座。
+   - 已复用现有 `proposal_feedback`、`memory_audit_events`、style preference 计数和新的 `memory_feedback_events` 作为反馈持久化底座。
    - accepted memory candidate 会写入 `memory_reinforcement:<slot>` 和 `memory_extract:<slot>` reinforcement 信号。
    - rejected / edited memory candidate 会写入 `memory_correction:<slot>` 和 `memory_extract:<slot>` correction 信号，并进入 memory audit。
-   - `MemoryExtractionFeedback` 现在将 correction 视为强压制信号：即使同 slot 已有 reinforcement，纠错也优先，后续同 slot 候选默认不再出现。
-   - 已新增 eval：`writer_agent:memory_correction_overrides_reinforcement`、`writer_agent:accepted_feedback_reinforces_style_memory`、`writer_agent:rejected_proposal_records_correction_signal`。
-   - 剩余：把 correction/reinforcement 从 style preference 复用层迁入更明确的 memory feedback schema，并覆盖作者撤销/手工纠错入口。
+   - `MemoryExtractionFeedback` 现在优先读取结构化 memory feedback，并将 correction 视为强压制信号：即使同 slot 已有 reinforcement，纠错也优先，后续同 slot 候选默认不再出现；旧 style preference 信号仅作为兼容兜底。
+   - 已新增 eval：`writer_agent:memory_correction_overrides_reinforcement`、`writer_agent:accepted_feedback_reinforces_style_memory`、`writer_agent:rejected_proposal_records_correction_signal`、`writer_agent:memory_feedback_schema_records_quality_signals`。
+   - 剩余：覆盖作者撤销/手工纠错入口，并把结构化 feedback 汇总成可审阅的 memory confidence / source reliability 视图。
 3. Project Brain 增加 knowledge index / reference graph。（第一阶段已完成）
    - 已新增 `ProjectBrainKnowledgeIndex` / node / edge schema。
    - 已从 Project Brain vector chunks、outline、lorebook 构建索引节点，节点带 kind、label、source_ref、keywords、summary。

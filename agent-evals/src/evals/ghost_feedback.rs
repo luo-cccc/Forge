@@ -580,6 +580,112 @@ pub fn run_rejected_proposal_records_correction_signal_eval() -> EvalResult {
     )
 }
 
+pub fn run_memory_feedback_schema_records_quality_signals_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut accepted_obs = observation("那个少年名叫沈照，袖中藏着一枚玉佩。");
+    accepted_obs.reason = ObservationReason::Save;
+    accepted_obs.source = ObservationSource::ChapterSave;
+    let accepted_proposal = kernel
+        .observe(accepted_obs)
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+        .expect("fixture should produce canon memory candidate");
+    let mut accepted_approval = eval_approval("memory_feedback_schema");
+    accepted_approval.proposal_id = Some(accepted_proposal.id.clone());
+    kernel
+        .approve_editor_operation_with_approval(
+            accepted_proposal.operations[0].clone(),
+            "",
+            Some(&accepted_approval),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: accepted_proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: None,
+            reason: Some("确认这是长期角色设定".to_string()),
+            created_at: now_ms(),
+        })
+        .unwrap();
+
+    let mut rejected_obs = observation("青灯案上放着一封密信，林墨没有告诉任何人它的下落。");
+    rejected_obs.id = "memory-feedback-rejected".to_string();
+    rejected_obs.reason = ObservationReason::Save;
+    rejected_obs.source = ObservationSource::ChapterSave;
+    let rejected_proposal = kernel
+        .observe(rejected_obs.clone())
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::PlotPromise)
+        .expect("fixture should produce promise memory candidate");
+    let rejected_slot = match rejected_proposal.operations.first() {
+        Some(WriterOperation::PromiseAdd { promise }) => {
+            format!("memory|promise|{}|{}", promise.kind, promise.title)
+        }
+        _ => String::new(),
+    };
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: rejected_proposal.id.clone(),
+            action: FeedbackAction::Rejected,
+            final_text: None,
+            reason: Some("作者纠错：无名书信只是气氛，不是伏笔".to_string()),
+            created_at: now_ms() + 1,
+        })
+        .unwrap();
+
+    let feedback = kernel.memory.list_memory_feedback(20).unwrap();
+    let mut errors = Vec::new();
+    if !feedback.iter().any(|event| {
+        event.proposal_id == accepted_proposal.id
+            && event.category == "canon"
+            && event.action == "reinforcement"
+            && event.confidence_delta > 0.0
+            && event.source_error.is_none()
+    }) {
+        errors.push("accepted memory candidate lacked structured reinforcement".to_string());
+    }
+    if !feedback.iter().any(|event| {
+        event.proposal_id == rejected_proposal.id
+            && event.category == "promise"
+            && event.action == "correction"
+            && event.confidence_delta < 0.0
+            && event
+                .source_error
+                .as_deref()
+                .is_some_and(|error| error.contains("不是伏笔"))
+    }) {
+        errors.push(
+            "rejected memory candidate lacked structured source-error correction".to_string(),
+        );
+    }
+
+    let suppressed = kernel
+        .observe(rejected_obs)
+        .unwrap()
+        .iter()
+        .any(|proposal| {
+            matches!(
+                proposal.operations.first(),
+                Some(WriterOperation::PromiseAdd { promise })
+                    if format!("memory|promise|{}|{}", promise.kind, promise.title)
+                        == rejected_slot
+            )
+        });
+    if suppressed {
+        errors.push("structured correction did not suppress the same promise slot".to_string());
+    }
+
+    eval_result(
+        "writer_agent:memory_feedback_schema_records_quality_signals",
+        format!("events={} rejectedSlot={}", feedback.len(), rejected_slot),
+        errors,
+    )
+}
+
 pub fn run_style_continuity_learning_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
