@@ -371,6 +371,8 @@ pub(crate) fn execute_writer_operation(
                 status: normalized_status,
                 source_ref: mission.source_ref.clone(),
                 updated_at: String::new(),
+                blocked_reason: mission.blocked_reason.clone(),
+                retired_history: mission.retired_history.clone(),
             };
             if let Some(error) = validate_chapter_mission_summary(&summary) {
                 Ok(OperationResult {

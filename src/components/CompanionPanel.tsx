@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import { Commands, Events } from "../protocol";
+import { Commands, Events, type PlotPromiseSummary } from "../protocol";
 import {
   canonUpdateOperation,
   chapterMissionDraftFromSummary,
@@ -241,6 +241,7 @@ function buildSecondBrainItems(
   currentChapter: string,
   trace: WriterAgentTraceSnapshot | null,
   isAgentThinking: boolean,
+  rankedPromises: PlotPromiseSummary[],
 ): SecondBrainItem[] {
   const contractDebt = firstDebt(storyDebt, ["story_contract"]);
   const missionDebt = firstDebt(storyDebt, ["chapter_mission"]);
@@ -249,7 +250,7 @@ function buildSecondBrainItems(
   const pacingDebt = firstDebt(storyDebt, ["pacing"]);
   const decision = scopedDecision(ledger, currentChapter);
   const arcProposal = proposalForArc(proposals);
-  const openPromise = ledger?.openPromises[0];
+  const openPromise = rankedPromises[0];
   const canonRule = ledger?.canonRules[0];
   const storyContract = ledger?.storyContract;
   const nextBeat = ledger?.nextBeat;
@@ -298,8 +299,9 @@ function buildSecondBrainItems(
       ? compactLine(decision.rationale || decision.scope, "Follow the latest creative decision")
       : "Keep drafting while preserving canon and unresolved promises.";
 
+  const highRiskCount = rankedPromises.filter((p) => p.risk === "high").length;
   const promiseValue = openPromise
-    ? compactLine(openPromise.title, "Open promise", 72)
+    ? compactLine(openPromise.title, `Open promise · ${openPromise.risk}`, 72)
     : promiseDebt
       ? compactLine(promiseDebt.title, "Open promise", 72)
       : "No open promise";
@@ -308,7 +310,7 @@ function buildSecondBrainItems(
         openPromise.expectedPayoff
           ? `${openPromise.description} -> ${openPromise.expectedPayoff}`
           : openPromise.description,
-        "Payoff not set",
+        highRiskCount > 1 ? `${highRiskCount} high-risk promises open` : "Payoff not set",
       )
     : promiseDebt
       ? compactLine(promiseDebt.message, "Resolve or defer")
@@ -354,12 +356,15 @@ function buildSecondBrainItems(
       ? compactLine(contractGaps.join("; "), "Fill these gaps for stronger agent grounding")
       : compactLine("All key fields are set — the agent has strong book-level grounding.", "")
     : "Set the book-level promise so the agent can judge local choices against the whole novel.";
+  const missionCalibration = proposals.find(
+    (p) => p.kind === "chapter_mission" && p.rationale.includes("mission calibration"),
+  );
   const missionValue = missionDebt
     ? compactLine(missionDebt.title, "Chapter mission guard", 72)
     : chapterMission
     ? compactLine(
         `${missionStatusLabel(chapterMission.status)} · ${chapterMission.mission || chapterMission.expectedEnding}`,
-        "Current chapter mission",
+        missionCalibration ? "Mission needs review — save triggered a status change" : "Current chapter mission",
         72,
       )
     : currentChapter
@@ -367,6 +372,11 @@ function buildSecondBrainItems(
       : "No chapter loaded";
   const missionDetail = missionDebt
     ? compactLine(missionDebt.message, "Resolve or update this chapter mission")
+    : missionCalibration && chapterMission
+    ? compactLine(
+        `Save suggests: ${missionCalibration.preview}. Review in queue to accept or reject.`,
+        "",
+      )
     : chapterMission
     ? compactLine(
         [
@@ -414,7 +424,13 @@ function buildSecondBrainItems(
       label: "Chapter Mission",
       value: missionValue,
       detail: missionDetail,
-      tone: missionDebt ? "danger" : chapterMission ? missionStatusTone(chapterMission.status) : "accent",
+      tone: missionDebt
+        ? "danger"
+        : missionCalibration
+          ? "danger"
+          : chapterMission
+            ? missionStatusTone(chapterMission.status)
+            : "accent",
     },
     {
       label: "Last Result",
@@ -483,6 +499,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [missionDraft, setMissionDraft] = useState<ChapterMissionDraft>(() => emptyChapterMissionDraft());
   const [foundationSaveState, setFoundationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [foundationDirty, setFoundationDirty] = useState(false);
+  const [showAllPromises, setShowAllPromises] = useState(false);
   const foundationChapterRef = useRef(currentChapter);
 
   const refreshStatus = useCallback(async () => {
@@ -821,6 +838,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           expectedEnding: missionDraft.expectedEnding.trim(),
           status: missionDraft.status.trim() || "active",
           sourceRef: missionDraft.sourceRef.trim() || "author",
+          blockedReason: missionDraft.blockedReason.trim(),
+          retiredHistory: missionDraft.retiredHistory.trim(),
         },
       });
     }
@@ -892,6 +911,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     mode === "write"
       ? pendingProposals.filter((proposal) => proposal.priority === "urgent").slice(0, 3)
       : pendingProposals;
+  const riskOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const rankedPromises = [...(ledger?.openPromises ?? [])].sort(
+    (a, b) => (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3),
+  );
   const secondBrainItems = buildSecondBrainItems(
     ledger,
     storyDebt,
@@ -899,6 +922,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     currentChapter,
     trace,
     isAgentThinking,
+    rankedPromises,
   );
   const availableTabs =
     mode === "write"
@@ -1381,6 +1405,28 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
                   placeholder="Expected ending state"
                 />
+                {missionDraft.status === "blocked" && (
+                  <textarea
+                    value={missionDraft.blockedReason}
+                    onChange={(event) => {
+                      setFoundationDirty(true);
+                      setMissionDraft((prev) => ({ ...prev, blockedReason: event.target.value }));
+                    }}
+                    className="min-h-14 rounded border border-warning/30 bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-warning"
+                    placeholder="Why is this mission blocked? (visible to agent)"
+                  />
+                )}
+                {missionDraft.status === "retired" && (
+                  <textarea
+                    value={missionDraft.retiredHistory}
+                    onChange={(event) => {
+                      setFoundationDirty(true);
+                      setMissionDraft((prev) => ({ ...prev, retiredHistory: event.target.value }));
+                    }}
+                    className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
+                    placeholder="Why was this mission retired? (preserved for history)"
+                  />
+                )}
               </div>
             </div>
 
@@ -1597,7 +1643,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(ledger?.openPromises.length ?? 0) === 0 && (
               <p className="text-text-muted">No open plot promises recorded yet.</p>
             )}
-            {ledger?.openPromises.map((promise) => {
+            {(showAllPromises ? rankedPromises : rankedPromises.slice(0, 3)).map((promise) => {
               const chapter = currentChapter ?? (promise.expectedPayoff || "current chapter");
               const operations: WriterOperation[] = [
                 { kind: "promise.resolve", promiseId: String(promise.id), chapter },
@@ -1614,11 +1660,17 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   reason: `Author decided '${promise.title}' no longer needs payoff in the current story shape.`,
                 },
               ];
+              const riskBadge =
+                promise.risk === "high"
+                  ? "bg-danger/20 text-danger"
+                  : promise.risk === "medium"
+                    ? "bg-warning/20 text-warning"
+                    : "bg-bg-deep text-text-muted";
               return (
                 <div key={promise.id} className="rounded bg-bg-raised border border-border-subtle p-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-text-primary">{promise.title}</span>
-                    <span className="text-[10px] text-text-muted">{promise.kind}</span>
+                    <span className={`text-[10px] px-1 rounded ${riskBadge}`}>{promise.risk}</span>
                   </div>
                   <p className="mt-1 text-text-secondary">{promise.description}</p>
                   <div className="mt-2 text-[10px] text-text-muted">
@@ -1638,6 +1690,16 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 </div>
               );
             })}
+            {rankedPromises.length > 3 && (
+              <button
+                onClick={() => setShowAllPromises(!showAllPromises)}
+                className="w-full py-1.5 text-[10px] text-text-muted hover:text-accent border border-dashed border-border-subtle rounded"
+              >
+                {showAllPromises
+                  ? "Show top 3 only"
+                  : `Show all ${rankedPromises.length} promises`}
+              </button>
+            )}
           </div>
         )}
 

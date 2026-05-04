@@ -292,6 +292,8 @@ pub struct PlotPromiseSummary {
     pub last_seen_ref: String,
     pub expected_payoff: String,
     pub priority: i32,
+    #[serde(default)]
+    pub risk: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -399,6 +401,10 @@ pub struct ChapterMissionSummary {
     pub status: String,
     pub source_ref: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub blocked_reason: String,
+    #[serde(default)]
+    pub retired_history: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -449,6 +455,12 @@ impl ChapterMissionSummary {
         push_contract_line(&mut lines, "禁止事项", &self.must_not);
         push_contract_line(&mut lines, "预期收束", &self.expected_ending);
         push_contract_line(&mut lines, "任务状态", &self.status);
+        if self.status == "blocked" && !self.blocked_reason.trim().is_empty() {
+            push_contract_line(&mut lines, "阻塞原因", &self.blocked_reason);
+        }
+        if self.status == "retired" && !self.retired_history.trim().is_empty() {
+            push_contract_line(&mut lines, "退役说明", &self.retired_history);
+        }
         lines.join("\n")
     }
 }
@@ -1086,9 +1098,11 @@ impl WriterMemory {
              FROM plot_promises WHERE status = 'open' ORDER BY priority DESC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
+            let kind: String = row.get(1)?;
+            let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
             Ok(PlotPromiseSummary {
                 id: row.get(0)?,
-                kind: row.get(1)?,
+                kind,
                 title: row.get(2)?,
                 description: row.get(3)?,
                 introduced_chapter: row.get(4)?,
@@ -1096,6 +1110,7 @@ impl WriterMemory {
                 last_seen_ref: row.get(6)?,
                 expected_payoff: row.get(7)?,
                 priority: row.get(8)?,
+                risk,
             })
         })?;
         rows.collect()
@@ -1307,8 +1322,8 @@ impl WriterMemory {
         self.conn.execute(
             "INSERT INTO chapter_missions
              (project_id, chapter_title, mission, must_include, must_not, expected_ending,
-              status, source_ref, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+              status, source_ref, updated_at, blocked_reason, retired_history)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10)
              ON CONFLICT(project_id, chapter_title) DO UPDATE SET
                 mission=excluded.mission,
                 must_include=excluded.must_include,
@@ -1316,7 +1331,9 @@ impl WriterMemory {
                 expected_ending=excluded.expected_ending,
                 status=excluded.status,
                 source_ref=excluded.source_ref,
-                updated_at=datetime('now')",
+                updated_at=datetime('now'),
+                blocked_reason=excluded.blocked_reason,
+                retired_history=excluded.retired_history",
             rusqlite::params![
                 mission.project_id,
                 mission.chapter_title,
@@ -1326,6 +1343,8 @@ impl WriterMemory {
                 mission.expected_ending,
                 mission.status,
                 mission.source_ref,
+                mission.blocked_reason,
+                mission.retired_history,
             ],
         )?;
         self.conn.query_row(
@@ -1343,7 +1362,8 @@ impl WriterMemory {
         self.conn
             .query_row(
                 "SELECT id, project_id, chapter_title, mission, must_include, must_not,
-                        expected_ending, status, source_ref, updated_at
+                        expected_ending, status, source_ref, updated_at,
+                        blocked_reason, retired_history
                  FROM chapter_missions WHERE project_id=?1 AND chapter_title=?2",
                 rusqlite::params![project_id, chapter_title],
                 chapter_mission_from_row,
@@ -1358,7 +1378,8 @@ impl WriterMemory {
     ) -> rusqlite::Result<Vec<ChapterMissionSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, project_id, chapter_title, mission, must_include, must_not,
-                    expected_ending, status, source_ref, updated_at
+                    expected_ending, status, source_ref, updated_at,
+                    blocked_reason, retired_history
              FROM chapter_missions
              WHERE project_id=?1
              ORDER BY id ASC
@@ -1397,6 +1418,8 @@ impl WriterMemory {
             status: "draft".to_string(),
             source_ref: source_ref.to_string(),
             updated_at: String::new(),
+            blocked_reason: String::new(),
+            retired_history: String::new(),
         };
         self.upsert_chapter_mission(&summary)?;
         Ok(true)
@@ -2543,6 +2566,18 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     )?;
     backfill_empty_timestamp(conn, "chapter_missions", "created_at")?;
     backfill_empty_timestamp(conn, "chapter_missions", "updated_at")?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "blocked_reason",
+        "blocked_reason TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "retired_history",
+        "retired_history TEXT DEFAULT ''",
+    )?;
 
     ensure_column(
         conn,
@@ -2694,6 +2729,8 @@ fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chapter
         status: crate::writer_agent::kernel_helpers::normalize_chapter_mission_status(&status),
         source_ref: row.get(8)?,
         updated_at: row.get(9)?,
+        blocked_reason: row.get::<_, String>(10).unwrap_or_default(),
+        retired_history: row.get::<_, String>(11).unwrap_or_default(),
     })
 }
 

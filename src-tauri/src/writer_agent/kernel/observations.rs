@@ -31,7 +31,16 @@ impl WriterAgentKernel {
             let result = chapter_result_from_observation(&observation, &self.memory);
             if !result.is_empty() {
                 self.memory.record_chapter_result(&result).ok();
-                self.calibrate_chapter_mission(&observation, &result).ok();
+                let calibration = self.calibrate_chapter_mission(
+                    &observation,
+                    &result,
+                    &obs_id,
+                    self.proposal_counter,
+                );
+                if let Some(cal) = calibration {
+                    self.proposal_counter += 1;
+                    proposals.push(cal);
+                }
                 self.touch_promise_last_seen_from_result(&result).ok();
                 proposals.extend(chapter_mission_result_proposals(
                     &observation,
@@ -228,9 +237,9 @@ impl WriterAgentKernel {
                     context_pack.budget_limit
                 ),
                 evidence: context_pack_evidence(&context_pack, &observation),
-                risks: vec![],
+                risks: ghost_quality_risks(&self.memory, &self.project_id),
                 alternatives,
-                confidence: intent.confidence.max(0.55) as f64,
+                confidence: ghost_confidence(intent.confidence, &self.memory, &self.project_id),
                 expires_at: Some(observation.created_at + 30_000),
             });
             self.proposal_counter += 1;
@@ -244,39 +253,90 @@ impl WriterAgentKernel {
         &self,
         observation: &WriterObservation,
         result: &ChapterResultSummary,
-    ) -> Result<(), String> {
-        let Some(chapter_title) = observation.chapter_title.as_deref() else {
-            return Ok(());
-        };
-        let Some(mut mission) = self
+        observation_id: &str,
+        proposal_counter: u64,
+    ) -> Option<AgentProposal> {
+        let chapter_title = observation.chapter_title.as_deref()?;
+        let mission = self
             .memory
             .get_chapter_mission(&self.project_id, chapter_title)
-            .map_err(|e| e.to_string())?
-        else {
-            return Ok(());
-        };
+            .ok()??;
 
         let status = calibrated_mission_status(&mission, result);
         if mission.status == status {
-            return Ok(());
+            return None;
         }
 
-        mission.status = status;
-        mission.source_ref = format!("result_feedback:{}", result.source_ref);
-        self.memory
-            .upsert_chapter_mission(&mission)
-            .map_err(|e| e.to_string())?;
+        let source_ref = format!("result_feedback:{}", result.source_ref);
         self.memory
             .record_decision(
                 chapter_title,
                 "Chapter mission calibration",
-                &format!("mission_status:{}", mission.status),
+                &format!("mission_status:{}", status),
                 &[],
                 &mission.render_for_context(),
                 &[result.source_ref.clone()],
             )
             .ok();
-        Ok(())
+
+        let preview = match status.as_str() {
+            "completed" => format!("Chapter mission completed: {}", chapter_title),
+            "drifted" => format!("Chapter mission drifted: {}", chapter_title),
+            "needs_review" => format!("Chapter mission needs review: {}", chapter_title),
+            _ => format!("Chapter mission status → {}: {}", status, chapter_title),
+        };
+        let rationale = format!(
+            "Save result triggered mission calibration from {} to {} based on must_include/must_not/expected_ending checks.",
+            mission.status, status
+        );
+
+        Some(AgentProposal {
+            id: proposal_id(&self.session_id, proposal_counter),
+            observation_id: observation_id.to_string(),
+            kind: ProposalKind::ChapterMission,
+            priority: if status == "drifted" {
+                ProposalPriority::Urgent
+            } else {
+                ProposalPriority::Normal
+            },
+            target: observation.cursor.clone(),
+            preview,
+            operations: vec![WriterOperation::ChapterMissionUpsert {
+                mission: crate::writer_agent::operation::ChapterMissionOp {
+                    project_id: self.project_id.clone(),
+                    chapter_title: chapter_title.to_string(),
+                    mission: mission.mission.clone(),
+                    must_include: mission.must_include.clone(),
+                    must_not: mission.must_not.clone(),
+                    expected_ending: mission.expected_ending.clone(),
+                    status: status.clone(),
+                    source_ref: source_ref.clone(),
+                    blocked_reason: String::new(),
+                    retired_history: String::new(),
+                },
+            }],
+            rationale,
+            evidence: vec![
+                EvidenceRef {
+                    source: EvidenceSource::ChapterMission,
+                    reference: format!("{}:mission", chapter_title),
+                    snippet: mission.mission.clone(),
+                },
+                EvidenceRef {
+                    source: EvidenceSource::ChapterText,
+                    reference: result.source_ref.clone(),
+                    snippet: result.summary.clone(),
+                },
+            ],
+            confidence: 0.82,
+            expires_at: Some(observation.created_at + 120_000),
+            alternatives: vec![],
+            risks: if status == "drifted" {
+                vec!["Chapter has drifted from its mission — review before continuing.".into()]
+            } else {
+                vec![]
+            },
+        })
     }
 
     fn touch_promise_last_seen_from_result(

@@ -841,6 +841,7 @@ export interface PlotPromiseSummary {
   lastSeenRef: string;
   expectedPayoff: string;
   priority: number;
+  risk: string;
 }
 
 export interface CreativeDecisionSummary {
@@ -889,6 +890,8 @@ export interface ChapterMissionSummary {
   status: string;
   sourceRef: string;
   updatedAt: string;
+  blockedReason: string;
+  retiredHistory: string;
 }
 
 export interface ChapterMissionOperationInput {
@@ -900,6 +903,8 @@ export interface ChapterMissionOperationInput {
   expectedEnding: string;
   status: string;
   sourceRef: string;
+  blockedReason?: string;
+  retiredHistory?: string;
 }
 
 export interface ChapterResultSummary {

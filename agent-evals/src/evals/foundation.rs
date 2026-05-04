@@ -34,6 +34,8 @@ pub fn run_foundation_write_validation_eval() -> EvalResult {
                     expected_ending: "".to_string(),
                     status: "in_progress".to_string(),
                     source_ref: "eval".to_string(),
+                    blocked_reason: String::new(),
+                    retired_history: String::new(),
                 },
             },
             "",

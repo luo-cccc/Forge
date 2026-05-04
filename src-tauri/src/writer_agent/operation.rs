@@ -141,6 +141,10 @@ pub struct ChapterMissionOp {
     pub expected_ending: String,
     pub status: String,
     pub source_ref: String,
+    #[serde(default)]
+    pub blocked_reason: String,
+    #[serde(default)]
+    pub retired_history: String,
 }
 
 /// Result of executing a WriterOperation.

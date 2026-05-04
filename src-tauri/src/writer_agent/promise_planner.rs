@@ -355,6 +355,7 @@ mod tests {
             last_seen_ref: String::new(),
             expected_payoff: payoff.to_string(),
             priority,
+            risk: "high".to_string(),
         }
     }
 

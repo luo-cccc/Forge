@@ -2,6 +2,7 @@
 //! Extracted from kernel.rs.
 
 use super::context::AgentTask;
+use super::kernel_run_loop::WriterAgentTask;
 use super::memory::{
     ChapterMissionSummary, StoryContractQuality, StoryContractSummary, WriterMemory,
 };
@@ -172,6 +173,37 @@ pub fn ghost_confidence(intent_confidence: f32, memory: &WriterMemory, project_i
         StoryContractQuality::Vague => base * 0.7,
         StoryContractQuality::Usable => base,
         StoryContractQuality::Strong => (base + 0.05).min(0.95),
+    }
+}
+
+pub fn task_requires_story_grounding(task: &WriterAgentTask) -> bool {
+    matches!(
+        task,
+        WriterAgentTask::ChapterGeneration
+            | WriterAgentTask::GhostWriting
+            | WriterAgentTask::InlineRewrite
+            | WriterAgentTask::ContinuityDiagnostic
+            | WriterAgentTask::PlanningReview
+    )
+}
+
+pub fn ghost_quality_risks(memory: &WriterMemory, project_id: &str) -> Vec<String> {
+    let quality = memory
+        .get_story_contract(project_id)
+        .ok()
+        .flatten()
+        .map(|contract| contract.quality())
+        .unwrap_or(StoryContractQuality::Missing);
+    match quality {
+        StoryContractQuality::Missing => vec![
+            "Story contract is missing — this continuation has no book-level grounding."
+                .to_string(),
+        ],
+        StoryContractQuality::Vague => vec![
+            "Story contract is vague — strengthen it in Settings for more reliable ghost writing."
+                .to_string(),
+        ],
+        _ => vec!["LLM draft should be reviewed before keeping.".to_string()],
     }
 }
 

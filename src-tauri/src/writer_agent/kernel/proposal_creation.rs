@@ -69,7 +69,7 @@ impl WriterAgentKernel {
                 context_pack.budget_limit
             ),
             evidence: context_pack_evidence(&context_pack, &observation),
-            risks: vec!["LLM draft should be reviewed before keeping.".into()],
+            risks: ghost_quality_risks(&self.memory, &self.project_id),
             alternatives: vec![],
             confidence: ghost_confidence(intent.confidence, &self.memory, &self.project_id),
             expires_at: Some(observation.created_at + 60_000),

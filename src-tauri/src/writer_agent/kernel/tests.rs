@@ -1130,14 +1130,20 @@ fn save_observation_calibrates_completed_chapter_mission() {
     obs.reason = ObservationReason::Save;
     obs.source = ObservationSource::ChapterSave;
 
-    kernel.observe(obs).unwrap();
+    let proposals = kernel.observe(obs).unwrap();
 
+    let calibration = proposals
+        .iter()
+        .find(|p| p.rationale.contains("mission calibration"))
+        .expect("should produce a mission calibration proposal");
+    assert_eq!(calibration.kind, ProposalKind::ChapterMission);
+    assert!(calibration.preview.contains("completed"));
+    // Mission in DB should NOT be auto-calibrated — proposals require author approval
     let mission = kernel
         .ledger_snapshot()
         .active_chapter_mission
-        .expect("mission should stay active");
-    assert_eq!(mission.status, "completed");
-    assert!(mission.source_ref.contains("result_feedback:chapter_save"));
+        .expect("mission should exist");
+    assert_eq!(mission.status, "draft");
 }
 
 #[test]
@@ -1159,18 +1165,22 @@ fn save_observation_marks_chapter_mission_drifted_on_must_not_hit() {
     obs.reason = ObservationReason::Save;
     obs.source = ObservationSource::ChapterSave;
 
-    kernel.observe(obs).unwrap();
+    let proposals = kernel.observe(obs).unwrap();
 
+    let calibration = proposals
+        .iter()
+        .find(|p| p.rationale.contains("mission calibration"))
+        .expect("should produce a mission calibration proposal");
+    assert_eq!(calibration.kind, ProposalKind::ChapterMission);
+    assert_eq!(calibration.priority, ProposalPriority::Urgent);
+    assert!(calibration.preview.contains("drifted"));
+    assert!(calibration.risks.iter().any(|r| r.contains("drifted")));
+    // Mission in DB should NOT be auto-calibrated
     let mission = kernel
         .ledger_snapshot()
         .active_chapter_mission
-        .expect("mission should stay active");
-    assert_eq!(mission.status, "drifted");
-    assert!(kernel
-        .ledger_snapshot()
-        .recent_decisions
-        .iter()
-        .any(|decision| decision.decision == "mission_status:drifted"));
+        .expect("mission should exist");
+    assert_eq!(mission.status, "draft");
 }
 
 #[test]
@@ -1345,6 +1355,8 @@ fn chapter_mission_operation_updates_ledger_snapshot() {
                     expected_ending: "以新的疑问收束。".to_string(),
                     status: "active".to_string(),
                     source_ref: "test".to_string(),
+                    blocked_reason: String::new(),
+                    retired_history: String::new(),
                 },
             },
             "",
@@ -1395,6 +1407,8 @@ fn chapter_mission_status_machine_accepts_new_statuses_and_legacy_alias() {
                         expected_ending: "以新的疑问收束。".to_string(),
                         status: raw.to_string(),
                         source_ref: "test".to_string(),
+                        blocked_reason: String::new(),
+                        retired_history: String::new(),
                     },
                 },
                 "",
@@ -1430,6 +1444,8 @@ fn chapter_mission_operation_rejects_vague_foundation() {
                     expected_ending: "".to_string(),
                     status: "in_progress".to_string(),
                     source_ref: "test".to_string(),
+                    blocked_reason: String::new(),
+                    retired_history: String::new(),
                 },
             },
             "",

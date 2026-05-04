@@ -26,6 +26,8 @@ export interface ChapterMissionDraft {
   expectedEnding: string;
   status: string;
   sourceRef: string;
+  blockedReason: string;
+  retiredHistory: string;
 }
 
 function memoryOperationSlot(operation: WriterOperation | undefined): string | null {
@@ -207,6 +209,8 @@ export function emptyChapterMissionDraft(): ChapterMissionDraft {
     expectedEnding: "",
     status: "active",
     sourceRef: "author",
+    blockedReason: "",
+    retiredHistory: "",
   };
 }
 
@@ -220,6 +224,8 @@ export function chapterMissionDraftFromSummary(
     expectedEnding: mission?.expectedEnding ?? "",
     status: mission?.status === "in_progress" ? "active" : mission?.status || "active",
     sourceRef: mission?.sourceRef || "author",
+    blockedReason: mission?.blockedReason ?? "",
+    retiredHistory: mission?.retiredHistory ?? "",
   };
 }
 

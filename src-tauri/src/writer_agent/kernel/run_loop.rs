@@ -82,13 +82,13 @@ impl WriterAgentKernel {
             self.record_task_receipt_run_event(receipt);
         }
 
-        if request.task == WriterAgentTask::ChapterGeneration {
+        if task_requires_story_grounding(&request.task) {
             let quality = self.contract_quality();
             if quality <= StoryContractQuality::Vague {
                 task_packet.beliefs.push(TaskBelief {
                     subject: "Story Contract Quality".to_string(),
                     statement: format!(
-                        "StoryContract quality is {:?}: generated chapter may lack story-level grounding. Consider strengthening the Story Contract in settings.",
+                        "StoryContract quality is {:?}: this task may lack story-level grounding. Consider strengthening the Story Contract in settings.",
                         quality
                     ),
                     confidence: 0.9f32,
