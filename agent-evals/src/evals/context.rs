@@ -205,6 +205,154 @@ pub fn run_context_source_trend_eval() -> EvalResult {
     )
 }
 
+pub fn run_context_source_trend_pressure_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let premise = "刀客追查玉佩真相，必须保留复仇与守护的双重压力。".repeat(8);
+    let promise = "林墨必须在复仇和守护之间做选择。".repeat(10);
+    let boundary = "不得提前泄露玉佩来源。".repeat(10);
+    let mission_goal =
+        "林墨要在审讯张三时逼近玉佩真相，但不能让读者提前知道玉佩来自北境密库。".repeat(8);
+    let ending = "以张三交出一枚伪造令牌收束。".repeat(5);
+    memory
+        .ensure_story_contract_seed("eval", "寒影录", "玄幻", &premise, &promise, &boundary)
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-8",
+            &mission_goal,
+            "审讯张三、保留玉佩来源悬念、暴露新的行动线索",
+            "直接揭开玉佩真实来源",
+            &ending,
+            "eval",
+        )
+        .unwrap();
+    for idx in 0..6 {
+        memory
+            .upsert_canon_entity(
+                "character",
+                &format!("线索人物{}", idx),
+                &[],
+                &format!(
+                    "线索人物{}知道玉佩线的一部分，但每个人都只提供含混证词。{}",
+                    idx,
+                    "寒玉戒指、北境密库、伪造令牌、张三隐瞒。".repeat(8)
+                ),
+                &serde_json::json!({ "clue": "玉佩", "chapter": idx }),
+                0.9,
+            )
+            .unwrap();
+    }
+    for idx in 0..5 {
+        memory
+            .add_promise(
+                "clue",
+                &format!("玉佩线索{}", idx),
+                &format!(
+                    "第{}条线索必须在审讯后续回收，不能提前解释来源。{}",
+                    idx,
+                    "延迟揭示。".repeat(20)
+                ),
+                "Chapter-3",
+                "Chapter-12",
+                5,
+            )
+            .unwrap();
+    }
+    memory
+        .upsert_style_preference(
+            "dialogue_subtext",
+            &"对白保持克制，用动作和停顿暗示压力，不用直白解释。".repeat(12),
+            true,
+        )
+        .unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-8".to_string());
+    let observation = observation_in_chapter(
+        &format!(
+            "{}林墨看着张三，问他那枚玉佩到底从谁手里来。",
+            "审讯室里只剩烛火和铁链轻响。".repeat(60)
+        ),
+        "Chapter-8",
+    );
+    let pack = kernel.context_pack_for(AgentTask::GhostWriting, &observation, 720);
+    let dropped = pack
+        .budget_report
+        .source_reports
+        .iter()
+        .filter(|report| report.provided == 0)
+        .count();
+    let truncated = pack
+        .budget_report
+        .source_reports
+        .iter()
+        .filter(|report| report.truncated)
+        .count();
+    let dropped_reason = pack.budget_report.source_reports.iter().any(|report| {
+        report.provided == 0
+            && report.reason.contains("dropped")
+            && report
+                .truncation_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("ContextPack total budget"))
+    });
+    let cursor_report = pack
+        .budget_report
+        .source_reports
+        .iter()
+        .find(|report| report.source == "CursorPrefix");
+
+    let proposals = kernel.observe(observation).unwrap();
+    let trace = kernel.trace_snapshot(10);
+    let has_trace_pressure = trace.context_source_trends.iter().any(|trend| {
+        trend.truncated_count > 0
+            && trend.total_requested > trend.total_provided
+            && trend.last_truncation_reason.is_some()
+    });
+
+    let mut errors = Vec::new();
+    if pack.total_chars > pack.budget_limit {
+        errors.push(format!(
+            "pressure fixture exceeded budget: used {} > {}",
+            pack.total_chars, pack.budget_limit
+        ));
+    }
+    if dropped == 0 {
+        errors.push("tight context pack did not expose any dropped sources".to_string());
+    }
+    if truncated == 0 {
+        errors.push("tight context pack did not expose any truncated sources".to_string());
+    }
+    if !dropped_reason {
+        errors.push("dropped source did not carry budget-exhaustion reason".to_string());
+    }
+    if !cursor_report.is_some_and(|report| report.provided > 0 && report.truncated) {
+        errors.push(format!(
+            "required cursor source should be included but pressure-marked: {:?}",
+            cursor_report
+        ));
+    }
+    if proposals.is_empty() {
+        errors.push("pressure fixture should still produce proposals".to_string());
+    }
+    if !has_trace_pressure {
+        errors.push("trace trends did not expose truncated source pressure".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_source_trend_pressure",
+        format!(
+            "tightSources={} dropped={} truncated={} traceTrends={}",
+            pack.budget_report.source_reports.len(),
+            dropped,
+            truncated,
+            trace.context_source_trends.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_context_window_guard_eval() -> EvalResult {
     let messages = vec![agent_harness_core::provider::LlmMessage {
         role: "user".to_string(),

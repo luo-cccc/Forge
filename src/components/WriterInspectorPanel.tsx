@@ -287,6 +287,60 @@ function contextBudgetToneClass(report: ContextBudgetTrace): string {
   return "border-border-subtle bg-bg-deep";
 }
 
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}k`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+function trendCoverageRate(trend: WriterContextSourceTrend): number {
+  if (trend.totalRequested <= 0) return 1;
+  return trend.totalProvided / trend.totalRequested;
+}
+
+function contextPressureSummary(trends: WriterContextSourceTrend[]): {
+  totalRequested: number;
+  totalProvided: number;
+  coverageRate: number;
+  truncatedEvents: number;
+  droppedEvents: number;
+  truncatedSources: number;
+  droppedSources: number;
+  hottestSource?: WriterContextSourceTrend;
+} {
+  const summary = trends.reduce(
+    (acc, trend) => {
+      acc.totalRequested += trend.totalRequested;
+      acc.totalProvided += trend.totalProvided;
+      acc.truncatedEvents += trend.truncatedCount;
+      acc.droppedEvents += trend.droppedCount;
+      if (trend.truncatedCount > 0) acc.truncatedSources += 1;
+      if (trend.droppedCount > 0) acc.droppedSources += 1;
+      return acc;
+    },
+    {
+      totalRequested: 0,
+      totalProvided: 0,
+      truncatedEvents: 0,
+      droppedEvents: 0,
+      truncatedSources: 0,
+      droppedSources: 0,
+    },
+  );
+  const hottestSource = [...trends].sort((left, right) => {
+    const leftPressure = left.droppedCount * 4 + left.truncatedCount * 2 + (1 - trendCoverageRate(left));
+    const rightPressure = right.droppedCount * 4 + right.truncatedCount * 2 + (1 - trendCoverageRate(right));
+    return rightPressure - leftPressure || right.appearances - left.appearances || left.source.localeCompare(right.source);
+  })[0];
+
+  return {
+    ...summary,
+    coverageRate: summary.totalRequested > 0 ? summary.totalProvided / summary.totalRequested : 1,
+    hottestSource,
+  };
+}
+
 function eventSortValue(event: WriterTimelineEvent): number {
   return event.tsMs || 0;
 }
@@ -357,7 +411,8 @@ export const WriterInspectorPanel: React.FC = () => {
   const latestArtifact = events.find((event) => event.kind === "task_artifact");
   const latestPostWrite = trace?.postWriteDiagnostics[0];
   const metrics = trace?.productMetrics;
-  const trends = trace?.contextSourceTrends ?? [];
+  const trends = useMemo(() => trace?.contextSourceTrends ?? [], [trace?.contextSourceTrends]);
+  const contextPressure = useMemo(() => contextPressureSummary(trends), [trends]);
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
   const latestFailureDetail = failureDetail(latestFailure?.detail);
   const latestSaveDetail = saveCompletedDetail(latestSave?.detail);
@@ -908,6 +963,52 @@ export const WriterInspectorPanel: React.FC = () => {
               {trends.length === 0 && (
                 <p className="text-text-muted">No context trend data yet.</p>
               )}
+              {trends.length > 0 && (
+                <div className="mb-2 grid grid-cols-3 gap-1.5">
+                  <div className="rounded border border-border-subtle bg-bg-deep p-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-text-muted">coverage</div>
+                    <div className="mt-0.5 font-mono text-[11px] text-text-primary">
+                      {formatRate(contextPressure.coverageRate)}
+                    </div>
+                    <div className="mt-0.5 text-[9px] text-text-muted">
+                      {formatCompactNumber(contextPressure.totalProvided)}/{formatCompactNumber(contextPressure.totalRequested)}
+                    </div>
+                  </div>
+                  <div className="rounded border border-accent/30 bg-bg-deep p-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-text-muted">truncated</div>
+                    <div className="mt-0.5 font-mono text-[11px] text-accent">
+                      {contextPressure.truncatedEvents}
+                    </div>
+                    <div className="mt-0.5 text-[9px] text-text-muted">
+                      {contextPressure.truncatedSources} sources
+                    </div>
+                  </div>
+                  <div className="rounded border border-danger/30 bg-bg-deep p-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-text-muted">dropped</div>
+                    <div className="mt-0.5 font-mono text-[11px] text-danger">
+                      {contextPressure.droppedEvents}
+                    </div>
+                    <div className="mt-0.5 text-[9px] text-text-muted">
+                      {contextPressure.droppedSources} sources
+                    </div>
+                  </div>
+                </div>
+              )}
+              {contextPressure.hottestSource && (
+                <div className="mb-2 rounded border border-border-subtle bg-bg-deep p-1.5 text-[10px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-text-muted">pressure source</span>
+                    <span className="truncate text-text-secondary" title={contextPressure.hottestSource.source}>
+                      {contextPressure.hottestSource.source}
+                    </span>
+                  </div>
+                  {(contextPressure.hottestSource.lastTruncationReason || contextPressure.hottestSource.lastReason) && (
+                    <p className="mt-1 line-clamp-2 text-text-muted">
+                      {contextPressure.hottestSource.lastTruncationReason ?? contextPressure.hottestSource.lastReason}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="space-y-1.5">
                 {trends.slice(0, 8).map((trend) => (
                   <div key={trend.source} className={`rounded border p-2 ${trendToneClass(trend)}`}>
@@ -916,13 +1017,27 @@ export const WriterInspectorPanel: React.FC = () => {
                         {trend.source}
                       </span>
                       <span className="font-mono text-[10px] text-text-muted">
-                        {trend.totalProvided}/{trend.totalRequested}
+                        {formatRate(trendCoverageRate(trend))}
                       </span>
                     </div>
-                    <div className="mt-1 flex gap-1 text-[10px] text-text-muted">
+                    <div className="mt-1 h-1 overflow-hidden rounded bg-bg-deep">
+                      <div
+                        className={
+                          trend.droppedCount > 0
+                            ? "h-full bg-danger"
+                            : trend.truncatedCount > 0
+                              ? "h-full bg-accent"
+                              : "h-full bg-success"
+                        }
+                        style={{ width: `${Math.max(4, Math.min(100, trendCoverageRate(trend) * 100))}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted">
                       <span>seen {trend.appearances}</span>
+                      <span>provided {trend.providedCount}</span>
                       <span>trunc {trend.truncatedCount}</span>
                       <span>drop {trend.droppedCount}</span>
+                      <span>avg {formatCompactNumber(Math.round(trend.averageProvided))}</span>
                     </div>
                     {(trend.lastReason || trend.lastTruncationReason) && (
                       <p className="mt-1 line-clamp-2 text-[10px] text-text-secondary">
