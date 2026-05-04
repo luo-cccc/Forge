@@ -1047,6 +1047,9 @@ export interface WriterProductMetricSessionTrend {
   lastEventAt: number;
   eventCount: number;
   proposalCount: number;
+  manualAskProposalCount: number;
+  manualAskOperationCount: number;
+  manualAskConvertedToOperationRate: number;
   feedbackCount: number;
   acceptedCount: number;
   rejectedCount: number;

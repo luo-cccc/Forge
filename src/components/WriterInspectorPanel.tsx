@@ -719,6 +719,7 @@ export const WriterInspectorPanel: React.FC = () => {
                       <span>{formatTime(session.lastEventAt)}</span>
                       <span>{session.proposalCount} proposals</span>
                       <span>{session.feedbackCount} feedback</span>
+                      <span>ask ops {formatRate(session.manualAskConvertedToOperationRate)}</span>
                       <span>accept {formatRate(session.proposalAcceptanceRate)}</span>
                       <span>save {formatRate(session.durableSaveSuccessRate)}</span>
                     </div>

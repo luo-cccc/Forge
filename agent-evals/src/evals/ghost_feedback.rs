@@ -356,6 +356,100 @@ pub fn run_product_metrics_manual_ask_conversion_eval() -> EvalResult {
     )
 }
 
+pub fn run_product_metrics_manual_ask_conversion_trend_eval() -> EvalResult {
+    let db_path = std::env::temp_dir().join(format!(
+        "forge-manual-ask-conversion-trend-{}-{}.sqlite",
+        std::process::id(),
+        now_ms()
+    ));
+    let mut errors = Vec::new();
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "manual-ask-trend-session".to_string();
+        let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+        obs.source = ObservationSource::ManualRequest;
+        obs.reason = ObservationReason::Explicit;
+        kernel.observe(obs.clone()).unwrap();
+        let proposal = kernel
+            .create_inline_operation_proposal(
+                obs,
+                "把下一句改成更有行动压力的版本",
+                "他抬手按住门环，终于决定当面追问张三。".to_string(),
+                "eval-manual-request",
+            )
+            .unwrap();
+
+        if !kernel.run_events(20).iter().any(|event| {
+            event.event_type == "writer.proposal_created"
+                && event
+                    .data
+                    .get("observationSource")
+                    .and_then(|value| value.as_str())
+                    == Some("manual_request")
+                && event
+                    .data
+                    .get("operationCount")
+                    .and_then(|value| value.as_u64())
+                    == Some(1)
+        }) {
+            errors.push(
+                "manual ask proposal_created event lacks source or operation count".to_string(),
+            );
+        }
+        if proposal.operations.is_empty() {
+            errors.push("manual ask proposal did not carry an operation".to_string());
+        }
+    }
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let kernel = WriterAgentKernel::new("eval", memory);
+        let trend = kernel.trace_snapshot(40).product_metrics_trend;
+        let session = trend
+            .recent_sessions
+            .iter()
+            .find(|session| session.session_id == "manual-ask-trend-session");
+
+        if session.is_none() {
+            errors.push("manual ask trend session was not replayed".to_string());
+        }
+        if let Some(session) = session {
+            if session.manual_ask_proposal_count != 1 {
+                errors.push(format!(
+                    "manual ask trend proposal count was {}",
+                    session.manual_ask_proposal_count
+                ));
+            }
+            if session.manual_ask_operation_count != 1 {
+                errors.push(format!(
+                    "manual ask trend operation count was {}",
+                    session.manual_ask_operation_count
+                ));
+            }
+            if (session.manual_ask_converted_to_operation_rate - 1.0).abs() > f64::EPSILON {
+                errors.push(format!(
+                    "manual ask trend conversion was {:.2}",
+                    session.manual_ask_converted_to_operation_rate
+                ));
+            }
+        }
+        if !kernel
+            .export_trajectory(40)
+            .jsonl
+            .contains("\"manualAskConvertedToOperationRate\":1.0")
+        {
+            errors.push("trajectory trend lacks manual ask conversion rate".to_string());
+        }
+    }
+    let _ = std::fs::remove_file(&db_path);
+
+    eval_result(
+        "writer_agent:product_metrics_manual_ask_conversion_trend",
+        format!("db={}", db_path.display()),
+        errors,
+    )
+}
+
 pub fn run_product_metrics_multi_session_trend_eval() -> EvalResult {
     let db_path = std::env::temp_dir().join(format!(
         "forge-product-metrics-trend-{}-{}.sqlite",

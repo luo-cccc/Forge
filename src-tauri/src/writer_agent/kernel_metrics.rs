@@ -52,6 +52,9 @@ pub struct WriterProductMetricSessionTrend {
     pub last_event_at: u64,
     pub event_count: u64,
     pub proposal_count: u64,
+    pub manual_ask_proposal_count: u64,
+    pub manual_ask_operation_count: u64,
+    pub manual_ask_converted_to_operation_rate: f64,
     pub feedback_count: u64,
     pub accepted_count: u64,
     pub rejected_count: u64,
@@ -305,6 +308,8 @@ struct SessionMetricAccumulator {
     last_event_at: u64,
     event_count: u64,
     proposal_count: u64,
+    manual_ask_proposal_count: u64,
+    manual_ask_operation_count: u64,
     feedback_count: u64,
     accepted_count: u64,
     rejected_count: u64,
@@ -330,6 +335,7 @@ impl SessionMetricAccumulator {
         match event.event_type.as_str() {
             "writer.proposal_created" => {
                 self.proposal_count = self.proposal_count.saturating_add(1);
+                self.record_proposal_created_event(event);
             }
             "writer.feedback_recorded" => {
                 self.record_feedback_event(event);
@@ -338,6 +344,20 @@ impl SessionMetricAccumulator {
                 self.record_operation_lifecycle_event(event);
             }
             _ => {}
+        }
+    }
+
+    fn record_proposal_created_event(&mut self, event: &RunEventSummary) {
+        let is_manual_ask = json_string(&event.data, "observationSource")
+            .map(|source| normalize_metric_label(&source) == "manual_request")
+            .unwrap_or(false);
+        if !is_manual_ask {
+            return;
+        }
+
+        self.manual_ask_proposal_count = self.manual_ask_proposal_count.saturating_add(1);
+        if json_number(&event.data, "operationCount").unwrap_or_default() > 0 {
+            self.manual_ask_operation_count = self.manual_ask_operation_count.saturating_add(1);
         }
     }
 
@@ -401,6 +421,12 @@ impl SessionMetricAccumulator {
             last_event_at: self.last_event_at,
             event_count: self.event_count,
             proposal_count: self.proposal_count,
+            manual_ask_proposal_count: self.manual_ask_proposal_count,
+            manual_ask_operation_count: self.manual_ask_operation_count,
+            manual_ask_converted_to_operation_rate: ratio(
+                self.manual_ask_operation_count,
+                self.manual_ask_proposal_count,
+            ),
             feedback_count: self.feedback_count,
             accepted_count: self.accepted_count,
             rejected_count: self.rejected_count,
@@ -428,6 +454,10 @@ fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|field| !field.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn json_number(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|field| field.as_u64())
 }
 
 fn normalize_metric_label(value: &str) -> String {

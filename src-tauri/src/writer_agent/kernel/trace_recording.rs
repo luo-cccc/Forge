@@ -180,6 +180,10 @@ impl WriterAgentKernel {
     }
 
     pub(super) fn record_proposal_run_event(&mut self, proposal: &AgentProposal, created_at: u64) {
+        let observation = self
+            .observations
+            .iter()
+            .find(|observation| observation.id == proposal.observation_id);
         self.record_run_event(
             "proposal_created",
             created_at,
@@ -191,6 +195,9 @@ impl WriterAgentKernel {
                 "kind": proposal.kind,
                 "priority": proposal.priority,
                 "confidence": proposal.confidence,
+                "observationSource": observation.map(|observation| observation.source.clone()),
+                "observationReason": observation.map(|observation| observation.reason.clone()),
+                "operationCount": proposal.operations.len(),
                 "operationKinds": proposal.operations
                     .iter()
                     .map(|operation| operation_kind_label(operation).to_string())
