@@ -66,6 +66,8 @@ const classification = {
   get_writer_agent_inspector_timeline: RISK.READ_ONLY,
   get_writer_agent_companion_timeline_summary: RISK.READ_ONLY,
   abort_editor_prediction: RISK.READ_ONLY,
+  get_project_brain_knowledge_graph: RISK.READ_ONLY,
+  compare_project_brain_source_revisions: RISK.READ_ONLY,
 
   // Credential
   set_api_key: RISK.CREDENTIAL,
@@ -170,7 +172,15 @@ const issues = [];
 const report = [];
 
 for (const cmd of commands) {
-  const risk = classification[cmd] || RISK.READ_ONLY;
+  if (!Object.prototype.hasOwnProperty.call(classification, cmd)) {
+    issues.push(
+      `${cmd}: missing explicit risk classification in scripts/check-command-audit.cjs`
+    );
+    report.push({ command: cmd, risk: "unclassified", auditCovered: false, ok: false });
+    continue;
+  }
+
+  const risk = classification[cmd];
   const body = extractFunctionBody(cmd);
   const hasAudit = AUDIT_FUNCTIONS.some((fn) => body.includes(fn));
 
@@ -183,6 +193,12 @@ for (const cmd of commands) {
     issues.push(
       `${cmd} (${risk}): no audit or operation reference found in command body`
     );
+  }
+}
+
+for (const cmd of Object.keys(classification)) {
+  if (!commands.includes(cmd)) {
+    issues.push(`${cmd}: classified command no longer exists in src-tauri/src`);
   }
 }
 

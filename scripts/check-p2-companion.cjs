@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const ts = require("typescript");
 
 const componentPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.tsx");
 const appPath = path.join(__dirname, "..", "src", "App.tsx");
@@ -8,107 +9,199 @@ const source = fs.readFileSync(componentPath, "utf8");
 const appSource = fs.readFileSync(appPath, "utf8");
 const inspectorSource = fs.readFileSync(inspectorPath, "utf8");
 
+const componentAst = ts.createSourceFile(componentPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const appAst = ts.createSourceFile(appPath, appSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const inspectorAst = ts.createSourceFile(inspectorPath, inspectorSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+function normalize(text) {
+  return text.replace(/\s+/g, " ");
+}
+
+function walk(node, visit) {
+  visit(node);
+  ts.forEachChild(node, (child) => walk(child, visit));
+}
+
+function hasVariableInitializer(ast, name, predicate) {
+  let found = false;
+  walk(ast, (node) => {
+    if (found || !ts.isVariableDeclaration(node)) return;
+    if (!ts.isIdentifier(node.name) || node.name.text !== name || !node.initializer) return;
+    found = predicate(normalize(node.initializer.getText()));
+  });
+  return found;
+}
+
+function hasJsxTag(ast, tagName) {
+  let found = false;
+  walk(ast, (node) => {
+    if (found) return;
+    if (
+      ts.isJsxSelfClosingElement(node) &&
+      ts.isIdentifier(node.tagName) &&
+      node.tagName.text === tagName
+    ) {
+      found = true;
+    }
+    if (
+      ts.isJsxOpeningElement(node) &&
+      ts.isIdentifier(node.tagName) &&
+      node.tagName.text === tagName
+    ) {
+      found = true;
+    }
+  });
+  return found;
+}
+
+function ancestorHasGuard(node, guardPattern) {
+  let current = node.parent;
+  while (current) {
+    if (
+      ts.isJsxExpression(current) ||
+      ts.isBinaryExpression(current) ||
+      ts.isConditionalExpression(current) ||
+      ts.isParenthesizedExpression(current)
+    ) {
+      if (guardPattern.test(normalize(current.getText()))) return true;
+    }
+    if (ts.isFunctionLike(current)) return false;
+    current = current.parent;
+  }
+  return false;
+}
+
+function hasGuardedNeedle(ast, needlePattern, guardPattern) {
+  let found = false;
+  walk(ast, (node) => {
+    if (found) return;
+    if (!needlePattern.test(normalize(node.getText()))) return;
+    found = ancestorHasGuard(node, guardPattern);
+  });
+  return found;
+}
+
+function hasString(ast, pattern) {
+  let found = false;
+  walk(ast, (node) => {
+    if (found) return;
+    if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      pattern.test(node.text)
+    ) {
+      found = true;
+    }
+  });
+  return found;
+}
+
+const modeNotWrite = /\bmode\s*!==\s*"write"/;
+
 const checks = [
   {
     name: "write mode exposes only the quiet status surface",
-    pass: source.includes('mode === "write"\n      ? (["status"] as const)'),
+    pass: hasVariableInitializer(
+      componentAst,
+      "availableTabs",
+      (text) => /\bmode\s*===\s*"write"\s*\?\s*\(\s*\[\s*"status"\s*\]\s*as const\s*\)/.test(text),
+    ),
   },
   {
     name: "tabs are hidden when there is only one author-facing surface",
-    pass: source.includes("{availableTabs.length > 1 && ("),
+    pass: /availableTabs\.length\s*>\s*1\s*&&/.test(source),
   },
   {
     name: "evidence trace is kept out of default writing mode",
-    pass: source.includes('{mode !== "write" && (\n              <div className={`rounded border p-2 text-xs ${secondBrainToneClass(contextBudgetTone(trace))}`}>'),
+    pass: hasGuardedNeedle(componentAst, /Evidence Trace/, modeNotWrite),
   },
   {
     name: "project storage diagnostics are kept out of default writing mode",
-    pass: source.includes('{mode !== "write" && storageDiagnostics && ('),
+    pass: hasGuardedNeedle(componentAst, /Project Storage/, modeNotWrite),
   },
   {
     name: "write-mode proposals do not expose rationale by default",
-    pass: source.includes('{mode !== "write" && p.rationale && ('),
+    pass: hasGuardedNeedle(componentAst, /\bp\.rationale\b/, modeNotWrite),
   },
   {
     name: "write-mode proposals do not expose evidence cards by default",
-    pass: source.includes('{mode !== "write" && p.evidence.length > 0 && ('),
+    pass: hasGuardedNeedle(componentAst, /\bp\.evidence\.length\b/, modeNotWrite),
   },
   {
     name: "write-mode proposals do not expose operation internals by default",
-    pass: source.includes('{mode !== "write" && primaryOperation(p) && ('),
+    pass: hasGuardedNeedle(componentAst, /primaryOperation\s*\(\s*p\s*\)/, modeNotWrite),
   },
   {
     name: "guard detail avoids raw task-packet counters in author view",
-    pass: !source.includes("${packet.task} guard is using"),
+    pass: !/\$\{packet\.task\}\s*guard is using/.test(source),
   },
   {
     name: "write-mode guard summarizes product metrics instead of raw traces",
     pass:
-      source.includes("Recent acceptance") &&
-      source.includes("productMetrics.proposalAcceptanceRate") &&
-      !source.includes("operationLifecycle.map"),
+      /Recent acceptance/.test(source) &&
+      /productMetrics\.proposalAcceptanceRate/.test(source) &&
+      !/operationLifecycle\.map/.test(source),
   },
   {
     name: "internal timeline has a dedicated inspect mode",
     pass:
-      appSource.includes('"inspect"') &&
-      appSource.includes("<WriterInspectorPanel />") &&
-      appSource.includes('storyMode === "inspect"'),
+      hasString(appAst, /^inspect$/) &&
+      hasJsxTag(appAst, "WriterInspectorPanel") &&
+      /storyMode\s*===\s*"inspect"/.test(appSource),
   },
   {
     name: "inspector uses the backend inspector timeline command",
     pass:
-      inspectorSource.includes("Commands.getWriterAgentInspectorTimeline") &&
-      inspectorSource.includes("WriterInspectorTimeline"),
+      /Commands\.getWriterAgentInspectorTimeline/.test(inspectorSource) &&
+      /WriterInspectorTimeline/.test(inspectorSource),
   },
   {
     name: "inspector keeps failure and provider budget details out of companion tabs",
     pass:
-      inspectorSource.includes('"failure"') &&
-      inspectorSource.includes("Provider Budget") &&
-      !source.includes("getWriterAgentInspectorTimeline"),
+      hasString(inspectorAst, /^failure$/) &&
+      /Provider Budget/.test(inspectorSource) &&
+      !/getWriterAgentInspectorTimeline/.test(source),
   },
   {
     name: "inspector owns save completed and save feedback latency details",
     pass:
-      inspectorSource.includes('"save_completed"') &&
-      inspectorSource.includes("writer.save_completed") &&
-      inspectorSource.includes("averageSaveToFeedbackMs") &&
-      !source.includes("writer.save_completed"),
+      hasString(inspectorAst, /^save_completed$/) &&
+      /writer\.save_completed/.test(inspectorSource) &&
+      /averageSaveToFeedbackMs/.test(inspectorSource) &&
+      !/writer\.save_completed/.test(source),
   },
   {
     name: "inspector owns proposal context budget drilldown",
     pass:
-      inspectorSource.includes("Proposal Context Budgets") &&
-      inspectorSource.includes("sourceReports") &&
-      inspectorSource.includes("contextBudgetToneClass") &&
-      !source.includes("Proposal Context Budgets"),
+      /Proposal Context Budgets/.test(inspectorSource) &&
+      /sourceReports/.test(inspectorSource) &&
+      /contextBudgetToneClass/.test(inspectorSource) &&
+      !/Proposal Context Budgets/.test(source),
   },
   {
     name: "inspector owns failure recovery action chips",
     pass:
-      inspectorSource.includes("recoveryActionsForFailure") &&
-      inspectorSource.includes("Review budget") &&
-      inspectorSource.includes("Open failures") &&
-      !source.includes("Review budget"),
+      /recoveryActionsForFailure/.test(inspectorSource) &&
+      /Review budget/.test(inspectorSource) &&
+      /Open failures/.test(inspectorSource) &&
+      !/Review budget/.test(source),
   },
   {
     name: "inspector owns task receipt details",
     pass:
-      inspectorSource.includes('"task_receipt"') &&
-      inspectorSource.includes("Latest Receipt") &&
-      inspectorSource.includes("Open receipts") &&
-      !source.includes("task_receipt") &&
-      !source.includes("Latest Receipt"),
+      hasString(inspectorAst, /^task_receipt$/) &&
+      /Latest Receipt/.test(inspectorSource) &&
+      /Open receipts/.test(inspectorSource) &&
+      !/task_receipt/.test(source) &&
+      !/Latest Receipt/.test(source),
   },
   {
     name: "inspector owns task artifact details",
     pass:
-      inspectorSource.includes('"task_artifact"') &&
-      inspectorSource.includes("Latest Artifact") &&
-      inspectorSource.includes("Open artifacts") &&
-      !source.includes("task_artifact") &&
-      !source.includes("Latest Artifact"),
+      hasString(inspectorAst, /^task_artifact$/) &&
+      /Latest Artifact/.test(inspectorSource) &&
+      /Open artifacts/.test(inspectorSource) &&
+      !/task_artifact/.test(source) &&
+      !/Latest Artifact/.test(source),
   },
 ];
 

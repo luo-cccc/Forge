@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-03
+Last updated: 2026-05-04
 
 ## Positioning
 
@@ -98,11 +98,11 @@ P1 is in progress:
 
 The expected local baseline is:
 
-- `cargo test -p agent-writer`: 185 passing
+- `cargo test -p agent-writer`: 190 passing
 - `cargo test -p agent-harness-core`: 80 passing
-- `cargo run -p agent-evals`: 143/143 passing
-- `npm run check:p2`: 15/15 passing
-- `npm run check:audit`: 51 commands, 0 issues
+- `cargo run -p agent-evals`: 155/155 passing
+- `npm run check:p2`: 17/17 passing
+- `npm run check:audit`: 52 commands, 0 issues
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing

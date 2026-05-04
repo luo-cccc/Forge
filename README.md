@@ -133,10 +133,10 @@ npm run verify
 Expected current baseline:
 
 - `cargo test -p agent-harness-core`: 80 tests passing
-- `cargo test -p agent-writer`: 185 tests passing
-- `cargo run -p agent-evals`: 143/143 evals passing
-- `npm run check:p2`: 15/15 checks passing
-- `npm run check:audit`: 50 commands, 0 issues
+- `cargo test -p agent-writer`: 190 tests passing
+- `cargo run -p agent-evals`: 155/155 evals passing
+- `npm run check:p2`: 17/17 checks passing
+- `npm run check:audit`: 52 commands, 0 issues
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing

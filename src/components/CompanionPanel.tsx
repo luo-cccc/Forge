@@ -27,7 +27,7 @@ import type {
 
 interface CompanionPanelProps {
   mode: StoryMode;
-  onApplyOperation?: (operation: WriterOperation) => Promise<ApplyOperationResult>;
+  onApplyOperation?: (operation: WriterOperation, proposalId?: string) => Promise<ApplyOperationResult>;
 }
 
 interface ApplyOperationResult {
@@ -37,25 +37,6 @@ interface ApplyOperationResult {
   savedContent?: string;
   chapterTitle?: string;
   error?: string;
-}
-
-async function recordOperationDurableSave(
-  proposalId: string | undefined,
-  operation: WriterOperation,
-  saveResult: string,
-  savedContent?: string,
-  chapterTitle?: string,
-  chapterRevision?: string,
-) {
-  if (!proposalId) return;
-  await invoke(Commands.recordWriterOperationDurableSave, {
-    proposalId,
-    operation,
-    saveResult,
-    savedContent,
-    chapterTitle,
-    chapterRevision,
-  });
 }
 
 function proposalSlotKey(proposal: AgentProposal): string {
@@ -792,7 +773,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   ): Promise<boolean> => {
     if (!isEditorTextOperation(operation)) return true;
 
-    const result = await onApplyOperation?.(operation);
+    const result = await onApplyOperation?.(operation, proposalId);
     if (!result?.applied) {
       setOperationError(result?.error ?? "The editor could not apply this operation.");
       return false;
@@ -803,14 +784,6 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       return false;
     }
 
-    await recordOperationDurableSave(
-      proposalId,
-      operation,
-      result.revision ? `editor_save:${result.revision}` : "editor_save:ok",
-      result.savedContent,
-      result.chapterTitle,
-      result.revision,
-    );
     return true;
   }, [onApplyOperation]);
 

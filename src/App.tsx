@@ -141,6 +141,7 @@ function App() {
 
   const handleApplyWriterOperation = useCallback(async (
     operation: WriterOperation,
+    proposalId?: string,
   ): Promise<ApplyWriterOperationResult> => {
     const editor = editorRef.current;
     if (!editor) {
@@ -188,7 +189,7 @@ function App() {
       setCurrentChapterRevision(revision);
       setIsEditorDirty(false);
       await invoke(Commands.recordWriterOperationDurableSave, {
-        proposalId: undefined,
+        proposalId,
         operation,
         saveResult: `editor_save:${revision}`,
         savedContent: content,
@@ -199,7 +200,7 @@ function App() {
     } catch (e) {
       setIsEditorDirty(true);
       await invoke(Commands.recordWriterOperationDurableSave, {
-        proposalId: undefined,
+        proposalId,
         operation,
         saveResult: `editor_save_failed:${String(e)}`,
         savedContent: content,
