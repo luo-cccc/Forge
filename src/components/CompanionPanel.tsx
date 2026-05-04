@@ -336,31 +336,23 @@ function buildSecondBrainItems(
       ? compactLine(arcProposal.preview, arcProposal.rationale || "Review current scene movement")
       : "Current arc has no flagged drag or missing beat.";
 
+  const contractQuality = storyContract?.quality ?? "missing";
+  const contractGaps = storyContract?.qualityGaps ?? [];
   const contractValue = contractDebt
     ? compactLine(contractDebt.title, "Story contract guard", 72)
     : hasStoryContract
     ? compactLine(
-        storyContract?.readerPromise ||
-          storyContract?.mainConflict ||
-          storyContract?.first30ChapterPromise ||
-          storyContract?.genre,
-        "Story contract",
+        `${storyContract?.readerPromise || storyContract?.mainConflict || storyContract?.genre || "未填写"}`,
+        `Story contract · ${contractQuality}`,
         72,
       )
     : "No story contract";
   const contractDetail = contractDebt
     ? compactLine(contractDebt.message, "Review book-level boundary before continuing")
     : hasStoryContract
-    ? compactLine(
-        [
-          storyContract?.genre && `Genre: ${storyContract.genre}`,
-          storyContract?.first30ChapterPromise && `First 30: ${storyContract.first30ChapterPromise}`,
-          storyContract?.mainConflict && `Conflict: ${storyContract.mainConflict}`,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        "Book-level promise is active.",
-      )
+    ? contractGaps.length > 0
+      ? compactLine(contractGaps.join("; "), "Fill these gaps for stronger agent grounding")
+      : compactLine("All key fields are set — the agent has strong book-level grounding.", "")
     : "Set the book-level promise so the agent can judge local choices against the whole novel.";
   const missionValue = missionDebt
     ? compactLine(missionDebt.title, "Chapter mission guard", 72)

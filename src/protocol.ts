@@ -862,6 +862,8 @@ export interface StoryContractSummary {
   structuralBoundary: string;
   toneContract: string;
   updatedAt: string;
+  quality: string;
+  qualityGaps: string[];
 }
 
 export interface StoryContractOperationInput {

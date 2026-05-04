@@ -380,6 +380,10 @@ pub struct StoryContractSummary {
     pub structural_boundary: String,
     pub tone_contract: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub quality: String,
+    #[serde(default)]
+    pub quality_gaps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -501,6 +505,17 @@ pub enum StoryContractQuality {
 }
 
 impl StoryContractSummary {
+    pub fn fill_quality(&mut self) {
+        self.quality = match self.quality() {
+            StoryContractQuality::Missing => "missing",
+            StoryContractQuality::Vague => "vague",
+            StoryContractQuality::Usable => "usable",
+            StoryContractQuality::Strong => "strong",
+        }
+        .to_string();
+        self.quality_gaps = self.quality_gaps();
+    }
+
     pub fn is_empty(&self) -> bool {
         [
             &self.title,
@@ -1234,7 +1249,7 @@ impl WriterMemory {
                  FROM story_contracts WHERE project_id=?1",
                 rusqlite::params![project_id],
                 |row| {
-                    Ok(StoryContractSummary {
+                    let mut summary = StoryContractSummary {
                         project_id: row.get(0)?,
                         title: row.get(1)?,
                         genre: row.get(2)?,
@@ -1245,7 +1260,11 @@ impl WriterMemory {
                         structural_boundary: row.get(7)?,
                         tone_contract: row.get(8)?,
                         updated_at: row.get(9)?,
-                    })
+                        quality: String::new(),
+                        quality_gaps: Vec::new(),
+                    };
+                    summary.fill_quality();
+                    Ok(summary)
                 },
             )
             .optional()
@@ -1263,7 +1282,7 @@ impl WriterMemory {
         if self.get_story_contract(project_id)?.is_some() {
             return Ok(false);
         }
-        let contract = StoryContractSummary {
+        let mut contract = StoryContractSummary {
             project_id: project_id.to_string(),
             title: title.to_string(),
             genre: genre.to_string(),
@@ -1274,7 +1293,10 @@ impl WriterMemory {
             structural_boundary: structural_boundary.to_string(),
             tone_contract: String::new(),
             updated_at: String::new(),
+            quality: String::new(),
+            quality_gaps: Vec::new(),
         };
+        contract.fill_quality();
         self.upsert_story_contract(&contract)?;
         Ok(true)
     }

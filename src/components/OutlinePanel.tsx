@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import { Commands, Events, type ChapterGenerationEvent, type ProjectFileRestored } from "../protocol";
+import { Commands, Events, type ChapterGenerationEvent, type ProjectFileRestored, type WriterAgentLedgerSnapshot } from "../protocol";
 
 interface OutlineNode {
   chapter_title: string;
@@ -21,6 +21,7 @@ export default function OutlinePanel() {
   const [chapterTitle, setChapterTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [generating, setGenerating] = useState<Set<string>>(new Set());
+  const [missions, setMissions] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<string | null>(null);
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
@@ -28,8 +29,18 @@ export default function OutlinePanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await invoke<OutlineNode[]>(Commands.getOutline);
-      setNodes(result);
+      const [outline, ledger] = await Promise.all([
+        invoke<OutlineNode[]>(Commands.getOutline),
+        invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger).catch(() => null),
+      ]);
+      setNodes(outline);
+      if (ledger?.chapterMissions) {
+        const map: Record<string, string> = {};
+        for (const m of ledger.chapterMissions) {
+          map[m.chapterTitle] = m.status;
+        }
+        setMissions(map);
+      }
     } catch (e) {
       console.error("Failed to load outline:", e);
     }
@@ -147,6 +158,16 @@ export default function OutlinePanel() {
     polished: "bg-accent-subtle text-accent border border-accent/30",
   };
 
+  const missionColors: Record<string, string> = {
+    draft: "bg-bg-raised text-text-muted",
+    active: "bg-accent/20 text-accent border border-accent/30",
+    completed: "bg-success/20 text-success border border-success/30",
+    drifted: "bg-danger/20 text-danger border border-danger/30",
+    blocked: "bg-warning/20 text-warning border border-warning/30",
+    needs_review: "bg-warning/20 text-warning border border-warning/30",
+    retired: "bg-bg-raised text-text-muted border border-border-subtle",
+  };
+
   return (
     <div className="flex flex-col h-full relative">
       {toast && (
@@ -197,6 +218,13 @@ export default function OutlinePanel() {
               >
                 {node.status}
               </span>
+              {missions[node.chapter_title] && (
+                <span
+                  className={`inline-block mt-1.5 ml-1 text-[10px] px-1.5 py-0.5 rounded-sm ${missionColors[missions[node.chapter_title]] || missionColors.draft}`}
+                >
+                  {missions[node.chapter_title].replaceAll("_", " ")}
+                </span>
+              )}
             </div>
           );
         })}

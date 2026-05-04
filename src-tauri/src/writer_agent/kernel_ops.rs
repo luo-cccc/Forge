@@ -314,7 +314,7 @@ pub(crate) fn execute_writer_operation(
             })
         }
         WriterOperation::StoryContractUpsert { contract } => {
-            let summary = StoryContractSummary {
+            let mut summary = StoryContractSummary {
                 project_id: contract.project_id.clone(),
                 title: contract.title.clone(),
                 genre: contract.genre.clone(),
@@ -325,7 +325,10 @@ pub(crate) fn execute_writer_operation(
                 structural_boundary: contract.structural_boundary.clone(),
                 tone_contract: contract.tone_contract.clone(),
                 updated_at: String::new(),
+                quality: String::new(),
+                quality_gaps: Vec::new(),
             };
+            summary.fill_quality();
             if let Some(error) = validate_story_contract_summary(&summary) {
                 Ok(OperationResult {
                     success: false,

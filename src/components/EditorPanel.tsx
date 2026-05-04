@@ -24,6 +24,7 @@ import {
   type ProposalFeedback,
   type SemanticLintPayload,
   type WriterOperation,
+  type ChapterMissionSummary,
 } from "../protocol";
 import CommentMark from "../extensions/CommentMark";
 import GhostText, { ghostTextPluginKey } from "../extensions/GhostText";
@@ -446,6 +447,26 @@ export default function EditorPanel({
   const activeSemanticLintRequestIdRef = useRef<string | null>(null);
   const currentChapterRef = useRef(currentChapter);
   const currentChapterRevisionRef = useRef<string | null>(currentChapterRevision);
+  const [chapterMission, setChapterMission] = useState<ChapterMissionSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentChapter) {
+      queueMicrotask(() => { if (!cancelled) setChapterMission(null); });
+      return () => { cancelled = true; };
+    }
+    invoke<import("../protocol").WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger)
+      .then((ledger) => {
+        if (cancelled) return;
+        const mission =
+          ledger.activeChapterMission ??
+          ledger.chapterMissions.find((m) => m.chapterTitle === currentChapter) ??
+          null;
+        setChapterMission(mission);
+      })
+      .catch(() => { if (!cancelled) setChapterMission(null); });
+    return () => { cancelled = true; };
+  }, [currentChapter]);
   const editSequenceRef = useRef(0);
   const pendingGhostFeedbackRef = useRef<ActiveGhostState | null>(null);
   const lastEditAtRef = useRef(0);
@@ -1167,6 +1188,14 @@ export default function EditorPanel({
   const btnActive = (active: boolean) =>
     active ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary";
 
+  const missionStatusColor = (status: string) => {
+    if (status === "completed") return "bg-success";
+    if (status === "active") return "bg-accent";
+    if (status === "drifted") return "bg-danger";
+    if (status === "blocked" || status === "needs_review") return "bg-warning";
+    return "bg-text-muted";
+  };
+
   if (!editor) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted">
@@ -1254,6 +1283,22 @@ export default function EditorPanel({
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
+      {chapterMission && (
+        <div className="px-4 py-1.5 border-b border-border-subtle bg-bg-raised/50 flex items-center gap-2 text-[11px]">
+          <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${missionStatusColor(chapterMission.status)}`} />
+          <span className="text-text-secondary truncate">
+            {chapterMission.mission || chapterMission.chapterTitle}
+          </span>
+          <span className="text-[10px] text-text-muted shrink-0">
+            {chapterMission.status.replaceAll("_", " ")}
+          </span>
+          {chapterMission.mustNot && (
+            <span className="text-[10px] text-danger/70 truncate hidden lg:inline" title={chapterMission.mustNot}>
+              Avoid: {chapterMission.mustNot}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex-1 min-h-0 relative flex">
         <div className="flex-1 min-w-0 flex flex-col relative">
           <div className="flex-1 overflow-y-auto relative">
