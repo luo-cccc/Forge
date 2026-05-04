@@ -43,7 +43,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 ### 当前剩余核心矛盾
 
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
-- Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
+- Story Contract 已有 quality/quality_gaps 字段并在 CompanionPanel 可视化；Chapter Mission 状态已在 OutlinePanel/EditorPanel 展示。门禁体验的 eval 层已完成（`story_contract_quality_nominal` 等），前端强门禁审批卡仍未接入 generation/diagnosis/save 流程。
 - `agent-evals/src/product_scenarios.rs` 已集中承载 10 个长篇产品场景 eval + 1 个合成 20 章连续写作 fixture；该 fixture 已把多章保存、伏笔、任务漂移、作者反馈和产品指标串成同一条可验证链路。下一步要继续引入真实作者项目数据对照，而不是只堆数量或合成场景。
 - `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入职责模块。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。架构体量不再依赖手工维护的精确行数描述，改由 `npm run check:architecture` 检查 `lib.rs`、kernel facade、eval facade 和 CompanionPanel 拆分预算。
 
@@ -215,6 +215,10 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 目标：Story Contract 不只是设置页内容，而是所有 agent 行动的书级约束。
 
+当前状态：Story Contract 质量评估已落地。`StoryContractSummary` 新增 `quality`（missing/vague/usable/strong）和 `quality_gaps` 字段，`fill_quality()` 在构造/反序列化时自动计算。CompanionPanel 已在 Story Contract 行展示 `contractQuality` 和具体缺口列表，前端 protocol.ts 同步新增 `quality` / `qualityGaps`。kernel_ops.rs 的 `StoryContractUpsert` 操作路径也已填充质量字段。
+
+剩余：quality gate 接入所有 generation/rewrite/diagnosis task packet 的低质量警告与自信度降级逻辑。
+
 任务：
 
 - 为 Story Contract 增加字段质量等级：
@@ -233,15 +237,19 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 - 新增 eval：低质量 Story Contract 不会污染 context pack。
 - 新增 eval：chapter generation 会显式记录 Story Contract source。
-- Companion Panel 显示 Story Contract 强度和最关键缺口。
+- Companion Panel 显示 Story Contract 强度和最关键缺口。（已完成）
 
 ### P1.2 Chapter Mission 工作流升级
 
 目标：每一章都有当前任务，agent 不能只看光标附近文本。
 
+当前状态：前端 Chapter Mission UI 已落地两层：OutlinePanel 每个节点旁展示 mission 状态 badge（draft/active/completed/drifted/blocked/needs_review/retired，带颜色编码），EditorPanel 顶部新增 mission 状态栏（当前章 mission 摘要 + 状态圆点 + must_not 约束）。后台 `get_writer_agent_ledger` 已同时供给 OutlinePanel 和 EditorPanel 使用。
+
+剩余：从大纲节点直接创建/编辑 Chapter Mission，mission 状态在保存时后自动结算与建议 UI。
+
 任务：
 
-- 在 OutlinePanel 中显示每章 mission 状态。
+- 在 OutlinePanel 中显示每章 mission 状态。（已完成）
 - 支持从大纲节点直接创建 / 编辑 Chapter Mission。
 - 保存章节后自动结算：
   - completed
@@ -260,7 +268,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 - 新增 eval：违反 `must_not` 会生成 story debt。
 - 新增 eval：完成 expected ending 会标记 mission completed。
-- 新增 UI check：当前章 mission 在写作视图中始终可见但不喧宾夺主。
+- 新增 UI check：当前章 mission 在写作视图中始终可见但不喧宾夺主。（已完成：EditorPanel 顶部 mission 状态栏含状态圆点 + mission 摘要 + must_not）
 
 ### P1.3 Promise Ledger 变成主控账本
 
@@ -1191,11 +1199,11 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 ### 第三轮：P1 信任合同
 
-1. Story Contract quality gate。
-2. Chapter Mission save settlement。
-3. Promise Ledger 类型和优先级。
-4. Companion Panel 只显示最高价值 3-5 项。
-5. 补 story/mission/promise scenario eval。
+1. Story Contract quality gate。（已完成：`fill_quality()` + CompanionPanel 展示 quality/gaps）
+2. Chapter Mission save settlement。（部分完成：状态机已升级，OutlinerPanel/EditorPanel UI 已上线，自动结算建议 UI 未接）
+3. Promise Ledger 类型和优先级。（已完成）
+4. Companion Panel 只显示最高价值 3-5 项。（已完成第一阶段）
+5. 补 story/mission/promise scenario eval。（已完成）
 
 ### 第四轮：P1 作者价值评测
 
