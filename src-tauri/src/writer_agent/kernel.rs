@@ -111,7 +111,25 @@ pub struct WriterAgentLedgerSnapshot {
     pub open_promises: Vec<super::memory::PlotPromiseSummary>,
     pub recent_decisions: Vec<super::memory::CreativeDecisionSummary>,
     pub memory_audit: Vec<super::memory::MemoryAuditSummary>,
+    pub memory_reliability: Vec<WriterMemoryReliabilitySummary>,
     pub context_recalls: Vec<ContextRecallSummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterMemoryReliabilitySummary {
+    pub slot: String,
+    pub category: String,
+    pub status: String,
+    pub reliability: f64,
+    pub reinforcement_count: u64,
+    pub correction_count: u64,
+    pub net_confidence_delta: f64,
+    pub last_action: String,
+    pub last_source_error: Option<String>,
+    pub last_reason: Option<String>,
+    pub last_proposal_id: String,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

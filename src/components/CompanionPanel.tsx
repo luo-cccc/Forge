@@ -188,6 +188,16 @@ function diagnosticSeverityClass(severity: string): string {
   return "bg-bg-surface text-text-muted";
 }
 
+function memoryReliabilityTone(status: string): SecondBrainTone {
+  if (status === "needs_review") return "danger";
+  if (status === "trusted") return "success";
+  return "accent";
+}
+
+function memoryReliabilityPercent(value: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
 function postWriteReportLabel(report: WriterPostWriteDiagnosticReport): string {
   const chapter = report.chapterTitle ?? "saved text";
   const revision = report.chapterRevision ? ` · ${report.chapterRevision}` : "";
@@ -1936,9 +1946,53 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(trace?.recentProposals.length ?? 0) === 0 &&
               (trace?.taskPackets.length ?? 0) === 0 &&
               (trace?.postWriteDiagnostics.length ?? 0) === 0 &&
+              (ledger?.memoryReliability.length ?? 0) === 0 &&
               (ledger?.memoryAudit.length ?? 0) === 0 &&
               (trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) === 0 && (
               <p className="text-text-muted">No agent audit events yet.</p>
+            )}
+            {(ledger?.memoryReliability.length ?? 0) > 0 && (
+              <div className="rounded bg-bg-raised border border-border-subtle p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Memory Reliability</span>
+                  <span className="text-[10px] text-text-muted">
+                    {ledger?.memoryReliability.length ?? 0} slots
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {ledger?.memoryReliability.slice(0, 6).map((item) => (
+                    <div
+                      key={item.slot}
+                      className={`rounded border p-2 ${secondBrainToneClass(memoryReliabilityTone(item.status))}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-text-secondary" title={item.slot}>
+                          {item.category} · {item.slot.split("|").slice(-2).join(" · ")}
+                        </span>
+                        <span className={`shrink-0 font-mono text-[10px] ${secondBrainValueClass(memoryReliabilityTone(item.status))}`}>
+                          {memoryReliabilityPercent(item.reliability)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          {item.status}
+                        </span>
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          +{item.reinforcementCount} / -{item.correctionCount}
+                        </span>
+                        <span className="rounded bg-bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                          delta {item.netConfidenceDelta.toFixed(2)}
+                        </span>
+                      </div>
+                      {(item.lastSourceError || item.lastReason) && (
+                        <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-text-secondary">
+                          {item.lastSourceError || item.lastReason}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {(trace?.postWriteDiagnostics.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">

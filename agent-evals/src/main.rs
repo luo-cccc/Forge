@@ -42,6 +42,7 @@ fn main() {
     results.push(run_accepted_feedback_reinforces_style_memory_eval());
     results.push(run_rejected_proposal_records_correction_signal_eval());
     results.push(run_memory_feedback_schema_records_quality_signals_eval());
+    results.push(run_memory_reliability_snapshot_eval());
     results.push(run_task_packet_foundation_eval());
     results.push(run_chapter_generation_task_packet_eval());
     results.push(run_result_feedback_tight_budget_eval());

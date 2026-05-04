@@ -686,6 +686,89 @@ pub fn run_memory_feedback_schema_records_quality_signals_eval() -> EvalResult {
     )
 }
 
+pub fn run_memory_reliability_snapshot_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut accepted_obs = observation("那个少年名叫沈照，袖中藏着一枚玉佩。");
+    accepted_obs.reason = ObservationReason::Save;
+    accepted_obs.source = ObservationSource::ChapterSave;
+    let accepted_proposal = kernel
+        .observe(accepted_obs)
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+        .expect("fixture should produce canon memory candidate");
+    let mut approval = eval_approval("memory_reliability_snapshot");
+    approval.proposal_id = Some(accepted_proposal.id.clone());
+    kernel
+        .approve_editor_operation_with_approval(
+            accepted_proposal.operations[0].clone(),
+            "",
+            Some(&approval),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: accepted_proposal.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: None,
+            reason: Some("作者确认长期设定".to_string()),
+            created_at: now_ms(),
+        })
+        .unwrap();
+
+    let mut rejected_obs = observation("青灯案上放着一封密信，林墨没有告诉任何人它的下落。");
+    rejected_obs.id = "memory-reliability-snapshot-rejected".to_string();
+    rejected_obs.reason = ObservationReason::Save;
+    rejected_obs.source = ObservationSource::ChapterSave;
+    let rejected_proposal = kernel
+        .observe(rejected_obs)
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::PlotPromise)
+        .expect("fixture should produce promise memory candidate");
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: rejected_proposal.id,
+            action: FeedbackAction::Rejected,
+            final_text: None,
+            reason: Some("作者纠错：密信只是气氛，不是伏笔".to_string()),
+            created_at: now_ms() + 1,
+        })
+        .unwrap();
+
+    let reliability = kernel.ledger_snapshot().memory_reliability;
+    let mut errors = Vec::new();
+    if !reliability.iter().any(|item| {
+        item.slot == "memory|canon|character|沈照"
+            && item.status == "trusted"
+            && item.reinforcement_count == 1
+            && item.reliability > 0.5
+    }) {
+        errors.push("ledger snapshot did not expose trusted memory reliability".to_string());
+    }
+    if !reliability.iter().any(|item| {
+        item.slot == "memory|promise|object_whereabouts|密信"
+            && item.status == "needs_review"
+            && item.correction_count == 1
+            && item
+                .last_source_error
+                .as_deref()
+                .is_some_and(|error| error.contains("不是伏笔"))
+    }) {
+        errors.push("ledger snapshot did not expose source-error reliability review".to_string());
+    }
+    if reliability.first().map(|item| item.status.as_str()) != Some("needs_review") {
+        errors.push("memory reliability should prioritize review-needed slots".to_string());
+    }
+
+    eval_result(
+        "writer_agent:memory_reliability_snapshot",
+        format!("slots={}", reliability.len()),
+        errors,
+    )
+}
+
 pub fn run_style_continuity_learning_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

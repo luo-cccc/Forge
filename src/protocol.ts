@@ -935,6 +935,21 @@ export interface MemoryAuditEntry {
   createdAt: number;
 }
 
+export interface MemoryReliabilitySummary {
+  slot: string;
+  category: string;
+  status: "trusted" | "needs_review" | "unproven" | string;
+  reliability: number;
+  reinforcementCount: number;
+  correctionCount: number;
+  netConfidenceDelta: number;
+  lastAction: string;
+  lastSourceError?: string | null;
+  lastReason?: string | null;
+  lastProposalId: string;
+  updatedAt: number;
+}
+
 export interface WriterAgentLedgerSnapshot {
   storyContract?: StoryContractSummary | null;
   activeChapterMission?: ChapterMissionSummary | null;
@@ -946,6 +961,7 @@ export interface WriterAgentLedgerSnapshot {
   openPromises: PlotPromiseSummary[];
   recentDecisions: CreativeDecisionSummary[];
   memoryAudit: MemoryAuditEntry[];
+  memoryReliability: MemoryReliabilitySummary[];
   contextRecalls: ContextRecallSummary[];
 }
 

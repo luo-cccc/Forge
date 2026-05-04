@@ -1716,6 +1716,82 @@ fn ledger_snapshot_includes_memory_audit_for_candidate_feedback() {
 }
 
 #[test]
+fn ledger_snapshot_summarizes_memory_reliability_feedback() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+    let mut accepted_obs = observation("那个少年名叫沈照，袖中藏着一枚玉佩。");
+    accepted_obs.reason = ObservationReason::Save;
+    accepted_obs.source = ObservationSource::ChapterSave;
+    let accepted = kernel
+        .observe(accepted_obs)
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::CanonUpdate)
+        .unwrap();
+    kernel
+        .approve_editor_operation_with_approval(
+            accepted.operations[0].clone(),
+            "",
+            Some(&test_approval_for_proposal(
+                "memory_reliability",
+                &accepted.id,
+            )),
+        )
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: accepted.id.clone(),
+            action: FeedbackAction::Accepted,
+            final_text: None,
+            reason: Some("confirmed durable fact".to_string()),
+            created_at: 42,
+        })
+        .unwrap();
+
+    let mut rejected_obs = observation("青灯案上放着一封密信，林墨没有告诉任何人它的下落。");
+    rejected_obs.id = "memory-reliability-rejected".to_string();
+    rejected_obs.reason = ObservationReason::Save;
+    rejected_obs.source = ObservationSource::ChapterSave;
+    let rejected = kernel
+        .observe(rejected_obs)
+        .unwrap()
+        .into_iter()
+        .find(|proposal| proposal.kind == ProposalKind::PlotPromise)
+        .unwrap();
+    kernel
+        .apply_feedback(ProposalFeedback {
+            proposal_id: rejected.id.clone(),
+            action: FeedbackAction::Rejected,
+            final_text: None,
+            reason: Some("作者纠错：这只是气氛，不是伏笔".to_string()),
+            created_at: 43,
+        })
+        .unwrap();
+
+    let reliability = kernel.ledger_snapshot().memory_reliability;
+    let accepted_slot = reliability
+        .iter()
+        .find(|item| item.slot == "memory|canon|character|沈照")
+        .unwrap();
+    assert_eq!(accepted_slot.status, "trusted");
+    assert_eq!(accepted_slot.reinforcement_count, 1);
+    assert_eq!(accepted_slot.correction_count, 0);
+    assert!(accepted_slot.reliability > 0.5);
+
+    let rejected_slot = reliability
+        .iter()
+        .find(|item| item.slot == "memory|promise|object_whereabouts|密信")
+        .unwrap();
+    assert_eq!(rejected_slot.status, "needs_review");
+    assert_eq!(rejected_slot.correction_count, 1);
+    assert!(rejected_slot.reliability < 0.5);
+    assert!(rejected_slot
+        .last_source_error
+        .as_deref()
+        .is_some_and(|error| error.contains("不是伏笔")));
+}
+
+#[test]
 fn memory_audit_survives_kernel_restart() {
     let db_path = std::env::temp_dir().join(format!(
         "forge-memory-audit-{}.sqlite",
