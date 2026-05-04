@@ -24,11 +24,13 @@ use agent_writer_lib::writer_agent::WriterAgentKernel;
 mod belief_conflict;
 mod canon;
 mod context;
+mod e2e_scenarios;
 mod foundation;
 mod ghost_feedback;
 mod intent;
 mod metacognition;
 mod mission;
+mod project_brain_knowledge;
 mod promise;
 mod provider_budget;
 mod research_subtask;
@@ -38,15 +40,18 @@ mod story_impact;
 mod task_packet;
 mod tool_policy;
 mod trajectory;
+mod writing_relevance;
 
 pub use belief_conflict::*;
 pub use canon::*;
 pub use context::*;
+pub use e2e_scenarios::*;
 pub use foundation::*;
 pub use ghost_feedback::*;
 pub use intent::*;
 pub use metacognition::*;
 pub use mission::*;
+pub use project_brain_knowledge::*;
 pub use promise::*;
 pub use provider_budget::*;
 pub use research_subtask::*;
@@ -56,6 +61,7 @@ pub use story_impact::*;
 pub use task_packet::*;
 pub use tool_policy::*;
 pub use trajectory::*;
+pub use writing_relevance::*;
 
 fn eval_llm_message(role: &str, content: &str) -> agent_harness_core::provider::LlmMessage {
     agent_harness_core::provider::LlmMessage {

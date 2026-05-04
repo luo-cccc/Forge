@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use crate::fixtures::*;
 use std::path::Path;
 
