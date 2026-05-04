@@ -7,6 +7,7 @@ use super::kernel::{
     WriterOperationLifecycleTrace, WriterProposalTrace, WriterTaskPacketTrace,
 };
 use super::memory::ContextRecallSummary;
+use super::metacognition::WriterMetacognitiveSnapshot;
 use super::run_events::WriterRunEvent;
 
 const TRAJECTORY_SCHEMA: &str = "forge-writer-agent-trajectory";
@@ -197,6 +198,33 @@ pub fn export_trace_snapshot(
             },
         );
     }
+    seq += 1;
+    push_event(
+        &mut lines,
+        TrajectoryEvent {
+            trace_schema: TRAJECTORY_SCHEMA,
+            schema_version: SCHEMA_VERSION,
+            trace_id: &trace_id,
+            project_id,
+            session_id,
+            seq,
+            event_type: "writer.metacognition",
+            ts_ms: snapshot
+                .run_events
+                .iter()
+                .map(|event| event.ts_ms)
+                .max()
+                .or_else(|| {
+                    snapshot
+                        .recent_feedback
+                        .iter()
+                        .map(|feedback| feedback.created_at)
+                        .max()
+                })
+                .unwrap_or(0),
+            data: &snapshot.metacognitive_snapshot,
+        },
+    );
     seq += 1;
     push_event(
         &mut lines,
@@ -529,6 +557,13 @@ fn trace_viewer_summary(event_type: &str, data: &Value) -> String {
             )
             .unwrap_or_else(|| "n/a".to_string()),
         ),
+        "writer.metacognition" => format!(
+            "Metacognition: risk={} action={} confidence={}{}",
+            string_field(data, &["riskLevel", "risk_level"]).unwrap_or("unknown"),
+            string_field(data, &["recommendedAction", "recommended_action"]).unwrap_or("unknown"),
+            number_or_float_field(data, &["confidence"]).unwrap_or_else(|| "unknown".to_string()),
+            optional_labeled(" - ", string_field(data, &["summary"])),
+        ),
         _ => format!("{}: {}", event_type, compact_json_snippet(data, 600)),
     }
 }
@@ -642,6 +677,7 @@ fn _assert_trace_types(
     _lifecycle: &WriterOperationLifecycleTrace,
     _run_event: &WriterRunEvent,
     _recall: &ContextRecallSummary,
+    _metacognition: &WriterMetacognitiveSnapshot,
 ) {
 }
 
@@ -674,17 +710,19 @@ mod tests {
             context_recalls: Vec::new(),
             product_metrics: Default::default(),
             product_metrics_trend: Default::default(),
+            metacognitive_snapshot: Default::default(),
         };
 
         let export = export_trace_snapshot("novel-a", "session-a", &snapshot);
         let lines = export.jsonl.lines().collect::<Vec<_>>();
 
         assert_eq!(export.schema, TRAJECTORY_SCHEMA);
-        assert_eq!(export.event_count, 4);
-        assert_eq!(lines.len(), 4);
+        assert_eq!(export.event_count, 5);
+        assert_eq!(lines.len(), 5);
         assert!(lines[0].contains("\"eventType\":\"writer.observation\""));
         assert!(lines[1].contains("\"eventType\":\"writer.feedback\""));
-        assert!(lines[2].contains("\"eventType\":\"writer.product_metrics_trend\""));
-        assert!(lines[3].contains("\"eventType\":\"writer.product_metrics\""));
+        assert!(lines[2].contains("\"eventType\":\"writer.metacognition\""));
+        assert!(lines[3].contains("\"eventType\":\"writer.product_metrics_trend\""));
+        assert!(lines[4].contains("\"eventType\":\"writer.product_metrics\""));
     }
 }

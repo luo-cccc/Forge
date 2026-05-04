@@ -47,6 +47,22 @@ impl WriterAgentKernel {
         H: ToolHandler + 'static,
     {
         let task = request.task.as_agent_task();
+        if crate::writer_agent::metacognition::metacognitive_task_is_write_sensitive(&request.task)
+        {
+            let meta = self.trace_snapshot(40).metacognitive_snapshot;
+            if let Some(reason) =
+                crate::writer_agent::metacognition::metacognitive_write_gate_reason(&meta)
+            {
+                self.record_metacognitive_gate_block_run_event(
+                    &request.task,
+                    request.observation.id.clone(),
+                    &reason,
+                    &meta,
+                    now_ms(),
+                );
+                return Err(reason);
+            }
+        }
         let proposals = self.observe(request.observation.clone())?;
         let operations = proposals
             .iter()

@@ -4,7 +4,7 @@ const path = require("path");
 const baselineItems = [
   ["cargo test -p agent-harness-core", "80 tests passing"],
   ["cargo test -p agent-writer", "190 tests passing"],
-  ["cargo run -p agent-evals", "159/159 evals passing"],
+  ["cargo run -p agent-evals", "163/163 evals passing"],
   ["npm run check:p2", "17/17 checks passing"],
   ["npm run check:p2-render", "write-mode DOM guard passing"],
   ["npm run check:audit", "53 commands, 0 issues"],

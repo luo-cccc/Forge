@@ -75,6 +75,9 @@ pub use super::kernel_run_loop::{
 };
 pub use super::kernel_task_packet::build_task_packet_for_observation;
 pub(crate) use super::kernel_task_packet::{context_budget_trace, trace_state_with_expiry};
+pub use super::metacognition::{
+    WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
+};
 
 mod context_pack;
 mod feedback;
@@ -232,6 +235,7 @@ pub struct WriterAgentTraceSnapshot {
     pub context_recalls: Vec<ContextRecallSummary>,
     pub product_metrics: WriterProductMetrics,
     pub product_metrics_trend: WriterProductMetricsTrend,
+    pub metacognitive_snapshot: WriterMetacognitiveSnapshot,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

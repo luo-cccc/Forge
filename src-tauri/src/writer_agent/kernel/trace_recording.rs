@@ -404,6 +404,34 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_metacognitive_gate_block_run_event(
+        &mut self,
+        task: &WriterAgentTask,
+        task_id: impl Into<String>,
+        reason: &str,
+        snapshot: &crate::writer_agent::metacognition::WriterMetacognitiveSnapshot,
+        created_at: u64,
+    ) {
+        let task_id = task_id.into();
+        self.record_run_event(
+            "metacognitive_gate_blocked",
+            created_at,
+            Some(task_id.clone()),
+            vec![format!("task:{:?}", task), "metacognitive_gate".to_string()],
+            serde_json::json!({
+                "taskId": task_id,
+                "task": task,
+                "reason": reason,
+                "riskLevel": snapshot.risk_level,
+                "recommendedAction": snapshot.recommended_action,
+                "confidence": snapshot.confidence,
+                "summary": snapshot.summary,
+                "reasons": snapshot.reasons,
+                "remediation": snapshot.remediation,
+            }),
+        );
+    }
+
     pub(super) fn record_task_receipt_run_event(
         &mut self,
         receipt: &crate::writer_agent::task_receipt::WriterTaskReceipt,

@@ -76,6 +76,42 @@ impl WriterAgentKernel {
             return Ok(result);
         }
 
+        if requires_approval
+            && crate::writer_agent::metacognition::metacognitive_operation_is_write_sensitive(
+                &operation,
+            )
+        {
+            let meta = self.trace_snapshot(40).metacognitive_snapshot;
+            if let Some(reason) =
+                crate::writer_agent::metacognition::metacognitive_write_gate_reason(&meta)
+            {
+                self.record_metacognitive_gate_block_run_event(
+                    &WriterAgentTask::ProposalEvaluation,
+                    approval
+                        .and_then(|context| context.proposal_id.clone())
+                        .unwrap_or_else(|| "approved-operation".to_string()),
+                    &reason,
+                    &meta,
+                    approval_decided_at,
+                );
+                self.record_approval_decided_run_event(
+                    &operation,
+                    approval,
+                    false,
+                    "metacognitive write gate blocked this operation",
+                    approval_decided_at,
+                );
+                let result = OperationResult {
+                    success: false,
+                    operation,
+                    error: Some(super::operation::OperationError::approval_required(&reason)),
+                    revision_after: None,
+                };
+                self.record_operation_result_lifecycle(&result, approval, Some(reason));
+                return Ok(result);
+            }
+        }
+
         if let Some(context) = approval {
             self.memory
                 .record_decision(

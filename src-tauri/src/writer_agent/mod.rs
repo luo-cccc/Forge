@@ -20,6 +20,7 @@ pub mod kernel_review;
 pub mod kernel_run_loop;
 pub mod kernel_task_packet;
 pub mod memory;
+pub mod metacognition;
 pub mod observation;
 pub mod operation;
 pub mod post_write_diagnostics;

@@ -31,6 +31,7 @@ pub enum WriterTimelineEventKind {
     TaskArtifact,
     ContextRecall,
     ProductMetrics,
+    Metacognition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +220,28 @@ pub fn build_inspector_timeline(
             "trend": snapshot.product_metrics_trend,
         })),
     });
+    events.push(WriterTimelineEvent {
+        audience: WriterTimelineAudience::Inspector,
+        kind: WriterTimelineEventKind::Metacognition,
+        label: "Metacognitive gate".to_string(),
+        ts_ms: snapshot
+            .run_events
+            .iter()
+            .map(|event| event.ts_ms)
+            .max()
+            .or_else(|| {
+                snapshot
+                    .recent_feedback
+                    .iter()
+                    .map(|feedback| feedback.created_at)
+                    .max()
+            })
+            .unwrap_or(0),
+        task_id: None,
+        source_refs: Vec::new(),
+        summary: snapshot.metacognitive_snapshot.summary.clone(),
+        detail: Some(serde_json::json!(snapshot.metacognitive_snapshot)),
+    });
 
     events.sort_by(|left, right| {
         left.ts_ms
@@ -265,6 +288,30 @@ pub fn build_companion_timeline_summary(
             "chapterMissionCompletionRate": metrics.chapter_mission_completion_rate,
         })),
     });
+    if snapshot.metacognitive_snapshot.recommended_action
+        != crate::writer_agent::metacognition::WriterMetacognitiveAction::Proceed
+    {
+        events.push(WriterTimelineEvent {
+            audience: WriterTimelineAudience::Companion,
+            kind: WriterTimelineEventKind::Metacognition,
+            label: "Run guard".to_string(),
+            ts_ms: snapshot
+                .run_events
+                .iter()
+                .map(|event| event.ts_ms)
+                .max()
+                .unwrap_or(0),
+            task_id: None,
+            source_refs: Vec::new(),
+            summary: snapshot.metacognitive_snapshot.summary.clone(),
+            detail: Some(serde_json::json!({
+                "riskLevel": snapshot.metacognitive_snapshot.risk_level,
+                "recommendedAction": snapshot.metacognitive_snapshot.recommended_action,
+                "confidence": snapshot.metacognitive_snapshot.confidence,
+                "reasonCount": snapshot.metacognitive_snapshot.reasons.len(),
+            })),
+        });
+    }
     for proposal in snapshot.recent_proposals.iter().take(3) {
         events.push(WriterTimelineEvent {
             audience: WriterTimelineAudience::Companion,
@@ -302,6 +349,7 @@ fn event_kind_weight(kind: &WriterTimelineEventKind) -> u8 {
         WriterTimelineEventKind::Feedback => 9,
         WriterTimelineEventKind::ContextRecall => 10,
         WriterTimelineEventKind::ProductMetrics => 11,
+        WriterTimelineEventKind::Metacognition => 12,
     }
 }
 
@@ -514,6 +562,7 @@ mod tests {
             context_recalls: Vec::new(),
             product_metrics: WriterProductMetrics::default(),
             product_metrics_trend: Default::default(),
+            metacognitive_snapshot: Default::default(),
         };
         let summary = build_companion_timeline_summary(&snapshot);
         assert!(!summary.includes_internal_trace);
@@ -528,6 +577,7 @@ mod tests {
                         | WriterTimelineEventKind::TaskReceipt
                         | WriterTimelineEventKind::TaskArtifact
                         | WriterTimelineEventKind::OperationLifecycle
+                        | WriterTimelineEventKind::Metacognition
                 )
         }));
     }

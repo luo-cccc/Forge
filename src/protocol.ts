@@ -987,6 +987,7 @@ export interface WriterAgentTraceSnapshot {
   contextRecalls: ContextRecallSummary[];
   productMetrics: WriterProductMetrics;
   productMetricsTrend: WriterProductMetricsTrend;
+  metacognitiveSnapshot: WriterMetacognitiveSnapshot;
 }
 
 export interface WriterPostWriteDiagnosticReport {
@@ -1081,6 +1082,33 @@ export interface WriterProductMetricSessionTrend {
   contextDroppedSourceCount: number;
 }
 
+export type WriterMetacognitiveRiskLevel = "low" | "medium" | "high" | "blocked" | string;
+
+export type WriterMetacognitiveAction =
+  | "proceed"
+  | "proceed_with_warning"
+  | "ask_clarifying_question"
+  | "switch_to_planning_review"
+  | "run_continuity_diagnostic"
+  | "block_write_until_author_confirms"
+  | string;
+
+export interface WriterMetacognitiveSnapshot {
+  riskLevel: WriterMetacognitiveRiskLevel;
+  recommendedAction: WriterMetacognitiveAction;
+  confidence: number;
+  summary: string;
+  reasons: string[];
+  remediation: string[];
+  contextCoverageRate: number;
+  contextTruncatedSourceCount: number;
+  contextDroppedSourceCount: number;
+  recentFailureCount: number;
+  postWriteErrorCount: number;
+  lowConfidenceProposalCount: number;
+  ignoredRepeatedSuggestionRate: number;
+}
+
 export interface WriterOperationLifecycleTrace {
   proposalId?: string | null;
   operationKind: string;
@@ -1118,7 +1146,8 @@ export type WriterTimelineEventKind =
   | "task_receipt"
   | "task_artifact"
   | "context_recall"
-  | "product_metrics";
+  | "product_metrics"
+  | "metacognition";
 
 export interface WriterTimelineEvent {
   audience: WriterTimelineAudience;

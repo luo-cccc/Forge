@@ -23,7 +23,8 @@ type InspectorFilter =
   | "task_packet"
   | "operation_lifecycle"
   | "context_recall"
-  | "product_metrics";
+  | "product_metrics"
+  | "metacognition";
 
 const filterLabels: Record<InspectorFilter, string> = {
   all: "All",
@@ -37,6 +38,7 @@ const filterLabels: Record<InspectorFilter, string> = {
   operation_lifecycle: "Lifecycle",
   context_recall: "Context",
   product_metrics: "Metrics",
+  metacognition: "Meta",
 };
 
 const filterOrder: InspectorFilter[] = [
@@ -51,6 +53,7 @@ const filterOrder: InspectorFilter[] = [
   "operation_lifecycle",
   "context_recall",
   "product_metrics",
+  "metacognition",
 ];
 
 function formatRate(value: number | undefined): string {
@@ -86,6 +89,7 @@ function eventToneClass(kind: WriterTimelineEventKind): string {
   if (kind === "task_artifact") return "border-success/30 bg-bg-raised";
   if (kind === "run_event") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "product_metrics") return "border-success/30 bg-success/10";
+  if (kind === "metacognition") return "border-accent/30 bg-accent-subtle/20";
   return "border-border-subtle bg-bg-raised";
 }
 
@@ -96,6 +100,7 @@ function eventBadgeClass(kind: WriterTimelineEventKind): string {
   if (kind === "task_artifact") return "bg-success/10 text-success";
   if (kind === "run_event") return "bg-accent-subtle text-accent";
   if (kind === "product_metrics") return "bg-success/10 text-success";
+  if (kind === "metacognition") return "bg-accent-subtle text-accent";
   return "bg-bg-deep text-text-muted";
 }
 
@@ -411,6 +416,7 @@ export const WriterInspectorPanel: React.FC = () => {
   const latestArtifact = events.find((event) => event.kind === "task_artifact");
   const latestPostWrite = trace?.postWriteDiagnostics[0];
   const metrics = trace?.productMetrics;
+  const metacognition = trace?.metacognitiveSnapshot;
   const trends = useMemo(() => trace?.contextSourceTrends ?? [], [trace?.contextSourceTrends]);
   const contextPressure = useMemo(() => contextPressureSummary(trends), [trends]);
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
@@ -680,6 +686,24 @@ export const WriterInspectorPanel: React.FC = () => {
               <div className="mb-2 font-medium text-text-primary">Run Health</div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Meta Risk</span>
+                  <span className={
+                    metacognition?.riskLevel === "blocked" || metacognition?.riskLevel === "high"
+                      ? "font-mono text-danger"
+                      : metacognition?.riskLevel === "medium"
+                        ? "font-mono text-accent"
+                        : "font-mono text-success"
+                  }>
+                    {metacognition?.riskLevel ?? "low"}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Meta Action</span>
+                  <span className="font-mono text-text-primary">
+                    {metacognition?.recommendedAction ?? "proceed"}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
                   <span className="block text-[10px] text-text-muted">Durable Save</span>
                   <span className="font-mono text-success">{formatRate(metrics?.durableSaveSuccessRate)}</span>
                 </div>
@@ -731,6 +755,44 @@ export const WriterInspectorPanel: React.FC = () => {
                 </div>
               </div>
             </section>
+
+            {metacognition && metacognition.recommendedAction !== "proceed" && (
+              <section className="rounded border border-accent/30 bg-accent-subtle/20 p-2 text-xs">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Metacognitive Gate</span>
+                  <button
+                    onClick={() => setFilter("metacognition")}
+                    className="rounded border border-accent/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent-subtle"
+                  >
+                    Open meta
+                  </button>
+                </div>
+                <p className="line-clamp-3 text-text-secondary">{metacognition.summary}</p>
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  <div className="rounded bg-bg-deep p-1.5">
+                    <span className="block text-[10px] text-text-muted">Coverage</span>
+                    <span className="font-mono text-text-primary">
+                      {formatRate(metacognition.contextCoverageRate)}
+                    </span>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1.5">
+                    <span className="block text-[10px] text-text-muted">Failures</span>
+                    <span className="font-mono text-danger">{metacognition.recentFailureCount}</span>
+                  </div>
+                  <div className="rounded bg-bg-deep p-1.5">
+                    <span className="block text-[10px] text-text-muted">Confidence</span>
+                    <span className="font-mono text-text-primary">
+                      {formatRate(metacognition.confidence)}
+                    </span>
+                  </div>
+                </div>
+                {metacognition.remediation[0] && (
+                  <p className="mt-2 line-clamp-2 text-[10px] text-accent">
+                    {metacognition.remediation[0]}
+                  </p>
+                )}
+              </section>
+            )}
 
             <section className="rounded border border-border-subtle bg-bg-raised p-2 text-xs">
               <div className="mb-2 flex items-center justify-between gap-2">

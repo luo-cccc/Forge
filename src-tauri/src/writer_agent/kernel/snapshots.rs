@@ -260,7 +260,7 @@ impl WriterAgentKernel {
         };
         let context_source_trends = context_source_trends(&recent_proposals);
 
-        WriterAgentTraceSnapshot {
+        let mut snapshot = WriterAgentTraceSnapshot {
             recent_observations: if persisted_observations.is_empty() {
                 self.observations
                     .iter()
@@ -338,7 +338,11 @@ impl WriterAgentKernel {
                 .unwrap_or_default(),
             product_metrics: self.product_metrics(),
             product_metrics_trend: self.product_metrics_trend(limit),
-        }
+            metacognitive_snapshot: Default::default(),
+        };
+        snapshot.metacognitive_snapshot =
+            crate::writer_agent::metacognition::metacognitive_snapshot_from_trace(&snapshot);
+        snapshot
     }
 
     pub fn export_trajectory(&self, limit: usize) -> super::trajectory::WriterTrajectoryExport {
