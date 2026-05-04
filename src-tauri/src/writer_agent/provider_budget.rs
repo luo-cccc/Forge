@@ -15,6 +15,7 @@ pub enum WriterProviderBudgetTask {
     ProjectBrainRebuild,
     ExternalResearch,
     ManualRequest,
+    MetacognitiveRecovery,
     GhostPreview,
 }
 
@@ -131,6 +132,7 @@ pub fn default_provider_budget_limits(
         WriterProviderBudgetTask::BatchGeneration => (85_000, 1_800_000),
         WriterProviderBudgetTask::ProjectBrainRebuild => (120_000, 2_500_000),
         WriterProviderBudgetTask::ExternalResearch => (45_000, 1_000_000),
+        WriterProviderBudgetTask::MetacognitiveRecovery => (28_000, 700_000),
     };
     WriterProviderBudgetRequest {
         task,
@@ -176,6 +178,7 @@ pub fn evaluate_provider_budget(
             | WriterProviderBudgetTask::ProjectBrainQuery
             | WriterProviderBudgetTask::ProjectBrainRebuild
             | WriterProviderBudgetTask::ExternalResearch
+            | WriterProviderBudgetTask::MetacognitiveRecovery
     ) && estimated_total_tokens
         >= request.max_total_tokens_without_approval * 4 / 5;
     if high_risk_long_task {

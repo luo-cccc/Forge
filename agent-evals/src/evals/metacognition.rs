@@ -282,6 +282,124 @@ pub fn run_metacognitive_gate_allows_recovery_operation_eval() -> EvalResult {
     )
 }
 
+pub fn run_metacognitive_recovery_run_uses_read_only_task_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻悬疑",
+            "玉佩线索推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-7",
+            "林墨审查玉佩线索是否偏离本章目标。",
+            "指出玉佩线索风险",
+            "不要提前揭开玉佩来源",
+            "以诊断后的下一步问题收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    seed_metacognitive_failure(&mut kernel);
+
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ContinuityDiagnostic,
+        observation: observation_in_chapter(
+            "林墨几乎要说出玉佩来自禁地，但张三还没有给证据。",
+            "Chapter-7",
+        ),
+        user_instruction: "元认知门禁要求恢复：只做连续性诊断，不写正文。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨几乎要说出玉佩来自禁地，但张三还没有给证据。".to_string(),
+            paragraph: "林墨几乎要说出玉佩来自禁地，但张三还没有给证据。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::ReadOnly,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o-mini");
+    let trace = kernel.trace_snapshot(50);
+    let packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "ContinuityDiagnostic");
+    let report = prepared
+        .as_ref()
+        .map(|prepared| {
+            prepared.first_round_provider_budget(
+                agent_writer_lib::writer_agent::provider_budget::WriterProviderBudgetTask::MetacognitiveRecovery,
+                "gpt-4o-mini",
+            )
+        })
+        .ok();
+
+    let mut errors = Vec::new();
+    if let Err(error) = &prepared {
+        errors.push(format!(
+            "metacognitive recovery diagnostic should prepare despite gate: {}",
+            error
+        ));
+    }
+    if !packet.is_some_and(|packet| {
+        packet.packet.intent == Some(agent_harness_core::Intent::AnalyzeText)
+            && packet.max_side_effect_level == "Read"
+            && !packet.packet.tool_policy.allow_approval_required
+            && packet
+                .packet
+                .constraints
+                .iter()
+                .any(|constraint| constraint.contains("Surface evidence"))
+    }) {
+        errors.push("recovery diagnostic packet was not read-only evidence-first".to_string());
+    }
+    if !trace.run_events.iter().any(|event| {
+        event.event_type == "writer.task_receipt"
+            && event.data.get("taskKind").and_then(|value| value.as_str())
+                == Some("ContinuityDiagnostic")
+    }) {
+        errors.push("recovery diagnostic did not record a diagnostic task receipt".to_string());
+    }
+    if !report.as_ref().is_some_and(|report| {
+        report.task
+            == agent_writer_lib::writer_agent::provider_budget::WriterProviderBudgetTask::MetacognitiveRecovery
+    }) {
+        errors.push("recovery run did not use metacognitive recovery budget task".to_string());
+    }
+
+    eval_result(
+        "writer_agent:metacognitive_recovery_run_uses_read_only_task",
+        format!(
+            "prepared={} packets={} receiptEvents={} budgetTask={:?}",
+            prepared.is_ok(),
+            trace.task_packets.len(),
+            trace
+                .run_events
+                .iter()
+                .filter(|event| event.event_type == "writer.task_receipt")
+                .count(),
+            report.map(|report| report.task)
+        ),
+        errors,
+    )
+}
+
 fn seed_metacognitive_failure(kernel: &mut WriterAgentKernel) {
     let bundle = WriterFailureEvidenceBundle::new(
         WriterFailureCategory::ContextMissing,

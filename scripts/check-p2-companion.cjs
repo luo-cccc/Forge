@@ -211,10 +211,12 @@ const checks = [
     pass:
       /metacognitiveRecoveryActions/.test(inspectorSource) &&
       /Open Review/.test(inspectorSource) &&
-      /Inspect Diagnostics/.test(inspectorSource) &&
+      /Run Review/.test(inspectorSource) &&
+      /Run Diagnostic/.test(inspectorSource) &&
+      /runMetacognitiveRecovery/.test(inspectorSource) &&
       /setStoryMode/.test(inspectorSource) &&
       !/Metacognitive Gate/.test(source) &&
-      !/Inspect Diagnostics/.test(source),
+      !/Run Diagnostic/.test(source),
   },
 ];
 

@@ -300,7 +300,7 @@ function App() {
         </div>
         {storyMode === "inspect" ? (
           <div className="min-h-0 flex-1">
-            <WriterInspectorPanel />
+            <WriterInspectorPanel getContext={getContext} />
           </div>
         ) : (
           <div className={`${companionHeight} min-h-0 ${storyMode === "explore" ? "border-b border-border-subtle" : ""}`}>

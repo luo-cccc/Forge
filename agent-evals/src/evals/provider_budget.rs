@@ -836,7 +836,8 @@ pub fn run_manual_request_provider_budget_eval() -> EvalResult {
             vec!["manual request prepare_task_run failed".to_string()],
         );
     };
-    let report = prepared.first_round_provider_budget("gpt-4o");
+    let report =
+        prepared.first_round_provider_budget(WriterProviderBudgetTask::ManualRequest, "gpt-4o");
     kernel.record_provider_budget_report(
         "manual-budget-1",
         &report,
@@ -925,7 +926,8 @@ pub fn run_manual_request_provider_budget_approval_eval() -> EvalResult {
             vec!["manual request prepare_task_run failed".to_string()],
         );
     };
-    let report = prepared.first_round_provider_budget("gpt-4o");
+    let report =
+        prepared.first_round_provider_budget(WriterProviderBudgetTask::ManualRequest, "gpt-4o");
     let approval = WriterProviderBudgetApproval {
         task: report.task,
         model: report.model.clone(),
@@ -1008,7 +1010,9 @@ pub fn run_manual_request_multi_round_provider_budget_eval() -> EvalResult {
         let report = agent_writer_lib::writer_agent::kernel::WriterAgentPreparedRun::<
             TwoRoundBudgetProvider,
             EvalToolHandler,
-        >::provider_budget_from_call_context(&context);
+        >::provider_budget_from_call_context(
+            WriterProviderBudgetTask::ManualRequest, &context
+        );
         budget_events_for_guard
             .lock()
             .unwrap()

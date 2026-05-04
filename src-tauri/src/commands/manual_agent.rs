@@ -163,7 +163,10 @@ fn install_manual_provider_budget_guard(
         let mut report = writer_agent::kernel::WriterAgentPreparedRun::<
             OpenAiCompatProvider,
             tool_bridge::TauriToolBridge,
-        >::provider_budget_from_call_context(&context);
+        >::provider_budget_from_call_context(
+            writer_agent::provider_budget::WriterProviderBudgetTask::ManualRequest,
+            &context,
+        );
         if context.round == 1
             && report.estimated_input_tokens <= preflight_estimated_input_tokens
             && report.decision == WriterProviderBudgetDecision::ApprovalRequired
@@ -318,6 +321,7 @@ pub async fn ask_agent(
         .and_then(|payload| payload.provider_budget_approval.clone());
     let budget_report = apply_provider_budget_approval(
         prepared_run.provider_budget_from_estimate(
+            writer_agent::provider_budget::WriterProviderBudgetTask::ManualRequest,
             model.clone(),
             preflight_estimated_input_tokens,
             4_096,

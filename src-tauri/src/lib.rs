@@ -73,6 +73,7 @@ use commands::graph::{
 };
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::manual_agent::ask_agent;
+use commands::metacognitive_recovery::run_metacognitive_recovery;
 use commands::outline::{
     delete_outline_node, get_outline, reorder_outline_nodes, save_outline_node,
     update_outline_status,
@@ -130,6 +131,7 @@ pub fn run() {
             report_editor_state,
             report_semantic_lint_state,
             ask_agent,
+            run_metacognitive_recovery,
             agent_observe,
             get_agent_domain_profile,
             get_agent_kernel_status,

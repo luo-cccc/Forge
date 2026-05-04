@@ -7,6 +7,7 @@ export const Commands = {
   approveWriterOperation: "approve_writer_operation",
   recordWriterOperationDurableSave: "record_writer_operation_durable_save",
   askAgent: "ask_agent",
+  runMetacognitiveRecovery: "run_metacognitive_recovery",
   generateParallelDrafts: "generate_parallel_drafts",
   askProjectBrain: "ask_project_brain",
   batchGenerateChapter: "batch_generate_chapter",
@@ -70,6 +71,7 @@ export const Events = {
   editorEntityCard: "editor-entity-card",
   editorHoverHint: "editor-hover-hint",
   inlineWriterOperation: "inline-writer-operation",
+  metacognitiveRecovery: "metacognitive-recovery",
   chapterRestored: "chapter-restored",
   projectFileRestored: "project-file-restored",
   storyboardMarker: "storyboard-marker",
@@ -421,6 +423,35 @@ export interface AskAgentContextPayload {
   providerBudgetApproval?: WriterProviderBudgetApproval;
 }
 
+export type MetacognitiveRecoveryAction =
+  | "planning_review"
+  | "continuity_diagnostic";
+
+export interface MetacognitiveRecoveryPayload {
+  action: MetacognitiveRecoveryAction;
+  instruction?: string;
+  context: string;
+  paragraph: string;
+  selectedText: string;
+  contextPayload?: AskAgentContextPayload;
+}
+
+export interface MetacognitiveRecoveryRunResult {
+  action: MetacognitiveRecoveryAction;
+  answer: string;
+  taskPacket: TaskPacket;
+  taskReceipt?: WriterTaskReceipt | null;
+  contextPackSummary: WriterAgentContextPackSummary;
+  traceRefs: string[];
+  sourceRefs: string[];
+}
+
+export interface MetacognitiveRecoveryEvent {
+  phase: "chunk" | "error" | "complete" | string;
+  content?: string;
+  message?: string;
+}
+
 export interface AskProjectBrainPayload {
   query: string;
   providerBudgetApproval?: WriterProviderBudgetApproval;
@@ -433,6 +464,7 @@ export type WriterProviderBudgetTask =
   | "project_brain_rebuild"
   | "external_research"
   | "manual_request"
+  | "metacognitive_recovery"
   | "ghost_preview"
   | string;
 
@@ -1193,6 +1225,14 @@ export interface WriterTaskReceipt {
   sourceRefs: string[];
   baseRevision?: string | null;
   createdAtMs: number;
+}
+
+export interface WriterAgentContextPackSummary {
+  task: string;
+  sourceCount: number;
+  totalChars: number;
+  budgetLimit: number;
+  sourceRefs: string[];
 }
 
 export interface WriterTaskArtifact {

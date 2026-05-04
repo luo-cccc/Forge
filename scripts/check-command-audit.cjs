@@ -87,6 +87,7 @@ const classification = {
   generate_parallel_drafts: RISK.PROVIDER_CALL,
   analyze_pacing: RISK.PROVIDER_CALL,
   ask_agent: RISK.PROVIDER_CALL,
+  run_metacognitive_recovery: RISK.PROVIDER_CALL,
 
   // Memory write (WriterMemory SQLite)
   agent_observe: RISK.MEMORY_WRITE,

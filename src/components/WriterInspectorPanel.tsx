@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../store";
 import { Commands } from "../protocol";
 import type {
+  MetacognitiveRecoveryAction,
+  MetacognitiveRecoveryRunResult,
   StoryMode,
   WriterAgentTraceSnapshot,
   WriterProposalTrace,
@@ -28,6 +30,10 @@ type InspectorFilter =
   | "context_recall"
   | "product_metrics"
   | "metacognition";
+
+interface WriterInspectorPanelProps {
+  getContext: () => { full: string; paragraph: string; selected: string; cursorPosition: number };
+}
 
 const filterLabels: Record<InspectorFilter, string> = {
   all: "All",
@@ -232,29 +238,43 @@ function metacognitiveRecoveryActions(meta: WriterMetacognitiveSnapshot | undefi
   label: string;
   filter?: InspectorFilter;
   storyMode?: StoryMode;
+  recoveryAction?: MetacognitiveRecoveryAction;
 }> {
   if (!meta || meta.recommendedAction === "proceed") return [];
   const action = meta.recommendedAction;
-  const actions: Array<{ label: string; filter?: InspectorFilter; storyMode?: StoryMode }> = [];
-  const add = (candidate: { label: string; filter?: InspectorFilter; storyMode?: StoryMode }) => {
+  const actions: Array<{
+    label: string;
+    filter?: InspectorFilter;
+    storyMode?: StoryMode;
+    recoveryAction?: MetacognitiveRecoveryAction;
+  }> = [];
+  const add = (candidate: {
+    label: string;
+    filter?: InspectorFilter;
+    storyMode?: StoryMode;
+    recoveryAction?: MetacognitiveRecoveryAction;
+  }) => {
     if (!actions.some((item) =>
       item.label === candidate.label &&
       item.filter === candidate.filter &&
-      item.storyMode === candidate.storyMode
+      item.storyMode === candidate.storyMode &&
+      item.recoveryAction === candidate.recoveryAction
     )) {
       actions.push(candidate);
     }
   };
 
   if (action === "switch_to_planning_review" || action === "ask_clarifying_question") {
+    add({ label: "Run Review", recoveryAction: "planning_review" });
     add({ label: "Open Review", storyMode: "review" });
   }
   if (action === "run_continuity_diagnostic") {
-    add({ label: "Inspect Diagnostics", filter: "save_completed" });
-    add({ label: "Open Review", storyMode: "review" });
+    add({ label: "Run Diagnostic", recoveryAction: "continuity_diagnostic", filter: "task_artifact" });
+    add({ label: "Run Review", recoveryAction: "planning_review" });
   }
   if (action === "block_write_until_author_confirms") {
     add({ label: "Inspect Saves", filter: "save_completed" });
+    add({ label: "Run Review", recoveryAction: "planning_review" });
     add({ label: "Open Review", storyMode: "review" });
   }
   if (meta.recentFailureCount > 0) {
@@ -268,6 +288,13 @@ function metacognitiveRecoveryActions(meta: WriterMetacognitiveSnapshot | undefi
   }
   add({ label: "Open Meta", filter: "metacognition" });
   return actions.slice(0, 4);
+}
+
+function metacognitiveRecoveryInstruction(action: MetacognitiveRecoveryAction): string {
+  if (action === "continuity_diagnostic") {
+    return "Run a read-only Continuity Diagnostic for the current metacognitive block. Inspect continuity, canon, chapter mission, promise, save, and context-pressure risks. Cite evidence and produce a diagnostic report only. Do not draft manuscript prose or mutate project memory.";
+  }
+  return "Run a read-only Planning Review for the current metacognitive block. Rebuild the current context picture, list missing evidence, identify risks, propose candidate next actions, and ask author-confirmation questions. Do not draft manuscript prose or mutate project memory.";
 }
 
 function saveCompletedDetail(detail: unknown): {
@@ -412,13 +439,19 @@ function matchingFilter(event: WriterTimelineEvent, filter: InspectorFilter): bo
   return event.kind === filter;
 }
 
-export const WriterInspectorPanel: React.FC = () => {
+export const WriterInspectorPanel: React.FC<WriterInspectorPanelProps> = ({ getContext }) => {
   const setStoryMode = useAppStore((state) => state.setStoryMode);
+  const currentChapter = useAppStore((state) => state.currentChapter);
+  const currentChapterRevision = useAppStore((state) => state.currentChapterRevision);
+  const isEditorDirty = useAppStore((state) => state.isEditorDirty);
   const [timeline, setTimeline] = useState<WriterInspectorTimeline | null>(null);
   const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
   const [filter, setFilter] = useState<InspectorFilter>("all");
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const [recoveryRunning, setRecoveryRunning] = useState<MetacognitiveRecoveryAction | null>(null);
+  const [recoveryResult, setRecoveryResult] = useState<MetacognitiveRecoveryRunResult | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -443,6 +476,49 @@ export const WriterInspectorPanel: React.FC = () => {
       clearInterval(interval);
     };
   }, [refresh]);
+
+  const runMetacognitiveRecovery = useCallback(async (action: MetacognitiveRecoveryAction) => {
+    if (recoveryRunning) return;
+    const { full, paragraph, selected, cursorPosition } = getContext();
+    setRecoveryRunning(action);
+    setRecoveryError(null);
+    setRecoveryResult(null);
+    try {
+      const result = await invoke<MetacognitiveRecoveryRunResult>(
+        Commands.runMetacognitiveRecovery,
+        {
+          payload: {
+            action,
+            instruction: metacognitiveRecoveryInstruction(action),
+            context: full,
+            paragraph,
+            selectedText: selected,
+            contextPayload: {
+              chapterTitle: currentChapter,
+              chapterRevision: currentChapterRevision ?? undefined,
+              cursorPosition: Math.min(cursorPosition, Array.from(full).length),
+              dirty: isEditorDirty,
+              requestId: `meta-recovery-${Date.now()}`,
+            },
+          },
+        },
+      );
+      setRecoveryResult(result);
+      setFilter(action === "continuity_diagnostic" ? "task_artifact" : "task_packet");
+      await refresh();
+    } catch (e) {
+      setRecoveryError(String(e));
+    } finally {
+      setRecoveryRunning(null);
+    }
+  }, [
+    currentChapter,
+    currentChapterRevision,
+    getContext,
+    isEditorDirty,
+    recoveryRunning,
+    refresh,
+  ]);
 
   const events = useMemo(() => timeline?.events ?? [], [timeline?.events]);
   const filteredEvents = useMemo(
@@ -851,16 +927,34 @@ export const WriterInspectorPanel: React.FC = () => {
                   <div className="mt-2 flex flex-wrap gap-1">
                     {metacognitiveActions.map((action) => (
                       <button
-                        key={`meta-${action.label}-${action.filter ?? action.storyMode ?? "none"}`}
+                        key={`meta-${action.label}-${action.filter ?? action.storyMode ?? action.recoveryAction ?? "none"}`}
+                        disabled={Boolean(recoveryRunning)}
                         onClick={() => {
                           if (action.filter) setFilter(action.filter);
                           if (action.storyMode) setStoryMode(action.storyMode);
+                          if (action.recoveryAction) void runMetacognitiveRecovery(action.recoveryAction);
                         }}
-                        className="rounded border border-accent/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent-subtle"
+                        className="rounded border border-accent/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent-subtle disabled:cursor-wait disabled:opacity-60"
                       >
-                        {action.label}
+                        {recoveryRunning === action.recoveryAction ? "Running" : action.label}
                       </button>
                     ))}
+                  </div>
+                )}
+                {recoveryError && (
+                  <p className="mt-2 line-clamp-2 text-[10px] text-danger">{recoveryError}</p>
+                )}
+                {recoveryResult && (
+                  <div className="mt-2 rounded border border-accent/20 bg-bg-deep p-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="text-accent">{metacognitiveActionLabel(recoveryResult.action)}</span>
+                      <span className="font-mono text-text-muted">
+                        {recoveryResult.contextPackSummary.sourceCount} sources
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-3 text-[10px] text-text-secondary">
+                      {recoveryResult.answer}
+                    </p>
                   </div>
                 )}
               </section>

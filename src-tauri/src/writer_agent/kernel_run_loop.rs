@@ -142,9 +142,11 @@ where
 
     pub fn first_round_provider_budget(
         &self,
+        task: WriterProviderBudgetTask,
         model: impl Into<String>,
     ) -> WriterProviderBudgetReport {
         self.provider_budget_from_estimate(
+            task,
             model,
             self.first_round_estimated_input_tokens(),
             Self::FIRST_ROUND_OUTPUT_TOKENS,
@@ -168,12 +170,13 @@ where
 
     pub fn provider_budget_from_estimate(
         &self,
+        task: WriterProviderBudgetTask,
         model: impl Into<String>,
         estimated_input_tokens: u64,
         requested_output_tokens: u64,
     ) -> WriterProviderBudgetReport {
         evaluate_provider_budget(WriterProviderBudgetRequest::new(
-            WriterProviderBudgetTask::ManualRequest,
+            task,
             model,
             estimated_input_tokens,
             requested_output_tokens,
@@ -185,10 +188,11 @@ where
     }
 
     pub fn provider_budget_from_call_context(
+        task: WriterProviderBudgetTask,
         context: &ProviderCallContext,
     ) -> WriterProviderBudgetReport {
         evaluate_provider_budget(WriterProviderBudgetRequest::new(
-            WriterProviderBudgetTask::ManualRequest,
+            task,
             context.model.clone(),
             context.estimated_input_tokens,
             context.requested_output_tokens,

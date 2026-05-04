@@ -13,4 +13,5 @@ pub const EDITOR_SEMANTIC_LINT: &str = "editor-semantic-lint";
 pub const EDITOR_ENTITY_CARD: &str = "editor-entity-card";
 pub const EDITOR_HOVER_HINT: &str = "editor-hover-hint";
 pub const INLINE_WRITER_OPERATION: &str = "inline-writer-operation";
+pub const METACOGNITIVE_RECOVERY: &str = "metacognitive-recovery";
 pub const STORYBOARD_MARKER: &str = "storyboard-marker";

@@ -72,6 +72,7 @@ fn main() {
     results.push(run_metacognitive_gate_blocks_write_run_eval());
     results.push(run_metacognitive_gate_blocks_approved_operation_eval());
     results.push(run_metacognitive_gate_allows_recovery_operation_eval());
+    results.push(run_metacognitive_recovery_run_uses_read_only_task_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
