@@ -130,8 +130,9 @@ Before pushing foundation changes, run:
 npm run verify
 ```
 
-Expected current baseline:
+Expected current baseline. This block is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
+<!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 80 tests passing
 - `cargo test -p agent-writer`: 190 tests passing
 - `cargo run -p agent-evals`: 155/155 evals passing
@@ -141,6 +142,7 @@ Expected current baseline:
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing
 - `git diff --check`: passing
+<!-- verification-baseline:end -->
 
 `cargo run -p agent-evals` writes local reports under `reports/`; `npm run verify` cleans generated eval reports before checking whitespace.
 

@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "check:p2": "node scripts/check-p2-companion.cjs",
     "check:audit": "node scripts/check-command-audit.cjs",
+    "baseline": "node scripts/verification-baseline.cjs --write",
+    "check:baseline": "node scripts/verification-baseline.cjs --check",
     "clean:reports": "node scripts/clean-eval-reports.cjs",
     "lint": "eslint .",
     "preview": "vite preview",

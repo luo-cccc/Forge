@@ -12,7 +12,7 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only behind `WriterAgentKernel.prepare_task_run()` / `WriterAgentPreparedRun.run()`. `ask_agent` in lib.rs calls the kernel path, with no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are re-exported through `writer_agent::kernel` and implemented in `writer_agent/kernel_run_loop.rs`.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 51 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers `pub async fn` command handlers. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 52 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
@@ -96,17 +96,19 @@ P1 is in progress:
 
 ## Current Verification Baseline
 
-The expected local baseline is:
+The expected local baseline is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
-- `cargo test -p agent-writer`: 190 passing
-- `cargo test -p agent-harness-core`: 80 passing
-- `cargo run -p agent-evals`: 155/155 passing
-- `npm run check:p2`: 17/17 passing
+<!-- verification-baseline:start -->
+- `cargo test -p agent-harness-core`: 80 tests passing
+- `cargo test -p agent-writer`: 190 tests passing
+- `cargo run -p agent-evals`: 155/155 evals passing
+- `npm run check:p2`: 17/17 checks passing
 - `npm run check:audit`: 52 commands, 0 issues
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing
 - `git diff --check`: passing
+<!-- verification-baseline:end -->
 
 `npm run verify` runs all of the above. `cargo run -p agent-evals` writes a local report under `reports/`; report directories are ignored and should not be committed.
 
