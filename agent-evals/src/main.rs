@@ -41,6 +41,7 @@ fn main() {
     results.push(run_product_metrics_manual_ask_conversion_eval());
     results.push(run_product_metrics_manual_ask_conversion_trend_eval());
     results.push(run_product_metrics_multi_session_trend_eval());
+    results.push(run_product_metrics_context_pressure_trend_eval());
     results.push(run_memory_correction_overrides_reinforcement_eval());
     results.push(run_accepted_feedback_reinforces_style_memory_eval());
     results.push(run_rejected_proposal_records_correction_signal_eval());

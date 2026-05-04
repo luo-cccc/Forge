@@ -758,6 +758,28 @@ export const WriterInspectorPanel: React.FC = () => {
                     {formatDuration(metricsTrend?.overallAverageSaveToFeedbackMs)}
                   </span>
                 </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Context</span>
+                  <span className="font-mono text-text-primary">
+                    {formatRate(metricsTrend?.recentContextCoverageRate)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Previous Ctx</span>
+                  <span className="font-mono text-text-primary">
+                    {formatRate(metricsTrend?.previousContextCoverageRate)}
+                  </span>
+                </div>
+                <div className="rounded bg-bg-deep p-2">
+                  <span className="block text-[10px] text-text-muted">Ctx Delta</span>
+                  <span className={
+                    (metricsTrend?.contextCoverageDelta ?? 0) < 0
+                      ? "font-mono text-accent"
+                      : "font-mono text-success"
+                  }>
+                    {formatRate(metricsTrend?.contextCoverageDelta ?? undefined)}
+                  </span>
+                </div>
               </div>
               <div className="mt-2 space-y-1.5">
                 {(metricsTrend?.recentSessions ?? []).slice(0, 5).map((session) => (
@@ -777,6 +799,10 @@ export const WriterInspectorPanel: React.FC = () => {
                       <span>ask ops {formatRate(session.manualAskConvertedToOperationRate)}</span>
                       <span>accept {formatRate(session.proposalAcceptanceRate)}</span>
                       <span>save {formatRate(session.durableSaveSuccessRate)}</span>
+                      <span>ctx {formatRate(session.contextCoverageRate)}</span>
+                      <span>ctx packs {session.contextPackCount}</span>
+                      <span>trunc {session.contextTruncatedSourceCount}</span>
+                      <span>drop {session.contextDroppedSourceCount}</span>
                     </div>
                   </div>
                 ))}

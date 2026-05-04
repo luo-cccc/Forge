@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 已降为主要保留模块 wiring、Tauri setup 和 command registration 的 root glue，并由 `scripts/check-architecture-size.cjs` 持续约束体量预算。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前本轮验证基线由 `scripts/verification-baseline.cjs` 维护，完整 `agent-evals` 为 158/158 passing。新增 `writer_agent:context_source_trend_pressure`，用紧预算长会话式 fixture 覆盖 context source trend 对 dropped / truncated source 压力、覆盖率缺口和 budget-exhaustion reason 的暴露；Inspector Context Pressure 也已升级为摘要视图，直接显示 coverage、truncated/dropped 事件数、受压 source 和每个 source 的覆盖率条。
+- 当前本轮验证基线由 `scripts/verification-baseline.cjs` 维护，完整 `agent-evals` 为 159/159 passing。新增 `writer_agent:product_metrics_context_pressure_trend`，把持久化 `writer.context_pack_built` run events 聚合进 `productMetricsTrend`，按 session 暴露 context pack count、requested/provided chars、coverage、truncated/dropped source counts 和 recent-vs-previous coverage delta；Inspector Session Trend 已展示这些跨 session context pressure 指标。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 - P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，ContinuityDiagnostic 已有只读 receipt、diagnostic_report task artifact、trajectory 回放和 Inspector receipt/artifact 筛选；记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report，accepted operation 后写诊断已会把诊断结果注册为可审查 proposal / story debt，不自动改写正文；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
@@ -400,7 +400,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 ### P2.1 Context Pack 质量升级
 
-Status：核心已完成，Inspect mode 已有第一版独立 context pressure 趋势视图；后续重点转向真实长 session 校准。
+Status：核心已完成，Inspect mode 已有当前 trace 和跨 session context pressure 趋势视图；后续重点转向真实长 session 阈值校准。
 
 Done：
 
@@ -410,10 +410,12 @@ Done：
 - `WriterAgentTraceSnapshot.context_source_trends` 已按最近 proposal 的 context budget reports 聚合 source appearances、provided/truncated/dropped 次数、总请求/提供字符、平均提供量和最后截断原因，作为 debug inspector 的后端趋势数据。
 - Inspect mode 的 Context Pressure 区块已展示整体覆盖率、truncated / dropped 事件数、受压 source、每个 source 的覆盖率条、平均提供量和最近截断/丢弃原因。
 - `writer_agent:context_source_trend_pressure` 已用紧预算长会话式 fixture 验证 dropped / truncated source pressure 和 budget-exhaustion reason 会被 trace/debug 路径暴露。
+- `productMetricsTrend` 已从持久化 `writer.context_pack_built` run events 聚合每个 session 的 context pack count、requested/provided chars、coverage rate、truncated/dropped source count、overall/recent/previous coverage 和 delta；Inspect Session Trend 已展示 `ctx`、`ctx packs`、`trunc`、`drop`。
+- `writer_agent:product_metrics_context_pressure_trend` 已覆盖跨 session context pressure trend 和 trajectory export 字段。
 
 Partial：
 
-- Context pressure 现在有独立 Inspect 视图，但仍主要基于最近 proposal 的 trace 聚合，还未按真实作者项目建立长期阈值、告警或分章节趋势。
+- Context pressure 现在有当前 trace 和 persisted session trend 两层 Inspect 视图，但还未按真实作者项目建立阈值、告警或分章节趋势。
 - Budget 被丢弃来源的解释已经进入 pack/report/Inspector 层，但还需要真实长 session 数据校准哪些 dropped source 是可接受压缩，哪些代表关键上下文缺失。
 
 Remaining：
@@ -427,6 +429,7 @@ Verification：
 - `writer_agent:context_budget_trace`
 - `writer_agent:context_source_trend`
 - `writer_agent:context_source_trend_pressure`
+- `writer_agent:product_metrics_context_pressure_trend`
 - `writer_agent:result_feedback_survives_tight_budget`
 - `writer_agent:context_pack_explainability`
 - `npm run verify`
@@ -604,7 +607,7 @@ writer_agent/
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式；当前完整 eval 基线由 `scripts/verification-baseline.cjs` 维护，为 158/158 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式；当前完整 eval 基线由 `scripts/verification-baseline.cjs` 维护，为 159/159 passing。
 
 建议模块：
 

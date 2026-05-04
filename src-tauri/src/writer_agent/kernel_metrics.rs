@@ -41,6 +41,10 @@ pub struct WriterProductMetricsTrend {
     pub recent_average_save_to_feedback_ms: Option<u64>,
     pub previous_average_save_to_feedback_ms: Option<u64>,
     pub save_to_feedback_delta_ms: Option<i64>,
+    pub overall_context_coverage_rate: f64,
+    pub recent_context_coverage_rate: f64,
+    pub previous_context_coverage_rate: f64,
+    pub context_coverage_delta: Option<f64>,
     pub recent_sessions: Vec<WriterProductMetricSessionTrend>,
 }
 
@@ -64,6 +68,12 @@ pub struct WriterProductMetricSessionTrend {
     pub durable_save_success_rate: f64,
     pub average_save_to_feedback_ms: Option<u64>,
     pub save_feedback_sample_count: u64,
+    pub context_pack_count: u64,
+    pub context_requested_chars: u64,
+    pub context_provided_chars: u64,
+    pub context_coverage_rate: f64,
+    pub context_truncated_source_count: u64,
+    pub context_dropped_source_count: u64,
 }
 
 pub(crate) fn product_metrics_from_trace(
@@ -273,6 +283,36 @@ pub(crate) fn product_metrics_trend_from_run_events(
     let save_to_feedback_delta_ms = recent_average_save_to_feedback_ms
         .zip(previous_average_save_to_feedback_ms)
         .map(|(recent, previous)| recent as i64 - previous as i64);
+    let total_context_requested = session_trends
+        .iter()
+        .map(|trend| trend.context_requested_chars)
+        .sum::<u64>();
+    let total_context_provided = session_trends
+        .iter()
+        .map(|trend| trend.context_provided_chars)
+        .sum::<u64>();
+    let overall_context_coverage_rate = ratio(total_context_provided, total_context_requested);
+    let recent_context_coverage_rate = session_trends
+        .iter()
+        .find(|trend| trend.context_pack_count > 0)
+        .map(|trend| trend.context_coverage_rate)
+        .unwrap_or_default();
+    let previous_context_coverage_rate = session_trends
+        .iter()
+        .filter(|trend| trend.context_pack_count > 0)
+        .map(|trend| trend.context_coverage_rate)
+        .nth(1)
+        .unwrap_or_default();
+    let context_coverage_delta = session_trends
+        .iter()
+        .filter(|trend| trend.context_pack_count > 0)
+        .map(|trend| trend.context_coverage_rate)
+        .take(2)
+        .collect::<Vec<_>>();
+    let context_coverage_delta = context_coverage_delta
+        .first()
+        .zip(context_coverage_delta.get(1))
+        .map(|(recent, previous)| recent - previous);
     let session_count = session_trends.len();
     let recent_sessions = session_trends
         .into_iter()
@@ -286,6 +326,10 @@ pub(crate) fn product_metrics_trend_from_run_events(
         recent_average_save_to_feedback_ms,
         previous_average_save_to_feedback_ms,
         save_to_feedback_delta_ms,
+        overall_context_coverage_rate,
+        recent_context_coverage_rate,
+        previous_context_coverage_rate,
+        context_coverage_delta,
         recent_sessions,
     }
 }
@@ -320,6 +364,11 @@ struct SessionMetricAccumulator {
     failed_save_count: u64,
     durable_saves_by_proposal: HashMap<String, Vec<u64>>,
     feedback_by_proposal: Vec<(String, u64)>,
+    context_pack_count: u64,
+    context_requested_chars: u64,
+    context_provided_chars: u64,
+    context_truncated_source_count: u64,
+    context_dropped_source_count: u64,
 }
 
 impl SessionMetricAccumulator {
@@ -342,6 +391,9 @@ impl SessionMetricAccumulator {
             }
             "writer.operation_lifecycle" => {
                 self.record_operation_lifecycle_event(event);
+            }
+            "writer.context_pack_built" => {
+                self.record_context_pack_event(event);
             }
             _ => {}
         }
@@ -399,6 +451,44 @@ impl SessionMetricAccumulator {
         }
     }
 
+    fn record_context_pack_event(&mut self, event: &RunEventSummary) {
+        self.context_pack_count = self.context_pack_count.saturating_add(1);
+        let Some(source_reports) = event
+            .data
+            .get("sourceReports")
+            .and_then(|value| value.as_array())
+        else {
+            self.context_requested_chars = self
+                .context_requested_chars
+                .saturating_add(json_number(&event.data, "budgetLimit").unwrap_or_default());
+            self.context_provided_chars = self
+                .context_provided_chars
+                .saturating_add(json_number(&event.data, "totalChars").unwrap_or_default());
+            self.context_truncated_source_count =
+                self.context_truncated_source_count.saturating_add(
+                    json_number(&event.data, "truncatedSourceCount").unwrap_or_default(),
+                );
+            return;
+        };
+
+        for report in source_reports {
+            let provided = json_number(report, "provided").unwrap_or_default();
+            let requested = json_number(report, "requested")
+                .or_else(|| json_number(report, "originalChars"))
+                .unwrap_or(provided);
+            self.context_requested_chars = self.context_requested_chars.saturating_add(requested);
+            self.context_provided_chars = self.context_provided_chars.saturating_add(provided);
+            if json_bool(report, "truncated").unwrap_or(false) {
+                self.context_truncated_source_count =
+                    self.context_truncated_source_count.saturating_add(1);
+            }
+            if provided == 0 {
+                self.context_dropped_source_count =
+                    self.context_dropped_source_count.saturating_add(1);
+            }
+        }
+    }
+
     fn into_trend(self, session_id: String) -> WriterProductMetricSessionTrend {
         let mut save_to_feedback = Vec::new();
         for (proposal_id, feedback_at) in &self.feedback_by_proposal {
@@ -443,6 +533,12 @@ impl SessionMetricAccumulator {
             ),
             average_save_to_feedback_ms: average_u64(&save_to_feedback),
             save_feedback_sample_count: save_to_feedback.len() as u64,
+            context_pack_count: self.context_pack_count,
+            context_requested_chars: self.context_requested_chars,
+            context_provided_chars: self.context_provided_chars,
+            context_coverage_rate: ratio(self.context_provided_chars, self.context_requested_chars),
+            context_truncated_source_count: self.context_truncated_source_count,
+            context_dropped_source_count: self.context_dropped_source_count,
         }
     }
 }
@@ -458,6 +554,10 @@ fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
 
 fn json_number(value: &serde_json::Value, key: &str) -> Option<u64> {
     value.get(key).and_then(|field| field.as_u64())
+}
+
+fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(|field| field.as_bool())
 }
 
 fn normalize_metric_label(value: &str) -> String {

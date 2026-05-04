@@ -1038,6 +1038,10 @@ export interface WriterProductMetricsTrend {
   recentAverageSaveToFeedbackMs?: number | null;
   previousAverageSaveToFeedbackMs?: number | null;
   saveToFeedbackDeltaMs?: number | null;
+  overallContextCoverageRate: number;
+  recentContextCoverageRate: number;
+  previousContextCoverageRate: number;
+  contextCoverageDelta?: number | null;
   recentSessions: WriterProductMetricSessionTrend[];
 }
 
@@ -1059,6 +1063,12 @@ export interface WriterProductMetricSessionTrend {
   durableSaveSuccessRate: number;
   averageSaveToFeedbackMs?: number | null;
   saveFeedbackSampleCount: number;
+  contextPackCount: number;
+  contextRequestedChars: number;
+  contextProvidedChars: number;
+  contextCoverageRate: number;
+  contextTruncatedSourceCount: number;
+  contextDroppedSourceCount: number;
 }
 
 export interface WriterOperationLifecycleTrace {

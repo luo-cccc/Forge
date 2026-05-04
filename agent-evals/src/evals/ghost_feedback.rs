@@ -569,6 +569,132 @@ pub fn run_product_metrics_multi_session_trend_eval() -> EvalResult {
     )
 }
 
+pub fn run_product_metrics_context_pressure_trend_eval() -> EvalResult {
+    let db_path = std::env::temp_dir().join(format!(
+        "forge-context-pressure-trend-{}-{}.sqlite",
+        std::process::id(),
+        now_ms()
+    ));
+    let mut errors = Vec::new();
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "context-pressure-session-a".to_string();
+        kernel
+            .create_llm_ghost_proposal(
+                observation("林墨停在旧门前，想起张三带走的玉佩和未解释的密令。"),
+                "他把声音压低，先确认门后的呼吸声。".to_string(),
+                "eval-model",
+            )
+            .unwrap();
+    }
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        memory
+            .ensure_story_contract_seed(
+                "eval",
+                "寒影录",
+                "玄幻",
+                &"玉佩线推动林墨做选择，所有线索都要延迟揭示。".repeat(10),
+                &"林墨必须在复仇和守护之间做选择。".repeat(8),
+                &"不得提前泄露玉佩来源。".repeat(8),
+            )
+            .unwrap();
+        memory
+            .ensure_chapter_mission_seed(
+                "eval",
+                "Chapter-9",
+                &"林墨审问张三，同时必须保留玉佩真正来源的悬念。".repeat(10),
+                "逼近玉佩线索",
+                "直接揭开玉佩真实来源",
+                &"以伪造令牌收束。".repeat(8),
+                "eval",
+            )
+            .unwrap();
+        memory
+            .upsert_style_preference(
+                "dialogue_subtext",
+                &"对白保持克制，用动作和停顿暗示压力。".repeat(12),
+                true,
+            )
+            .unwrap();
+        for idx in 0..4 {
+            memory
+                .add_promise(
+                    "clue",
+                    &format!("玉佩压力{}", idx),
+                    &format!(
+                        "第{}条玉佩线索必须后续回收。{}",
+                        idx,
+                        "延迟揭示。".repeat(18)
+                    ),
+                    "Chapter-2",
+                    "Chapter-12",
+                    5,
+                )
+                .unwrap();
+        }
+
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "context-pressure-session-b".to_string();
+        kernel.active_chapter = Some("Chapter-9".to_string());
+        kernel
+            .create_llm_ghost_proposal(
+                observation_in_chapter(
+                    &format!(
+                        "{}林墨看着张三，问他那枚玉佩到底从谁手里来。",
+                        "审讯室里只剩烛火和铁链轻响。".repeat(70)
+                    ),
+                    "Chapter-9",
+                ),
+                "张三没有回答，只把袖口往阴影里藏得更深。".to_string(),
+                "eval-model",
+            )
+            .unwrap();
+
+        let trend = kernel.trace_snapshot(80).product_metrics_trend;
+        let recent = trend.recent_sessions.first();
+        if trend.session_count < 2 {
+            errors.push(format!(
+                "context pressure trend saw {} sessions",
+                trend.session_count
+            ));
+        }
+        if trend.overall_context_coverage_rate <= 0.0 {
+            errors.push("overall context coverage was not aggregated".to_string());
+        }
+        if trend.context_coverage_delta.is_none() {
+            errors.push("context coverage trend lacks recent-vs-previous delta".to_string());
+        }
+        if !recent.is_some_and(|session| {
+            session.session_id == "context-pressure-session-b"
+                && session.context_pack_count >= 1
+                && session.context_requested_chars > session.context_provided_chars
+                && session.context_truncated_source_count > 0
+                && session.context_coverage_rate > 0.0
+        }) {
+            errors.push(format!(
+                "recent context pressure session missing pressure: {:?}",
+                recent
+            ));
+        }
+        if !kernel
+            .export_trajectory(80)
+            .jsonl
+            .contains("\"contextCoverageRate\"")
+        {
+            errors.push("trajectory trend lacks context coverage fields".to_string());
+        }
+    }
+    let _ = std::fs::remove_file(&db_path);
+
+    eval_result(
+        "writer_agent:product_metrics_context_pressure_trend",
+        format!("db={}", db_path.display()),
+        errors,
+    )
+}
+
 pub fn run_memory_correction_overrides_reinforcement_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let slot = "memory|canon|character|沈照".to_string();
