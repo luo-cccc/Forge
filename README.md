@@ -132,12 +132,17 @@ npm run verify
 
 Expected current baseline:
 
-- `cargo test -p agent-harness-core`: 79 tests passing
-- `cargo test -p agent-writer`: 151 tests passing
-- `cargo run -p agent-evals`: 48/48 evals passing
-- `npm run check:p2`: 8/8 checks passing
+- `cargo test -p agent-harness-core`: 80 tests passing
+- `cargo test -p agent-writer`: 185 tests passing
+- `cargo run -p agent-evals`: 143/143 evals passing
+- `npm run check:p2`: 15/15 checks passing
+- `npm run check:audit`: 50 commands, 0 issues
+- `npm run lint`: passing
+- `npm run build`: passing
+- `cargo fmt --all -- --check`: passing
+- `git diff --check`: passing
 
-`cargo run -p agent-evals` writes `reports/eval_report.json`; `npm run verify` cleans it automatically before checking whitespace.
+`cargo run -p agent-evals` writes local reports under `reports/`; `npm run verify` cleans generated eval reports before checking whitespace.
 
 ## Current Engineering Priorities
 

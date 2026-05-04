@@ -67,6 +67,20 @@ impl Default for AgentLoopConfig {
 /// Event callback type — the Tauri layer provides this to emit events to the frontend.
 pub type EventCallback = Arc<dyn Fn(AgentLoopEvent) + Send + Sync>;
 
+#[derive(Debug, Clone)]
+pub struct ProviderCallContext {
+    pub round: u32,
+    pub provider: String,
+    pub model: String,
+    pub estimated_input_tokens: u64,
+    pub requested_output_tokens: u64,
+    pub message_count: usize,
+    pub tool_count: usize,
+    pub stream: bool,
+}
+
+pub type ProviderCallGuard = Arc<dyn Fn(ProviderCallContext) -> Result<(), String> + Send + Sync>;
+
 /// The core agent execution loop.
 /// Generic over Provider and ToolHandler — fully testable with mocks.
 /// Ported from Claw Code `ConversationRuntime<C,T>` pattern.
@@ -76,6 +90,7 @@ pub struct AgentLoop<P: Provider, H: ToolHandler> {
     pub executor: ToolExecutor<H>,
     pub messages: Vec<LlmMessage>,
     pub on_event: Option<EventCallback>,
+    pub provider_call_guard: Option<ProviderCallGuard>,
 }
 
 impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
@@ -91,11 +106,16 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             executor: ToolExecutor::new(registry, handler),
             messages: Vec::new(),
             on_event: None,
+            provider_call_guard: None,
         }
     }
 
     pub fn set_event_callback(&mut self, cb: EventCallback) {
         self.on_event = Some(cb);
+    }
+
+    pub fn set_provider_call_guard(&mut self, guard: ProviderCallGuard) {
+        self.provider_call_guard = Some(guard);
     }
 
     fn emit(&self, event: AgentLoopEvent) {
@@ -134,6 +154,18 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
         registry.to_effective_openai_tools(&filter, &self.executor.permission_policy)
     }
 
+    async fn build_tools_async(&self, intent: &Intent) -> Vec<serde_json::Value> {
+        let filter = self.config.tool_filter.clone().unwrap_or(ToolFilter {
+            intent: Some(intent.clone()),
+            max_side_effect_level: Some(ToolSideEffectLevel::Write),
+            include_requires_approval: true,
+            include_disabled: false,
+            required_tags: Vec::new(),
+        });
+        let registry = self.executor.registry.lock().await;
+        registry.to_effective_openai_tools(&filter, &self.executor.permission_policy)
+    }
+
     /// The main execution loop.
     ///
     /// 1. Classify intent → filter tools
@@ -152,7 +184,7 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
         });
 
         // Phase 2: Build tools for this intent
-        let tools = self.build_tools(&intent);
+        let tools = self.build_tools_async(&intent).await;
         let has_tools = !tools.is_empty();
 
         // Phase 3: Execution rounds
@@ -200,6 +232,41 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             }
             if let Some(message) = guard.message.filter(|_| guard.should_warn) {
                 self.emit(AgentLoopEvent::Error { message });
+            }
+
+            if let Some(provider_call_guard) = &self.provider_call_guard {
+                let model = self
+                    .provider
+                    .models()
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| "unknown".to_string());
+                let estimated_input_tokens = self.provider.estimate_tokens(&request.messages)
+                    + request
+                        .system
+                        .as_ref()
+                        .map(|system| system.chars().count() as u64 / 3)
+                        .unwrap_or(0)
+                    + request
+                        .tools
+                        .as_ref()
+                        .map(|tools| tools.len() as u64 * 256)
+                        .unwrap_or(0);
+                if let Err(message) = provider_call_guard(ProviderCallContext {
+                    round: rounds + 1,
+                    provider: self.provider.name().to_string(),
+                    model,
+                    estimated_input_tokens,
+                    requested_output_tokens,
+                    message_count: request.messages.len(),
+                    tool_count: request.tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+                    stream: request.stream,
+                }) {
+                    self.emit(AgentLoopEvent::Error {
+                        message: message.clone(),
+                    });
+                    return Err(message);
+                }
             }
 
             // Call LLM with streaming — forward text chunks to UI

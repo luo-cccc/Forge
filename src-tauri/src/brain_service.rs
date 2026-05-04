@@ -27,6 +27,7 @@ const RERANK_CANDIDATE_MULTIPLIER: usize = 6;
 const KNOWLEDGE_INDEX_FILENAME: &str = "knowledge_index.json";
 const PROJECT_BRAIN_QUERY_OUTPUT_TOKENS: u64 = 4_096;
 const DEFAULT_EMBEDDING_DIMENSIONS: usize = 1536;
+const DEFAULT_EMBEDDING_INPUT_LIMIT_CHARS: usize = 8_000;
 
 #[derive(Debug, Clone)]
 pub struct ProjectBrainFocus {
@@ -50,6 +51,12 @@ pub struct ProjectBrainKnowledgeNode {
     pub kind: String,
     pub label: String,
     pub source_ref: String,
+    #[serde(default)]
+    pub source_revision: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub chunk_index: Option<usize>,
     pub keywords: Vec<String>,
     pub summary: String,
 }
@@ -80,6 +87,44 @@ pub struct ProjectBrainEmbeddingProviderProfile {
     pub input_limit_chars: usize,
     pub batch_limit: usize,
     pub retry_limit: usize,
+    pub provider_status: ProjectBrainEmbeddingRegistryStatus,
+    pub model_status: ProjectBrainEmbeddingRegistryStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectBrainEmbeddingRegistryStatus {
+    RegistryKnown,
+    CompatibilityFallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainEmbeddingModelSpec {
+    pub model: String,
+    pub dimensions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainEmbeddingProviderSpec {
+    pub provider_id: String,
+    pub api_base_markers: Vec<String>,
+    pub default_input_limit_chars: usize,
+    pub batch_limit: usize,
+    pub retry_limit: usize,
+    pub models: Vec<ProjectBrainEmbeddingModelSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainEmbeddingProviderRegistry {
+    pub providers: Vec<ProjectBrainEmbeddingProviderSpec>,
+    pub fallback_provider_id: String,
+    pub fallback_dimensions: usize,
+    pub fallback_input_limit_chars: usize,
+    pub fallback_batch_limit: usize,
+    pub fallback_retry_limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -187,13 +232,97 @@ pub fn project_brain_embedding_profile_from_config(
     embedding_model: &str,
     input_limit_chars: usize,
 ) -> ProjectBrainEmbeddingProviderProfile {
+    resolve_project_brain_embedding_profile(api_base, embedding_model, Some(input_limit_chars))
+}
+
+pub fn resolve_project_brain_embedding_profile(
+    api_base: &str,
+    embedding_model: &str,
+    input_limit_chars: Option<usize>,
+) -> ProjectBrainEmbeddingProviderProfile {
+    let registry = project_brain_embedding_provider_registry();
+    let provider_spec = registry_provider_for_api_base(&registry, api_base);
+    let model_spec = registry_model_for_name(&registry, provider_spec, embedding_model);
+    let provider_status = if provider_spec.is_some() {
+        ProjectBrainEmbeddingRegistryStatus::RegistryKnown
+    } else {
+        ProjectBrainEmbeddingRegistryStatus::CompatibilityFallback
+    };
+    let model_status = if model_spec.is_some() {
+        ProjectBrainEmbeddingRegistryStatus::RegistryKnown
+    } else {
+        ProjectBrainEmbeddingRegistryStatus::CompatibilityFallback
+    };
+    let provider_id = provider_spec
+        .map(|provider| provider.provider_id.clone())
+        .unwrap_or_else(|| registry.fallback_provider_id.clone());
+    let dimensions = model_spec
+        .map(|model| model.dimensions)
+        .unwrap_or(registry.fallback_dimensions);
+    let input_limit_chars = input_limit_chars
+        .filter(|limit| *limit > 0)
+        .unwrap_or_else(|| {
+            provider_spec
+                .map(|provider| provider.default_input_limit_chars)
+                .unwrap_or(registry.fallback_input_limit_chars)
+        });
+    let batch_limit = provider_spec
+        .map(|provider| provider.batch_limit)
+        .unwrap_or(registry.fallback_batch_limit);
+    let retry_limit = provider_spec
+        .map(|provider| provider.retry_limit)
+        .unwrap_or(registry.fallback_retry_limit);
+
     ProjectBrainEmbeddingProviderProfile {
-        provider_id: provider_id_from_api_base(api_base),
+        provider_id,
         model: embedding_model.to_string(),
-        dimensions: embedding_dimensions_for_model(embedding_model),
+        dimensions,
         input_limit_chars,
-        batch_limit: 16,
-        retry_limit: 1,
+        batch_limit,
+        retry_limit,
+        provider_status,
+        model_status,
+    }
+}
+
+pub fn project_brain_embedding_provider_registry() -> ProjectBrainEmbeddingProviderRegistry {
+    let openai_models = openai_embedding_model_specs();
+    ProjectBrainEmbeddingProviderRegistry {
+        providers: vec![
+            ProjectBrainEmbeddingProviderSpec {
+                provider_id: "openai".to_string(),
+                api_base_markers: vec!["api.openai.com".to_string()],
+                default_input_limit_chars: DEFAULT_EMBEDDING_INPUT_LIMIT_CHARS,
+                batch_limit: 16,
+                retry_limit: 1,
+                models: openai_models.clone(),
+            },
+            ProjectBrainEmbeddingProviderSpec {
+                provider_id: "openrouter".to_string(),
+                api_base_markers: vec!["openrouter.ai".to_string()],
+                default_input_limit_chars: DEFAULT_EMBEDDING_INPUT_LIMIT_CHARS,
+                batch_limit: 16,
+                retry_limit: 1,
+                models: openai_models.clone(),
+            },
+            ProjectBrainEmbeddingProviderSpec {
+                provider_id: "local-openai-compatible".to_string(),
+                api_base_markers: vec![
+                    "localhost".to_string(),
+                    "127.0.0.1".to_string(),
+                    "[::1]".to_string(),
+                ],
+                default_input_limit_chars: 4_000,
+                batch_limit: 8,
+                retry_limit: 0,
+                models: openai_models,
+            },
+        ],
+        fallback_provider_id: "openai-compatible".to_string(),
+        fallback_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+        fallback_input_limit_chars: DEFAULT_EMBEDDING_INPUT_LIMIT_CHARS,
+        fallback_batch_limit: 8,
+        fallback_retry_limit: 0,
     }
 }
 
@@ -276,6 +405,14 @@ pub async fn embed_project_brain_chunks(
     chunks: &[(String, Vec<String>, Option<String>)],
     timeout_secs: u64,
 ) -> (Vec<Chunk>, ProjectBrainEmbeddingBatchReport) {
+    let source_revision = storage::content_revision(
+        &chunks
+            .iter()
+            .map(|(chunk_text, _, _)| chunk_text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
+    let source_ref = format!("chapter:{}", chapter_title);
     let profile = project_brain_embedding_profile(settings);
     let mut embedded_chunks = Vec::new();
     let mut report = ProjectBrainEmbeddingBatchReport {
@@ -332,6 +469,10 @@ pub async fn embed_project_brain_chunks(
             embedding,
             keywords: keywords.clone(),
             topic: topic.clone(),
+            source_ref: Some(source_ref.clone()),
+            source_revision: Some(source_revision.clone()),
+            source_kind: Some("chapter".to_string()),
+            chunk_index: Some(i),
         });
         report.embedded_count += 1;
     }
@@ -458,6 +599,10 @@ pub fn project_brain_embedding_batch_status(
     }
 }
 
+pub fn project_brain_source_revision(content: &str) -> String {
+    storage::content_revision(content)
+}
+
 pub fn build_project_brain_knowledge_index(
     project_id: &str,
     brain: &VectorDB,
@@ -472,6 +617,9 @@ pub fn build_project_brain_knowledge_index(
             kind: "lore".to_string(),
             label: entry.keyword.clone(),
             source_ref: format!("lorebook:{}", entry.id),
+            source_revision: None,
+            source_kind: Some("lorebook".to_string()),
+            chunk_index: None,
             keywords: unique_keywords(vec![entry.keyword.clone()], &entry.content),
             summary: snippet_text(&entry.content, 220),
         });
@@ -486,6 +634,9 @@ pub fn build_project_brain_knowledge_index(
             kind: "outline".to_string(),
             label: node.chapter_title.clone(),
             source_ref: format!("outline:{}", node.chapter_title),
+            source_revision: None,
+            source_kind: Some("outline".to_string()),
+            chunk_index: None,
             keywords: unique_keywords(vec![node.chapter_title.clone()], &node.summary),
             summary: snippet_text(&node.summary, 220),
         });
@@ -497,11 +648,18 @@ pub fn build_project_brain_knowledge_index(
         } else {
             chunk.chapter.clone()
         };
+        let source_ref = chunk
+            .source_ref
+            .clone()
+            .unwrap_or_else(|| format!("project_brain:{}", chunk.id));
         nodes.push(ProjectBrainKnowledgeNode {
             id: format!("chunk:{}", stable_node_id(&chunk.id, &chunk.chapter)),
             kind: "chunk".to_string(),
             label,
-            source_ref: format!("project_brain:{}", chunk.id),
+            source_ref,
+            source_revision: chunk.source_revision.clone(),
+            source_kind: chunk.source_kind.clone(),
+            chunk_index: chunk.chunk_index,
             keywords: unique_keywords(chunk.keywords.clone(), &chunk.text),
             summary: snippet_text(&chunk.text, 220),
         });
@@ -584,23 +742,50 @@ fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
 
-fn provider_id_from_api_base(api_base: &str) -> String {
-    let lower = api_base.to_ascii_lowercase();
-    if lower.contains("openrouter") {
-        "openrouter".to_string()
-    } else if lower.contains("openai") {
-        "openai".to_string()
-    } else {
-        "openai-compatible".to_string()
-    }
+fn openai_embedding_model_specs() -> Vec<ProjectBrainEmbeddingModelSpec> {
+    vec![
+        ProjectBrainEmbeddingModelSpec {
+            model: "text-embedding-3-large".to_string(),
+            dimensions: 3072,
+        },
+        ProjectBrainEmbeddingModelSpec {
+            model: "text-embedding-3-small".to_string(),
+            dimensions: 1536,
+        },
+        ProjectBrainEmbeddingModelSpec {
+            model: "text-embedding-ada-002".to_string(),
+            dimensions: 1536,
+        },
+    ]
 }
 
-fn embedding_dimensions_for_model(model: &str) -> usize {
-    match model {
-        "text-embedding-3-large" => 3072,
-        "text-embedding-3-small" | "text-embedding-ada-002" => 1536,
-        _ => DEFAULT_EMBEDDING_DIMENSIONS,
-    }
+fn registry_provider_for_api_base<'a>(
+    registry: &'a ProjectBrainEmbeddingProviderRegistry,
+    api_base: &str,
+) -> Option<&'a ProjectBrainEmbeddingProviderSpec> {
+    let lower = api_base.to_ascii_lowercase();
+    registry.providers.iter().find(|provider| {
+        provider
+            .api_base_markers
+            .iter()
+            .any(|marker| lower.contains(marker))
+    })
+}
+
+fn registry_model_for_name<'a>(
+    registry: &'a ProjectBrainEmbeddingProviderRegistry,
+    provider: Option<&'a ProjectBrainEmbeddingProviderSpec>,
+    model: &str,
+) -> Option<&'a ProjectBrainEmbeddingModelSpec> {
+    provider
+        .and_then(|provider| provider.models.iter().find(|spec| spec.model == model))
+        .or_else(|| {
+            registry
+                .providers
+                .iter()
+                .flat_map(|provider| provider.models.iter())
+                .find(|spec| spec.model == model)
+        })
 }
 
 fn validate_embedding_dimensions(
@@ -802,10 +987,17 @@ fn project_brain_query_source_refs(
         format!("estimated_cost_micros:{}", report.estimated_cost_micros),
     ];
     refs.extend(results.iter().flat_map(|(_, _, chunk)| {
-        [
+        let mut refs = vec![
             format!("project_brain:{}", chunk.id),
             format!("chapter:{}", chunk.chapter),
-        ]
+        ];
+        if let Some(source_ref) = chunk.source_ref.as_deref() {
+            refs.push(format!("source_ref:{}", source_ref));
+        }
+        if let Some(source_revision) = chunk.source_revision.as_deref() {
+            refs.push(format!("source_revision:{}", source_revision));
+        }
+        refs
     }));
     refs
 }

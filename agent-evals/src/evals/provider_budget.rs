@@ -1,10 +1,108 @@
 use super::*;
 
+use agent_harness_core::provider::{
+    LlmMessage, LlmRequest, LlmResponse, Provider, StreamEvent, ToolCall, ToolCallFunction,
+    UsageInfo,
+};
 use agent_writer_lib::writer_agent::provider_budget::{
     apply_provider_budget_approval, estimate_provider_cost_micros, evaluate_provider_budget,
     WriterProviderBudgetApproval, WriterProviderBudgetDecision, WriterProviderBudgetRequest,
     WriterProviderBudgetTask,
 };
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
+struct TwoRoundBudgetProvider {
+    calls: AtomicUsize,
+    model: String,
+}
+
+impl TwoRoundBudgetProvider {
+    fn new(model: &str) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            model: model.to_string(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for TwoRoundBudgetProvider {
+    fn name(&self) -> &str {
+        "eval-provider"
+    }
+
+    fn models(&self) -> Vec<String> {
+        vec![self.model.clone()]
+    }
+
+    async fn stream_call(
+        &self,
+        _request: LlmRequest,
+        _on_event: Box<dyn Fn(StreamEvent) + Send + Sync>,
+    ) -> Result<LlmResponse, String> {
+        let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call_index == 0 {
+            Ok(LlmResponse {
+                content: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "tool-call-1".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "load_current_chapter".to_string(),
+                        arguments: serde_json::json!({"chapter": "Chapter-1"}).to_string(),
+                    },
+                }]),
+                finish_reason: "tool_calls".to_string(),
+                usage: Some(UsageInfo {
+                    input_tokens: 256,
+                    output_tokens: 32,
+                }),
+            })
+        } else {
+            Ok(LlmResponse {
+                content: Some("第二轮完成。".to_string()),
+                tool_calls: None,
+                finish_reason: "stop".to_string(),
+                usage: Some(UsageInfo {
+                    input_tokens: 512,
+                    output_tokens: 16,
+                }),
+            })
+        }
+    }
+
+    async fn call(&self, request: LlmRequest) -> Result<LlmResponse, String> {
+        self.stream_call(request, Box::new(|_| {})).await
+    }
+
+    async fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+        Ok(vec![0.0; 4])
+    }
+
+    fn estimate_tokens(&self, messages: &[LlmMessage]) -> u64 {
+        messages
+            .iter()
+            .map(|message| {
+                message
+                    .content
+                    .as_ref()
+                    .map(|content| content.chars().count() as u64 / 3 + 8)
+                    .unwrap_or(8)
+            })
+            .sum()
+    }
+
+    fn context_window_tokens(&self) -> u64 {
+        200_000
+    }
+
+    async fn health_check(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 pub fn run_provider_budget_requires_approval_eval() -> EvalResult {
     let mut request = WriterProviderBudgetRequest::new(
@@ -867,6 +965,95 @@ pub fn run_manual_request_provider_budget_approval_eval() -> EvalResult {
             "before={:?} after={:?} tokens={}",
             report.decision, approved.decision, approved.estimated_total_tokens
         ),
+        errors,
+    )
+}
+
+pub fn run_manual_request_multi_round_provider_budget_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation("林墨停在旧门前，想起张三带走的玉佩。");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "先查当前章节，再给我一个简短判断。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            paragraph: "林墨停在旧门前，想起张三带走的玉佩。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = Arc::new(TwoRoundBudgetProvider::new("gpt-4o"));
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o");
+    let Ok(mut prepared) = prepared else {
+        return eval_result(
+            "writer_agent:manual_request_multi_round_provider_budget",
+            "prepare failed".to_string(),
+            vec!["manual request prepare_task_run failed".to_string()],
+        );
+    };
+
+    let budget_events: Arc<std::sync::Mutex<Vec<(u32, WriterProviderBudgetDecision)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let budget_events_for_guard = budget_events.clone();
+    prepared.set_provider_call_guard(Arc::new(move |context| {
+        let report = agent_writer_lib::writer_agent::kernel::WriterAgentPreparedRun::<
+            TwoRoundBudgetProvider,
+            EvalToolHandler,
+        >::provider_budget_from_call_context(&context);
+        budget_events_for_guard
+            .lock()
+            .unwrap()
+            .push((context.round, report.decision));
+        if context.round == 2 {
+            return Err("eval second provider round blocked by budget guard".to_string());
+        }
+        Ok(())
+    }));
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let run_result = runtime.block_on(async { prepared.run().await });
+    let events = budget_events.lock().unwrap().clone();
+
+    let mut errors = Vec::new();
+    if run_result.is_ok() {
+        errors.push("multi-round guard did not stop the second provider call".to_string());
+    }
+    if !run_result
+        .as_ref()
+        .err()
+        .is_some_and(|error| error.contains("second provider round blocked"))
+    {
+        errors.push(format!(
+            "run failed with unexpected error {:?}",
+            run_result.err()
+        ));
+    }
+    if events.len() != 2 {
+        errors.push(format!(
+            "expected provider budget guard for two rounds, got {:?}",
+            events
+        ));
+    }
+    if !events.iter().any(|(round, _)| *round == 1) || !events.iter().any(|(round, _)| *round == 2)
+    {
+        errors.push(format!(
+            "provider budget guard did not record both rounds: {:?}",
+            events
+        ));
+    }
+
+    eval_result(
+        "writer_agent:manual_request_multi_round_provider_budget",
+        format!("rounds={:?}", events),
         errors,
     )
 }

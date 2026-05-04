@@ -35,6 +35,14 @@ pub struct Chunk {
     pub embedding: Vec<f32>,
     pub keywords: Vec<String>,
     pub topic: Option<String>,
+    #[serde(default)]
+    pub source_ref: Option<String>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub chunk_index: Option<usize>,
 }
 
 pub struct VectorDB {

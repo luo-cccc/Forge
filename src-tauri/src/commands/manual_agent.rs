@@ -7,7 +7,7 @@ use crate::{
     agent_runtime, events, llm_runtime, manual_agent, storage, tool_bridge, writer_agent, AppState,
     AskAgentContext, AskAgentMode, HarnessState, InlineWriterOperationEvent, ManualAgentTurn,
 };
-use writer_agent::provider_budget::apply_provider_budget_approval;
+use writer_agent::provider_budget::{apply_provider_budget_approval, WriterProviderBudgetDecision};
 
 const MANUAL_REQUEST_PROVIDER_BUDGET_ERROR: &str =
     "MANUAL_REQUEST_PROVIDER_BUDGET_APPROVAL_REQUIRED";
@@ -148,6 +148,56 @@ fn emit_manual_provider_budget_error(
     );
 }
 
+fn install_manual_provider_budget_guard(
+    prepared_run: &mut writer_agent::kernel::WriterAgentPreparedRun<
+        OpenAiCompatProvider,
+        tool_bridge::TauriToolBridge,
+    >,
+    app: tauri::AppHandle,
+    request_id: String,
+    observation: writer_agent::observation::WriterObservation,
+    approval: Option<writer_agent::provider_budget::WriterProviderBudgetApproval>,
+    preflight_estimated_input_tokens: u64,
+) {
+    prepared_run.set_provider_call_guard(std::sync::Arc::new(move |context| {
+        let mut report = writer_agent::kernel::WriterAgentPreparedRun::<
+            OpenAiCompatProvider,
+            tool_bridge::TauriToolBridge,
+        >::provider_budget_from_call_context(&context);
+        if context.round == 1
+            && report.estimated_input_tokens <= preflight_estimated_input_tokens
+            && report.decision == WriterProviderBudgetDecision::ApprovalRequired
+        {
+            report = apply_provider_budget_approval(report, approval.as_ref());
+        }
+
+        let task_id = format!("manual-request-{}-round-{}", request_id, context.round);
+        let source_refs = manual_budget_source_refs(&request_id, &observation, &report);
+        let created_at = agent_runtime::now_ms();
+        record_manual_provider_budget_report(
+            &app,
+            &task_id,
+            &report,
+            source_refs.clone(),
+            created_at,
+        );
+        if report.approval_required {
+            emit_manual_provider_budget_error(&app, &report);
+            record_manual_provider_budget_failure(&app, task_id, source_refs, report, created_at);
+            return Err(MANUAL_REQUEST_PROVIDER_BUDGET_ERROR.to_string());
+        }
+
+        record_manual_model_started(
+            &app,
+            &task_id,
+            &report,
+            source_refs,
+            agent_runtime::now_ms(),
+        );
+        Ok(())
+    }));
+}
+
 fn set_harness_idle(state: &tauri::State<'_, AppState>) -> Result<(), String> {
     let mut s = crate::lock_harness_state(state)?;
     *s = HarnessState::Idle;
@@ -262,8 +312,16 @@ pub async fn ask_agent(
         let proposals = prepared.proposals().to_vec();
         (prepared, proposals, has_lore, has_outline)
     };
+    let preflight_estimated_input_tokens = prepared_run.first_round_estimated_input_tokens();
+    let provider_budget_approval = context_payload
+        .as_ref()
+        .and_then(|payload| payload.provider_budget_approval.clone());
     let budget_report = apply_provider_budget_approval(
-        prepared_run.first_round_provider_budget(model.clone()),
+        prepared_run.provider_budget_from_estimate(
+            model.clone(),
+            preflight_estimated_input_tokens,
+            4_096,
+        ),
         context_payload
             .as_ref()
             .and_then(|payload| payload.provider_budget_approval.as_ref()),
@@ -291,12 +349,13 @@ pub async fn ask_agent(
         set_harness_idle(&state)?;
         return Err(MANUAL_REQUEST_PROVIDER_BUDGET_ERROR.to_string());
     }
-    record_manual_model_started(
-        &app,
-        &budget_task_id,
-        &budget_report,
-        budget_source_refs,
-        agent_runtime::now_ms(),
+    install_manual_provider_budget_guard(
+        &mut prepared_run,
+        app.clone(),
+        request_id.clone(),
+        manual_observation.clone(),
+        provider_budget_approval,
+        preflight_estimated_input_tokens,
     );
     prepared_run
         .agent

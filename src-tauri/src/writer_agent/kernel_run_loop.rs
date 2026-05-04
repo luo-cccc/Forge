@@ -1,4 +1,4 @@
-use agent_harness_core::agent_loop::EventCallback;
+use agent_harness_core::agent_loop::{EventCallback, ProviderCallContext, ProviderCallGuard};
 use agent_harness_core::provider::{LlmMessage, Provider};
 use agent_harness_core::{AgentLoop, EffectiveToolInventory, TaskPacket, ToolHandler};
 
@@ -141,6 +141,14 @@ where
         &self,
         model: impl Into<String>,
     ) -> WriterProviderBudgetReport {
+        self.provider_budget_from_estimate(
+            model,
+            self.first_round_estimated_input_tokens(),
+            Self::FIRST_ROUND_OUTPUT_TOKENS,
+        )
+    }
+
+    pub fn first_round_estimated_input_tokens(&self) -> u64 {
         let mut messages = self.agent.messages.clone();
         messages.push(LlmMessage {
             role: "user".to_string(),
@@ -150,15 +158,37 @@ where
             name: None,
         });
 
-        let estimated_input_tokens = self.agent.provider.estimate_tokens(&messages)
+        self.agent.provider.estimate_tokens(&messages)
             + (self.agent.config.system_prompt.chars().count() as u64 / 3)
-            + self.tool_inventory.allowed.len() as u64 * 256;
+            + self.tool_inventory.allowed.len() as u64 * 256
+    }
 
+    pub fn provider_budget_from_estimate(
+        &self,
+        model: impl Into<String>,
+        estimated_input_tokens: u64,
+        requested_output_tokens: u64,
+    ) -> WriterProviderBudgetReport {
         evaluate_provider_budget(WriterProviderBudgetRequest::new(
             WriterProviderBudgetTask::ManualRequest,
             model,
             estimated_input_tokens,
-            Self::FIRST_ROUND_OUTPUT_TOKENS,
+            requested_output_tokens,
+        ))
+    }
+
+    pub fn set_provider_call_guard(&mut self, guard: ProviderCallGuard) {
+        self.agent.set_provider_call_guard(guard);
+    }
+
+    pub fn provider_budget_from_call_context(
+        context: &ProviderCallContext,
+    ) -> WriterProviderBudgetReport {
+        evaluate_provider_budget(WriterProviderBudgetRequest::new(
+            WriterProviderBudgetTask::ManualRequest,
+            context.model.clone(),
+            context.estimated_input_tokens,
+            context.requested_output_tokens,
         ))
     }
 
