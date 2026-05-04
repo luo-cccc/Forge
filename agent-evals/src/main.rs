@@ -64,6 +64,7 @@ fn main() {
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
+    results.push(run_promise_payoff_planner_prioritizes_nearby_debts_eval());
     results.push(run_promise_opportunity_apply_eval());
     results.push(run_promise_stale_eval());
     results.push(run_promise_defer_operation_eval());

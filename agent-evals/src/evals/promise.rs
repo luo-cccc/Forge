@@ -51,6 +51,127 @@ pub fn run_promise_opportunity_eval() -> EvalResult {
     )
 }
 
+pub fn run_promise_payoff_planner_prioritizes_nearby_debts_eval() -> EvalResult {
+    use agent_writer_lib::writer_agent::promise_planner::{
+        plan_promise_payoffs, render_promise_payoff_plan, PromisePlannerAction,
+    };
+
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let nearby_id = memory
+        .add_promise(
+            "mystery_clue",
+            "寒玉戒指来源",
+            "寒玉戒指来源必须在第五章附近开始回收。",
+            "Chapter-2",
+            "Chapter-5",
+            4,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "plot_promise",
+            "远古王座真相",
+            "远古王座真相是大后期线索。",
+            "Chapter-1",
+            "Chapter-20",
+            10,
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_whereabouts",
+            "黑铁钥匙",
+            "黑铁钥匙不能在本章打扰主线。",
+            "Chapter-3",
+            "Chapter-9",
+            6,
+        )
+        .unwrap();
+    let resolved_id = memory
+        .add_promise(
+            "mystery_clue",
+            "已解伏笔",
+            "这条伏笔已经解决，不应进入 planner。",
+            "Chapter-1",
+            "Chapter-5",
+            9,
+        )
+        .unwrap();
+    memory.resolve_promise(resolved_id, "Chapter-4").unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-5",
+            "林墨围绕寒玉戒指来源推进旧门线索。",
+            "寒玉戒指来源必须被推进",
+            "不要打扰黑铁钥匙线",
+            "戒指来源得到新证据但不完全揭穿",
+            "mission:chapter-5",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-5".to_string());
+    let ledger = kernel.ledger_snapshot();
+    let plan = plan_promise_payoffs(
+        "Chapter-5",
+        ledger.active_chapter_mission.as_ref(),
+        &ledger.open_promises,
+        "林墨在旧门前摸到寒玉戒指的裂痕。",
+    );
+    let rendered = render_promise_payoff_plan(&plan);
+
+    let mut errors = Vec::new();
+    if plan.is_empty() {
+        errors.push("promise payoff planner returned no items".to_string());
+        return eval_result(
+            "writer_agent:promise_payoff_planner_prioritizes_nearby_debts",
+            "no plan".to_string(),
+            errors,
+        );
+    }
+    if plan[0].promise_id != nearby_id
+        || plan[0].action != PromisePlannerAction::PayoffNow
+        || !plan[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("expected payoff"))
+    {
+        errors.push(format!(
+            "nearby payoff should rank first with PayoffNow, got {:?}",
+            plan.first()
+        ));
+    }
+    if plan.iter().any(|item| item.title == "已解伏笔") {
+        errors.push("resolved promise entered payoff planner".to_string());
+    }
+    let avoid = plan.iter().find(|item| item.title == "黑铁钥匙");
+    if !avoid.is_some_and(|item| item.action == PromisePlannerAction::AvoidDisturbing) {
+        errors.push(format!(
+            "must_not overlapping promise should be AvoidDisturbing, got {:?}",
+            avoid
+        ));
+    }
+    let remote = plan.iter().find(|item| item.title == "远古王座真相");
+    if !remote.is_some_and(|item| item.action == PromisePlannerAction::Defer) {
+        errors.push(format!("remote promise should be Defer, got {:?}", remote));
+    }
+    if !rendered.contains("寒玉戒指来源") || !rendered.contains("PayoffNow") {
+        errors.push("rendered payoff plan does not expose top action".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_payoff_planner_prioritizes_nearby_debts",
+        format!(
+            "top={} action={:?} items={} rendered={}",
+            plan[0].title,
+            plan[0].action,
+            plan.len(),
+            rendered.contains("PayoffNow")
+        ),
+        errors,
+    )
+}
+
 pub fn run_promise_opportunity_apply_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

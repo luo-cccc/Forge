@@ -23,6 +23,7 @@ pub mod memory;
 pub mod observation;
 pub mod operation;
 pub mod post_write_diagnostics;
+pub mod promise_planner;
 pub mod proposal;
 pub mod provider_budget;
 pub mod research_subtask;

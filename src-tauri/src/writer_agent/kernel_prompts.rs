@@ -6,6 +6,7 @@ use super::kernel::{
     tool_filter_for_task, WriterAgentApprovalMode, WriterAgentKernel, WriterAgentLedgerSnapshot,
     WriterAgentRunRequest, WriterAgentTask,
 };
+use super::promise_planner::{plan_promise_payoffs, render_promise_payoff_plan};
 use agent_harness_core::ToolFilter;
 
 pub fn tool_filter_for_run_request(
@@ -222,7 +223,15 @@ Ledgers:\n{}",
             .as_deref()
             .unwrap_or("current chapter"),
         render_context_pack_for_prompt(context_pack),
-        render_ledger_snapshot_for_prompt(ledger)
+        render_planning_ledger_snapshot_for_prompt(
+            ledger,
+            request
+                .observation
+                .chapter_title
+                .as_deref()
+                .unwrap_or("current chapter"),
+            &request.observation.paragraph
+        )
     )
 }
 
@@ -298,6 +307,28 @@ pub(crate) fn render_ledger_snapshot_for_prompt(snapshot: &WriterAgentLedgerSnap
     })
     .collect::<Vec<_>>()
     .join("\n\n")
+}
+
+pub(crate) fn render_planning_ledger_snapshot_for_prompt(
+    snapshot: &WriterAgentLedgerSnapshot,
+    current_chapter: &str,
+    local_context: &str,
+) -> String {
+    let base = render_ledger_snapshot_for_prompt(snapshot);
+    let payoff_plan = render_promise_payoff_plan(&plan_promise_payoffs(
+        current_chapter,
+        snapshot.active_chapter_mission.as_ref(),
+        &snapshot.open_promises,
+        local_context,
+    ));
+    if payoff_plan.trim().is_empty() {
+        return base;
+    }
+    [base, format!("## Promise Payoff Plan\n{}", payoff_plan)]
+        .into_iter()
+        .filter(|section| !section.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 pub(crate) fn objective_for_run_task(task: &WriterAgentTask) -> String {
