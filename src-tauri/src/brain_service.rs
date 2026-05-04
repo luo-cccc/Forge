@@ -3,7 +3,7 @@ use agent_harness_core::{
     vector_db::{Chunk, VectorDB},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
@@ -59,6 +59,8 @@ pub struct ProjectBrainKnowledgeNode {
     pub source_kind: Option<String>,
     #[serde(default)]
     pub chunk_index: Option<usize>,
+    #[serde(default)]
+    pub archived: bool,
     pub keywords: Vec<String>,
     pub summary: String,
 }
@@ -89,6 +91,35 @@ pub struct ProjectBrainSourceRevision {
     pub revision: String,
     pub node_count: usize,
     pub chunk_indexes: Vec<usize>,
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainSourceCompare {
+    pub source_ref: String,
+    pub source_kind: String,
+    pub active_revision: Option<String>,
+    pub revisions: Vec<ProjectBrainSourceCompareRevision>,
+    pub added_keywords: Vec<String>,
+    pub removed_keywords: Vec<String>,
+    pub shared_keywords: Vec<String>,
+    pub added_summary: Vec<String>,
+    pub removed_summary: Vec<String>,
+    pub evidence_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainSourceCompareRevision {
+    pub revision: String,
+    pub active: bool,
+    pub node_count: usize,
+    pub chunk_count: usize,
+    pub chunk_indexes: Vec<usize>,
+    pub keywords: Vec<String>,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -412,7 +443,12 @@ pub async fn embed_chapter(
             e
         )
     })?;
-    db.remove_chapter(chapter_title);
+    let active_revision = embedded_chunks
+        .first()
+        .and_then(|chunk| chunk.source_revision.as_deref())
+        .unwrap_or_default()
+        .to_string();
+    db.archive_chapter_revision(chapter_title, &active_revision);
     for chunk in embedded_chunks {
         db.upsert(chunk);
     }
@@ -484,7 +520,7 @@ pub async fn embed_project_brain_chunks(
         }
 
         embedded_chunks.push(Chunk {
-            id: format!("{}-{}", chapter_title, i),
+            id: format!("{}-{}-{}", chapter_title, source_revision, i),
             chapter: chapter_title.to_string(),
             text: limited_text,
             embedding,
@@ -494,6 +530,7 @@ pub async fn embed_project_brain_chunks(
             source_revision: Some(source_revision.clone()),
             source_kind: Some("chapter".to_string()),
             chunk_index: Some(i),
+            archived: false,
         });
         report.embedded_count += 1;
     }
@@ -556,6 +593,170 @@ pub fn save_project_brain_knowledge_index(
     let path = knowledge_index_path(app)?;
     let json = serde_json::to_string_pretty(index).map_err(|e| e.to_string())?;
     storage::atomic_write(&path, &json)
+}
+
+pub fn compare_project_brain_source_revisions(
+    app: &tauri::AppHandle,
+    source_ref: &str,
+) -> Result<ProjectBrainSourceCompare, String> {
+    let source_ref = source_ref.trim();
+    if source_ref.is_empty() {
+        return Err("Project Brain source ref is required for revision compare".to_string());
+    }
+
+    let brain_path = storage::brain_path(app)?;
+    let brain = VectorDB::load(&brain_path).map_err(|e| {
+        format!(
+            "Project Brain index at '{}' is unreadable; restore a backup or rebuild the index: {}",
+            brain_path.display(),
+            e
+        )
+    })?;
+    Ok(compare_project_brain_source_revisions_from_db(
+        source_ref, &brain,
+    ))
+}
+
+pub fn compare_project_brain_source_revisions_from_db(
+    source_ref: &str,
+    brain: &VectorDB,
+) -> ProjectBrainSourceCompare {
+    #[derive(Default)]
+    struct RevisionAccumulator {
+        active: bool,
+        node_count: usize,
+        chunk_count: usize,
+        chunk_indexes: Vec<usize>,
+        keywords: Vec<String>,
+        summary_parts: Vec<String>,
+    }
+
+    let source_ref = source_ref.trim();
+    let mut source_kind = "unknown".to_string();
+    let mut by_revision = BTreeMap::<String, RevisionAccumulator>::new();
+    for chunk in brain
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.source_ref.as_deref() == Some(source_ref))
+    {
+        if let Some(kind) = chunk
+            .source_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+        {
+            source_kind = kind.to_string();
+        }
+        let revision = chunk
+            .source_revision
+            .as_deref()
+            .map(str::trim)
+            .filter(|revision| !revision.is_empty())
+            .unwrap_or("unknown");
+        let entry = by_revision.entry(revision.to_string()).or_default();
+        entry.node_count += 1;
+        entry.chunk_count += 1;
+        if !chunk.archived {
+            entry.active = true;
+        }
+        if let Some(chunk_index) = chunk.chunk_index {
+            entry.chunk_indexes.push(chunk_index);
+        }
+        entry.keywords.extend(chunk.keywords.iter().cloned());
+        if !chunk.text.trim().is_empty() {
+            entry.summary_parts.push(chunk.text.clone());
+        }
+    }
+
+    let mut revisions = by_revision
+        .into_iter()
+        .map(|(revision, mut entry)| {
+            entry.chunk_indexes.sort_unstable();
+            entry.chunk_indexes.dedup();
+            let summary = snippet_text(
+                &entry
+                    .summary_parts
+                    .iter()
+                    .map(|part| part.trim())
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                360,
+            );
+            ProjectBrainSourceCompareRevision {
+                revision,
+                active: entry.active,
+                node_count: entry.node_count,
+                chunk_count: entry.chunk_count,
+                chunk_indexes: entry.chunk_indexes,
+                keywords: normalized_limited_keywords(entry.keywords, 16),
+                summary,
+            }
+        })
+        .collect::<Vec<_>>();
+    revisions.sort_by(|left, right| {
+        right
+            .active
+            .cmp(&left.active)
+            .then_with(|| left.revision.cmp(&right.revision))
+    });
+
+    let active_revision = revisions
+        .iter()
+        .find(|revision| revision.active)
+        .map(|revision| revision.revision.clone());
+    let active_keywords = revisions
+        .iter()
+        .find(|revision| revision.active)
+        .map(|revision| normalized_keyword_set(&revision.keywords))
+        .unwrap_or_default();
+    let archived_keywords = revisions
+        .iter()
+        .filter(|revision| !revision.active)
+        .flat_map(|revision| revision.keywords.iter().cloned())
+        .collect::<Vec<_>>();
+    let archived_keywords = normalized_keyword_set(&archived_keywords);
+
+    let added_keywords = active_keywords
+        .difference(&archived_keywords)
+        .take(12)
+        .cloned()
+        .collect::<Vec<_>>();
+    let removed_keywords = archived_keywords
+        .difference(&active_keywords)
+        .take(12)
+        .cloned()
+        .collect::<Vec<_>>();
+    let shared_keywords = active_keywords
+        .intersection(&archived_keywords)
+        .take(12)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let active_summary = revisions
+        .iter()
+        .find(|revision| revision.active)
+        .map(|revision| revision.summary.clone())
+        .unwrap_or_default();
+    let archived_summary = revisions
+        .iter()
+        .filter(|revision| !revision.active)
+        .map(|revision| revision.summary.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    ProjectBrainSourceCompare {
+        source_ref: source_ref.to_string(),
+        source_kind,
+        active_revision,
+        revisions,
+        added_keywords: added_keywords.into_iter().collect(),
+        removed_keywords: removed_keywords.into_iter().collect(),
+        shared_keywords: shared_keywords.into_iter().collect(),
+        added_summary: compare_summary_terms(&active_summary, &archived_summary),
+        removed_summary: compare_summary_terms(&archived_summary, &active_summary),
+        evidence_refs: vec![format!("source_ref:{}", source_ref)],
+    }
 }
 
 pub fn read_knowledge_index_file(
@@ -641,6 +842,7 @@ pub fn build_project_brain_knowledge_index(
             source_revision: None,
             source_kind: Some("lorebook".to_string()),
             chunk_index: None,
+            archived: false,
             keywords: unique_keywords(vec![entry.keyword.clone()], &entry.content),
             summary: snippet_text(&entry.content, 220),
         });
@@ -658,6 +860,7 @@ pub fn build_project_brain_knowledge_index(
             source_revision: None,
             source_kind: Some("outline".to_string()),
             chunk_index: None,
+            archived: false,
             keywords: unique_keywords(vec![node.chapter_title.clone()], &node.summary),
             summary: snippet_text(&node.summary, 220),
         });
@@ -681,6 +884,7 @@ pub fn build_project_brain_knowledge_index(
             source_revision: chunk.source_revision.clone(),
             source_kind: chunk.source_kind.clone(),
             chunk_index: chunk.chunk_index,
+            archived: chunk.archived,
             keywords: unique_keywords(chunk.keywords.clone(), &chunk.text),
             summary: snippet_text(&chunk.text, 220),
         });
@@ -704,6 +908,7 @@ fn build_source_history(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrain
         revisions: BTreeMap<String, ProjectBrainSourceRevision>,
         node_count: usize,
         chunk_count: usize,
+        active_revisions: HashSet<String>,
         latest_summary: String,
     }
 
@@ -734,6 +939,9 @@ fn build_source_history(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrain
             .map(str::trim)
             .filter(|revision| !revision.is_empty())
         {
+            if !node.archived {
+                entry.active_revisions.insert(revision.to_string());
+            }
             let revision_entry = entry
                 .revisions
                 .entry(revision.to_string())
@@ -741,6 +949,7 @@ fn build_source_history(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrain
                     revision: revision.to_string(),
                     node_count: 0,
                     chunk_indexes: Vec::new(),
+                    active: false,
                 });
             revision_entry.node_count += 1;
             if let Some(chunk_index) = node.chunk_index {
@@ -756,6 +965,7 @@ fn build_source_history(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrain
             for revision in &mut revisions {
                 revision.chunk_indexes.sort_unstable();
                 revision.chunk_indexes.dedup();
+                revision.active = entry.active_revisions.contains(&revision.revision);
             }
             ProjectBrainSourceHistory {
                 source_ref,
@@ -817,6 +1027,31 @@ fn unique_keywords(mut seed: Vec<String>, text: &str) -> Vec<String> {
         .map(|keyword| keyword.trim().to_string())
         .filter(|keyword| keyword.chars().count() >= 2 && seen.insert(keyword.to_lowercase()))
         .take(12)
+        .collect()
+}
+
+fn normalized_limited_keywords(seed: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = HashSet::new();
+    seed.into_iter()
+        .flat_map(|keyword| unique_keywords(vec![keyword.clone()], &keyword))
+        .map(|keyword| keyword.trim().to_string())
+        .filter(|keyword| keyword.chars().count() >= 2 && seen.insert(keyword.to_lowercase()))
+        .take(limit)
+        .collect()
+}
+
+fn normalized_keyword_set(seed: &[String]) -> BTreeSet<String> {
+    normalized_limited_keywords(seed.to_vec(), 64)
+        .into_iter()
+        .collect()
+}
+
+fn compare_summary_terms(primary: &str, baseline: &str) -> Vec<String> {
+    let baseline_terms = normalized_keyword_set(&agent_harness_core::extract_keywords(baseline));
+    normalized_limited_keywords(agent_harness_core::extract_keywords(primary), 24)
+        .into_iter()
+        .filter(|term| !baseline_terms.contains(term))
+        .take(8)
         .collect()
 }
 

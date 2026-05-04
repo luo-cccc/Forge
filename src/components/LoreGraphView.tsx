@@ -32,6 +32,7 @@ interface KnowledgeNode {
   sourceRevision?: string | null;
   sourceKind?: string | null;
   chunkIndex?: number | null;
+  archived?: boolean;
   keywords: string[];
   summary: string;
 }
@@ -45,6 +46,7 @@ interface KnowledgeSourceRevision {
   revision: string;
   nodeCount: number;
   chunkIndexes: number[];
+  active?: boolean;
 }
 interface KnowledgeSourceHistory {
   sourceRef: string;
@@ -61,6 +63,27 @@ interface KnowledgeGraphData {
   sourceHistory?: KnowledgeSourceHistory[];
   sourceCount: number;
 }
+interface KnowledgeSourceCompareRevision {
+  revision: string;
+  active: boolean;
+  nodeCount: number;
+  chunkCount: number;
+  chunkIndexes: number[];
+  keywords: string[];
+  summary: string;
+}
+interface KnowledgeSourceCompare {
+  sourceRef: string;
+  sourceKind: string;
+  activeRevision?: string | null;
+  revisions: KnowledgeSourceCompareRevision[];
+  addedKeywords: string[];
+  removedKeywords: string[];
+  sharedKeywords: string[];
+  addedSummary: string[];
+  removedSummary: string[];
+  evidenceRefs: string[];
+}
 
 interface Node2D {
   id: string;
@@ -75,6 +98,7 @@ interface Node2D {
   sourceRevision?: string | null;
   sourceKind?: string | null;
   chunkIndex?: number | null;
+  archived?: boolean;
   keywords?: string[];
 }
 interface Edge2D {
@@ -165,6 +189,9 @@ export default function LoreGraphView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [kindFilter, setKindFilter] = useState("all");
   const [viewBox, setViewBox] = useState("0 0 800 600");
+  const [sourceCompare, setSourceCompare] = useState<KnowledgeSourceCompare | null>(null);
+  const [sourceCompareError, setSourceCompareError] = useState<string | null>(null);
+  const [sourceCompareLoading, setSourceCompareLoading] = useState(false);
 
   const loadGraph = useCallback(async (mode: GraphMode) => {
     const w = 700;
@@ -183,6 +210,7 @@ export default function LoreGraphView() {
           sourceRevision: node.sourceRevision,
           sourceKind: node.sourceKind,
           chunkIndex: node.chunkIndex,
+          archived: node.archived,
           keywords: node.keywords,
           x: w / 2 + (Math.random() - 0.5) * 200,
           y: h / 2 + (Math.random() - 0.5) * 200,
@@ -250,9 +278,15 @@ export default function LoreGraphView() {
     return () => window.clearTimeout(timeout);
   }, [graphMode, loadGraph]);
 
-  const handleNodeClick = useCallback((node: Node2D) => {
-    setSelectedNode(node);
+  const resetSourceCompare = useCallback(() => {
+    setSourceCompare(null);
+    setSourceCompareError(null);
   }, []);
+
+  const handleNodeClick = useCallback((node: Node2D) => {
+    resetSourceCompare();
+    setSelectedNode(node);
+  }, [resetSourceCompare]);
 
   const handleAskBrain = useCallback(() => {
     if (!selectedNode) return;
@@ -359,6 +393,24 @@ export default function LoreGraphView() {
     ) ?? null;
   }, [graphMode, knowledgeGraph, selectedNode]);
 
+  const handleCompareSource = async () => {
+    if (!selectedNode?.sourceRef || graphMode !== "brain") return;
+    setSourceCompareLoading(true);
+    setSourceCompareError(null);
+    try {
+      const result = await invoke<KnowledgeSourceCompare>(
+        Commands.compareProjectBrainSourceRevisions,
+        { sourceRef: selectedNode.sourceRef },
+      );
+      setSourceCompare(result);
+    } catch (error) {
+      setSourceCompare(null);
+      setSourceCompareError(String(error));
+    } finally {
+      setSourceCompareLoading(false);
+    }
+  };
+
   const graphSummary = `${visibleNodes.length}/${nodes.length} nodes · ${visibleEdges.length}/${edges.length} edges`;
 
   if (!graphData && graphMode === "entities" && !loadError) {
@@ -380,6 +432,7 @@ export default function LoreGraphView() {
                 key={mode}
                 onClick={() => {
                   setSelectedNode(null);
+                  resetSourceCompare();
                   setLoadError(null);
                   setNodes([]);
                   setEdges([]);
@@ -486,7 +539,10 @@ export default function LoreGraphView() {
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-text-primary">{selectedNode.name}</span>
             <button
-              onClick={() => setSelectedNode(null)}
+              onClick={() => {
+                setSelectedNode(null);
+                resetSourceCompare();
+              }}
               className="text-text-muted hover:text-text-primary text-xs"
             >
               ✕
@@ -531,6 +587,12 @@ export default function LoreGraphView() {
                   <span className="text-text-secondary">#{selectedNode.chunkIndex + 1}</span>
                 </div>
               )}
+              {selectedNode.archived && (
+                <div className="flex min-w-0 justify-between gap-2">
+                  <span>Status</span>
+                  <span className="text-text-secondary">Archived revision</span>
+                </div>
+              )}
             </div>
           )}
           {selectedSourceHistory && (
@@ -546,8 +608,11 @@ export default function LoreGraphView() {
               )}
               {selectedSourceHistory.revisions.slice(0, 3).map((revision) => (
                 <div key={revision.revision} className="min-w-0 rounded-sm border border-border-subtle px-1.5 py-1">
-                  <div className="truncate text-text-secondary" title={revision.revision}>
-                    {revision.revision}
+                  <div className="flex min-w-0 justify-between gap-2">
+                    <div className="truncate text-text-secondary" title={revision.revision}>
+                      {revision.revision}
+                    </div>
+                    {revision.active && <span className="shrink-0 text-[9px] text-accent">active</span>}
                   </div>
                   <div className="mt-0.5 text-[9px] text-text-muted">
                     {revision.nodeCount} nodes
@@ -557,6 +622,57 @@ export default function LoreGraphView() {
                   </div>
                 </div>
               ))}
+              {selectedSourceHistory.revisions.length > 1 && (
+                <button
+                  onClick={handleCompareSource}
+                  disabled={sourceCompareLoading}
+                  className="w-full rounded-sm border border-border-subtle px-2 py-1 text-left text-[10px] text-text-secondary hover:border-accent/50 disabled:opacity-60"
+                >
+                  {sourceCompareLoading ? "Comparing revisions..." : "Compare source revisions"}
+                </button>
+              )}
+              {sourceCompareError && <div className="text-danger">{sourceCompareError}</div>}
+              {sourceCompare && (
+                <div className="space-y-1 rounded-sm border border-border-subtle bg-bg p-2">
+                  <div className="flex justify-between gap-2 text-text-secondary">
+                    <span>Revision compare</span>
+                    <span>{sourceCompare.revisions.length} rev</span>
+                  </div>
+                  <div className="text-[9px] text-text-muted">
+                    Active: {sourceCompare.activeRevision ?? "none"}
+                  </div>
+                  {(sourceCompare.addedKeywords.length > 0 || sourceCompare.removedKeywords.length > 0) && (
+                    <div className="space-y-1">
+                      {sourceCompare.addedKeywords.length > 0 && (
+                        <div className="line-clamp-2 text-[9px] text-text-secondary">
+                          Added: {sourceCompare.addedKeywords.slice(0, 6).join(", ")}
+                        </div>
+                      )}
+                      {sourceCompare.removedKeywords.length > 0 && (
+                        <div className="line-clamp-2 text-[9px] text-text-muted">
+                          Removed: {sourceCompare.removedKeywords.slice(0, 6).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {sourceCompare.revisions.slice(0, 3).map((revision) => (
+                    <div key={revision.revision} className="rounded-sm border border-border-subtle px-1.5 py-1">
+                      <div className="flex min-w-0 justify-between gap-2">
+                        <span className="truncate text-text-secondary" title={revision.revision}>
+                          {revision.revision}
+                        </span>
+                        <span className="shrink-0 text-[9px] text-text-muted">
+                          {revision.active ? "active" : "archived"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[9px] text-text-muted">
+                        {revision.chunkCount} chunks
+                        {revision.keywords.length > 0 ? ` · ${revision.keywords.slice(0, 4).join(", ")}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {(selectedNode.keywords?.length ?? 0) > 0 && (

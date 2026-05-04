@@ -43,6 +43,8 @@ pub struct Chunk {
     pub source_kind: Option<String>,
     #[serde(default)]
     pub chunk_index: Option<usize>,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 pub struct VectorDB {
@@ -98,16 +100,31 @@ impl VectorDB {
         } else {
             self.chunks.push(chunk);
         }
-        self.avg_text_len = self
-            .chunks
-            .iter()
-            .map(|c| tokenize(&c.text).len() as f32)
-            .sum::<f32>()
-            / self.chunks.len().max(1) as f32;
+        self.refresh_avg_text_len();
+    }
+
+    pub fn archive_chapter_revision(&mut self, chapter: &str, active_revision: &str) {
+        self.chunks.retain(|chunk| {
+            !(chunk.chapter == chapter && chunk.source_revision.as_deref() == Some(active_revision))
+        });
+        for chunk in &mut self.chunks {
+            if chunk.chapter == chapter && chunk.source_revision.as_deref() != Some(active_revision)
+            {
+                chunk.archived = true;
+            }
+        }
+        self.refresh_avg_text_len();
     }
 
     pub fn remove_chapter(&mut self, chapter: &str) {
-        self.chunks.retain(|c| c.chapter != chapter);
+        let chapter_source_ref = format!("chapter:{}", chapter);
+        self.chunks.retain(|c| {
+            c.chapter != chapter && c.source_ref.as_deref() != Some(&chapter_source_ref)
+        });
+        self.refresh_avg_text_len();
+    }
+
+    fn refresh_avg_text_len(&mut self) {
         self.avg_text_len = if self.chunks.is_empty() {
             1.0
         } else {
@@ -120,10 +137,24 @@ impl VectorDB {
     }
 
     // ── BM25 lexical scoring ────────────────────────────────────────
-    fn bm25_score(&self, query: &str, chunk: &Chunk) -> f32 {
+    fn bm25_score(&self, query: &str, chunk: &Chunk, include_archived: bool) -> f32 {
         let query_terms = tokenize(query);
         let doc_terms = tokenize(&chunk.text);
-        let doc_count = self.chunks.len().max(1);
+        let corpus = self
+            .chunks
+            .iter()
+            .filter(|c| include_archived || !c.archived)
+            .collect::<Vec<_>>();
+        let doc_count = corpus.len().max(1);
+        let avg_text_len = if corpus.is_empty() {
+            1.0
+        } else {
+            corpus
+                .iter()
+                .map(|c| tokenize(&c.text).len() as f32)
+                .sum::<f32>()
+                / corpus.len() as f32
+        };
         let doc_len = doc_terms.len() as f32;
         let k1 = 1.5;
         let b = 0.75;
@@ -135,23 +166,36 @@ impl VectorDB {
                 if tf == 0.0 {
                     return 0.0;
                 }
-                let df = self
-                    .chunks
+                let df = corpus
                     .iter()
                     .filter(|c| tokenize(&c.text).iter().any(|t| t == term))
                     .count()
                     .max(1) as f32;
                 let idf = ((doc_count as f32 - df + 0.5) / (df + 0.5)).ln().max(0.0);
-                idf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * doc_len / self.avg_text_len))
+                idf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * doc_len / avg_text_len))
             })
             .sum()
     }
 
     // ── Pure cosine (backward compat) ───────────────────────────────
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Vec<(f32, &Chunk)> {
+        self.search_internal(query_embedding, top_k, false)
+    }
+
+    pub fn search_all(&self, query_embedding: &[f32], top_k: usize) -> Vec<(f32, &Chunk)> {
+        self.search_internal(query_embedding, top_k, true)
+    }
+
+    fn search_internal(
+        &self,
+        query_embedding: &[f32],
+        top_k: usize,
+        include_archived: bool,
+    ) -> Vec<(f32, &Chunk)> {
         let mut scored: Vec<(f32, &Chunk)> = self
             .chunks
             .iter()
+            .filter(|c| include_archived || !c.archived)
             .map(|c| (cosine_similarity(query_embedding, &c.embedding), c))
             .collect();
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -166,12 +210,32 @@ impl VectorDB {
         query_embedding: &[f32],
         top_k: usize,
     ) -> Vec<(f32, &Chunk)> {
+        self.search_hybrid_internal(query, query_embedding, top_k, false)
+    }
+
+    pub fn search_hybrid_all(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        top_k: usize,
+    ) -> Vec<(f32, &Chunk)> {
+        self.search_hybrid_internal(query, query_embedding, top_k, true)
+    }
+
+    fn search_hybrid_internal(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        top_k: usize,
+        include_archived: bool,
+    ) -> Vec<(f32, &Chunk)> {
         let mut scored: Vec<(f32, &Chunk)> = self
             .chunks
             .iter()
+            .filter(|c| include_archived || !c.archived)
             .map(|c| {
                 let sem = cosine_similarity(query_embedding, &c.embedding);
-                let lex = self.bm25_score(query, c) * 0.3; // BM25 权重 0.3
+                let lex = self.bm25_score(query, c, include_archived) * 0.3; // BM25 权重 0.3
                 let sym = if c
                     .keywords
                     .iter()

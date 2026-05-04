@@ -1,11 +1,11 @@
 use crate::fixtures::*;
 use agent_harness_core::{Chunk, VectorDB};
 use agent_writer_lib::brain_service::{
-    build_project_brain_knowledge_index, project_brain_embedding_batch_status,
-    project_brain_embedding_profile_from_config, project_brain_embedding_provider_registry,
-    project_brain_source_revision, rerank_project_brain_results_with_focus,
-    resolve_project_brain_embedding_profile, safe_knowledge_index_file_path,
-    search_project_brain_results_with_focus, trim_embedding_input,
+    build_project_brain_knowledge_index, compare_project_brain_source_revisions_from_db,
+    project_brain_embedding_batch_status, project_brain_embedding_profile_from_config,
+    project_brain_embedding_provider_registry, project_brain_source_revision,
+    rerank_project_brain_results_with_focus, resolve_project_brain_embedding_profile,
+    safe_knowledge_index_file_path, search_project_brain_results_with_focus, trim_embedding_input,
     ProjectBrainEmbeddingBatchStatus, ProjectBrainEmbeddingRegistryStatus, ProjectBrainFocus,
 };
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
@@ -1276,6 +1276,7 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
             source_revision: None,
             source_kind: None,
             chunk_index: None,
+            archived: false,
         },
         agent_harness_core::Chunk {
             id: "ring-focus".to_string(),
@@ -1288,6 +1289,7 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
             source_revision: None,
             source_kind: None,
             chunk_index: None,
+            archived: false,
         },
     ];
     let raw_results = vec![(50.0, &chunks[0]), (1.0, &chunks[1])];
@@ -1377,6 +1379,7 @@ pub fn run_project_brain_long_session_candidate_recall_eval() -> EvalResult {
             source_revision: None,
             source_kind: None,
             chunk_index: None,
+            archived: false,
         });
     }
     db.upsert(Chunk {
@@ -1395,6 +1398,7 @@ pub fn run_project_brain_long_session_candidate_recall_eval() -> EvalResult {
         source_revision: None,
         source_kind: None,
         chunk_index: None,
+        archived: false,
     });
 
     let search_text = focus.search_text();
@@ -1612,6 +1616,7 @@ pub fn run_project_brain_author_fixture_rerank_eval() -> EvalResult {
             source_revision: None,
             source_kind: None,
             chunk_index: None,
+            archived: false,
         });
     }
     db.upsert(Chunk {
@@ -1626,6 +1631,7 @@ pub fn run_project_brain_author_fixture_rerank_eval() -> EvalResult {
         source_revision: None,
         source_kind: None,
         chunk_index: None,
+        archived: false,
     });
 
     let embedding = vec![1.0, 0.0];
@@ -1691,6 +1697,7 @@ pub fn run_project_brain_knowledge_index_graph_eval() -> EvalResult {
         source_revision: None,
         source_kind: None,
         chunk_index: None,
+        archived: false,
     });
     let outline = vec![agent_writer_lib::brain_service::OutlineNode {
         chapter_title: "Chapter-5".to_string(),
@@ -1775,7 +1782,21 @@ pub fn run_project_brain_knowledge_index_path_guard_eval() -> EvalResult {
 pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
     let chapter_text = "林墨在霜铃塔发现寒玉戒指的裂纹。\n\n张三承认旧门钥匙来自同一宗门。";
     let revision = project_brain_source_revision(chapter_text);
+    let older_revision = project_brain_source_revision("旧版：林墨只追查霜铃塔传闻。");
     let mut db = VectorDB::new();
+    db.upsert(Chunk {
+        id: "chapter-5-old-0".to_string(),
+        chapter: "Chapter-5".to_string(),
+        text: "旧版中林墨只追查霜铃塔传闻，没有把寒玉戒指和祭图关联起来。".to_string(),
+        embedding: vec![0.5, 0.5],
+        keywords: vec!["霜铃塔传闻".to_string(), "旧版线索".to_string()],
+        topic: Some("旧版霜铃塔传闻".to_string()),
+        source_ref: Some("chapter:Chapter-5".to_string()),
+        source_revision: Some(older_revision.clone()),
+        source_kind: Some("chapter".to_string()),
+        chunk_index: Some(0),
+        archived: true,
+    });
     db.upsert(Chunk {
         id: "chapter-5-0".to_string(),
         chapter: "Chapter-5".to_string(),
@@ -1787,6 +1808,7 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
         source_revision: Some(revision.clone()),
         source_kind: Some("chapter".to_string()),
         chunk_index: Some(0),
+        archived: false,
     });
     db.upsert(Chunk {
         id: "chapter-5-1".to_string(),
@@ -1799,29 +1821,39 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
         source_revision: Some(revision.clone()),
         source_kind: Some("chapter".to_string()),
         chunk_index: Some(1),
+        archived: false,
     });
     let index = build_project_brain_knowledge_index("eval", &db, &[], &[]);
-    let chunk = &db.chunks[0];
-    let node = index.nodes.iter().find(|node| node.label == "Chapter-5");
+    let node = index.nodes.iter().find(|node| {
+        node.label == "Chapter-5" && node.source_revision.as_deref() == Some(revision.as_str())
+    });
     let source_history = index
         .source_history
         .iter()
         .find(|source| source.source_ref == "chapter:Chapter-5");
+    let compare = compare_project_brain_source_revisions_from_db("chapter:Chapter-5", &db);
 
     let mut errors = Vec::new();
-    if chunk.source_ref.as_deref() != Some("chapter:Chapter-5") {
-        errors.push(format!("chunk source_ref mismatch: {:?}", chunk.source_ref));
-    }
-    if chunk.source_revision.as_deref() != Some(revision.as_str()) {
+    let active_chunk = db.chunks.iter().find(|chunk| chunk.id == "chapter-5-0");
+    if active_chunk.and_then(|chunk| chunk.source_ref.as_deref()) != Some("chapter:Chapter-5") {
         errors.push(format!(
-            "chunk source_revision mismatch: {:?}",
-            chunk.source_revision
+            "chunk source_ref mismatch: {:?}",
+            active_chunk.and_then(|chunk| chunk.source_ref.as_deref())
         ));
     }
-    if chunk.source_kind.as_deref() != Some("chapter") || chunk.chunk_index != Some(0) {
+    if active_chunk.and_then(|chunk| chunk.source_revision.as_deref()) != Some(revision.as_str()) {
+        errors.push(format!(
+            "chunk source_revision mismatch: {:?}",
+            active_chunk.and_then(|chunk| chunk.source_revision.as_deref())
+        ));
+    }
+    if active_chunk.and_then(|chunk| chunk.source_kind.as_deref()) != Some("chapter")
+        || active_chunk.and_then(|chunk| chunk.chunk_index) != Some(0)
+    {
         errors.push(format!(
             "chunk source kind/index mismatch: {:?} {:?}",
-            chunk.source_kind, chunk.chunk_index
+            active_chunk.and_then(|chunk| chunk.source_kind.as_deref()),
+            active_chunk.and_then(|chunk| chunk.chunk_index)
         ));
     }
     match node {
@@ -1847,9 +1879,9 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
     match source_history {
         Some(history) => {
             if history.source_kind != "chapter"
-                || history.node_count != 2
-                || history.chunk_count != 2
-                || history.revisions.len() != 1
+                || history.node_count != 3
+                || history.chunk_count != 3
+                || history.revisions.len() != 2
             {
                 errors.push(format!(
                     "source history aggregation mismatch: kind={} nodes={} chunks={} revisions={}",
@@ -1859,31 +1891,61 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
                     history.revisions.len()
                 ));
             }
-            if let Some(history_revision) = history.revisions.first() {
+            if let Some(history_revision) = history
+                .revisions
+                .iter()
+                .find(|history_revision| history_revision.revision == revision)
+            {
                 if history_revision.revision != revision
                     || history_revision.node_count != 2
                     || history_revision.chunk_indexes != vec![0, 1]
+                    || !history_revision.active
                 {
                     errors.push(format!(
-                        "source revision history mismatch: revision={} nodes={} chunks={:?}",
+                        "source revision history mismatch: revision={} nodes={} chunks={:?} active={}",
                         history_revision.revision,
                         history_revision.node_count,
-                        history_revision.chunk_indexes
+                        history_revision.chunk_indexes,
+                        history_revision.active
                     ));
                 }
             } else {
                 errors.push("source history missing revision entry".to_string());
             }
+            if !history.revisions.iter().any(|history_revision| {
+                history_revision.revision == older_revision && !history_revision.active
+            }) {
+                errors.push("source history missing archived revision entry".to_string());
+            }
         }
         None => errors.push("knowledge index missing source history".to_string()),
+    }
+    if compare.active_revision.as_deref() != Some(revision.as_str())
+        || compare.revisions.len() != 2
+        || !compare
+            .added_keywords
+            .iter()
+            .any(|keyword| keyword == "祭图")
+        || !compare
+            .removed_keywords
+            .iter()
+            .any(|keyword| keyword == "旧版线索")
+    {
+        errors.push(format!(
+            "source compare mismatch: active={:?} revisions={} added={:?} removed={:?}",
+            compare.active_revision,
+            compare.revisions.len(),
+            compare.added_keywords,
+            compare.removed_keywords
+        ));
     }
 
     eval_result(
         "writer_agent:project_brain_chunk_source_version",
         format!(
             "source={:?} revision={:?} nodeKind={} sourceKind={} historySources={}",
-            chunk.source_ref,
-            chunk.source_revision,
+            active_chunk.and_then(|chunk| chunk.source_ref.as_ref()),
+            active_chunk.and_then(|chunk| chunk.source_revision.as_ref()),
             node.map(|node| node.kind.as_str()).unwrap_or("none"),
             node.and_then(|node| node.source_kind.as_deref())
                 .unwrap_or("none"),

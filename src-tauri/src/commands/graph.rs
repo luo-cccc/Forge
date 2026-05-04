@@ -42,6 +42,14 @@ pub fn get_project_brain_knowledge_graph(
 }
 
 #[tauri::command]
+pub fn compare_project_brain_source_revisions(
+    app: tauri::AppHandle,
+    source_ref: String,
+) -> Result<crate::brain_service::ProjectBrainSourceCompare, String> {
+    crate::brain_service::compare_project_brain_source_revisions(&app, &source_ref)
+}
+
+#[tauri::command]
 pub fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
     let mut entities = Vec::new();
     let mut relationships = Vec::new();
