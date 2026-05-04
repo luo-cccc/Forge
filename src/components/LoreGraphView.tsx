@@ -29,6 +29,9 @@ interface KnowledgeNode {
   kind: string;
   label: string;
   sourceRef: string;
+  sourceRevision?: string | null;
+  sourceKind?: string | null;
+  chunkIndex?: number | null;
   keywords: string[];
   summary: string;
 }
@@ -55,6 +58,9 @@ interface Node2D {
   vx: number;
   vy: number;
   sourceRef?: string;
+  sourceRevision?: string | null;
+  sourceKind?: string | null;
+  chunkIndex?: number | null;
   keywords?: string[];
 }
 interface Edge2D {
@@ -160,6 +166,9 @@ export default function LoreGraphView() {
           category: node.kind,
           description: node.summary,
           sourceRef: node.sourceRef,
+          sourceRevision: node.sourceRevision,
+          sourceKind: node.sourceKind,
+          chunkIndex: node.chunkIndex,
           keywords: node.keywords,
           x: w / 2 + (Math.random() - 0.5) * 200,
           y: h / 2 + (Math.random() - 0.5) * 200,
@@ -257,6 +266,9 @@ export default function LoreGraphView() {
           node.category,
           node.description,
           node.sourceRef ?? "",
+          node.sourceRevision ?? "",
+          node.sourceKind ?? "",
+          node.chunkIndex === null || node.chunkIndex === undefined ? "" : String(node.chunkIndex),
           ...(node.keywords ?? []),
           ...edges.flatMap((edge) => {
             if (edge.source !== index && edge.target !== index) return [];
@@ -369,7 +381,7 @@ export default function LoreGraphView() {
           <input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={graphMode === "brain" ? "Search source, keyword, summary" : "Search entity or relation"}
+            placeholder={graphMode === "brain" ? "Search source, revision, keyword, summary" : "Search entity or relation"}
             className="min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-deep px-2 py-1 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent"
           />
           <div className="flex flex-wrap gap-1">
@@ -476,6 +488,30 @@ export default function LoreGraphView() {
               Source: {selectedNode.sourceRef}
             </div>
           )}
+          {graphMode === "brain" && (
+            <div className="grid grid-cols-1 gap-1 rounded-sm border border-border-subtle bg-bg-deep p-2 text-[10px] text-text-muted">
+              {selectedNode.sourceKind && (
+                <div className="flex min-w-0 justify-between gap-2">
+                  <span>Source kind</span>
+                  <span className="truncate text-text-secondary">{selectedNode.sourceKind}</span>
+                </div>
+              )}
+              {selectedNode.sourceRevision && (
+                <div className="flex min-w-0 justify-between gap-2">
+                  <span>Revision</span>
+                  <span className="truncate text-text-secondary" title={selectedNode.sourceRevision}>
+                    {selectedNode.sourceRevision}
+                  </span>
+                </div>
+              )}
+              {selectedNode.chunkIndex !== null && selectedNode.chunkIndex !== undefined && (
+                <div className="flex min-w-0 justify-between gap-2">
+                  <span>Chunk</span>
+                  <span className="text-text-secondary">#{selectedNode.chunkIndex + 1}</span>
+                </div>
+              )}
+            </div>
+          )}
           {(selectedNode.keywords?.length ?? 0) > 0 && (
             <div className="flex flex-wrap gap-1">
               {selectedNode.keywords?.slice(0, 8).map((keyword) => (
@@ -521,6 +557,12 @@ export default function LoreGraphView() {
                     {reference.relation}
                     {reference.evidenceRef ? ` · ${reference.evidenceRef}` : ""}
                   </div>
+                  {graphMode === "brain" && (reference.node.sourceRef || reference.node.sourceRevision) && (
+                    <div className="mt-1 truncate text-[9px] text-text-muted">
+                      {reference.node.sourceRef}
+                      {reference.node.sourceRevision ? ` · ${reference.node.sourceRevision}` : ""}
+                    </div>
+                  )}
                 </button>
               ))
             )}
