@@ -136,11 +136,10 @@ fn beliefs_from_context_pack(context_pack: &WritingContextPack) -> Vec<TaskBelie
         if statement.trim().is_empty() {
             continue;
         }
-        beliefs.push(TaskBelief::new(
-            subject,
-            statement,
-            belief_confidence(&source.source),
-        ));
+        beliefs.push(
+            TaskBelief::new(subject, statement, belief_confidence(&source.source))
+                .with_source(format!("{:?}", source.source)),
+        );
     }
 
     if beliefs.is_empty() {

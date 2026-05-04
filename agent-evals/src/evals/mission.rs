@@ -510,3 +510,98 @@ pub fn run_mission_drift_flag_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_goal_drift_creates_story_debt_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-6",
+            "林墨在禁地外追查玉佩线索，但本章不能提前揭开玉佩来源。",
+            "玉佩线索",
+            "提前揭开玉佩来源",
+            "以新的旁证和误导收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let base_text = "林墨站在禁地外，确认张三仍隐瞒着关键线索。";
+    let proposal = kernel
+        .create_llm_ghost_proposal(
+            observation_in_chapter(base_text, "Chapter-6"),
+            "张三说出真相：玉佩来自禁地。".to_string(),
+            "eval-model",
+        )
+        .unwrap();
+    let operation = proposal.operations[0].clone();
+    let mut approval = eval_approval("goal_drift_story_debt");
+    approval.proposal_id = Some(proposal.id.clone());
+    let approved = kernel
+        .approve_editor_operation_with_approval(operation.clone(), "rev-1", Some(&approval))
+        .unwrap();
+    let saved_text = format!("{}{}", base_text, "张三说出真相：玉佩来自禁地。");
+    kernel
+        .record_operation_durable_save_with_post_write(
+            Some(proposal.id.clone()),
+            operation,
+            "editor_save:rev-2".to_string(),
+            Some(saved_text.clone()),
+            Some("Chapter-6".to_string()),
+            Some("rev-2".to_string()),
+        )
+        .unwrap();
+
+    let snapshot = kernel.trace_snapshot(50);
+    let debt = kernel.story_debt_snapshot();
+    let pending = kernel.pending_proposals();
+    let mission_proposal = pending
+        .iter()
+        .find(|proposal| proposal.kind == ProposalKind::ChapterMission);
+
+    let mut errors = Vec::new();
+    if !approved.success {
+        errors.push("accepted operation approval failed".to_string());
+    }
+    if !snapshot.post_write_diagnostics.iter().any(|report| {
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| format!("{:?}", diagnostic.category) == "ChapterMissionViolation")
+    }) {
+        errors.push("post-write diagnostics missed chapter mission violation".to_string());
+    }
+    if debt.mission_count == 0 {
+        errors.push("accepted operation mission drift did not enter story debt".to_string());
+    }
+    if mission_proposal.is_none() {
+        errors.push("accepted operation mission drift did not create pending proposal".to_string());
+    }
+    if !mission_proposal.is_some_and(|proposal| {
+        proposal
+            .evidence
+            .iter()
+            .any(|evidence| evidence.source == EvidenceSource::ChapterMission)
+            && proposal
+                .operations
+                .iter()
+                .any(|operation| matches!(operation, WriterOperation::TextAnnotate { .. }))
+    }) {
+        errors.push(
+            "mission drift proposal lacks mission evidence or annotation operation".to_string(),
+        );
+    }
+    if !saved_text.contains("张三说出真相：玉佩来自禁地。") {
+        errors.push("eval fixture lost accepted text before diagnostics".to_string());
+    }
+
+    eval_result(
+        "writer_agent:goal_drift_creates_story_debt",
+        format!(
+            "reports={} pending={} missionDebt={}",
+            snapshot.post_write_diagnostics.len(),
+            pending.len(),
+            debt.mission_count
+        ),
+        errors,
+    )
+}

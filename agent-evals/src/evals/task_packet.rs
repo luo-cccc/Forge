@@ -365,6 +365,181 @@ pub fn run_task_packet_trace_eval() -> EvalResult {
     )
 }
 
+pub fn run_generic_persona_not_used_as_foundation_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻悬疑",
+            "围绕玉佩来源和林墨的选择推进长篇悬念。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-7",
+            "林墨审讯张三，逼近玉佩线索但不能揭开来源。",
+            "张三必须暴露一个新的矛盾",
+            "不要提前揭开玉佩来源",
+            "以林墨决定暂时相信张三收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩来源",
+            "玉佩来源仍是核心谜底，需要延后揭示。",
+            "Chapter-1",
+            "Chapter-12",
+            5,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "主角，惯用寒影刀，面对张三时说话克制。",
+            &serde_json::json!({ "weapon": "寒影刀", "voice": "克制" }),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .upsert_style_preference(
+            "style:dialogue.subtext",
+            "对话偏短句留白，避免直接解释情绪",
+            true,
+        )
+        .unwrap();
+    memory
+        .record_decision(
+            "Chapter-7",
+            "张三暂时不可完全可信",
+            "keep_ambiguous",
+            &[],
+            "作者反馈要求保持张三的动机暧昧，不要变成直接坦白。",
+            &["author_feedback:eval".to_string()],
+        )
+        .unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter(
+        "林墨把寒影刀压在桌沿，只问张三那枚玉佩去了哪里。",
+        "Chapter-7",
+    );
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::PlanningReview,
+        observation: obs,
+        user_instruction: "先审一下这一章的目标和风险，不要代写正文。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨把寒影刀压在桌沿，只问张三那枚玉佩去了哪里。".to_string(),
+            paragraph: "林墨把寒影刀压在桌沿，只问张三那枚玉佩去了哪里。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::ReadOnly,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o-mini");
+    let trace = kernel.trace_snapshot(10);
+    let packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "PlanningReview")
+        .map(|trace| &trace.packet);
+
+    let mut errors = Vec::new();
+    if let Err(error) = &prepared {
+        errors.push(format!(
+            "kernel failed to prepare planning review: {}",
+            error
+        ));
+    }
+    let allowed_foundation_sources = [
+        "ProjectBrief",
+        "ChapterMission",
+        "ResultFeedback",
+        "NextBeat",
+        "PromiseSlice",
+        "CanonSlice",
+        "DecisionSlice",
+        "AuthorStyle",
+        "CursorPrefix",
+        "SelectedText",
+        "RagExcerpt",
+    ];
+    if !packet.is_some_and(|packet| {
+        let sources = packet
+            .beliefs
+            .iter()
+            .filter_map(|belief| belief.source.as_deref())
+            .collect::<Vec<_>>();
+        [
+            "ProjectBrief",
+            "ChapterMission",
+            "PromiseSlice",
+            "CanonSlice",
+        ]
+        .iter()
+        .all(|expected| sources.iter().any(|source| source == expected))
+            && sources.iter().all(|source| {
+                allowed_foundation_sources
+                    .iter()
+                    .any(|allowed| allowed == source)
+            })
+            && packet.required_context.iter().all(|context| {
+                allowed_foundation_sources
+                    .iter()
+                    .any(|allowed| allowed == &context.source_type)
+            })
+    }) {
+        errors.push(
+            "task packet beliefs or required context are not grounded in writer foundation sources"
+                .to_string(),
+        );
+    }
+    if packet.is_some_and(|packet| {
+        let serialized = serde_json::to_string(packet)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        serialized.contains("persona")
+            || serialized.contains("personality")
+            || serialized.contains("chatbot identity")
+            || serialized.contains("agent_identity")
+    }) {
+        errors.push("task packet introduced a generic persona foundation".to_string());
+    }
+
+    eval_result(
+        "writer_agent:generic_persona_not_used_as_foundation",
+        format!(
+            "prepared={} beliefs={} requiredContext={}",
+            prepared.is_ok(),
+            packet.map(|packet| packet.beliefs.len()).unwrap_or(0),
+            packet
+                .map(|packet| packet.required_context.len())
+                .unwrap_or(0)
+        ),
+        errors,
+    )
+}
+
 pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

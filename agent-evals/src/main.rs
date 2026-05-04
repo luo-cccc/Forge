@@ -60,6 +60,7 @@ fn main() {
     results.push(run_chapter_mission_drifted_no_duplicate_save_gap_eval());
     results.push(run_mission_state_transition_requires_evidence_eval());
     results.push(run_mission_blocked_retired_not_auto_calibrated_eval());
+    results.push(run_goal_drift_creates_story_debt_eval());
     results.push(run_belief_conflict_explains_sources_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
@@ -89,6 +90,7 @@ fn main() {
     results.push(run_operation_approval_decided_run_event_eval());
     results.push(run_context_pack_built_run_event_eval());
     results.push(run_task_packet_trace_eval());
+    results.push(run_generic_persona_not_used_as_foundation_eval());
     results.push(run_chapter_generation_task_packet_trace_eval());
     results.push(run_chapter_generation_task_receipt_required_eval());
     results.push(run_task_receipt_mismatch_blocks_write_eval());

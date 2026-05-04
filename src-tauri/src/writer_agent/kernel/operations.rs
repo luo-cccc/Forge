@@ -221,7 +221,7 @@ impl WriterAgentKernel {
 
     fn record_saved_operation_post_write_diagnostics(
         &mut self,
-        proposal_id: Option<&str>,
+        source_proposal_id: Option<&str>,
         operation: &WriterOperation,
         saved_text: Option<&str>,
         chapter_title: Option<String>,
@@ -273,8 +273,8 @@ impl WriterAgentKernel {
                 created_at,
             );
         let mut source_refs = Vec::new();
-        if let Some(proposal_id) = proposal_id {
-            source_refs.push(format!("proposal:{}", proposal_id));
+        if let Some(source_proposal_id) = source_proposal_id {
+            source_refs.push(format!("proposal:{}", source_proposal_id));
         }
         source_refs.push(format!("operation:{}", operation_kind_label(operation)));
         if let Some(scope) = operation_affected_scope(operation) {
@@ -282,6 +282,18 @@ impl WriterAgentKernel {
         }
         extend_unique_source_refs(&mut report.source_refs, source_refs);
         self.record_post_write_diagnostic_report(&report);
+        self.observations.push(observation.clone());
+        let mut proposals = Vec::new();
+        for diagnostic in diagnostics {
+            proposals.push(diagnostic_to_proposal(
+                diagnostic,
+                &observation,
+                &observation.id,
+                &proposal_id(&self.session_id, self.proposal_counter),
+            ));
+            self.proposal_counter += 1;
+        }
+        self.register_proposals(proposals, &std::collections::HashMap::new());
         Some(report)
     }
 
