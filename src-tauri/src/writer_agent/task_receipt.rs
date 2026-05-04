@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::context::{ContextSource, WritingContextPack};
 use super::observation::WriterObservation;
 
+const MAX_TASK_ARTIFACT_CONTENT_CHARS: usize = 12_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WriterTaskReceipt {
@@ -170,6 +172,59 @@ impl WriterTaskReceipt {
             }
         }
         mismatches
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterTaskArtifact {
+    pub artifact_id: String,
+    pub task_id: String,
+    pub task_kind: String,
+    pub artifact_kind: String,
+    pub chapter: Option<String>,
+    pub objective: String,
+    pub content: String,
+    pub content_char_count: usize,
+    pub content_truncated: bool,
+    pub required_evidence: Vec<String>,
+    pub source_refs: Vec<String>,
+    pub base_revision: Option<String>,
+    pub created_at_ms: u64,
+}
+
+impl WriterTaskArtifact {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        artifact_id: impl Into<String>,
+        task_id: impl Into<String>,
+        task_kind: impl Into<String>,
+        artifact_kind: impl Into<String>,
+        chapter: Option<String>,
+        objective: impl Into<String>,
+        content: impl Into<String>,
+        content_char_count: usize,
+        content_truncated: bool,
+        required_evidence: Vec<String>,
+        source_refs: Vec<String>,
+        base_revision: Option<String>,
+        created_at_ms: u64,
+    ) -> Self {
+        Self {
+            artifact_id: artifact_id.into(),
+            task_id: task_id.into(),
+            task_kind: task_kind.into(),
+            artifact_kind: artifact_kind.into(),
+            chapter,
+            objective: objective.into(),
+            content: content.into(),
+            content_char_count,
+            content_truncated,
+            required_evidence: normalize_strings(required_evidence),
+            source_refs: normalize_strings(source_refs),
+            base_revision,
+            created_at_ms,
+        }
     }
 }
 
@@ -364,6 +419,44 @@ pub fn build_continuity_diagnostic_receipt(
         observation.chapter_revision.clone(),
         created_at_ms,
     )
+}
+
+pub fn build_diagnostic_report_artifact(
+    receipt: &WriterTaskReceipt,
+    report: &str,
+    created_at_ms: u64,
+) -> Result<WriterTaskArtifact, Vec<WriterTaskReceiptMismatch>> {
+    let mismatches = receipt.validate_artifact_attempt(&receipt.task_id, "diagnostic_report");
+    if !mismatches.is_empty() {
+        return Err(mismatches);
+    }
+
+    let report = report.trim();
+    let content_char_count = report.chars().count();
+    let content_truncated = content_char_count > MAX_TASK_ARTIFACT_CONTENT_CHARS;
+    let content = truncate_chars(report, MAX_TASK_ARTIFACT_CONTENT_CHARS);
+    let artifact_id = format!("{}:diagnostic_report", receipt.task_id);
+    let mut source_refs = vec![
+        format!("receipt:{}", receipt.task_id),
+        format!("artifact:{}", artifact_id),
+    ];
+    source_refs.extend(receipt.source_refs.iter().cloned());
+
+    Ok(WriterTaskArtifact::new(
+        artifact_id,
+        receipt.task_id.clone(),
+        receipt.task_kind.clone(),
+        "diagnostic_report",
+        receipt.chapter.clone(),
+        receipt.objective.clone(),
+        content,
+        content_char_count,
+        content_truncated,
+        receipt.required_evidence.clone(),
+        source_refs,
+        receipt.base_revision.clone(),
+        created_at_ms,
+    ))
 }
 
 fn is_diagnostic_required_source(source: &ContextSource) -> bool {

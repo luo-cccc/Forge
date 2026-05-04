@@ -1,5 +1,82 @@
 use super::*;
 
+use agent_harness_core::provider::{
+    LlmMessage, LlmRequest, LlmResponse, Provider, StreamEvent, UsageInfo,
+};
+
+struct StaticDiagnosticProvider {
+    answer: String,
+    model: String,
+}
+
+impl StaticDiagnosticProvider {
+    fn new(answer: &str) -> Self {
+        Self {
+            answer: answer.to_string(),
+            model: "gpt-4o-mini".to_string(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for StaticDiagnosticProvider {
+    fn name(&self) -> &str {
+        "eval-static-diagnostic"
+    }
+
+    fn models(&self) -> Vec<String> {
+        vec![self.model.clone()]
+    }
+
+    async fn stream_call(
+        &self,
+        _request: LlmRequest,
+        on_event: Box<dyn Fn(StreamEvent) + Send + Sync>,
+    ) -> Result<LlmResponse, String> {
+        on_event(StreamEvent::TextDelta {
+            content: self.answer.clone(),
+        });
+        Ok(LlmResponse {
+            content: Some(self.answer.clone()),
+            tool_calls: None,
+            finish_reason: "stop".to_string(),
+            usage: Some(UsageInfo {
+                input_tokens: 512,
+                output_tokens: self.answer.chars().count() as u64 / 3,
+            }),
+        })
+    }
+
+    async fn call(&self, request: LlmRequest) -> Result<LlmResponse, String> {
+        self.stream_call(request, Box::new(|_| {})).await
+    }
+
+    async fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+        Ok(vec![0.0; 4])
+    }
+
+    fn estimate_tokens(&self, messages: &[LlmMessage]) -> u64 {
+        messages
+            .iter()
+            .map(|message| {
+                message
+                    .content
+                    .as_ref()
+                    .map(|content| content.chars().count() as u64 / 3 + 8)
+                    .unwrap_or(8)
+            })
+            .sum()
+    }
+
+    fn context_window_tokens(&self) -> u64 {
+        128_000
+    }
+
+    async fn health_check(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 pub fn run_task_packet_foundation_eval() -> EvalResult {
     let mut packet = agent_harness_core::TaskPacket::new(
         "eval-task-1",
@@ -934,6 +1011,140 @@ pub fn run_continuity_diagnostic_task_receipt_eval() -> EvalResult {
             receipt.is_some(),
             trace.run_events.len(),
             inspector.events.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_continuity_diagnostic_artifact_recorded_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻悬疑",
+            "玉佩线索推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-9",
+            "林墨审查玉佩线索是否偏离本章目标。",
+            "指出玉佩线索风险",
+            "不要提前揭开玉佩来源",
+            "以诊断后的下一步问题收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩来源",
+            "玉佩来源必须延后揭示。",
+            "Chapter-1",
+            "Chapter-12",
+            5,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ContinuityDiagnostic,
+        observation: observation_in_chapter(
+            "林墨差点说出玉佩来自禁地，但张三仍没有给出证据。",
+            "Chapter-9",
+        ),
+        user_instruction: "只做诊断报告，列出证据和建议，不写正文。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨差点说出玉佩来自禁地，但张三仍没有给出证据。".to_string(),
+            paragraph: "林墨差点说出玉佩来自禁地，但张三仍没有给出证据。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::ReadOnly,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(StaticDiagnosticProvider::new(
+        "诊断报告：Chapter-9 存在提前揭示玉佩来源风险。证据：ChapterMission 要求不要提前揭开玉佩来源；PromiseLedger 要求延后揭示。建议：保留张三沉默，把问题转为林墨是否继续追问。",
+    ));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let run_result = runtime.block_on(async {
+        kernel
+            .run_task(request, provider, EvalToolHandler, "gpt-4o-mini", None)
+            .await
+    });
+    let events = kernel.run_events(60);
+    let artifact_event = events
+        .iter()
+        .find(|event| event.event_type == "writer.task_artifact");
+    let inspector = kernel.inspector_timeline(60);
+    let export = kernel.export_trajectory(80);
+
+    let mut errors = Vec::new();
+    if let Err(error) = &run_result {
+        errors.push(format!("diagnostic run failed: {}", error));
+    }
+    if !run_result.as_ref().is_ok_and(|result| {
+        result.task_receipt.as_ref().is_some_and(|receipt| {
+            receipt
+                .validate_artifact_attempt(&receipt.task_id, "diagnostic_report")
+                .is_empty()
+        })
+    }) {
+        errors.push("diagnostic run result lacks a valid diagnostic_report receipt".to_string());
+    }
+    if !artifact_event.is_some_and(|event| {
+        event
+            .data
+            .get("artifactKind")
+            .and_then(|value| value.as_str())
+            == Some("diagnostic_report")
+            && event.data.get("taskKind").and_then(|value| value.as_str())
+                == Some("ContinuityDiagnostic")
+            && event
+                .data
+                .get("content")
+                .and_then(|value| value.as_str())
+                .is_some_and(|text| text.contains("诊断报告") && text.contains("玉佩来源风险"))
+            && event
+                .source_refs
+                .iter()
+                .any(|reference| reference.starts_with("artifact:"))
+    }) {
+        errors.push("diagnostic artifact run event lacks report content or refs".to_string());
+    }
+    if !inspector.events.iter().any(|event| {
+        event.kind
+            == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::TaskArtifact
+            && event.label.contains("diagnostic_report")
+            && event.summary.contains("chars=")
+    }) {
+        errors.push("inspector does not expose diagnostic artifact event".to_string());
+    }
+    if !export.jsonl.lines().any(|line| {
+        line.contains("\"eventType\":\"writer.run_event\"")
+            && line.contains("\"writer.task_artifact\"")
+            && line.contains("diagnostic_report")
+    }) {
+        errors.push("trajectory export lacks diagnostic artifact run event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:continuity_diagnostic_artifact_recorded",
+        format!(
+            "run={} artifacts={} inspectorEvents={} trajectoryLines={}",
+            run_result.is_ok(),
+            events
+                .iter()
+                .filter(|event| event.event_type == "writer.task_artifact")
+                .count(),
+            inspector.events.len(),
+            export.jsonl.lines().count()
         ),
         errors,
     )

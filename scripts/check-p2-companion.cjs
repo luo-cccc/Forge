@@ -101,6 +101,15 @@ const checks = [
       !source.includes("task_receipt") &&
       !source.includes("Latest Receipt"),
   },
+  {
+    name: "inspector owns task artifact details",
+    pass:
+      inspectorSource.includes('"task_artifact"') &&
+      inspectorSource.includes("Latest Artifact") &&
+      inspectorSource.includes("Open artifacts") &&
+      !source.includes("task_artifact") &&
+      !source.includes("Latest Artifact"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);

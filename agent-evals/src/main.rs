@@ -94,6 +94,7 @@ fn main() {
     results.push(run_chapter_generation_task_packet_trace_eval());
     results.push(run_chapter_generation_task_receipt_required_eval());
     results.push(run_continuity_diagnostic_task_receipt_eval());
+    results.push(run_continuity_diagnostic_artifact_recorded_eval());
     results.push(run_task_receipt_mismatch_blocks_write_eval());
     results.push(run_failure_evidence_bundle_eval());
     results.extend(run_product_scenario_evals());

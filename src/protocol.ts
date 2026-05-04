@@ -1077,6 +1077,7 @@ export type WriterTimelineEventKind =
   | "failure"
   | "subtask"
   | "task_receipt"
+  | "task_artifact"
   | "context_recall"
   | "product_metrics";
 
@@ -1121,6 +1122,22 @@ export interface WriterTaskReceipt {
   requiredEvidence: string[];
   expectedArtifacts: string[];
   mustNot: string[];
+  sourceRefs: string[];
+  baseRevision?: string | null;
+  createdAtMs: number;
+}
+
+export interface WriterTaskArtifact {
+  artifactId: string;
+  taskId: string;
+  taskKind: string;
+  artifactKind: string;
+  chapter?: string | null;
+  objective: string;
+  content: string;
+  contentCharCount: number;
+  contentTruncated: boolean;
+  requiredEvidence: string[];
   sourceRefs: string[];
   baseRevision?: string | null;
   createdAtMs: number;

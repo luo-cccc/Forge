@@ -18,6 +18,7 @@ type InspectorFilter =
   | "save_completed"
   | "subtask"
   | "task_receipt"
+  | "task_artifact"
   | "run_event"
   | "task_packet"
   | "operation_lifecycle"
@@ -30,6 +31,7 @@ const filterLabels: Record<InspectorFilter, string> = {
   save_completed: "Saves",
   subtask: "Subtasks",
   task_receipt: "Receipts",
+  task_artifact: "Artifacts",
   run_event: "Run Events",
   task_packet: "Packets",
   operation_lifecycle: "Lifecycle",
@@ -43,6 +45,7 @@ const filterOrder: InspectorFilter[] = [
   "save_completed",
   "subtask",
   "task_receipt",
+  "task_artifact",
   "run_event",
   "task_packet",
   "operation_lifecycle",
@@ -80,6 +83,7 @@ function eventToneClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "border-danger/40 bg-danger/10";
   if (kind === "subtask") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "task_receipt") return "border-success/30 bg-success/10";
+  if (kind === "task_artifact") return "border-success/30 bg-bg-raised";
   if (kind === "run_event") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "product_metrics") return "border-success/30 bg-success/10";
   return "border-border-subtle bg-bg-raised";
@@ -89,6 +93,7 @@ function eventBadgeClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "bg-danger/20 text-danger";
   if (kind === "subtask") return "bg-accent-subtle text-accent";
   if (kind === "task_receipt") return "bg-success/10 text-success";
+  if (kind === "task_artifact") return "bg-success/10 text-success";
   if (kind === "run_event") return "bg-accent-subtle text-accent";
   if (kind === "product_metrics") return "bg-success/10 text-success";
   return "bg-bg-deep text-text-muted";
@@ -250,6 +255,28 @@ function taskReceiptDetail(detail: unknown): {
   };
 }
 
+function taskArtifactDetail(detail: unknown): {
+  taskKind?: string;
+  artifactKind?: string;
+  chapter?: string;
+  content?: string;
+  contentCharCount?: number;
+  contentTruncated?: boolean;
+  requiredEvidence: string[];
+} | null {
+  const data = detailRecord(detail);
+  if (!("artifactKind" in data) && !("contentCharCount" in data) && !("content" in data)) return null;
+  return {
+    taskKind: textField(data.taskKind),
+    artifactKind: textField(data.artifactKind),
+    chapter: textField(data.chapter),
+    content: textField(data.content),
+    contentCharCount: numberField(data.contentCharCount),
+    contentTruncated: typeof data.contentTruncated === "boolean" ? data.contentTruncated : undefined,
+    requiredEvidence: stringArrayField(data.requiredEvidence),
+  };
+}
+
 function contextBudgetToneClass(report: ContextBudgetTrace): string {
   if (report.sourceReports.some((source) => source.provided === 0)) {
     return "border-danger/30 bg-bg-deep";
@@ -327,6 +354,7 @@ export const WriterInspectorPanel: React.FC = () => {
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
   const latestReceipt = events.find((event) => event.kind === "task_receipt");
+  const latestArtifact = events.find((event) => event.kind === "task_artifact");
   const latestPostWrite = trace?.postWriteDiagnostics[0];
   const metrics = trace?.productMetrics;
   const trends = trace?.contextSourceTrends ?? [];
@@ -334,6 +362,7 @@ export const WriterInspectorPanel: React.FC = () => {
   const latestFailureDetail = failureDetail(latestFailure?.detail);
   const latestSaveDetail = saveCompletedDetail(latestSave?.detail);
   const latestReceiptDetail = taskReceiptDetail(latestReceipt?.detail);
+  const latestArtifactDetail = taskArtifactDetail(latestArtifact?.detail);
   const saveCompletedEvents = events.filter((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
@@ -425,6 +454,7 @@ export const WriterInspectorPanel: React.FC = () => {
                 const failure = failureDetail(event.detail);
                 const saveCompleted = saveCompletedDetail(event.detail);
                 const taskReceipt = taskReceiptDetail(event.detail);
+                const taskArtifact = taskArtifactDetail(event.detail);
                 const proposalTrace = event.taskId ? proposalById.get(event.taskId) : undefined;
                 const contextBudget = proposalTrace?.contextBudget;
                 return (
@@ -529,6 +559,22 @@ export const WriterInspectorPanel: React.FC = () => {
                             </span>
                           ))}
                         </div>
+                      </div>
+                    )}
+                    {taskArtifact && (
+                      <div className="mt-2 rounded border border-success/30 bg-bg-deep p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-success">
+                            {taskArtifact.taskKind ?? "task"} · {taskArtifact.artifactKind ?? "artifact"}
+                          </span>
+                          <span className="text-[10px] text-text-muted">
+                            {taskArtifact.contentCharCount ?? 0} chars
+                            {taskArtifact.contentTruncated ? " · truncated" : ""}
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-3 text-[10px] text-text-secondary">
+                          {taskArtifact.content}
+                        </p>
                       </div>
                     )}
                     {contextBudget && (
@@ -783,6 +829,39 @@ export const WriterInspectorPanel: React.FC = () => {
                   {latestReceiptDetail?.mustNot.slice(0, 4).map((rule) => (
                     <span key={`guard-${rule}`} className="rounded bg-bg-deep px-1.5 py-0.5 text-danger">
                       no {rule}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {latestArtifact && (
+              <section className="rounded border border-success/30 bg-bg-raised p-2 text-xs">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Latest Artifact</span>
+                  <button
+                    onClick={() => setFilter("task_artifact")}
+                    className="rounded border border-success/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-success hover:bg-success/10"
+                  >
+                    Open artifacts
+                  </button>
+                </div>
+                <div className="rounded bg-bg-deep p-2 text-text-secondary">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{latestArtifactDetail?.artifactKind ?? latestArtifact.label}</span>
+                    <span className="font-mono text-[10px] text-text-muted">
+                      {latestArtifactDetail?.contentCharCount ?? 0} chars
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-4 text-[10px] text-text-muted">
+                    {latestArtifactDetail?.content ?? latestArtifact.summary}
+                  </p>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                  {latestArtifactDetail?.chapter && <span>{latestArtifactDetail.chapter}</span>}
+                  {latestArtifactDetail?.requiredEvidence.slice(0, 4).map((source) => (
+                    <span key={`artifact-source-${source}`} className="rounded bg-bg-deep px-1.5 py-0.5">
+                      {source}
                     </span>
                   ))}
                 </div>

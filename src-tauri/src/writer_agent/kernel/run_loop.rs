@@ -184,6 +184,23 @@ impl WriterAgentKernel {
                 &result.source_refs,
             )?;
         }
+        if request.task == WriterAgentTask::ContinuityDiagnostic {
+            if let Some(receipt) = result.task_receipt.as_ref() {
+                let artifact =
+                    crate::writer_agent::task_receipt::build_diagnostic_report_artifact(
+                        receipt,
+                        &result.answer,
+                        now_ms(),
+                    )
+                    .map_err(|mismatches| {
+                        format!(
+                            "ContinuityDiagnostic diagnostic_report artifact failed receipt validation: {:?}",
+                            mismatches
+                        )
+                    })?;
+                self.record_task_artifact_run_event(&artifact);
+            }
+        }
         Ok(())
     }
 }

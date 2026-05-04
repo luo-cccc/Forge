@@ -421,6 +421,19 @@ impl WriterAgentKernel {
         );
     }
 
+    pub(super) fn record_task_artifact_run_event(
+        &mut self,
+        artifact: &crate::writer_agent::task_receipt::WriterTaskArtifact,
+    ) {
+        self.record_run_event(
+            "task_artifact",
+            artifact.created_at_ms,
+            Some(artifact.task_id.clone()),
+            artifact.source_refs.clone(),
+            serde_json::json!(artifact),
+        );
+    }
+
     pub(super) fn record_post_write_diagnostic_report(
         &mut self,
         report: &crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport,
