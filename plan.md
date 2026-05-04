@@ -34,7 +34,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - Agent/editor/manual observation payload 和 WriterObservation 转换逻辑已抽入 `src-tauri/src/observation_bridge.rs`。
 - Editor realtime ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow 已抽入 `src-tauri/src/editor_realtime.rs`。
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
-- 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
+- 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 已降为主要保留模块 wiring、Tauri setup 和 command registration 的 root glue，并由 `scripts/check-architecture-size.cjs` 持续约束体量预算。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
 - 当前本轮已验证：`cargo run -p agent-evals --quiet` 155/155 passing。新增 `writer_agent:memory_reliability_snapshot`，把结构化 memory feedback 汇总成 ledger snapshot 的 `memoryReliability`，并在 Companion Audit 页展示 trusted / needs_review / unproven slot、可靠性百分比、reinforcement/correction 计数、net confidence delta 和最近 source error；上一轮新增的 `writer_agent:memory_feedback_schema_records_quality_signals` 继续覆盖 memory candidate 在作者批准/接受后写入结构化 reinforcement，在作者拒绝后写入带 `source_error` 的 correction，并由该 correction 压制后续同 slot 候选。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
@@ -44,8 +44,8 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
-- `agent-evals/src/product_scenarios.rs` 已集中承载 11 个真实长篇产品场景 eval；新增连续 20 章合成 fixture 已把多章保存、伏笔、任务漂移、作者反馈和产品指标串成同一条可验证链路。下一步要继续引入真实作者项目数据对照，而不是只堆数量或合成场景。
-- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入职责模块，kernel facade 当前约 450 行。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。
+- `agent-evals/src/product_scenarios.rs` 已集中承载 10 个长篇产品场景 eval + 1 个合成 20 章连续写作 fixture；该 fixture 已把多章保存、伏笔、任务漂移、作者反馈和产品指标串成同一条可验证链路。下一步要继续引入真实作者项目数据对照，而不是只堆数量或合成场景。
+- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入职责模块。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。架构体量不再依赖手工维护的精确行数描述，改由 `npm run check:architecture` 检查 `lib.rs`、kernel facade、eval facade 和 CompanionPanel 拆分预算。
 
 ## 2. 总体原则
 
@@ -520,7 +520,7 @@ Verification：
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 52 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 当前约 170 行，只保留模块 wiring、Tauri setup 和 command registration。
+当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 52 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 只保留模块 wiring、Tauri setup 和 command registration，并纳入 `npm run check:architecture` 的 root glue 预算。
 
 建议模块：
 
@@ -565,10 +565,11 @@ src-tauri/src/manual_agent.rs
 - Root utility / event / audit / writer observation helper 有独立模块。（已完成）
 - Root tests 有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
+- `npm run check:architecture` 通过，防止 root glue 重新膨胀。
 
 ### P2.5 拆分 `writer_agent/kernel.rs`
 
-当前状态：已完成。`writer_agent/kernel.rs` 当前约 450 行，保留 facade、状态结构、公开类型、`new()` 和少量共享转换 helper；对外 `writer_agent::kernel::*` 路径保持稳定。既有 `kernel_chapters.rs`、`kernel_helpers.rs`、`kernel_ops.rs`、`kernel_prompts.rs`、`kernel_review.rs` 继续承接章节、helper、operation、prompt、review 逻辑。`writer_agent/kernel_task_packet.rs` 已承接 TaskPacket 构建、context budget trace 和 trace state expiry helper。`writer_agent/kernel_metrics.rs` 已承接 `WriterProductMetrics` 和 trace-derived product metrics 计算。`writer_agent/kernel_proposals.rs` 已承接 proposal 替换、优先级权重和过期判断 helper。`writer_agent/kernel_ghost.rs` 已承接 ghost 续写草稿、三分支候选、continuation 清理和 context evidence 映射。`writer_agent/kernel_memory_feedback.rs` 已承接 proposal slot、suppression slot、memory extraction feedback、memory audit/feedback helper。`writer_agent/kernel_memory_candidates.rs` 已承接 memory candidate extraction、LLM candidate parsing、canon/promise candidate proposal construction、dedupe、sentence splitting 和 quality validation。`writer_agent/kernel_run_loop.rs` 已承接 run-loop 类型和 `WriterAgentPreparedRun`。`writer_agent/kernel/` 下的子模块已承接 observation handling、context pack accessors、run-loop methods、proposal creation/registration、feedback、operation execution、snapshot、trace recording 和 kernel tests。
+当前状态：已完成。`writer_agent/kernel.rs` 保留 facade、状态结构、公开类型、`new()` 和少量共享转换 helper；对外 `writer_agent::kernel::*` 路径保持稳定。既有 `kernel_chapters.rs`、`kernel_helpers.rs`、`kernel_ops.rs`、`kernel_prompts.rs`、`kernel_review.rs` 继续承接章节、helper、operation、prompt、review 逻辑。`writer_agent/kernel_task_packet.rs` 已承接 TaskPacket 构建、context budget trace 和 trace state expiry helper。`writer_agent/kernel_metrics.rs` 已承接 `WriterProductMetrics` 和 trace-derived product metrics 计算。`writer_agent/kernel_proposals.rs` 已承接 proposal 替换、优先级权重和过期判断 helper。`writer_agent/kernel_ghost.rs` 已承接 ghost 续写草稿、三分支候选、continuation 清理和 context evidence 映射。`writer_agent/kernel_memory_feedback.rs` 已承接 proposal slot、suppression slot、memory extraction feedback、memory audit/feedback helper。`writer_agent/kernel_memory_candidates.rs` 已承接 memory candidate extraction、LLM candidate parsing、canon/promise candidate proposal construction、dedupe、sentence splitting 和 quality validation。`writer_agent/kernel_run_loop.rs` 已承接 run-loop 类型和 `WriterAgentPreparedRun`。`writer_agent/kernel/` 下的子模块已承接 observation handling、context pack accessors、run-loop methods、proposal creation/registration、feedback、operation execution、snapshot、trace recording 和 kernel tests。kernel facade 体量由 `npm run check:architecture` 持续守住预算。
 
 建议模块：
 
@@ -595,10 +596,11 @@ writer_agent/
 - kernel facade 保持清晰 API。
 - operation execution、task packet、feedback、policy 分离。
 - eval 不降级。
+- `npm run check:architecture` 通过。
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 当前约 64 行，只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式，当前 100/100 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；原大型 eval 函数已按职责拆入 `agent-evals/src/evals/` 下的 intent、canon、ghost_feedback、context、tool_policy、run_loop、task_packet、foundation、mission、promise、story_debt、trajectory 模块。`cargo run -p agent-evals` 仍输出同一报告格式；当前完整 eval 基线由 `scripts/verification-baseline.cjs` 维护，为 155/155 passing。
 
 建议模块：
 

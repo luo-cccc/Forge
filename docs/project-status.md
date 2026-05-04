@@ -62,8 +62,8 @@ P1 is in progress:
 - Agent/editor/manual observation payloads and WriterObservation conversion now live in `src-tauri/src/observation_bridge.rs`.
 - Editor realtime ghost rendering, ambient output forwarding, editor prediction cleanup, realtime cowrite gating, and LLM ghost proposal flow now live in `src-tauri/src/editor_realtime.rs`.
 - API key resolution, path helpers, event constants, event payloads, Agent status payloads, project write audit helpers, and chapter-save observation/canon-refresh/context-render helpers now live in focused root helper modules (`api_key.rs`, `app_paths.rs`, `events.rs`, `event_payloads.rs`, `agent_status.rs`, `project_audit.rs`, `writer_observer.rs`).
-- The root lib test suite now lives in `src-tauri/src/tests.rs`; `src-tauri/src/lib.rs` is down to roughly 170 lines of module wiring, Tauri setup, and command registration.
-- Writer Agent kernel splitting is now complete for the P2 pass. The facade in `src-tauri/src/writer_agent/kernel.rs` is down to roughly 450 lines and retains the stable public API while implementation-heavy responsibilities live in focused sibling/nested modules.
+- The root lib test suite now lives in `src-tauri/src/tests.rs`; `src-tauri/src/lib.rs` is root glue for module wiring, Tauri setup, and command registration, with size guarded by `npm run check:architecture`.
+- Writer Agent kernel splitting is now complete for the P2 pass. The facade in `src-tauri/src/writer_agent/kernel.rs` retains the stable public API while implementation-heavy responsibilities live in focused sibling/nested modules, with facade size guarded by `npm run check:architecture`.
 - TaskPacket construction, context budget trace conversion, and trace state expiry helpers now live in `src-tauri/src/writer_agent/kernel_task_packet.rs` while preserving the existing `writer_agent::kernel::build_task_packet_for_observation` export path.
 - Trace-derived product metrics now live in `src-tauri/src/writer_agent/kernel_metrics.rs`, while preserving the existing `writer_agent::kernel::WriterProductMetrics` export path.
 - Proposal lifecycle helpers now live in `src-tauri/src/writer_agent/kernel_proposals.rs`, covering replacement decisions, priority ordering, and expiry checks with focused unit coverage.
@@ -104,6 +104,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 - `cargo run -p agent-evals`: 155/155 evals passing
 - `npm run check:p2`: 17/17 checks passing
 - `npm run check:audit`: 52 commands, 0 issues
+- `npm run check:architecture`: 5/5 files within budget
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing

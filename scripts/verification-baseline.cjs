@@ -7,6 +7,7 @@ const baselineItems = [
   ["cargo run -p agent-evals", "155/155 evals passing"],
   ["npm run check:p2", "17/17 checks passing"],
   ["npm run check:audit", "52 commands, 0 issues"],
+  ["npm run check:architecture", "5/5 files within budget"],
   ["npm run lint", "passing"],
   ["npm run build", "passing"],
   ["cargo fmt --all -- --check", "passing"],
