@@ -3,9 +3,12 @@ const path = require("path");
 const ts = require("typescript");
 
 const componentPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.tsx");
+const helpersPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.helpers.ts");
 const appPath = path.join(__dirname, "..", "src", "App.tsx");
 const inspectorPath = path.join(__dirname, "..", "src", "components", "WriterInspectorPanel.tsx");
 const source = fs.readFileSync(componentPath, "utf8");
+const helpersSource = fs.readFileSync(helpersPath, "utf8");
+const mergedSource = source + "\n" + helpersSource;
 const appSource = fs.readFileSync(appPath, "utf8");
 const inspectorSource = fs.readFileSync(inspectorPath, "utf8");
 
@@ -137,9 +140,9 @@ const checks = [
   {
     name: "write-mode guard summarizes product metrics instead of raw traces",
     pass:
-      /Recent acceptance/.test(source) &&
-      /productMetrics\.proposalAcceptanceRate/.test(source) &&
-      !/operationLifecycle\.map/.test(source),
+      /Recent acceptance/.test(mergedSource) &&
+      /productMetrics\.proposalAcceptanceRate/.test(mergedSource) &&
+      !/operationLifecycle\.map/.test(mergedSource),
   },
   {
     name: "internal timeline has a dedicated inspect mode",

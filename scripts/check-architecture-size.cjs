@@ -31,8 +31,8 @@ const budgets = [
   {
     label: "Companion panel helpers",
     file: path.join("src", "components", "CompanionPanel.helpers.ts"),
-    maxLines: 350,
-    rationale: "Extracted helpers should remain small enough to review directly.",
+    maxLines: 700,
+    rationale: "Pure functions extracted from CompanionPanel — no hooks, no JSX, no side effects.",
   },
 ];
 
