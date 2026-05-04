@@ -206,6 +206,16 @@ const checks = [
       !/task_artifact/.test(source) &&
       !/Latest Artifact/.test(source),
   },
+  {
+    name: "inspector owns metacognitive recovery action chips",
+    pass:
+      /metacognitiveRecoveryActions/.test(inspectorSource) &&
+      /Open Review/.test(inspectorSource) &&
+      /Inspect Diagnostics/.test(inspectorSource) &&
+      /setStoryMode/.test(inspectorSource) &&
+      !/Metacognitive Gate/.test(source) &&
+      !/Inspect Diagnostics/.test(source),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);

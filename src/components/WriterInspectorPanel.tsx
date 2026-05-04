@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAppStore } from "../store";
 import { Commands } from "../protocol";
 import type {
+  StoryMode,
   WriterAgentTraceSnapshot,
   WriterProposalTrace,
   ContextBudgetTrace,
   WriterContextSourceTrend,
   WriterInspectorTimeline,
+  WriterMetacognitiveSnapshot,
   WriterPostWriteDiagnosticReport,
   WriterTimelineEvent,
   WriterTimelineEventKind,
@@ -216,6 +219,57 @@ function recoveryActionsForFailure(failure: NonNullable<ReturnType<typeof failur
   return actions.slice(0, 4);
 }
 
+function metacognitiveActionLabel(action: string | undefined): string {
+  if (!action || action === "proceed") return "Proceed";
+  return action
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function metacognitiveRecoveryActions(meta: WriterMetacognitiveSnapshot | undefined): Array<{
+  label: string;
+  filter?: InspectorFilter;
+  storyMode?: StoryMode;
+}> {
+  if (!meta || meta.recommendedAction === "proceed") return [];
+  const action = meta.recommendedAction;
+  const actions: Array<{ label: string; filter?: InspectorFilter; storyMode?: StoryMode }> = [];
+  const add = (candidate: { label: string; filter?: InspectorFilter; storyMode?: StoryMode }) => {
+    if (!actions.some((item) =>
+      item.label === candidate.label &&
+      item.filter === candidate.filter &&
+      item.storyMode === candidate.storyMode
+    )) {
+      actions.push(candidate);
+    }
+  };
+
+  if (action === "switch_to_planning_review" || action === "ask_clarifying_question") {
+    add({ label: "Open Review", storyMode: "review" });
+  }
+  if (action === "run_continuity_diagnostic") {
+    add({ label: "Inspect Diagnostics", filter: "save_completed" });
+    add({ label: "Open Review", storyMode: "review" });
+  }
+  if (action === "block_write_until_author_confirms") {
+    add({ label: "Inspect Saves", filter: "save_completed" });
+    add({ label: "Open Review", storyMode: "review" });
+  }
+  if (meta.recentFailureCount > 0) {
+    add({ label: "Inspect Failures", filter: "failure" });
+  }
+  if (meta.contextDroppedSourceCount > 0 || meta.contextTruncatedSourceCount > 0 || meta.contextCoverageRate < 0.75) {
+    add({ label: "Inspect Context", filter: "context_recall" });
+  }
+  if (meta.postWriteErrorCount > 0) {
+    add({ label: "Inspect Saves", filter: "save_completed" });
+  }
+  add({ label: "Open Meta", filter: "metacognition" });
+  return actions.slice(0, 4);
+}
+
 function saveCompletedDetail(detail: unknown): {
   chapterTitle?: string;
   chapterRevision?: string;
@@ -359,6 +413,7 @@ function matchingFilter(event: WriterTimelineEvent, filter: InspectorFilter): bo
 }
 
 export const WriterInspectorPanel: React.FC = () => {
+  const setStoryMode = useAppStore((state) => state.setStoryMode);
   const [timeline, setTimeline] = useState<WriterInspectorTimeline | null>(null);
   const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
   const [filter, setFilter] = useState<InspectorFilter>("all");
@@ -417,6 +472,10 @@ export const WriterInspectorPanel: React.FC = () => {
   const latestPostWrite = trace?.postWriteDiagnostics[0];
   const metrics = trace?.productMetrics;
   const metacognition = trace?.metacognitiveSnapshot;
+  const metacognitiveActions = useMemo(
+    () => metacognitiveRecoveryActions(metacognition),
+    [metacognition],
+  );
   const trends = useMemo(() => trace?.contextSourceTrends ?? [], [trace?.contextSourceTrends]);
   const contextPressure = useMemo(() => contextPressureSummary(trends), [trends]);
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
@@ -760,12 +819,9 @@ export const WriterInspectorPanel: React.FC = () => {
               <section className="rounded border border-accent/30 bg-accent-subtle/20 p-2 text-xs">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="font-medium text-text-primary">Metacognitive Gate</span>
-                  <button
-                    onClick={() => setFilter("metacognition")}
-                    className="rounded border border-accent/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent-subtle"
-                  >
-                    Open meta
-                  </button>
+                  <span className="rounded bg-bg-deep px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                    {metacognitiveActionLabel(metacognition.recommendedAction)}
+                  </span>
                 </div>
                 <p className="line-clamp-3 text-text-secondary">{metacognition.summary}</p>
                 <div className="mt-2 grid grid-cols-3 gap-1.5">
@@ -790,6 +846,22 @@ export const WriterInspectorPanel: React.FC = () => {
                   <p className="mt-2 line-clamp-2 text-[10px] text-accent">
                     {metacognition.remediation[0]}
                   </p>
+                )}
+                {metacognitiveActions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {metacognitiveActions.map((action) => (
+                      <button
+                        key={`meta-${action.label}-${action.filter ?? action.storyMode ?? "none"}`}
+                        onClick={() => {
+                          if (action.filter) setFilter(action.filter);
+                          if (action.storyMode) setStoryMode(action.storyMode);
+                        }}
+                        className="rounded border border-accent/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent-subtle"
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </section>
             )}
