@@ -27,6 +27,7 @@ pub enum WriterTimelineEventKind {
     RunEvent,
     Failure,
     Subtask,
+    TaskReceipt,
     ContextRecall,
     ProductMetrics,
 }
@@ -153,6 +154,10 @@ pub fn build_inspector_timeline(
             || run_event.event_type == "writer.subtask_completed"
         {
             events.push(subtask_event_from_run_event(run_event));
+            continue;
+        }
+        if run_event.event_type == "writer.task_receipt" {
+            events.push(task_receipt_event_from_run_event(run_event));
             continue;
         }
         events.push(WriterTimelineEvent {
@@ -284,12 +289,58 @@ fn event_kind_weight(kind: &WriterTimelineEventKind) -> u8 {
         WriterTimelineEventKind::TaskPacket => 1,
         WriterTimelineEventKind::RunEvent => 2,
         WriterTimelineEventKind::Subtask => 3,
-        WriterTimelineEventKind::Failure => 4,
-        WriterTimelineEventKind::Proposal => 5,
-        WriterTimelineEventKind::OperationLifecycle => 6,
-        WriterTimelineEventKind::Feedback => 7,
-        WriterTimelineEventKind::ContextRecall => 8,
-        WriterTimelineEventKind::ProductMetrics => 9,
+        WriterTimelineEventKind::TaskReceipt => 4,
+        WriterTimelineEventKind::Failure => 5,
+        WriterTimelineEventKind::Proposal => 6,
+        WriterTimelineEventKind::OperationLifecycle => 7,
+        WriterTimelineEventKind::Feedback => 8,
+        WriterTimelineEventKind::ContextRecall => 9,
+        WriterTimelineEventKind::ProductMetrics => 10,
+    }
+}
+
+fn task_receipt_event_from_run_event(run_event: &WriterRunEvent) -> WriterTimelineEvent {
+    let task_kind = run_event
+        .data
+        .get("taskKind")
+        .and_then(|value| value.as_str())
+        .unwrap_or("task");
+    let chapter = run_event
+        .data
+        .get("chapter")
+        .and_then(|value| value.as_str())
+        .unwrap_or("chapter n/a");
+    let evidence_count = run_event
+        .data
+        .get("requiredEvidence")
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter(|item| item.as_str().is_some()).count())
+        .unwrap_or(0);
+    let artifact_count = run_event
+        .data
+        .get("expectedArtifacts")
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter(|item| item.as_str().is_some()).count())
+        .unwrap_or(0);
+    let guard_count = run_event
+        .data
+        .get("mustNot")
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter(|item| item.as_str().is_some()).count())
+        .unwrap_or(0);
+
+    WriterTimelineEvent {
+        audience: WriterTimelineAudience::Inspector,
+        kind: WriterTimelineEventKind::TaskReceipt,
+        label: format!("TaskReceipt {}", task_kind),
+        ts_ms: run_event.ts_ms,
+        task_id: run_event.task_id.clone(),
+        source_refs: run_event.source_refs.clone(),
+        summary: format!(
+            "{} receipt for {} evidence={} artifacts={} guards={}",
+            task_kind, chapter, evidence_count, artifact_count, guard_count
+        ),
+        detail: Some(run_event.data.clone()),
     }
 }
 
@@ -420,6 +471,7 @@ mod tests {
                         | WriterTimelineEventKind::RunEvent
                         | WriterTimelineEventKind::Failure
                         | WriterTimelineEventKind::Subtask
+                        | WriterTimelineEventKind::TaskReceipt
                         | WriterTimelineEventKind::OperationLifecycle
                 )
         }));

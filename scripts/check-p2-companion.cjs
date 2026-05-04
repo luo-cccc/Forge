@@ -92,6 +92,15 @@ const checks = [
       inspectorSource.includes("Open failures") &&
       !source.includes("Review budget"),
   },
+  {
+    name: "inspector owns task receipt details",
+    pass:
+      inspectorSource.includes('"task_receipt"') &&
+      inspectorSource.includes("Latest Receipt") &&
+      inspectorSource.includes("Open receipts") &&
+      !source.includes("task_receipt") &&
+      !source.includes("Latest Receipt"),
+  },
 ];
 
 const failed = checks.filter((check) => !check.pass);

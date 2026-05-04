@@ -1076,6 +1076,7 @@ export type WriterTimelineEventKind =
   | "run_event"
   | "failure"
   | "subtask"
+  | "task_receipt"
   | "context_recall"
   | "product_metrics";
 

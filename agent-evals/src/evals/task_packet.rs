@@ -858,6 +858,7 @@ pub fn run_continuity_diagnostic_task_receipt_eval() -> EvalResult {
         )
         .ok()
     });
+    let inspector = kernel.inspector_timeline(20);
     let export = kernel.export_trajectory(40);
 
     let mut errors = Vec::new();
@@ -906,14 +907,33 @@ pub fn run_continuity_diagnostic_task_receipt_eval() -> EvalResult {
     }) {
         errors.push("trajectory export lacks diagnostic task receipt run event".to_string());
     }
+    if !inspector.events.iter().any(|event| {
+        event.kind
+            == agent_writer_lib::writer_agent::inspector::WriterTimelineEventKind::TaskReceipt
+            && event.label.contains("ContinuityDiagnostic")
+            && event.summary.contains("guards=")
+            && event
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("mustNot"))
+                .and_then(|value| value.as_array())
+                .is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item.as_str() == Some("saved_chapter"))
+                })
+    }) {
+        errors.push("inspector does not expose diagnostic receipt as a receipt event".to_string());
+    }
 
     eval_result(
         "writer_agent:continuity_diagnostic_task_receipt",
         format!(
-            "prepared={} receipt={} runEvents={}",
+            "prepared={} receipt={} runEvents={} inspectorEvents={}",
             prepared.is_ok(),
             receipt.is_some(),
-            trace.run_events.len()
+            trace.run_events.len(),
+            inspector.events.len()
         ),
         errors,
     )

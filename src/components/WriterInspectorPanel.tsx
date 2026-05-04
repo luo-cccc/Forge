@@ -17,6 +17,7 @@ type InspectorFilter =
   | "failure"
   | "save_completed"
   | "subtask"
+  | "task_receipt"
   | "run_event"
   | "task_packet"
   | "operation_lifecycle"
@@ -28,6 +29,7 @@ const filterLabels: Record<InspectorFilter, string> = {
   failure: "Failures",
   save_completed: "Saves",
   subtask: "Subtasks",
+  task_receipt: "Receipts",
   run_event: "Run Events",
   task_packet: "Packets",
   operation_lifecycle: "Lifecycle",
@@ -40,6 +42,7 @@ const filterOrder: InspectorFilter[] = [
   "failure",
   "save_completed",
   "subtask",
+  "task_receipt",
   "run_event",
   "task_packet",
   "operation_lifecycle",
@@ -76,6 +79,7 @@ function formatDuration(value: number | null | undefined): string {
 function eventToneClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "border-danger/40 bg-danger/10";
   if (kind === "subtask") return "border-accent/30 bg-accent-subtle/20";
+  if (kind === "task_receipt") return "border-success/30 bg-success/10";
   if (kind === "run_event") return "border-accent/30 bg-accent-subtle/20";
   if (kind === "product_metrics") return "border-success/30 bg-success/10";
   return "border-border-subtle bg-bg-raised";
@@ -84,6 +88,7 @@ function eventToneClass(kind: WriterTimelineEventKind): string {
 function eventBadgeClass(kind: WriterTimelineEventKind): string {
   if (kind === "failure") return "bg-danger/20 text-danger";
   if (kind === "subtask") return "bg-accent-subtle text-accent";
+  if (kind === "task_receipt") return "bg-success/10 text-success";
   if (kind === "run_event") return "bg-accent-subtle text-accent";
   if (kind === "product_metrics") return "bg-success/10 text-success";
   return "bg-bg-deep text-text-muted";
@@ -183,6 +188,7 @@ function recoveryActionsForFailure(failure: NonNullable<ReturnType<typeof failur
     add("Review save", "save_completed");
   }
   if (code.includes("receipt") || category.includes("receipt")) {
+    add("Review receipt", "task_receipt");
     add("Review task packet", "task_packet");
   }
   if (
@@ -223,6 +229,24 @@ function saveCompletedDetail(detail: unknown): {
     diagnosticTotalCount: numberField(data.diagnosticTotalCount),
     diagnosticErrorCount: numberField(data.diagnosticErrorCount),
     diagnosticWarningCount: numberField(data.diagnosticWarningCount),
+  };
+}
+
+function taskReceiptDetail(detail: unknown): {
+  taskKind?: string;
+  chapter?: string;
+  expectedArtifacts: string[];
+  requiredEvidence: string[];
+  mustNot: string[];
+} | null {
+  const data = detailRecord(detail);
+  if (!("taskKind" in data) && !("expectedArtifacts" in data) && !("mustNot" in data)) return null;
+  return {
+    taskKind: textField(data.taskKind),
+    chapter: textField(data.chapter),
+    expectedArtifacts: stringArrayField(data.expectedArtifacts),
+    requiredEvidence: stringArrayField(data.requiredEvidence),
+    mustNot: stringArrayField(data.mustNot),
   };
 }
 
@@ -302,12 +326,14 @@ export const WriterInspectorPanel: React.FC = () => {
   const latestSave = events.find((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
+  const latestReceipt = events.find((event) => event.kind === "task_receipt");
   const latestPostWrite = trace?.postWriteDiagnostics[0];
   const metrics = trace?.productMetrics;
   const trends = trace?.contextSourceTrends ?? [];
   const providerBudget = providerBudgetDetail(latestProviderBudget?.detail);
   const latestFailureDetail = failureDetail(latestFailure?.detail);
   const latestSaveDetail = saveCompletedDetail(latestSave?.detail);
+  const latestReceiptDetail = taskReceiptDetail(latestReceipt?.detail);
   const saveCompletedEvents = events.filter((event) =>
     event.kind === "run_event" && event.label === "writer.save_completed"
   );
@@ -398,6 +424,7 @@ export const WriterInspectorPanel: React.FC = () => {
                 const budget = providerBudgetDetail(event.detail);
                 const failure = failureDetail(event.detail);
                 const saveCompleted = saveCompletedDetail(event.detail);
+                const taskReceipt = taskReceiptDetail(event.detail);
                 const proposalTrace = event.taskId ? proposalById.get(event.taskId) : undefined;
                 const contextBudget = proposalTrace?.contextBudget;
                 return (
@@ -481,6 +508,26 @@ export const WriterInspectorPanel: React.FC = () => {
                           {saveCompleted.chapterTitle && <span>{saveCompleted.chapterTitle}</span>}
                           {saveCompleted.operationKind && <span>{saveCompleted.operationKind}</span>}
                           {saveCompleted.postWriteReportId && <span>report {saveCompleted.postWriteReportId}</span>}
+                        </div>
+                      </div>
+                    )}
+                    {taskReceipt && (
+                      <div className="mt-2 rounded border border-success/30 bg-bg-deep p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-success">
+                            {taskReceipt.taskKind ?? "task receipt"}
+                          </span>
+                          <span className="text-[10px] text-text-muted">
+                            {taskReceipt.expectedArtifacts.length} artifacts · {taskReceipt.mustNot.length} guards
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                          {taskReceipt.chapter && <span>{taskReceipt.chapter}</span>}
+                          {taskReceipt.requiredEvidence.slice(0, 4).map((source) => (
+                            <span key={`${event.taskId}-${source}`} className="rounded bg-bg-surface px-1 py-0.5">
+                              {source}
+                            </span>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -709,6 +756,33 @@ export const WriterInspectorPanel: React.FC = () => {
                   {latestSave.sourceRefs.slice(0, 6).map((source) => (
                     <span key={source} className="rounded bg-bg-deep px-1.5 py-0.5 text-[10px] text-text-muted">
                       {source}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {latestReceipt && (
+              <section className="rounded border border-success/30 bg-success/10 p-2 text-xs">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-primary">Latest Receipt</span>
+                  <button
+                    onClick={() => setFilter("task_receipt")}
+                    className="rounded border border-success/30 bg-bg-deep px-1.5 py-0.5 text-[10px] text-success hover:bg-success/10"
+                  >
+                    Open receipts
+                  </button>
+                </div>
+                <p className="line-clamp-3 text-text-secondary">{latestReceipt.summary}</p>
+                <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-text-muted">
+                  {latestReceiptDetail?.expectedArtifacts.slice(0, 4).map((artifact) => (
+                    <span key={`artifact-${artifact}`} className="rounded bg-bg-deep px-1.5 py-0.5">
+                      {artifact}
+                    </span>
+                  ))}
+                  {latestReceiptDetail?.mustNot.slice(0, 4).map((rule) => (
+                    <span key={`guard-${rule}`} className="rounded bg-bg-deep px-1.5 py-0.5 text-danger">
+                      no {rule}
                     </span>
                   ))}
                 </div>
