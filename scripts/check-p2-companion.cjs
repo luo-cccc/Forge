@@ -3,11 +3,15 @@ const path = require("path");
 const ts = require("typescript");
 
 const componentPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.tsx");
-const helpersPath = path.join(__dirname, "..", "src", "components", "CompanionPanel.helpers.ts");
+const helpersPaths = [
+  path.join(__dirname, "..", "src", "components", "CompanionPanel.proposal.ts"),
+  path.join(__dirname, "..", "src", "components", "CompanionPanel.contract.ts"),
+  path.join(__dirname, "..", "src", "components", "CompanionPanel.brain.ts"),
+];
 const appPath = path.join(__dirname, "..", "src", "App.tsx");
 const inspectorPath = path.join(__dirname, "..", "src", "components", "WriterInspectorPanel.tsx");
 const source = fs.readFileSync(componentPath, "utf8");
-const helpersSource = fs.readFileSync(helpersPath, "utf8");
+const helpersSource = helpersPaths.map((p) => fs.readFileSync(p, "utf8")).join("\n");
 const mergedSource = source + "\n" + helpersSource;
 const appSource = fs.readFileSync(appPath, "utf8");
 const inspectorSource = fs.readFileSync(inspectorPath, "utf8");

@@ -72,6 +72,60 @@ pub fn restore_project_brain_source_revision(
 }
 
 #[tauri::command]
+pub fn cross_reference_brain_nodes(
+    app: tauri::AppHandle,
+    source_node_id: String,
+    target_node_id: String,
+) -> Result<crate::brain_service::ProjectBrainCrossReferenceResult, String> {
+    crate::brain_service::cross_reference_project_brain_nodes(
+        &app,
+        &source_node_id,
+        &target_node_id,
+    )
+}
+
+#[tauri::command]
+pub fn ingest_external_research(
+    app: tauri::AppHandle,
+    provider: String,
+    url_or_path: String,
+    title: String,
+    content: String,
+    author_approved: bool,
+    approval_reason: String,
+) -> Result<crate::brain_service::ExternalResearchIngestResult, String> {
+    let result = crate::brain_service::ingest_external_research_source(
+        &app,
+        &provider,
+        &url_or_path,
+        &title,
+        &content,
+        author_approved,
+        &approval_reason,
+    )?;
+    crate::audit_project_file_write(
+        &app,
+        "project_brain",
+        "External research source ingested into Project Brain",
+        "ingested_external_research_source",
+        &format!(
+            "Author-approved external research ingest '{}' (provider: {}, source: {}) wrote {} chunks into Project Brain. Approval reason: {}",
+            result.source.title,
+            result.source.provider,
+            if result.source.url_or_path.is_empty() {
+                "unspecified"
+            } else {
+                &result.source.url_or_path
+            },
+            result.chunk_count,
+            approval_reason.trim(),
+        ),
+        &result.evidence_refs,
+    );
+    Ok(result)
+}
+
+#[tauri::command]
 pub fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
     let mut entities = Vec::new();
     let mut relationships = Vec::new();

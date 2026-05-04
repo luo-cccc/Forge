@@ -85,15 +85,27 @@ impl WriterAgentKernel {
             format!("{:?}", task),
             task_packet.clone(),
         );
-        let task_receipt = (request.task == WriterAgentTask::ContinuityDiagnostic).then(|| {
-            crate::writer_agent::task_receipt::build_continuity_diagnostic_receipt(
-                task_packet.id.clone(),
-                &request.observation,
-                &task_packet.objective,
-                &context_pack,
-                now_ms(),
-            )
-        });
+        let task_receipt = (request.task == WriterAgentTask::ContinuityDiagnostic
+            || request.task == WriterAgentTask::PlanningReview)
+            .then(|| {
+                if request.task == WriterAgentTask::PlanningReview {
+                    crate::writer_agent::task_receipt::build_planning_review_receipt(
+                        task_packet.id.clone(),
+                        &request.observation,
+                        &task_packet.objective,
+                        &context_pack,
+                        now_ms(),
+                    )
+                } else {
+                    crate::writer_agent::task_receipt::build_continuity_diagnostic_receipt(
+                        task_packet.id.clone(),
+                        &request.observation,
+                        &task_packet.objective,
+                        &context_pack,
+                        now_ms(),
+                    )
+                }
+            });
         if let Some(receipt) = task_receipt.as_ref() {
             self.record_task_receipt_run_event(receipt);
         }
@@ -200,9 +212,23 @@ impl WriterAgentKernel {
                 &result.source_refs,
             )?;
         }
-        if request.task == WriterAgentTask::ContinuityDiagnostic {
+        if request.task == WriterAgentTask::ContinuityDiagnostic
+            || request.task == WriterAgentTask::PlanningReview
+        {
             if let Some(receipt) = result.task_receipt.as_ref() {
-                let artifact =
+                let artifact = if request.task == WriterAgentTask::PlanningReview {
+                    crate::writer_agent::task_receipt::build_planning_review_artifact(
+                        receipt,
+                        &result.answer,
+                        now_ms(),
+                    )
+                    .map_err(|mismatches| {
+                        format!(
+                            "PlanningReview planning_review_report artifact failed receipt validation: {:?}",
+                            mismatches
+                        )
+                    })?
+                } else {
                     crate::writer_agent::task_receipt::build_diagnostic_report_artifact(
                         receipt,
                         &result.answer,
@@ -213,7 +239,8 @@ impl WriterAgentKernel {
                             "ContinuityDiagnostic diagnostic_report artifact failed receipt validation: {:?}",
                             mismatches
                         )
-                    })?;
+                    })?
+                };
                 self.record_task_artifact_run_event(&artifact);
             }
         }

@@ -6,6 +6,9 @@ use agent_writer_lib::writer_agent::memory::{
 };
 use agent_writer_lib::writer_agent::observation::{ObservationReason, ObservationSource};
 use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind};
+use agent_writer_lib::writer_agent::task_receipt::{
+    WriterFailureCategory, WriterFailureEvidenceBundle,
+};
 use agent_writer_lib::writer_agent::trajectory::export_trace_snapshot;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 use std::path::Path;
@@ -23,6 +26,7 @@ pub fn run_product_scenario_evals() -> Vec<EvalResult> {
         run_scenario_manual_ask_records_decision_eval(),
         run_scenario_context_explainability_for_longform_eval(),
         run_continuous_writing_fixture_20_chapters_eval(),
+        run_real_author_long_session_calibration_eval(),
     ]
 }
 
@@ -989,6 +993,376 @@ fn continuous_expected_ending(chapter: usize) -> String {
         17 | 18 => "真相揭示完整债图。".to_string(),
         _ => "留下一个重大疑问。".to_string(),
     }
+}
+
+fn seed_real_author_project_memory(memory: &WriterMemory) {
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "镜中墟",
+            "志怪悬疑",
+            "苏晚在镜墟幻界中追查亡父遗留的七面铜镜，每面镜后封印一段被修改的记忆。",
+            "苏晚必须在还原记忆真相与保护镜墟秩序之间反复权衡。",
+            "不得提前揭示镜墟之主真实身份；不得把铜镜记忆当作绝对事实。",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "苏晚",
+            &["镜使".to_string()],
+            "女主，镜墟守护者的女儿，能进入铜镜记忆片段。",
+            &serde_json::json!({"ability": "镜中行走", "bond": "父亲遗命"}),
+            0.95,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "沈砚",
+            &["画师".to_string()],
+            "曾在镜墟迷途三年，画下铜镜线索，不愿再进幻界。",
+            &serde_json::json!({"role": "线索提供者", "trauma": "铜镜吞噬记忆"}),
+            0.91,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "云娘",
+            &["镜灵".to_string()],
+            "镜墟中最古老的灵体，声称知道真相但只以交易形式透露。",
+            &serde_json::json!({"alignment": "ambiguous", "knowledge": "complete"}),
+            0.88,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "object",
+            "七面铜镜",
+            &["法器".to_string()],
+            "苏父留下的七面古铜镜，分别封印七段被修改的记忆。已找回三面。",
+            &serde_json::json!({"found": 3, "total": 7, "danger": "镜子会反向观察持镜者"}),
+            0.93,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_rule(
+            "镜墟之主真实身份至少延后到第七面镜出现后再揭示。",
+            "mystery_boundary",
+            9,
+            "real_author_fixture",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_rule(
+            "每面铜镜揭示的记忆都可能被修改过——没有一面镜子的记忆是完全真实的。",
+            "unreliable_narrator",
+            9,
+            "real_author_fixture",
+        )
+        .unwrap();
+    memory
+        .upsert_style_preference("accepted_Ghost", "细腻克制、留白、不解释情感动机", true)
+        .unwrap();
+    memory
+        .add_promise_with_entities(
+            "object_whereabouts",
+            "第四面铜镜",
+            "第四面铜镜藏在沈砚画中的旧巷，但进入巷子需要云娘的交易条件",
+            "第一章",
+            "第十二章",
+            9,
+            &[
+                "七面铜镜".to_string(),
+                "沈砚".to_string(),
+                "云娘".to_string(),
+            ],
+        )
+        .unwrap();
+    memory
+        .add_promise_with_entities(
+            "mystery_clue",
+            "父亲最后一封信",
+            "苏父的信提到第七面镜是假的——但谁伪造了它不应提前揭晓",
+            "第三章",
+            "第十五章",
+            8,
+            &["苏晚".to_string(), "七面铜镜".to_string()],
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "emotional_debt",
+            "沈砚的道歉",
+            "沈砚欠苏晚一句关于当年离开镜墟的实话",
+            "第四章",
+            "第十章",
+            7,
+        )
+        .unwrap();
+
+    let chapter_missions: Vec<(&str, &str, &str, &str, &str)> = vec![
+        (
+            "第一章",
+            "引入苏晚与镜墟关系，建立铜镜的世界观规则",
+            "找到第一面铜镜的线索",
+            "不得揭示镜墟之主身份",
+            "线索指向旧巷但铜镜被移动过",
+        ),
+        (
+            "第二章",
+            "展开沈砚与苏晚的旧识关系",
+            "沈砚交出第一幅镜墟画作",
+            "不得让沈砚进入镜墟",
+            "沈砚画中的镜墟比现实少了一座塔",
+        ),
+        (
+            "第三章",
+            "揭示父亲最后一封信的存在",
+            "找到父亲信件的隐藏段落",
+            "不得让云娘直接说出真相",
+            "信中提到\"第七面是假的\"但未说明原因",
+        ),
+        (
+            "第四章",
+            "沈砚道歉的第一次铺垫",
+            "沈砚开口但不完整",
+            "不得让苏晚直接原谅",
+            "沈砚只说了一半实话",
+        ),
+        (
+            "第五章",
+            "云娘提出第一个交易条件",
+            "苏晚用一段记忆换取铜镜位置",
+            "不得揭示云娘真实身份",
+            "苏晚失去的记忆与父亲有关",
+        ),
+    ];
+
+    for (chapter, mission, must_include, must_not, ending) in &chapter_missions {
+        memory
+            .upsert_chapter_mission(&ChapterMissionSummary {
+                id: 0,
+                project_id: "eval".to_string(),
+                chapter_title: chapter.to_string(),
+                mission: mission.to_string(),
+                must_include: must_include.to_string(),
+                must_not: must_not.to_string(),
+                expected_ending: ending.to_string(),
+                status: "active".to_string(),
+                source_ref: format!("real_author_fixture:{}", chapter),
+                updated_at: String::new(),
+                blocked_reason: String::new(),
+                retired_history: String::new(),
+            })
+            .unwrap();
+    }
+}
+
+fn simulate_real_author_writing_session(kernel: &mut WriterAgentKernel, feedback_delay_ms: u64) {
+    let chapters = vec![
+        ("第一章", "苏晚把铜镜翻过来，背面刻的不是她记忆中的名字。镜墟在黄昏时分最安静，她把沈砚的画展开——画里少了一座塔。"),
+        ("第二章", "沈砚不愿意看铜镜。\"那东西会记住看它的人。\"苏晚把画摊在他面前，塔的位置是一团墨，像被刻意涂掉的。"),
+        ("第三章", "父亲的遗信藏在铜镜夹层。苏晚读到一半发现笔迹变了——后半段不是父亲写的。\"第七面是假的\"——但没有说为什么。"),
+        ("第四章", "沈砚终于说：\"我不是逃出镜墟的——我是被赶出来的。\"苏晚没有接话。铜镜在他说话时微微发亮。"),
+        ("第五章", "云娘把交易摆上桌：\"用一段你不想要的记忆，换第四面铜镜的位置。\"苏晚把五岁生日的画面递出去，发现云娘不敢看那面铜镜。"),
+    ];
+
+    for (chapter_idx, (chapter, paragraph)) in chapters.iter().enumerate() {
+        kernel.active_chapter = Some(chapter.to_string());
+        let save_proposals = kernel
+            .observe(save_observation(paragraph, chapter))
+            .unwrap();
+
+        for cal in save_proposals.iter().filter(|p| {
+            p.kind == ProposalKind::ChapterMission && p.rationale.contains("mission calibration")
+        }) {
+            let op = cal.operations[0].clone();
+            let mut approval = eval_approval("fixture_mission_calibration");
+            approval.proposal_id = Some(cal.id.clone());
+            kernel
+                .approve_editor_operation_with_approval(op, "", Some(&approval))
+                .ok();
+        }
+
+        let observation = observation_in_chapter(paragraph, chapter);
+        let continuation = format!(
+            "苏晚把第{}面铜镜放回匣中，发现它们彼此之间在轻声说话。",
+            chapter_idx + 1
+        );
+
+        if *chapter == "第三章" {
+            let bundle = WriterFailureEvidenceBundle::new(
+                WriterFailureCategory::ContextMissing,
+                "context_pack_dropped_chapter_mission",
+                "Context pressure dropped ChapterMission before Planning Review at chapter 3.",
+                true,
+                Some("real-author-task-3".to_string()),
+                vec!["context:ChapterMission".to_string()],
+                serde_json::json!({"droppedSource": "ChapterMission", "chapter": chapter}),
+                vec!["rebuild_context_pack: Run Planning Review before continuing.".to_string()],
+                now_ms(),
+            );
+            kernel.record_failure_evidence_bundle(&bundle);
+        }
+
+        let proposal = kernel
+            .create_llm_ghost_proposal(observation, continuation.clone(), "fixture-model")
+            .unwrap();
+        let operation = proposal.operations[0].clone();
+        kernel
+            .record_operation_durable_save(
+                Some(proposal.id.clone()),
+                operation,
+                format!("editor_save:{}", chapter),
+            )
+            .unwrap();
+
+        let is_fourth = *chapter == "第四章";
+        let reason = if is_fourth {
+            "沈砚的实话太长——留一半，让铜镜替他说。"
+        } else {
+            "这一章的感觉对了。"
+        };
+        kernel
+            .apply_feedback(ProposalFeedback {
+                proposal_id: proposal.id.clone(),
+                action: if is_fourth {
+                    FeedbackAction::Edited
+                } else {
+                    FeedbackAction::Accepted
+                },
+                final_text: if is_fourth {
+                    Some("沈砚只说了半句实话——铜镜替他补了后半句。".to_string())
+                } else {
+                    Some(continuation)
+                },
+                reason: Some(reason.to_string()),
+                created_at: now_ms() + feedback_delay_ms,
+            })
+            .unwrap();
+    }
+}
+
+pub fn run_real_author_long_session_calibration_eval() -> EvalResult {
+    let db_path = std::env::temp_dir().join(format!(
+        "forge-real-author-calibration-{}-{}.sqlite",
+        std::process::id(),
+        now_ms()
+    ));
+    let mut errors = Vec::new();
+
+    let session_metrics;
+    let story_debt;
+    let context_sources;
+    let mission_statuses;
+    let trace_has_metacognition;
+    let trace_has_product_trend;
+    let trace_has_context_recalls;
+
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        seed_real_author_project_memory(&memory);
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "real-author-calibration".to_string();
+        simulate_real_author_writing_session(&mut kernel, 80);
+
+        session_metrics = kernel.trace_snapshot(120).product_metrics.clone();
+        story_debt = kernel.story_debt_snapshot();
+        let snapshot = kernel.trace_snapshot(200);
+
+        let obs = observation_in_chapter(
+            "苏晚发现铜镜背面刻的不是名字——是沈砚的画中塔的位置。",
+            "第三章",
+        );
+        let pack = kernel.context_pack_for_default(AgentTask::PlanningReview, &obs);
+        context_sources = pack
+            .sources
+            .iter()
+            .map(|source| format!("{:?}", source.source))
+            .collect::<Vec<_>>();
+
+        let ledger = kernel.ledger_snapshot();
+        mission_statuses = ledger
+            .chapter_missions
+            .iter()
+            .map(|m| (m.chapter_title.clone(), m.status.clone()))
+            .collect::<Vec<_>>();
+
+        let meta = snapshot.metacognitive_snapshot;
+        trace_has_metacognition =
+            !meta.reasons.is_empty() && !meta.remediation.is_empty() && meta.confidence > 0.0;
+        trace_has_product_trend = snapshot.product_metrics_trend.session_count >= 1;
+        trace_has_context_recalls = !snapshot.context_recalls.is_empty();
+    }
+
+    let _ = std::fs::remove_file(&db_path);
+
+    if session_metrics.proposal_count < 5 {
+        errors.push(format!(
+            "real author session under-produced proposals: {}",
+            session_metrics.proposal_count
+        ));
+    }
+    if session_metrics.feedback_count < 5 {
+        errors.push(format!(
+            "real author session under-recorded feedback: {}",
+            session_metrics.feedback_count
+        ));
+    }
+    if session_metrics.durable_save_success_rate <= 0.0 {
+        errors.push("real author session had zero durable save success rate".to_string());
+    }
+    if !context_sources
+        .iter()
+        .any(|source| source.contains("CanonSlice"))
+    {
+        errors.push("context pack missing canon sources for named entities".to_string());
+    }
+    if !context_sources
+        .iter()
+        .any(|source| source.contains("PromiseSlice"))
+    {
+        errors.push("context pack missing promise sources for multi-chapter arcs".to_string());
+    }
+    let has_completed = mission_statuses.iter().any(|(_, s)| s == "completed");
+    let has_drifted = mission_statuses.iter().any(|(_, s)| s == "drifted");
+    let has_review = mission_statuses.iter().any(|(_, s)| s == "needs_review");
+    if !has_completed && !has_drifted && !has_review {
+        errors.push(format!(
+            "real author session produced no mission state changes: {:?}",
+            mission_statuses
+        ));
+    }
+    if !trace_has_metacognition {
+        errors.push("metacognitive snapshot did not register real author session risk".to_string());
+    }
+    if !trace_has_product_trend {
+        errors.push("product metrics trend not replayable in real author session".to_string());
+    }
+    if !trace_has_context_recalls {
+        errors.push("context recalls not tracked in real author session".to_string());
+    }
+    if story_debt.total == 0 {
+        errors.push("story debt remained zero across real author chapters".to_string());
+    }
+
+    eval_result(
+        "writer_agent:real_author_long_session_calibration",
+        format!(
+            "proposals={} feedback={} saveRate={:.2} debtTotal={} promiseDebt={} missionDebt={} sources:{:?} missions:{:?}",
+            session_metrics.proposal_count,
+            session_metrics.feedback_count,
+            session_metrics.durable_save_success_rate,
+            story_debt.total,
+            story_debt.promise_count,
+            story_debt.mission_count,
+            context_sources,
+            mission_statuses,
+        ),
+        errors,
+    )
 }
 
 fn simulate_continuous_writing_session(

@@ -36,6 +36,8 @@ export const Commands = {
   getChapterRevision: "get_chapter_revision",
   compareProjectBrainSourceRevisions: "compare_project_brain_source_revisions",
   restoreProjectBrainSourceRevision: "restore_project_brain_source_revision",
+  crossReferenceBrainNodes: "cross_reference_brain_nodes",
+  ingestExternalResearch: "ingest_external_research",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
   getProjectGraphData: "get_project_graph_data",
@@ -455,6 +457,42 @@ export interface MetacognitiveRecoveryEvent {
 export interface AskProjectBrainPayload {
   query: string;
   providerBudgetApproval?: WriterProviderBudgetApproval;
+}
+
+export interface ProjectBrainCrossReference {
+  sourceNodeId: string;
+  targetNodeId: string;
+  relation: string;
+  confidence: number;
+  evidenceKeywords: string[];
+  createdAtMs: number;
+}
+
+export interface ProjectBrainCrossReferenceResult {
+  reference: ProjectBrainCrossReference;
+  sourceLabel: string;
+  targetLabel: string;
+  sharedKeywords: string[];
+  suggestedAction: string;
+}
+
+export interface ExternalResearchSource {
+  provider: string;
+  urlOrPath: string;
+  title: string;
+  contentSnippet: string;
+  relevanceScore: number;
+  sourceKind: string;
+  ingestionMode: "manual_author_approved";
+  authorApproved: boolean;
+}
+
+export interface ExternalResearchIngestResult {
+  source: ExternalResearchSource;
+  chunkCount: number;
+  nodeIds: string[];
+  evidenceRefs: string[];
+  createdAtMs: number;
 }
 
 export type WriterProviderBudgetTask =

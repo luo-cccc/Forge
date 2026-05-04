@@ -69,6 +69,7 @@ const classification = {
   abort_editor_prediction: RISK.READ_ONLY,
   get_project_brain_knowledge_graph: RISK.READ_ONLY,
   compare_project_brain_source_revisions: RISK.READ_ONLY,
+  cross_reference_brain_nodes: RISK.READ_ONLY,
 
   // Credential
   set_api_key: RISK.CREDENTIAL,
@@ -109,6 +110,7 @@ const classification = {
   rename_chapter_file: RISK.DESTRUCTIVE,
   restore_file_backup: RISK.DESTRUCTIVE,
   restore_project_brain_source_revision: RISK.DESTRUCTIVE,
+  ingest_external_research: RISK.MANUSCRIPT_WRITE,
 };
 
 // Audit checks: write/destructive commands must reference audit or operation functions
@@ -214,6 +216,7 @@ const writeCommandsWithDirectWrites = [
   "rename_chapter_file",
   "restore_file_backup",
   "restore_project_brain_source_revision",
+  "ingest_external_research",
 ];
 
 for (const cmd of writeCommandsWithDirectWrites) {

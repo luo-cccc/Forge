@@ -30,10 +30,22 @@ const budgets = [
     rationale: "Main companion panel should stay below its split budget after helper extraction.",
   },
   {
-    label: "Companion panel helpers",
-    file: path.join("src", "components", "CompanionPanel.helpers.ts"),
-    maxLines: 700,
-    rationale: "Pure functions extracted from CompanionPanel — no hooks, no JSX, no side effects.",
+    label: "Companion panel proposal helpers",
+    file: path.join("src", "components", "CompanionPanel.proposal.ts"),
+    maxLines: 300,
+    rationale: "Pure proposal / operation helpers extracted from CompanionPanel — no hooks, no JSX.",
+  },
+  {
+    label: "Companion panel contract helpers",
+    file: path.join("src", "components", "CompanionPanel.contract.ts"),
+    maxLines: 200,
+    rationale: "Story contract / chapter mission draft types and factories — no hooks, no JSX.",
+  },
+  {
+    label: "Companion panel brain helpers",
+    file: path.join("src", "components", "CompanionPanel.brain.ts"),
+    maxLines: 500,
+    rationale: "Second brain display helpers — no hooks, no JSX, pure display logic.",
   },
 ];
 
@@ -79,25 +91,35 @@ function countLines(source) {
 }
 
 function checkCompanionHelpersBoundary() {
-  const relativePath = path.join("src", "components", "CompanionPanel.helpers.ts");
-  const absolutePath = path.join(repoRoot, relativePath);
-  const source = fs.readFileSync(absolutePath, "utf8");
-  const ast = ts.createSourceFile(absolutePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const boundaryFailures = [];
+  const helperFiles = [
+    path.join("src", "components", "CompanionPanel.proposal.ts"),
+    path.join("src", "components", "CompanionPanel.contract.ts"),
+    path.join("src", "components", "CompanionPanel.brain.ts"),
+  ];
 
-  walk(ast, (node) => {
-    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
-      boundaryFailures.push("contains JSX");
-      return;
+  for (const relativePath of helperFiles) {
+    const absolutePath = path.join(repoRoot, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      failures.push(`${relativePath}: missing`);
+      continue;
     }
+    const source = fs.readFileSync(absolutePath, "utf8");
+    const ast = ts.createSourceFile(absolutePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const boundaryFailures = [];
 
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "react"
-    ) {
-      boundaryFailures.push("imports React");
-    }
+    walk(ast, (node) => {
+      if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+        boundaryFailures.push("contains JSX");
+        return;
+      }
+
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text === "react"
+      ) {
+        boundaryFailures.push("imports React");
+      }
 
     if (ts.isCallExpression(node)) {
       const expression = node.expression;
@@ -131,11 +153,12 @@ function checkCompanionHelpersBoundary() {
     }
   });
 
-  const unique = [...new Set(boundaryFailures)];
-  if (unique.length > 0) {
-    failures.push(`${relativePath}: helper boundary violated (${unique.join(", ")})`);
-  } else {
-    console.log(`ok   ${relativePath}: helper boundary has no hooks, JSX, or side-effect APIs.`);
+    const unique = [...new Set(boundaryFailures)];
+    if (unique.length > 0) {
+      failures.push(`${relativePath}: helper boundary violated (${unique.join(", ")})`);
+    } else {
+      console.log(`ok   ${relativePath}: helper boundary has no hooks, JSX, or side-effect APIs.`);
+    }
   }
 }
 
