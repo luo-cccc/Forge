@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前本轮已验证：`cargo run -p agent-evals --bin run_eval --quiet` 146/146 passing，`cargo test -p agent-writer chapter_mission --lib` passing，`npm run check:audit` passing，`npx tsc -b` passing，`cargo check -p agent-writer` passing，`npm run lint` passing，`git diff --check` passing；完整 `npm run verify` passing。
+- 当前本轮已验证：`cargo run -p agent-evals --bin run_eval --quiet` 147/147 passing，新增 `writer_agent:belief_conflict_explains_sources` 覆盖 Story Contract / Chapter Mission / Canon / Promise Ledger / Project Brain 来源解释；`cargo test -p agent-writer belief_conflict -- --nocapture` passing，`cargo test -p agent-writer chapter_mission --lib` passing，`npm run check:audit` passing，`npx tsc -b` passing，`cargo check -p agent-writer` passing，`npm run lint` passing，`git diff --check` passing；完整 `npm run verify` passing。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 - P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
@@ -925,6 +925,9 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 2. Belief conflict explanation。
    - 当 Story Contract、Mission、Canon、Promise、Project Brain 互相冲突时，必须说明冲突来源和置信度。
    - 不能静默选择一个来源覆盖另一个来源。
+   - 第一阶段已完成：新增 `writer_agent::belief_conflict` 后端解释器，可从 WriterMemory 的 Story Contract / Chapter Mission / Canon / Promise Ledger 和 Project Brain chunk evidence 聚合来源标注、reference、snippet、confidence、signals，并输出 `ForbiddenReveal` 与 `FactContradiction` 两类解释。
+   - `writer_agent:belief_conflict_explains_sources` 已覆盖“合同/任务/伏笔要求延后揭示寒玉戒指来源，但 Project Brain chunk 说已揭示，同时 Canon 仍记录来源未知”的场景；eval 要求 guard conflict 同时带 Story Contract / Chapter Mission / Promise Ledger / Project Brain 证据，fact conflict 同时带 Canon / Project Brain 证据。
+   - 边界：当前只解释冲突并给 resolution hint，不自动改写正文、不自动修改 ledger、不在 UI 中仲裁哪个来源胜出；后续需要接入 planning/review surface 和作者审批流。
 3. Promise payoff planner。
    - 在章节规划阶段提示本章附近应回收、延后或避免打扰的 promise。
    - 已 resolved promise 继续保持 quiet。
@@ -938,7 +941,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 - `writer_agent:mission_state_transition_requires_evidence`（已完成）
 - `writer_agent:mission_blocked_retired_not_auto_calibrated`（已完成）
-- `writer_agent:belief_conflict_explains_sources`
+- `writer_agent:belief_conflict_explains_sources`（已完成第一阶段：后端解释 + eval）
 - `writer_agent:promise_payoff_planner_prioritizes_nearby_debts`
 - `writer_agent:goal_drift_creates_story_debt`
 - `writer_agent:generic_persona_not_used_as_foundation`

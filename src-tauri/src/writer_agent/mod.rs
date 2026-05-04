@@ -1,3 +1,4 @@
+pub mod belief_conflict;
 pub mod canon;
 pub mod context;
 pub mod context_relevance;

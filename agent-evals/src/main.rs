@@ -60,6 +60,7 @@ fn main() {
     results.push(run_chapter_mission_drifted_no_duplicate_save_gap_eval());
     results.push(run_mission_state_transition_requires_evidence_eval());
     results.push(run_mission_blocked_retired_not_auto_calibrated_eval());
+    results.push(run_belief_conflict_explains_sources_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());

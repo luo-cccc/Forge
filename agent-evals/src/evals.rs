@@ -21,6 +21,7 @@ use agent_writer_lib::writer_agent::operation::WriterOperation;
 use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind, ProposalPriority};
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 
+mod belief_conflict;
 mod canon;
 mod context;
 mod foundation;
@@ -36,6 +37,7 @@ mod task_packet;
 mod tool_policy;
 mod trajectory;
 
+pub use belief_conflict::*;
 pub use canon::*;
 pub use context::*;
 pub use foundation::*;
