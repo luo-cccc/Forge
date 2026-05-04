@@ -1788,9 +1788,25 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
         source_kind: Some("chapter".to_string()),
         chunk_index: Some(0),
     });
+    db.upsert(Chunk {
+        id: "chapter-5-1".to_string(),
+        chapter: "Chapter-5".to_string(),
+        text: "林墨把寒玉戒指和旧门钥匙放在同一张祭图上。".to_string(),
+        embedding: vec![0.0, 1.0],
+        keywords: vec!["寒玉戒指".to_string(), "祭图".to_string()],
+        topic: Some("寒玉戒指复核".to_string()),
+        source_ref: Some("chapter:Chapter-5".to_string()),
+        source_revision: Some(revision.clone()),
+        source_kind: Some("chapter".to_string()),
+        chunk_index: Some(1),
+    });
     let index = build_project_brain_knowledge_index("eval", &db, &[], &[]);
     let chunk = &db.chunks[0];
     let node = index.nodes.iter().find(|node| node.label == "Chapter-5");
+    let source_history = index
+        .source_history
+        .iter()
+        .find(|source| source.source_ref == "chapter:Chapter-5");
 
     let mut errors = Vec::new();
     if chunk.source_ref.as_deref() != Some("chapter:Chapter-5") {
@@ -1828,16 +1844,50 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
         }
         None => errors.push("knowledge index missing sourced chunk node".to_string()),
     }
+    match source_history {
+        Some(history) => {
+            if history.source_kind != "chapter"
+                || history.node_count != 2
+                || history.chunk_count != 2
+                || history.revisions.len() != 1
+            {
+                errors.push(format!(
+                    "source history aggregation mismatch: kind={} nodes={} chunks={} revisions={}",
+                    history.source_kind,
+                    history.node_count,
+                    history.chunk_count,
+                    history.revisions.len()
+                ));
+            }
+            if let Some(history_revision) = history.revisions.first() {
+                if history_revision.revision != revision
+                    || history_revision.node_count != 2
+                    || history_revision.chunk_indexes != vec![0, 1]
+                {
+                    errors.push(format!(
+                        "source revision history mismatch: revision={} nodes={} chunks={:?}",
+                        history_revision.revision,
+                        history_revision.node_count,
+                        history_revision.chunk_indexes
+                    ));
+                }
+            } else {
+                errors.push("source history missing revision entry".to_string());
+            }
+        }
+        None => errors.push("knowledge index missing source history".to_string()),
+    }
 
     eval_result(
         "writer_agent:project_brain_chunk_source_version",
         format!(
-            "source={:?} revision={:?} nodeKind={} sourceKind={}",
+            "source={:?} revision={:?} nodeKind={} sourceKind={} historySources={}",
             chunk.source_ref,
             chunk.source_revision,
             node.map(|node| node.kind.as_str()).unwrap_or("none"),
             node.and_then(|node| node.source_kind.as_deref())
-                .unwrap_or("none")
+                .unwrap_or("none"),
+            index.source_history.len()
         ),
         errors,
     )

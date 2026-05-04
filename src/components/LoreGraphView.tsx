@@ -41,10 +41,24 @@ interface KnowledgeEdge {
   relation: string;
   evidenceRef: string;
 }
+interface KnowledgeSourceRevision {
+  revision: string;
+  nodeCount: number;
+  chunkIndexes: number[];
+}
+interface KnowledgeSourceHistory {
+  sourceRef: string;
+  sourceKind: string;
+  revisions: KnowledgeSourceRevision[];
+  nodeCount: number;
+  chunkCount: number;
+  latestSummary: string;
+}
 interface KnowledgeGraphData {
   projectId: string;
   nodes: KnowledgeNode[];
   edges: KnowledgeEdge[];
+  sourceHistory?: KnowledgeSourceHistory[];
   sourceCount: number;
 }
 
@@ -338,6 +352,13 @@ export default function LoreGraphView() {
     [selectedReferences],
   );
 
+  const selectedSourceHistory = useMemo(() => {
+    if (!selectedNode?.sourceRef || graphMode !== "brain") return null;
+    return knowledgeGraph?.sourceHistory?.find(
+      (source) => source.sourceRef === selectedNode.sourceRef,
+    ) ?? null;
+  }, [graphMode, knowledgeGraph, selectedNode]);
+
   const graphSummary = `${visibleNodes.length}/${nodes.length} nodes · ${visibleEdges.length}/${edges.length} edges`;
 
   if (!graphData && graphMode === "entities" && !loadError) {
@@ -510,6 +531,32 @@ export default function LoreGraphView() {
                   <span className="text-text-secondary">#{selectedNode.chunkIndex + 1}</span>
                 </div>
               )}
+            </div>
+          )}
+          {selectedSourceHistory && (
+            <div className="space-y-1 rounded-sm border border-border-subtle bg-bg-deep p-2 text-[10px] text-text-muted">
+              <div className="flex justify-between gap-2">
+                <span>Source history</span>
+                <span className="text-text-secondary">
+                  {selectedSourceHistory.revisions.length} rev · {selectedSourceHistory.chunkCount} chunks
+                </span>
+              </div>
+              {selectedSourceHistory.latestSummary && (
+                <p className="line-clamp-2 text-text-secondary">{selectedSourceHistory.latestSummary}</p>
+              )}
+              {selectedSourceHistory.revisions.slice(0, 3).map((revision) => (
+                <div key={revision.revision} className="min-w-0 rounded-sm border border-border-subtle px-1.5 py-1">
+                  <div className="truncate text-text-secondary" title={revision.revision}>
+                    {revision.revision}
+                  </div>
+                  <div className="mt-0.5 text-[9px] text-text-muted">
+                    {revision.nodeCount} nodes
+                    {revision.chunkIndexes.length > 0
+                      ? ` · chunks ${revision.chunkIndexes.map((index) => `#${index + 1}`).join(", ")}`
+                      : ""}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           {(selectedNode.keywords?.length ?? 0) > 0 && (

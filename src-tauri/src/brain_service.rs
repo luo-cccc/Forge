@@ -41,6 +41,8 @@ pub struct ProjectBrainKnowledgeIndex {
     pub project_id: String,
     pub nodes: Vec<ProjectBrainKnowledgeNode>,
     pub edges: Vec<ProjectBrainKnowledgeEdge>,
+    #[serde(default)]
+    pub source_history: Vec<ProjectBrainSourceHistory>,
     pub source_count: usize,
 }
 
@@ -68,6 +70,25 @@ pub struct ProjectBrainKnowledgeEdge {
     pub to: String,
     pub relation: String,
     pub evidence_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainSourceHistory {
+    pub source_ref: String,
+    pub source_kind: String,
+    pub revisions: Vec<ProjectBrainSourceRevision>,
+    pub node_count: usize,
+    pub chunk_count: usize,
+    pub latest_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrainSourceRevision {
+    pub revision: String,
+    pub node_count: usize,
+    pub chunk_indexes: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -666,12 +687,86 @@ pub fn build_project_brain_knowledge_index(
     }
 
     let edges = build_knowledge_edges(&nodes);
+    let source_history = build_source_history(&nodes);
     ProjectBrainKnowledgeIndex {
         project_id: project_id.to_string(),
         source_count: lorebook.len() + outline.len() + brain.chunks.len(),
         nodes,
         edges,
+        source_history,
     }
+}
+
+fn build_source_history(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrainSourceHistory> {
+    #[derive(Default)]
+    struct SourceAccumulator {
+        source_kind: Option<String>,
+        revisions: BTreeMap<String, ProjectBrainSourceRevision>,
+        node_count: usize,
+        chunk_count: usize,
+        latest_summary: String,
+    }
+
+    let mut by_source = BTreeMap::<String, SourceAccumulator>::new();
+    for node in nodes {
+        let source_ref = node.source_ref.trim();
+        if source_ref.is_empty() {
+            continue;
+        }
+        let entry = by_source.entry(source_ref.to_string()).or_default();
+        entry.node_count += 1;
+        if node.kind == "chunk" {
+            entry.chunk_count += 1;
+        }
+        if entry.source_kind.is_none() {
+            entry.source_kind = node
+                .source_kind
+                .clone()
+                .filter(|kind| !kind.trim().is_empty())
+                .or_else(|| Some(node.kind.clone()));
+        }
+        if !node.summary.trim().is_empty() {
+            entry.latest_summary = node.summary.clone();
+        }
+        if let Some(revision) = node
+            .source_revision
+            .as_deref()
+            .map(str::trim)
+            .filter(|revision| !revision.is_empty())
+        {
+            let revision_entry = entry
+                .revisions
+                .entry(revision.to_string())
+                .or_insert_with(|| ProjectBrainSourceRevision {
+                    revision: revision.to_string(),
+                    node_count: 0,
+                    chunk_indexes: Vec::new(),
+                });
+            revision_entry.node_count += 1;
+            if let Some(chunk_index) = node.chunk_index {
+                revision_entry.chunk_indexes.push(chunk_index);
+            }
+        }
+    }
+
+    by_source
+        .into_iter()
+        .map(|(source_ref, entry)| {
+            let mut revisions = entry.revisions.into_values().collect::<Vec<_>>();
+            for revision in &mut revisions {
+                revision.chunk_indexes.sort_unstable();
+                revision.chunk_indexes.dedup();
+            }
+            ProjectBrainSourceHistory {
+                source_ref,
+                source_kind: entry.source_kind.unwrap_or_else(|| "unknown".to_string()),
+                revisions,
+                node_count: entry.node_count,
+                chunk_count: entry.chunk_count,
+                latest_summary: snippet_text(&entry.latest_summary, 220),
+            }
+        })
+        .collect()
 }
 
 fn build_knowledge_edges(nodes: &[ProjectBrainKnowledgeNode]) -> Vec<ProjectBrainKnowledgeEdge> {
