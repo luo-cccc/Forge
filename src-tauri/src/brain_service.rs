@@ -372,7 +372,7 @@ pub fn cross_reference_project_brain_nodes(
 
     let confidence = if shared_keywords.len() >= 3 {
         0.85
-    } else if shared_keywords.len() >= 1 {
+    } else if !shared_keywords.is_empty() {
         0.55
     } else {
         0.25

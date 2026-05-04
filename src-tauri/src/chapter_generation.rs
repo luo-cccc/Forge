@@ -436,6 +436,7 @@ pub fn truncate_text_report(text: &str, max_chars: usize) -> (String, usize, boo
     (truncated, included_chars, true)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn resolve_target_from_outline(
     outline: &[storage::OutlineNode],
     target_chapter_title: Option<&str>,

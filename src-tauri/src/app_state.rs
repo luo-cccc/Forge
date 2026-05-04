@@ -181,5 +181,5 @@ fn seed_story_model_if_empty(
 
 pub(crate) fn startup_error(message: String) -> Box<dyn std::error::Error> {
     tracing::error!("{}", message);
-    std::io::Error::new(std::io::ErrorKind::Other, message).into()
+    std::io::Error::other(message).into()
 }
