@@ -110,6 +110,12 @@ Run the P2 companion-surface guard:
 npm run check:p2
 ```
 
+Run the P2 write-mode render guard:
+
+```powershell
+npm run check:p2-render
+```
+
 Clean generated eval reports:
 
 ```powershell
@@ -143,7 +149,8 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 - `cargo test -p agent-writer`: 190 tests passing
 - `cargo run -p agent-evals`: 159/159 evals passing
 - `npm run check:p2`: 17/17 checks passing
-- `npm run check:audit`: 52 commands, 0 issues
+- `npm run check:p2-render`: write-mode DOM guard passing
+- `npm run check:audit`: 53 commands, 0 issues
 - `npm run check:architecture`: 5/5 files within budget
 - `npm run lint`: passing
 - `npm run build`: passing

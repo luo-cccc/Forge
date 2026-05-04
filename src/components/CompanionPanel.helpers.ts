@@ -131,6 +131,7 @@ export function operationApproval(
   source: string,
   reason: string,
   proposalId?: string,
+  createdAt = 0,
 ): OperationApproval {
   return {
     source,
@@ -138,7 +139,7 @@ export function operationApproval(
     reason,
     proposalId,
     surfacedToUser: true,
-    createdAt: Date.now(),
+    createdAt,
   };
 }
 

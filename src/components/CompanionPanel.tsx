@@ -241,6 +241,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           "companion_proposal",
           `Author applied proposal: ${proposal.kind}`,
           proposal.id,
+          nowMs,
         ),
       });
 
@@ -263,7 +264,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, nowMs, recordFeedback]);
 
   const handleApplyQueueEntry = useCallback(async (entry: StoryReviewQueueEntry) => {
     setOperationError(null);
@@ -281,6 +282,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           "story_review_queue",
           `Author applied review queue item: ${entry.category}`,
           entry.proposalId,
+          nowMs,
         ),
       });
 
@@ -303,7 +305,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, nowMs, recordFeedback]);
 
   const handleApplyQueueOperation = useCallback(async (
     entry: StoryReviewQueueEntry,
@@ -315,7 +317,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
-        approval: operationApproval("story_review_queue", feedbackReason, entry.proposalId),
+        approval: operationApproval("story_review_queue", feedbackReason, entry.proposalId, nowMs),
       });
       if (!result.success) {
         setOperationError(result.error?.message ?? "Operation was rejected by the kernel.");
@@ -332,7 +334,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [applyApprovedOperation, currentChapterRevision, recordFeedback]);
+  }, [applyApprovedOperation, currentChapterRevision, nowMs, recordFeedback]);
 
   const handlePromiseLedgerOperation = useCallback(async (operation: WriterOperation) => {
     setOperationError(null);
@@ -343,6 +345,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         approval: operationApproval(
           "promise_ledger",
           `Author updated promise ledger: ${operation.kind}`,
+          undefined,
+          nowMs,
         ),
       });
       if (!result.success) {
@@ -353,7 +357,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [currentChapterRevision, refreshStatus]);
+  }, [currentChapterRevision, nowMs, refreshStatus]);
 
   const handleApplyDebtOperation = useCallback(async (
     entry: StoryDebtEntry,
@@ -365,7 +369,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       const result = await invoke<OperationResult>(Commands.approveWriterOperation, {
         operation,
         currentRevision: currentChapterRevision ?? "",
-        approval: operationApproval("story_debt", feedbackReason, entry.relatedReviewIds[0]),
+        approval: operationApproval("story_debt", feedbackReason, entry.relatedReviewIds[0], nowMs),
       });
       if (!result.success) {
         setOperationError(result.error?.message ?? "Could not apply this story debt action.");
@@ -387,7 +391,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch (e) {
       setOperationError(String(e));
     }
-  }, [applyApprovedOperation, currentChapterRevision, recordFeedback, refreshStatus]);
+  }, [applyApprovedOperation, currentChapterRevision, nowMs, recordFeedback, refreshStatus]);
 
 
   const handleIgnoreDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
@@ -452,6 +456,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           approval: operationApproval(
             "foundation_editor",
             `Author saved foundation memory: ${operation.kind}`,
+            undefined,
+            nowMs,
           ),
         });
         if (!result.success) {
@@ -471,6 +477,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     currentChapterRevision,
     ledger?.storyContract?.projectId,
     missionDraft,
+    nowMs,
     refreshStatus,
     status?.projectId,
   ]);

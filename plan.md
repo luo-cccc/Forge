@@ -26,7 +26,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 关键保存风险已处理：dirty state、chapter switching、autosave、inline operation、accepted feedback、batch generation dirty protection。
 - `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
-- Command boundary audit 已覆盖 52 个 Tauri commands，并进入 `npm run verify`。
+- Command boundary audit 已覆盖 53 个 Tauri commands，并进入 `npm run verify`。
 - Tauri command handlers 已全部移入 `src-tauri/src/commands/*`；`src-tauri/src/lib.rs` 当前不再包含 `#[tauri::command]`。
 - AppState、启动期 Hermes/Writer memory DB 打开、legacy DB migration、kernel seed 逻辑已抽入 `src-tauri/src/app_state.rs`。
 - Semantic lint payload/event 和设定/诊断 lint 逻辑已抽入 `src-tauri/src/semantic_lint.rs`。
@@ -345,7 +345,7 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 
 - 默认写作界面没有聊天框主导视觉。
 - Agent 建议不超过固定数量，超出进入队列。
-- 新增 P2 UI check：Companion 默认区域不会展示 raw trace / raw chain / raw tool log。
+- 新增 P2 UI check：`npm run check:p2` 通过 AST 约束验证 Companion 默认区域不会展示 raw trace / raw chain / raw tool log；`npm run check:p2-render` 用 React server render 注入内部 trace fixture，验证 write mode 实际 DOM 不泄漏 task packet、operation lifecycle、run event 或 Inspector-only 文案。（已完成）
 
 ## 7. P1：作者价值评测
 
@@ -537,7 +537,7 @@ Verification：
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 52 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 只保留模块 wiring、Tauri setup 和 command registration，并纳入 `npm run check:architecture` 的 root glue 预算。
+当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 53 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 只保留模块 wiring、Tauri setup 和 command registration，并纳入 `npm run check:architecture` 的 root glue 预算。
 
 建议模块：
 
@@ -583,6 +583,7 @@ src-tauri/src/manual_agent.rs
 - Root tests 有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
 - `npm run check:architecture` 通过，防止 root glue 重新膨胀。
+- `npm run check:architecture` 同时检查 `CompanionPanel.helpers.ts` 不引入 React、JSX、hook-like 调用或副作用 API，避免 helper 文件变成第二个组件/副作用聚合点。（已完成）
 
 ### P2.5 拆分 `writer_agent/kernel.rs`
 

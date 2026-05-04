@@ -5,6 +5,7 @@ const steps = [
   ["npm", ["run", "lint"]],
   ["npm", ["run", "build"]],
   ["npm", ["run", "check:p2"]],
+  ["npm", ["run", "check:p2-render"]],
   ["npm", ["run", "check:audit"]],
   ["npm", ["run", "check:architecture"]],
   ["npm", ["run", "check:baseline"]],
