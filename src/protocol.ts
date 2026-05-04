@@ -33,6 +33,7 @@ export const Commands = {
   getEffectiveAgentToolInventory: "get_effective_agent_tool_inventory",
   getChapterRevision: "get_chapter_revision",
   compareProjectBrainSourceRevisions: "compare_project_brain_source_revisions",
+  restoreProjectBrainSourceRevision: "restore_project_brain_source_revision",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
   getProjectGraphData: "get_project_graph_data",

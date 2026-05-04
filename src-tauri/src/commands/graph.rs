@@ -50,6 +50,28 @@ pub fn compare_project_brain_source_revisions(
 }
 
 #[tauri::command]
+pub fn restore_project_brain_source_revision(
+    app: tauri::AppHandle,
+    source_ref: String,
+    revision: String,
+) -> Result<crate::brain_service::ProjectBrainSourceRevisionRestore, String> {
+    let restored =
+        crate::brain_service::restore_project_brain_source_revision(&app, &source_ref, &revision)?;
+    crate::audit_project_file_write(
+        &app,
+        "project_brain",
+        "Project Brain source revision restored",
+        "restored_project_brain_source_revision",
+        &format!(
+            "Author restored Project Brain source '{}' to revision '{}'.",
+            restored.source_ref, restored.restored_revision
+        ),
+        &restored.evidence_refs,
+    );
+    Ok(restored)
+}
+
+#[tauri::command]
 pub fn get_project_graph_data(app: tauri::AppHandle) -> Result<ProjectGraphData, String> {
     let mut entities = Vec::new();
     let mut relationships = Vec::new();

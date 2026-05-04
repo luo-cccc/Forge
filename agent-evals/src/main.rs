@@ -58,6 +58,8 @@ fn main() {
     results.push(run_chapter_mission_negated_guard_eval());
     results.push(run_chapter_mission_save_gap_eval());
     results.push(run_chapter_mission_drifted_no_duplicate_save_gap_eval());
+    results.push(run_mission_state_transition_requires_evidence_eval());
+    results.push(run_mission_blocked_retired_not_auto_calibrated_eval());
     results.push(run_next_beat_context_eval());
     results.push(run_timeline_contradiction_eval());
     results.push(run_promise_opportunity_eval());
@@ -121,6 +123,7 @@ fn main() {
     results.push(run_project_brain_knowledge_index_graph_eval());
     results.push(run_project_brain_knowledge_index_path_guard_eval());
     results.push(run_project_brain_chunk_source_version_eval());
+    results.push(run_project_brain_source_revision_restore_eval());
     results.push(run_project_brain_embedding_provider_limits_eval());
     results.push(run_project_brain_embedding_provider_registry_eval());
     results.push(run_research_subtask_uses_isolated_workspace_eval());

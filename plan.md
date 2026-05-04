@@ -36,9 +36,9 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前已验证：`cargo run -p agent-evals` 143/143 passing；完整 `npm run verify` passing。
+- 当前本轮已验证：`cargo run -p agent-evals --bin run_eval --quiet` 146/146 passing，`cargo test -p agent-writer chapter_mission --lib` passing，`npm run check:audit` passing，`npx tsc -b` passing，`cargo check -p agent-writer` passing，`npm run lint` passing，`git diff --check` passing；完整 `npm run verify` passing。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
-- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare 和 Graph 页 source history/compare 展示，Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
+- P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
 ### 当前剩余核心矛盾
 
@@ -247,7 +247,8 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
   - completed
   - drifted
   - needs_review
-  - unresolved
+  - active
+  - blocked / retired 由作者显式设置，不会被保存观察自动覆盖
 - 生成或重写时必须检查：
   - must include
   - must not reveal
@@ -792,8 +793,10 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - Graph 页已新增 Brain 模式，可查看 Project Brain knowledge nodes / shared-keyword edges / source refs / keywords，并保留 Ask Brain 入口。
    - Graph 页已新增第一层节点类型过滤、来源/关键词/摘要/关系/revision 搜索、选中节点邻接高亮、source kind / revision / chunk index 详情、source history 摘要、read-only source revision compare、reference / back-reference 列表和一键跳转到相邻节点。
    - Project Brain vector chunks 已新增 `source_ref`、`source_revision`、`source_kind`、`chunk_index`、`archived`，章节 embedding 会记录来源章节和内容 revision，并把旧 revision 标为 archived；默认 Project Brain 检索只看 active chunk，source compare 才读取 archived history；knowledge node 保留 `kind=chunk`，并附带 source metadata；knowledge index 会按 source_ref 聚合 revision history、active 标记、node/chunk counts 和 chunk indexes。
-   - 已新增 eval：`writer_agent:project_brain_knowledge_index_graph`、`writer_agent:project_brain_knowledge_index_path_guard`、`writer_agent:project_brain_chunk_source_version`。
-   - 剩余：更深的 cross reference / back reference 操作、更多真实 Story Bible / 章节结果来源、跨来源冲突/重复关系校准，以及 source/version 回滚操作。
+   - Source/version 回滚第一阶段已完成：新增 `restore_project_brain_source_revision`，Graph 页可从 archived revision 执行恢复；后端只把同一 `source_ref` 下目标 revision 的 chunk 设为 active，并把其他 revision 设为 archived，随后重建 knowledge index 和记录 `project_brain` 写审计。
+   - 该回滚不是章节正文恢复，不会改写 chapter markdown、outline 或 lorebook；作者若要恢复正文，仍需要走现有 file backup/chapter restore 路径。
+   - 已新增 eval：`writer_agent:project_brain_knowledge_index_graph`、`writer_agent:project_brain_knowledge_index_path_guard`、`writer_agent:project_brain_chunk_source_version`、`writer_agent:project_brain_source_revision_restore`。
+   - 剩余：更深的 cross reference / back reference 操作、更多真实 Story Bible / 章节结果来源、跨来源冲突/重复关系校准，以及把 source revision 恢复和真实正文/Story Bible 恢复流程做成一致的作者确认体验。
 4. Project Brain embedding provider 抽象。（第一阶段已完成）
    - 已新增 `ProjectBrainEmbeddingProviderRegistry` / provider spec / model spec，OpenAI、OpenRouter 和 local OpenAI-compatible provider 走本地 registry 解析。
    - 已新增 `ProjectBrainEmbeddingProviderProfile`，明确 provider id、model、维度、input limit、batch limit、retry limit、provider registry status 和 model registry status。
@@ -802,7 +805,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - `embed_chapter` 和 Project Brain query embedding 已走统一 wrapper：输入会按 profile 截断，embedding 维度会校验，失败会按 retry policy 重试。
    - 已新增 `ProjectBrainEmbeddingBatchReport` / `ProjectBrainEmbeddingBatchStatus`，记录 requested、embedded、skipped、truncated、errors 和 complete / partial / empty 状态，避免批量入库静默误报。
    - 已新增 eval：`writer_agent:project_brain_embedding_provider_limits`、`writer_agent:project_brain_embedding_provider_registry`。
-   - 剩余：provider-specific embedding 质量校准、source/version 回滚操作，以及真实项目 embedding 召回质量验证。
+   - 剩余：provider-specific embedding 质量校准，以及真实项目 embedding 召回质量验证。
 5. 记忆写入继续保持 reviewable。
    - 不允许后台自动任务绕过 WriterOperation。
    - 不允许 LLM 直接写永久 Canon / Promise / Style。
@@ -816,6 +819,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:project_brain_knowledge_index_graph`（已完成）
 - `writer_agent:project_brain_knowledge_index_path_guard`（已完成）
 - `writer_agent:project_brain_chunk_source_version`（已完成）
+- `writer_agent:project_brain_source_revision_restore`（已完成）
 - `writer_agent:project_brain_embedding_provider_limits`（已完成）
 - `writer_agent:project_brain_embedding_provider_registry`（已完成）
 - `writer_agent:memory_auto_write_cannot_bypass_review`（已完成）
@@ -913,8 +917,11 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 任务：
 
 1. Chapter Mission 状态机升级。
-   - draft、active、completed、drifted、blocked、needs_review、retired。
-   - 保存章节后根据 Result Feedback 自动建议状态迁移，但需要可审查。
+   - 第一阶段已完成：状态机已支持 draft、active、completed、drifted、blocked、needs_review、retired；旧 `in_progress` 会兼容归一为 `active`。
+   - 保存章节后会基于 Result Feedback 将 draft/active/needs_review 迁移为 completed、active、drifted 或 needs_review，并把 `source_ref` 指向对应 `chapter_save` 结果；迁移会写入 creative decision 作为证据记录。
+   - blocked / retired 是作者显式状态，不会被保存观察自动覆盖，也不会继续生成普通 mission save-gap proposal。
+   - Companion Chapter Mission 下拉已暴露 draft / active / review / done / drift / blocked / retired。
+   - 剩余：把自动迁移改成可审查 suggestion/approval UI，而不是当前后端直接校准；补充 blocked 的具体原因字段和 retired 的历史解释。
 2. Belief conflict explanation。
    - 当 Story Contract、Mission、Canon、Promise、Project Brain 互相冲突时，必须说明冲突来源和置信度。
    - 不能静默选择一个来源覆盖另一个来源。
@@ -929,7 +936,8 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 验收：
 
-- `writer_agent:mission_state_transition_requires_evidence`
+- `writer_agent:mission_state_transition_requires_evidence`（已完成）
+- `writer_agent:mission_blocked_retired_not_auto_calibrated`（已完成）
 - `writer_agent:belief_conflict_explains_sources`
 - `writer_agent:promise_payoff_planner_prioritizes_nearby_debts`
 - `writer_agent:goal_drift_creates_story_debt`
@@ -1029,8 +1037,8 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 4. Memory correction / reinforcement。（第一阶段已完成）
    - 已让作者对记忆候选的采纳/拒绝改变后续同 slot 候选行为；纠错优先于强化。
 5. Project Brain knowledge index / graph。（第一阶段已完成）
-   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；第一层 graph filtering、search、source detail、source history、read-only source revision compare 和 reference/back-reference navigation 已落地；embedding provider registry / profile / input limit / batch status / retry policy / compatibility fallback 第一阶段已落地；chunk source_ref / source_revision / source_kind / chunk_index / archived metadata 已落地。
-   - 剩余：provider-specific embedding 质量校准、source/version 回滚操作，以及真实 Story Bible / 章节数据召回质量验证。
+   - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；第一层 graph filtering、search、source detail、source history、read-only source revision compare、source revision restore 和 reference/back-reference navigation 已落地；embedding provider registry / profile / input limit / batch status / retry policy / compatibility fallback 第一阶段已落地；chunk source_ref / source_revision / source_kind / chunk_index / archived metadata 已落地。
+   - 剩余：provider-specific embedding 质量校准、真实 Story Bible / 章节数据召回质量验证，以及把索引 revision 恢复和正文/Story Bible 恢复整合到同一可审查恢复体验。
 6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；subtask started/completed run event、trajectory export 和 Inspect Subtasks 筛选已落地；真实 run loop 自动调度和外部检索工具仍未完成。
 7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
@@ -1051,7 +1059,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 关键章节生成失败不是字符串，而是可分类的证据包；更多工具/反馈失败路径仍需接入。
 - RunEventStore 可以回放一次 writer run。
 - 作者对记忆候选的纠错会压制后续同 slot 抽取，采纳会强化同 slot 候选；记忆候选进入 review queue 时会写 `writer.memory_candidate_created` run event，但不会绕过作者确认直接写 ledger。
-- Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；第一层节点类型过滤、来源/关键词/摘要/关系/revision 搜索、source detail、source history、read-only source revision compare、邻接高亮和 reference/back-reference 导航已完成。source/version 回滚、更深的跨引用操作、真实 Story Bible/章节结果来源校准仍未完成。
+- Project Brain knowledge index / graph 有后端 schema、构建函数、路径守卫和 Graph 页 Brain 模式；第一层节点类型过滤、来源/关键词/摘要/关系/revision 搜索、source detail、source history、read-only source revision compare、source revision restore、邻接高亮和 reference/back-reference 导航已完成。当前 source revision restore 只恢复 Project Brain 索引 active/archived 状态，不回写正文；更深的跨引用操作、真实 Story Bible/章节结果来源校准和统一正文恢复体验仍未完成。
 - Research / Diagnostic 子任务有隔离 artifact workspace、tool policy、evidence-only 结果边界、started/completed run event、Inspector subtask timeline 和 Research tool/provider 失败证据包；真实外部公开资料 provider/tool 调度仍未完成。
 - Inspector timeline 有后端视图和前端 Inspect 只读调试面板，默认 Companion summary 已证明不暴露内部 trace；Inspect 已有 failure 恢复排查跳转、save_completed 专用筛选和 save-to-feedback latency 摘要；trajectory export 有 redaction warning、local-only 标记和 Trace Viewer compatible JSONL 导出。
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成、Project Brain chat answer、manual request AgentLoop 每轮 provider call 都已有前置门禁、Explore UI approval surface 和批准凭证覆盖校验；ExternalResearch 已有 subtask provider budget report / failure bundle helper 和 run event 覆盖。Project Brain / manual request 预算失败会展示审批卡并用前端批准凭证重试。尚未强制接入所有真实 provider call，且真实外部检索工具调用和 external research 审批 UI 仍未完成。
@@ -1177,13 +1185,13 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 2. 增加 Planning / Review 只读模式。（第一阶段已完成：专用 task/context/prompt/tool policy/eval）
 3. 增加 WriterTaskReceipt 和 failure evidence bundle。（第一阶段已完成：章节生成 receipt、保存前校验、writer.error run event、trajectory export）
 4. 增加 memory correction / reinforcement。（第一阶段已完成：reviewed memory candidates 的 correction/reinforcement signal）
-5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / chunk source-version metadata / source history / read-only revision compare / eval / Graph 页 Brain 模式）
+5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / chunk source-version metadata / source history / read-only revision compare / source revision restore / eval / Graph 页 Brain 模式）
 6. 增加 isolated research / diagnostic subtask workspace。（第一阶段已完成：artifact workspace / tool policy / evidence-only result / eval）
 7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / save_completed filter / save-to-feedback latency / proposal context budget drilldown / redaction warning / local-only export marker / Trace Viewer compatible JSONL）
 8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
 9. 增加 post-write diagnostics。（保存观察 + accepted operation + Audit UI + save_completed link 第一阶段已完成：report / run event / trace snapshot / trajectory export / eval / UI summary / save_completed inspector filter）
 10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
-11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、memory candidate run event、memory auto-write review boundary、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard/chunk source-version metadata/source history/revision compare、Project Brain embedding provider profile/input limit/batch status/provider registry fallback、isolated research/diagnostic subtask workspace、research subtask started/completed run event、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、research subtask provider budget、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、product metrics multi-session trend、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；后续重点转向更多真实 run-loop/UI 接入和连续写作 fixture）
+11. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、failure evidence、memory correction/reinforcement、memory candidate run event、memory auto-write review boundary、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard/chunk source-version metadata/source history/revision compare/source revision restore、Project Brain embedding provider profile/input limit/batch status/provider registry fallback、isolated research/diagnostic subtask workspace、research subtask started/completed run event、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、research subtask provider budget、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、product metrics multi-session trend、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；后续重点转向更多真实 run-loop/UI 接入和连续写作 fixture）
 
 ## 14. 完成定义
 

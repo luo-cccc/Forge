@@ -5,7 +5,8 @@ use agent_writer_lib::brain_service::{
     project_brain_embedding_batch_status, project_brain_embedding_profile_from_config,
     project_brain_embedding_provider_registry, project_brain_source_revision,
     rerank_project_brain_results_with_focus, resolve_project_brain_embedding_profile,
-    safe_knowledge_index_file_path, search_project_brain_results_with_focus, trim_embedding_input,
+    restore_project_brain_source_revision_in_db, safe_knowledge_index_file_path,
+    search_project_brain_results_with_focus, trim_embedding_input,
     ProjectBrainEmbeddingBatchStatus, ProjectBrainEmbeddingRegistryStatus, ProjectBrainFocus,
 };
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
@@ -1950,6 +1951,128 @@ pub fn run_project_brain_chunk_source_version_eval() -> EvalResult {
             node.and_then(|node| node.source_kind.as_deref())
                 .unwrap_or("none"),
             index.source_history.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_project_brain_source_revision_restore_eval() -> EvalResult {
+    let active_revision = project_brain_source_revision("新版：寒玉戒指已经和旧门钥匙合流。");
+    let archived_revision = project_brain_source_revision("旧版：寒玉戒指仍留在霜铃塔。");
+    let other_revision = project_brain_source_revision("旁支：潮汐祭账继续独立推进。");
+    let mut db = VectorDB::new();
+    db.upsert(Chunk {
+        id: "chapter-5-old-0".to_string(),
+        chapter: "Chapter-5".to_string(),
+        text: "旧版中寒玉戒指仍留在霜铃塔，没有和旧门钥匙合流。".to_string(),
+        embedding: vec![0.2, 0.8],
+        keywords: vec!["霜铃塔".to_string(), "寒玉戒指".to_string()],
+        topic: Some("旧版戒指位置".to_string()),
+        source_ref: Some("chapter:Chapter-5".to_string()),
+        source_revision: Some(archived_revision.clone()),
+        source_kind: Some("chapter".to_string()),
+        chunk_index: Some(0),
+        archived: true,
+    });
+    db.upsert(Chunk {
+        id: "chapter-5-new-0".to_string(),
+        chapter: "Chapter-5".to_string(),
+        text: "新版中寒玉戒指已经和旧门钥匙合流。".to_string(),
+        embedding: vec![0.9, 0.1],
+        keywords: vec!["旧门钥匙".to_string(), "寒玉戒指".to_string()],
+        topic: Some("新版戒指合流".to_string()),
+        source_ref: Some("chapter:Chapter-5".to_string()),
+        source_revision: Some(active_revision.clone()),
+        source_kind: Some("chapter".to_string()),
+        chunk_index: Some(0),
+        archived: false,
+    });
+    db.upsert(Chunk {
+        id: "chapter-6-0".to_string(),
+        chapter: "Chapter-6".to_string(),
+        text: "潮汐祭账继续独立推进，不属于 Chapter-5 的回滚范围。".to_string(),
+        embedding: vec![0.1, 0.9],
+        keywords: vec!["潮汐祭账".to_string()],
+        topic: Some("旁支来源".to_string()),
+        source_ref: Some("chapter:Chapter-6".to_string()),
+        source_revision: Some(other_revision.clone()),
+        source_kind: Some("chapter".to_string()),
+        chunk_index: Some(0),
+        archived: false,
+    });
+
+    let restore = restore_project_brain_source_revision_in_db(
+        "chapter:Chapter-5",
+        &archived_revision,
+        &mut db,
+    );
+    let compare = compare_project_brain_source_revisions_from_db("chapter:Chapter-5", &db);
+
+    let mut errors = Vec::new();
+    match restore {
+        Ok(report) => {
+            if report.restored_revision != archived_revision
+                || report.previous_active_revisions != vec![active_revision.clone()]
+                || report.changed_chunk_count != 2
+                || report.active_chunk_count != 1
+                || report.archived_chunk_count != 1
+            {
+                errors.push(format!(
+                    "restore report mismatch: restored={} previous={:?} changed={} active={} archived={}",
+                    report.restored_revision,
+                    report.previous_active_revisions,
+                    report.changed_chunk_count,
+                    report.active_chunk_count,
+                    report.archived_chunk_count
+                ));
+            }
+        }
+        Err(error) => errors.push(format!("restore failed: {}", error)),
+    }
+
+    let restored_chunk = db.chunks.iter().find(|chunk| chunk.id == "chapter-5-old-0");
+    if restored_chunk.map(|chunk| chunk.archived) != Some(false) {
+        errors.push("requested revision chunk was not activated".to_string());
+    }
+    let previous_chunk = db.chunks.iter().find(|chunk| chunk.id == "chapter-5-new-0");
+    if previous_chunk.map(|chunk| chunk.archived) != Some(true) {
+        errors.push("previous active revision was not archived".to_string());
+    }
+    let other_chunk = db.chunks.iter().find(|chunk| chunk.id == "chapter-6-0");
+    if other_chunk.map(|chunk| chunk.archived) != Some(false)
+        || other_chunk.and_then(|chunk| chunk.source_revision.as_deref())
+            != Some(other_revision.as_str())
+    {
+        errors.push("restore changed a different source_ref".to_string());
+    }
+    if compare.active_revision.as_deref() != Some(archived_revision.as_str())
+        || !compare
+            .removed_keywords
+            .iter()
+            .any(|keyword| keyword == "旧门钥匙")
+    {
+        errors.push(format!(
+            "source compare did not reflect restored revision: active={:?} removed={:?}",
+            compare.active_revision, compare.removed_keywords
+        ));
+    }
+    if restore_project_brain_source_revision_in_db("chapter:Chapter-5", "missing-rev", &mut db)
+        .is_ok()
+    {
+        errors.push("missing revision restore was accepted".to_string());
+    }
+    if restore_project_brain_source_revision_in_db("chapter:Missing", &archived_revision, &mut db)
+        .is_ok()
+    {
+        errors.push("missing source restore was accepted".to_string());
+    }
+
+    eval_result(
+        "writer_agent:project_brain_source_revision_restore",
+        format!(
+            "active={:?} chunks={}",
+            compare.active_revision,
+            db.chunks.len()
         ),
         errors,
     )

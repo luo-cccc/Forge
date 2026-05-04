@@ -2521,6 +2521,7 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
 }
 
 fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterMissionSummary> {
+    let status: String = row.get(7)?;
     Ok(ChapterMissionSummary {
         id: row.get(0)?,
         project_id: row.get(1)?,
@@ -2529,7 +2530,7 @@ fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chapter
         must_include: row.get(4)?,
         must_not: row.get(5)?,
         expected_ending: row.get(6)?,
-        status: row.get(7)?,
+        status: crate::writer_agent::kernel_helpers::normalize_chapter_mission_status(&status),
         source_ref: row.get(8)?,
         updated_at: row.get(9)?,
     })

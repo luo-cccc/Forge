@@ -1365,8 +1365,52 @@ fn chapter_mission_operation_updates_ledger_snapshot() {
             .active_chapter_mission
             .unwrap()
             .status,
-        "in_progress"
+        "active"
     );
+}
+
+#[test]
+fn chapter_mission_status_machine_accepts_new_statuses_and_legacy_alias() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("novel-a", memory);
+    kernel.active_chapter = Some("第一章".to_string());
+
+    for (raw, normalized) in [
+        ("in_progress", "active"),
+        ("active", "active"),
+        ("draft", "draft"),
+        ("blocked", "blocked"),
+        ("retired", "retired"),
+        ("needs_review", "needs_review"),
+    ] {
+        let result = kernel
+            .approve_editor_operation_with_approval(
+                WriterOperation::ChapterMissionUpsert {
+                    mission: crate::writer_agent::operation::ChapterMissionOp {
+                        project_id: "novel-a".to_string(),
+                        chapter_title: "第一章".to_string(),
+                        mission: "林墨发现玉佩线索。".to_string(),
+                        must_include: "推进玉佩线索".to_string(),
+                        must_not: "不要提前揭开真相".to_string(),
+                        expected_ending: "以新的疑问收束。".to_string(),
+                        status: raw.to_string(),
+                        source_ref: "test".to_string(),
+                    },
+                },
+                "",
+                Some(&test_approval("mission_status_machine")),
+            )
+            .unwrap();
+        assert!(result.success, "{raw} should be accepted");
+        assert_eq!(
+            kernel
+                .ledger_snapshot()
+                .active_chapter_mission
+                .unwrap()
+                .status,
+            normalized
+        );
+    }
 }
 
 #[test]

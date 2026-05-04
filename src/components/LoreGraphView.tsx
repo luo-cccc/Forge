@@ -84,6 +84,17 @@ interface KnowledgeSourceCompare {
   removedSummary: string[];
   evidenceRefs: string[];
 }
+interface KnowledgeSourceRevisionRestore {
+  sourceRef: string;
+  sourceKind: string;
+  restoredRevision: string;
+  previousActiveRevisions: string[];
+  changedChunkCount: number;
+  activeChunkCount: number;
+  archivedChunkCount: number;
+  totalSourceChunkCount: number;
+  evidenceRefs: string[];
+}
 
 interface Node2D {
   id: string;
@@ -192,6 +203,8 @@ export default function LoreGraphView() {
   const [sourceCompare, setSourceCompare] = useState<KnowledgeSourceCompare | null>(null);
   const [sourceCompareError, setSourceCompareError] = useState<string | null>(null);
   const [sourceCompareLoading, setSourceCompareLoading] = useState(false);
+  const [sourceRestoreLoading, setSourceRestoreLoading] = useState<string | null>(null);
+  const [sourceRestoreResult, setSourceRestoreResult] = useState<KnowledgeSourceRevisionRestore | null>(null);
 
   const loadGraph = useCallback(async (mode: GraphMode) => {
     const w = 700;
@@ -281,6 +294,8 @@ export default function LoreGraphView() {
   const resetSourceCompare = useCallback(() => {
     setSourceCompare(null);
     setSourceCompareError(null);
+    setSourceRestoreLoading(null);
+    setSourceRestoreResult(null);
   }, []);
 
   const handleNodeClick = useCallback((node: Node2D) => {
@@ -397,6 +412,7 @@ export default function LoreGraphView() {
     if (!selectedNode?.sourceRef || graphMode !== "brain") return;
     setSourceCompareLoading(true);
     setSourceCompareError(null);
+    setSourceRestoreResult(null);
     try {
       const result = await invoke<KnowledgeSourceCompare>(
         Commands.compareProjectBrainSourceRevisions,
@@ -408,6 +424,41 @@ export default function LoreGraphView() {
       setSourceCompareError(String(error));
     } finally {
       setSourceCompareLoading(false);
+    }
+  };
+
+  const handleRestoreSourceRevision = async (revision: string) => {
+    if (!selectedNode?.sourceRef || graphMode !== "brain") return;
+    setSourceRestoreLoading(revision);
+    setSourceCompareError(null);
+    try {
+      const result = await invoke<KnowledgeSourceRevisionRestore>(
+        Commands.restoreProjectBrainSourceRevision,
+        { sourceRef: selectedNode.sourceRef, revision },
+      );
+      setSourceRestoreResult(result);
+      await loadGraph("brain");
+      const compare = await invoke<KnowledgeSourceCompare>(
+        Commands.compareProjectBrainSourceRevisions,
+        { sourceRef: result.sourceRef },
+      );
+      setSourceCompare(compare);
+      const restored = compare.revisions.find((item) => item.revision === result.restoredRevision);
+      if (restored) {
+        setSelectedNode((current) => current
+          ? {
+            ...current,
+            sourceRevision: restored.revision,
+            archived: !restored.active,
+            description: restored.summary || current.description,
+            keywords: restored.keywords,
+          }
+          : current);
+      }
+    } catch (error) {
+      setSourceCompareError(String(error));
+    } finally {
+      setSourceRestoreLoading(null);
     }
   };
 
@@ -631,9 +682,15 @@ export default function LoreGraphView() {
                   {sourceCompareLoading ? "Comparing revisions..." : "Compare source revisions"}
                 </button>
               )}
-              {sourceCompareError && <div className="text-danger">{sourceCompareError}</div>}
-              {sourceCompare && (
-                <div className="space-y-1 rounded-sm border border-border-subtle bg-bg p-2">
+                  {sourceCompareError && <div className="text-danger">{sourceCompareError}</div>}
+                  {sourceRestoreResult && (
+                    <div className="rounded-sm border border-accent/40 bg-accent/10 px-1.5 py-1 text-[9px] text-accent">
+                      Restored {sourceRestoreResult.restoredRevision} · changed{" "}
+                      {sourceRestoreResult.changedChunkCount} chunks
+                    </div>
+                  )}
+                  {sourceCompare && (
+                    <div className="space-y-1 rounded-sm border border-border-subtle bg-bg p-2">
                   <div className="flex justify-between gap-2 text-text-secondary">
                     <span>Revision compare</span>
                     <span>{sourceCompare.revisions.length} rev</span>
@@ -669,6 +726,17 @@ export default function LoreGraphView() {
                         {revision.chunkCount} chunks
                         {revision.keywords.length > 0 ? ` · ${revision.keywords.slice(0, 4).join(", ")}` : ""}
                       </div>
+                      {!revision.active && (
+                        <button
+                          onClick={() => void handleRestoreSourceRevision(revision.revision)}
+                          disabled={sourceRestoreLoading !== null}
+                          className="mt-1 w-full rounded-sm border border-border-subtle px-1.5 py-0.5 text-left text-[9px] text-text-secondary hover:border-accent/50 disabled:opacity-60"
+                        >
+                          {sourceRestoreLoading === revision.revision
+                            ? "Restoring..."
+                            : "Restore as active revision"}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

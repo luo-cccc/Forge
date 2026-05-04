@@ -69,7 +69,7 @@ use commands::generation::{
 };
 use commands::graph::{
     compare_project_brain_source_revisions, get_project_brain_knowledge_graph,
-    get_project_graph_data,
+    get_project_graph_data, restore_project_brain_source_revision,
 };
 use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::manual_agent::ask_agent;
@@ -170,6 +170,7 @@ pub fn run() {
             generate_parallel_drafts,
             get_project_brain_knowledge_graph,
             compare_project_brain_source_revisions,
+            restore_project_brain_source_revision,
             get_project_graph_data,
             analyze_pacing,
             rename_chapter_file,

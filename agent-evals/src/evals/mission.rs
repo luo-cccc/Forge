@@ -315,6 +315,141 @@ pub fn run_chapter_mission_drifted_no_duplicate_save_gap_eval() -> EvalResult {
     )
 }
 
+pub fn run_mission_state_transition_requires_evidence_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨追查玉佩下落。",
+            "玉佩",
+            "提前揭开真相",
+            "下落",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+
+    let initial_status = kernel
+        .ledger_snapshot()
+        .active_chapter_mission
+        .as_ref()
+        .map(|mission| mission.status.clone())
+        .unwrap_or_default();
+
+    let mut save = observation("林墨发现玉佩的下落，但张三仍没有说出真相。");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    kernel.observe(save).unwrap();
+
+    let ledger = kernel.ledger_snapshot();
+    let mission = ledger.active_chapter_mission.as_ref();
+    let result_source = ledger
+        .recent_chapter_results
+        .first()
+        .map(|result| result.source_ref.as_str())
+        .unwrap_or_default();
+    let evidence_linked = mission.is_some_and(|mission| {
+        mission.status == "completed"
+            && mission.source_ref.contains("result_feedback:chapter_save")
+            && mission.source_ref.contains(result_source)
+            && ledger
+                .recent_decisions
+                .iter()
+                .any(|decision| decision.decision == "mission_status:completed")
+    });
+
+    let mut errors = Vec::new();
+    if initial_status != "draft" {
+        errors.push(format!(
+            "seeded mission should start as draft, got {}",
+            initial_status
+        ));
+    }
+    if !evidence_linked {
+        errors.push(format!(
+            "mission status transition did not retain result evidence: status={:?} source={:?}",
+            mission.map(|mission| mission.status.as_str()),
+            mission.map(|mission| mission.source_ref.as_str())
+        ));
+    }
+
+    eval_result(
+        "writer_agent:mission_state_transition_requires_evidence",
+        format!(
+            "initial={} final={} decisions={}",
+            initial_status,
+            mission
+                .map(|mission| mission.status.as_str())
+                .unwrap_or("missing"),
+            ledger.recent_decisions.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_mission_blocked_retired_not_auto_calibrated_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨追查玉佩下落。",
+            "玉佩",
+            "提前揭开真相",
+            "下落",
+            "eval",
+        )
+        .unwrap();
+    let mut blocked = memory
+        .get_chapter_mission("eval", "Chapter-1")
+        .unwrap()
+        .unwrap();
+    blocked.status = "blocked".to_string();
+    blocked.source_ref = "author:blocker".to_string();
+    memory.upsert_chapter_mission(&blocked).unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+    let mut save = observation("林墨发现玉佩的下落，但张三仍没有说出真相。");
+    save.reason = ObservationReason::Save;
+    save.source = ObservationSource::ChapterSave;
+    let proposals = kernel.observe(save).unwrap();
+    let ledger = kernel.ledger_snapshot();
+    let mission = ledger.active_chapter_mission.as_ref();
+    let mission_gap_proposals = proposals
+        .iter()
+        .filter(|proposal| proposal.kind == ProposalKind::ChapterMission)
+        .count();
+
+    let mut errors = Vec::new();
+    if !mission.is_some_and(|mission| mission.status == "blocked") {
+        errors.push(format!(
+            "blocked mission was auto-calibrated: {:?}",
+            mission.map(|mission| mission.status.as_str())
+        ));
+    }
+    if mission_gap_proposals != 0 {
+        errors.push(format!(
+            "blocked mission emitted {} mission proposals",
+            mission_gap_proposals
+        ));
+    }
+
+    eval_result(
+        "writer_agent:mission_blocked_retired_not_auto_calibrated",
+        format!(
+            "status={} missionProposals={}",
+            mission
+                .map(|mission| mission.status.as_str())
+                .unwrap_or("missing"),
+            mission_gap_proposals
+        ),
+        errors,
+    )
+}
+
 pub fn run_mission_drift_flag_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

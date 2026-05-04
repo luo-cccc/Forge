@@ -124,7 +124,8 @@ pub(crate) fn derive_next_beat(
         match mission.status.as_str() {
             "drifted" => blockers.push(format!("上一轮任务偏离: {}", mission.must_not)),
             "needs_review" => blockers.push("上一轮任务与结果匹配度低，需要人工复核。".to_string()),
-            "in_progress" => blockers.push("上一轮任务只完成部分，需要继续接住。".to_string()),
+            "active" => blockers.push("上一轮任务只完成部分，需要继续接住。".to_string()),
+            "blocked" => blockers.push("本章任务被阻塞，需要先解除阻塞或改写任务。".to_string()),
             _ => {}
         }
     }
@@ -162,7 +163,9 @@ pub(crate) fn next_beat_goal(
         if mission.status == "needs_review" {
             return format!("复核本章任务是否还成立: {}", mission.mission);
         }
-        if mission.status != "completed" && !mission.mission.trim().is_empty() {
+        if !matches!(mission.status.as_str(), "completed" | "retired")
+            && !mission.mission.trim().is_empty()
+        {
             return mission.mission.clone();
         }
     }
@@ -199,6 +202,10 @@ pub(crate) fn calibrated_mission_status(
     mission: &ChapterMissionSummary,
     result: &ChapterResultSummary,
 ) -> String {
+    if matches!(mission.status.as_str(), "blocked" | "retired") {
+        return mission.status.clone();
+    }
+
     let haystack = mission_result_haystack(result);
     let violation_haystack = mission_result_violation_haystack(result);
     let must_not_hit = cue_violation_hit_score(&mission.must_not, &violation_haystack) > 0;
@@ -213,7 +220,7 @@ pub(crate) fn calibrated_mission_status(
     if must_include_score > 0 && expected_ending_score > 0 {
         "completed".to_string()
     } else if must_include_score > 0 || expected_ending_score > 0 || mission_score > 1 {
-        "in_progress".to_string()
+        "active".to_string()
     } else {
         "needs_review".to_string()
     }
@@ -239,7 +246,10 @@ pub(crate) fn chapter_mission_result_proposals(
     if cue_violation_hit_score(&mission.must_not, &violation_haystack) > 0 {
         return Vec::new();
     }
-    if matches!(mission.status.as_str(), "completed" | "drifted") {
+    if matches!(
+        mission.status.as_str(),
+        "completed" | "drifted" | "blocked" | "retired"
+    ) {
         return Vec::new();
     }
     if mission.must_include.trim().is_empty() || cue_hit_score(&mission.must_include, &haystack) > 0

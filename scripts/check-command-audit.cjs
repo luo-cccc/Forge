@@ -104,6 +104,7 @@ const classification = {
   delete_outline_node: RISK.DESTRUCTIVE,
   rename_chapter_file: RISK.DESTRUCTIVE,
   restore_file_backup: RISK.DESTRUCTIVE,
+  restore_project_brain_source_revision: RISK.DESTRUCTIVE,
 };
 
 // Audit checks: write/destructive commands must reference audit or operation functions
@@ -194,6 +195,7 @@ const writeCommandsWithDirectWrites = [
   "delete_outline_node",
   "rename_chapter_file",
   "restore_file_backup",
+  "restore_project_brain_source_revision",
 ];
 
 for (const cmd of writeCommandsWithDirectWrites) {

@@ -251,7 +251,7 @@ function emptyChapterMissionDraft(): ChapterMissionDraft {
     mustInclude: "",
     mustNot: "",
     expectedEnding: "",
-    status: "in_progress",
+    status: "active",
     sourceRef: "author",
   };
 }
@@ -264,7 +264,7 @@ function chapterMissionDraftFromSummary(
     mustInclude: mission?.mustInclude ?? "",
     mustNot: mission?.mustNot ?? "",
     expectedEnding: mission?.expectedEnding ?? "",
-    status: mission?.status || "in_progress",
+    status: mission?.status === "in_progress" ? "active" : mission?.status || "active",
     sourceRef: mission?.sourceRef || "author",
   };
 }
@@ -388,17 +388,20 @@ function formatRate(value: number | undefined): string {
 }
 
 function missionStatusLabel(status: string | undefined): string {
+  if (status === "draft") return "Draft";
   if (status === "completed") return "Done";
   if (status === "drifted") return "Drift";
   if (status === "needs_review") return "Review";
-  if (status === "in_progress") return "Active";
+  if (status === "active" || status === "in_progress") return "Active";
+  if (status === "blocked") return "Blocked";
+  if (status === "retired") return "Retired";
   return status || "Draft";
 }
 
 function missionStatusTone(status: string | undefined): SecondBrainTone {
   if (status === "completed") return "success";
-  if (status === "drifted" || status === "needs_review") return "danger";
-  if (status === "in_progress") return "accent";
+  if (status === "drifted" || status === "needs_review" || status === "blocked") return "danger";
+  if (status === "active" || status === "in_progress") return "accent";
   return "accent";
 }
 
@@ -1047,7 +1050,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           mustInclude: missionDraft.mustInclude.trim(),
           mustNot: missionDraft.mustNot.trim(),
           expectedEnding: missionDraft.expectedEnding.trim(),
-          status: missionDraft.status.trim() || "in_progress",
+          status: missionDraft.status.trim() || "active",
           sourceRef: missionDraft.sourceRef.trim() || "author",
         },
       });
@@ -1563,10 +1566,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   }}
                   className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary outline-none focus:border-accent"
                 >
-                  <option value="in_progress">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="active">Active</option>
                   <option value="needs_review">Review</option>
                   <option value="completed">Done</option>
                   <option value="drifted">Drift</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="retired">Retired</option>
                 </select>
               </div>
               <div className="grid grid-cols-1 gap-2">

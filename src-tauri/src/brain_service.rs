@@ -124,6 +124,20 @@ pub struct ProjectBrainSourceCompareRevision {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectBrainSourceRevisionRestore {
+    pub source_ref: String,
+    pub source_kind: String,
+    pub restored_revision: String,
+    pub previous_active_revisions: Vec<String>,
+    pub changed_chunk_count: usize,
+    pub active_chunk_count: usize,
+    pub archived_chunk_count: usize,
+    pub total_source_chunk_count: usize,
+    pub evidence_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum ProjectBrainEmbeddingBatchStatus {
     Complete,
     Partial,
@@ -615,6 +629,130 @@ pub fn compare_project_brain_source_revisions(
     Ok(compare_project_brain_source_revisions_from_db(
         source_ref, &brain,
     ))
+}
+
+pub fn restore_project_brain_source_revision(
+    app: &tauri::AppHandle,
+    source_ref: &str,
+    revision: &str,
+) -> Result<ProjectBrainSourceRevisionRestore, String> {
+    let source_ref = source_ref.trim();
+    let revision = revision.trim();
+    if source_ref.is_empty() {
+        return Err("Project Brain source ref is required for revision restore".to_string());
+    }
+    if revision.is_empty() {
+        return Err("Project Brain source revision is required for revision restore".to_string());
+    }
+
+    let brain_path = storage::brain_path(app)?;
+    let mut brain = VectorDB::load(&brain_path).map_err(|e| {
+        format!(
+            "Project Brain index at '{}' is unreadable; restore a backup or rebuild the index: {}",
+            brain_path.display(),
+            e
+        )
+    })?;
+    let report = restore_project_brain_source_revision_in_db(source_ref, revision, &mut brain)?;
+    let json = serde_json::to_string_pretty(&brain.chunks).map_err(|e| e.to_string())?;
+    storage::atomic_write(&brain_path, &json)?;
+    rebuild_project_brain_knowledge_index(app)?;
+    Ok(report)
+}
+
+pub fn restore_project_brain_source_revision_in_db(
+    source_ref: &str,
+    revision: &str,
+    brain: &mut VectorDB,
+) -> Result<ProjectBrainSourceRevisionRestore, String> {
+    let source_ref = source_ref.trim();
+    let revision = revision.trim();
+    if source_ref.is_empty() {
+        return Err("Project Brain source ref is required for revision restore".to_string());
+    }
+    if revision.is_empty() {
+        return Err("Project Brain source revision is required for revision restore".to_string());
+    }
+
+    let mut source_kind = "unknown".to_string();
+    let mut previous_active_revisions = BTreeSet::new();
+    let mut has_requested_revision = false;
+    let mut total_source_chunk_count = 0usize;
+    let mut active_chunk_count = 0usize;
+    let mut archived_chunk_count = 0usize;
+    let mut changed_chunk_count = 0usize;
+
+    for chunk in &brain.chunks {
+        if chunk.source_ref.as_deref() != Some(source_ref) {
+            continue;
+        }
+        total_source_chunk_count += 1;
+        if let Some(kind) = chunk
+            .source_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+        {
+            source_kind = kind.to_string();
+        }
+        if !chunk.archived {
+            if let Some(active_revision) = chunk
+                .source_revision
+                .as_deref()
+                .map(str::trim)
+                .filter(|active_revision| !active_revision.is_empty())
+            {
+                previous_active_revisions.insert(active_revision.to_string());
+            }
+        }
+        if chunk.source_revision.as_deref().map(str::trim) == Some(revision) {
+            has_requested_revision = true;
+        }
+    }
+
+    if total_source_chunk_count == 0 {
+        return Err(format!(
+            "Project Brain source '{}' has no indexed chunks to restore",
+            source_ref
+        ));
+    }
+    if !has_requested_revision {
+        return Err(format!(
+            "Project Brain source '{}' has no revision '{}'",
+            source_ref, revision
+        ));
+    }
+
+    for chunk in &mut brain.chunks {
+        if chunk.source_ref.as_deref() != Some(source_ref) {
+            continue;
+        }
+        let should_archive = chunk.source_revision.as_deref().map(str::trim) != Some(revision);
+        if chunk.archived != should_archive {
+            changed_chunk_count += 1;
+            chunk.archived = should_archive;
+        }
+        if chunk.archived {
+            archived_chunk_count += 1;
+        } else {
+            active_chunk_count += 1;
+        }
+    }
+
+    Ok(ProjectBrainSourceRevisionRestore {
+        source_ref: source_ref.to_string(),
+        source_kind,
+        restored_revision: revision.to_string(),
+        previous_active_revisions: previous_active_revisions.into_iter().collect(),
+        changed_chunk_count,
+        active_chunk_count,
+        archived_chunk_count,
+        total_source_chunk_count,
+        evidence_refs: vec![
+            format!("source_ref:{}", source_ref),
+            format!("source_revision:{}", revision),
+        ],
+    })
 }
 
 pub fn compare_project_brain_source_revisions_from_db(

@@ -149,8 +149,7 @@ pub(crate) fn validate_chapter_mission_summary(mission: &ChapterMissionSummary) 
         }
     }
 
-    let allowed_status = ["in_progress", "needs_review", "completed", "drifted"];
-    if !allowed_status.contains(&mission.status.as_str()) {
+    if !is_valid_chapter_mission_status(&mission.status) {
         return Some(format!(
             "Chapter Mission status '{}' is invalid.",
             mission.status
@@ -178,10 +177,19 @@ pub fn ghost_confidence(intent_confidence: f32, memory: &WriterMemory, project_i
 
 pub(crate) fn normalize_chapter_mission_status(status: &str) -> String {
     match status.trim() {
-        "" | "draft" | "active" => "in_progress".to_string(),
-        "in_progress" | "needs_review" | "completed" | "drifted" => status.trim().to_string(),
+        "" | "active" | "in_progress" => "active".to_string(),
+        "draft" | "needs_review" | "completed" | "drifted" | "blocked" | "retired" => {
+            status.trim().to_string()
+        }
         other => other.to_string(),
     }
+}
+
+pub(crate) fn is_valid_chapter_mission_status(status: &str) -> bool {
+    matches!(
+        normalize_chapter_mission_status(status).as_str(),
+        "draft" | "active" | "needs_review" | "completed" | "drifted" | "blocked" | "retired"
+    )
 }
 
 pub(crate) fn operation_kind_label(operation: &WriterOperation) -> &'static str {
