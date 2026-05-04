@@ -29,6 +29,7 @@ pub mod proposal;
 pub mod provider_budget;
 pub mod research_subtask;
 pub mod run_events;
+pub mod story_impact;
 pub mod task_receipt;
 pub mod trajectory;
 

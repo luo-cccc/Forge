@@ -165,6 +165,11 @@ fn main() {
     results.push(run_end_to_end_mission_drift_detection_eval());
     results.push(run_trajectory_product_metrics_present_eval());
     results.push(run_ghost_task_packet_foundation_coverage_eval());
+    results.push(run_story_impact_radius_includes_impacted_promise_eval());
+    results.push(run_story_impact_radius_excludes_semantic_distractor_eval());
+    results.push(run_story_impact_radius_reports_truncated_sources_eval());
+    results.push(run_story_impact_radius_maps_operation_to_story_nodes_eval());
+    results.push(run_story_impact_radius_small_change_stays_minimal_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

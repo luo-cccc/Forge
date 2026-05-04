@@ -2448,3 +2448,282 @@ pub fn run_end_to_end_mission_drift_detection_eval() -> EvalResult {
         errors,
     )
 }
+
+// ── Story Impact Radius ──
+
+use agent_writer_lib::writer_agent::story_impact::{
+    compute_story_impact_radius, StoryEdgeKind, StoryImpactRisk, StoryNodeKind,
+    WriterStoryGraphEdge, WriterStoryGraphNode,
+};
+
+fn make_si_node(
+    id: &str,
+    kind: StoryNodeKind,
+    label: &str,
+    confidence: f32,
+    summary: &str,
+) -> WriterStoryGraphNode {
+    WriterStoryGraphNode {
+        id: id.to_string(),
+        kind,
+        label: label.to_string(),
+        source_ref: format!("src:{}", id),
+        source_revision: None,
+        chapter: None,
+        confidence,
+        summary: summary.to_string(),
+    }
+}
+
+fn make_si_edge(from: &str, to: &str, kind: StoryEdgeKind) -> WriterStoryGraphEdge {
+    WriterStoryGraphEdge {
+        from: from.to_string(),
+        to: to.to_string(),
+        kind,
+        evidence_ref: format!("edge:{}->{}", from, to),
+        confidence: 0.8,
+    }
+}
+
+pub fn run_story_impact_radius_includes_impacted_promise_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![make_si_node(
+        "task:1",
+        StoryNodeKind::SeedTask,
+        "",
+        1.0,
+        "writing ch3",
+    )];
+    let nodes = vec![
+        seeds[0].clone(),
+        make_si_node(
+            "promise:1",
+            StoryNodeKind::PlotPromise,
+            "jade ring",
+            0.85,
+            "promise: jade ring",
+        ),
+        make_si_node(
+            "canon:1",
+            StoryNodeKind::CanonEntity,
+            "Lin Mo",
+            0.9,
+            "char: Lin Mo",
+        ),
+    ];
+    let edges = vec![
+        make_si_edge("task:1", "promise:1", StoryEdgeKind::UpdatesPromise),
+        make_si_edge("task:1", "canon:1", StoryEdgeKind::MentionsEntity),
+    ];
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+    if !radius
+        .impacted_nodes
+        .iter()
+        .any(|n| n.kind == StoryNodeKind::PlotPromise)
+    {
+        errors.push("promise should be in impact radius".to_string());
+    }
+    if radius.truncated {
+        errors.push("should not be truncated".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_includes_impacted_promise_under_budget",
+        format!(
+            "impacted={} truncated={}",
+            radius.impacted_nodes.len(),
+            radius.truncated
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_excludes_semantic_distractor_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![make_si_node(
+        "task:1",
+        StoryNodeKind::SeedTask,
+        "",
+        1.0,
+        "writing ch3",
+    )];
+    let nodes = vec![
+        seeds[0].clone(),
+        make_si_node(
+            "canon:1",
+            StoryNodeKind::CanonEntity,
+            "frost tower",
+            0.9,
+            "place",
+        ),
+        make_si_node(
+            "canon:2",
+            StoryNodeKind::CanonEntity,
+            "old rumor",
+            0.3,
+            "noise",
+        ),
+    ];
+    let edges = vec![make_si_edge(
+        "task:1",
+        "canon:1",
+        StoryEdgeKind::MentionsEntity,
+    )];
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+    if !radius.impacted_nodes.iter().any(|n| n.id == "canon:1") {
+        errors.push("connected canon should be included".to_string());
+    }
+    if radius.impacted_nodes.iter().any(|n| n.id == "canon:2") {
+        errors.push("disconnected distractor should be excluded".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_excludes_semantic_distractor",
+        format!(
+            "impacted={} excluded={}",
+            radius.impacted_nodes.len(),
+            !radius.impacted_nodes.iter().any(|n| n.id == "canon:2")
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_reports_truncated_sources_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![make_si_node(
+        "task:1",
+        StoryNodeKind::SeedTask,
+        "",
+        1.0,
+        "writing",
+    )];
+    let mut nodes = vec![seeds[0].clone()];
+    let mut edges = Vec::new();
+    for i in 1..=20 {
+        nodes.push(make_si_node(
+            &format!("p:{}", i),
+            StoryNodeKind::PlotPromise,
+            "p",
+            0.8,
+            "long summary text for budget testing purposes xyz",
+        ));
+        edges.push(make_si_edge(
+            "task:1",
+            &format!("p:{}", i),
+            StoryEdgeKind::UpdatesPromise,
+        ));
+    }
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 200);
+    if !radius.truncated {
+        errors.push("should be truncated".to_string());
+    }
+    if !radius.reasons.iter().any(|r| {
+        r.contains("trunc")
+            || r.contains("depth")
+            || r.contains("limit")
+            || r.contains("预算")
+            || r.contains("深度")
+            || r.contains("遍历")
+    }) {
+        errors.push(format!("no truncation reason: {:?}", radius.reasons));
+    }
+    if radius.impacted_nodes.len() >= nodes.len() {
+        errors.push("too many nodes".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_reports_truncated_sources",
+        format!(
+            "truncated={} impacted={}/{}",
+            radius.truncated,
+            radius.impacted_nodes.len(),
+            nodes.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_maps_operation_to_story_nodes_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![
+        make_si_node("task:1", StoryNodeKind::SeedTask, "", 1.0, "rewrite"),
+        make_si_node(
+            "mission:ch3",
+            StoryNodeKind::ChapterMission,
+            "ch3 mission",
+            0.9,
+            "advance jade ring",
+        ),
+    ];
+    let nodes = vec![
+        seeds[0].clone(),
+        seeds[1].clone(),
+        make_si_node(
+            "promise:1",
+            StoryNodeKind::PlotPromise,
+            "jade ring",
+            0.85,
+            "promise",
+        ),
+    ];
+    let edges = vec![make_si_edge(
+        "mission:ch3",
+        "promise:1",
+        StoryEdgeKind::SupportsMission,
+    )];
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+    if radius.impacted_nodes.len() < 2 {
+        errors.push("too few impacted nodes".to_string());
+    }
+    if !radius
+        .impacted_sources
+        .iter()
+        .any(|s| s.contains("promise:1"))
+    {
+        errors.push("promise not in sources".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_maps_operation_to_story_nodes",
+        format!(
+            "impacted={} sources={}",
+            radius.impacted_nodes.len(),
+            radius.impacted_sources.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_small_change_stays_minimal_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![make_si_node(
+        "task:1",
+        StoryNodeKind::SeedTask,
+        "",
+        1.0,
+        "fix typo",
+    )];
+    let nodes = vec![
+        seeds[0].clone(),
+        make_si_node("canon:1", StoryNodeKind::CanonEntity, "Lin", 0.9, "char"),
+    ];
+    let edges = vec![];
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+    if radius.impacted_nodes.len() != 1 {
+        errors.push(format!(
+            "expected 1 node, got {}",
+            radius.impacted_nodes.len()
+        ));
+    }
+    if radius.truncated {
+        errors.push("should not be truncated".to_string());
+    }
+    if !matches!(radius.risk, StoryImpactRisk::Low) {
+        errors.push("should be low risk".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_small_change_stays_minimal",
+        format!(
+            "impacted={} risk={:?}",
+            radius.impacted_nodes.len(),
+            radius.risk
+        ),
+        errors,
+    )
+}

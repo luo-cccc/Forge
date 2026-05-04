@@ -26,7 +26,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 关键保存风险已处理：dirty state、chapter switching、autosave、inline operation、accepted feedback、batch generation dirty protection。
 - `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
-- Command boundary audit 已覆盖 54 个 Tauri commands，并进入 `npm run verify`。
+- Command boundary audit 已覆盖 56 个 Tauri commands，并进入 `npm run verify`。
 - Tauri command handlers 已全部移入 `src-tauri/src/commands/*`；`src-tauri/src/lib.rs` 当前不再包含 `#[tauri::command]`。
 - AppState、启动期 Hermes/Writer memory DB 打开、legacy DB migration、kernel seed 逻辑已抽入 `src-tauri/src/app_state.rs`。
 - Semantic lint payload/event 和设定/诊断 lint 逻辑已抽入 `src-tauri/src/semantic_lint.rs`。
@@ -537,7 +537,7 @@ Verification：
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 54 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 只保留模块 wiring、Tauri setup 和 command registration，并纳入 `npm run check:architecture` 的 root glue 预算。
+当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 56 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 只保留模块 wiring、Tauri setup 和 command registration，并纳入 `npm run check:architecture` 的 root glue 预算。
 
 建议模块：
 
@@ -722,7 +722,7 @@ agent-evals/src/
 
 ## 11. P4：外部 Agent 项目借鉴专项计划
 
-本节来自对 `C:/Users/Msi/Desktop/agent` 下 7 个 agent 项目的定向审查。目标不是把 Forge 改造成通用 agent 平台，而是在证据可追溯的前提下，把其他项目中已经证明有价值的机制裁剪到小说写作 agent 的五个核心方面。
+本节来自对 `C:/Users/Msi/Desktop/agent` 下 8 个本地 agent 项目的定向审查，其中 `code-review-graph-main` 对应 GitHub 来源 `https://github.com/tirth8205/code-review-graph.git`。目标不是把 Forge 改造成通用 agent 平台，而是在证据可追溯的前提下，把其他项目中已经证明有价值的机制裁剪到小说写作 agent 的五个核心方面。
 
 ### 11.0 证据边界
 
@@ -735,12 +735,14 @@ agent-evals/src/
 - `ml-intern-main`
 - `openclaw-main`
 - `opencode-1.14.30`
+- `code-review-graph-main`（本地路径：`C:/Users/Msi/Desktop/agent/code-review-graph-main`；GitHub 来源：`https://github.com/tirth8205/code-review-graph.git`）
 
 证据纪律：
 
 - 只把 README 或源码中已经看到的机制写成依据。
 - 对 `openclaw-main`、`opencode-1.14.30`、`hermes-agent-2026.4.30` 这类大仓，只按已审查源码得出局部结论，不声明“已完整审计”。
 - README 声称但未进入源码验证的能力，不能作为高置信实现依据。
+- `code-review-graph-main` 当前本地目录不是 git checkout，不从该目录推断 commit hash；只把已核对到本地 README / source function 的机制写入计划，benchmark 数字只能作为该项目自报证据，不能直接外推到 Forge。
 - 没发现致命问题时必须坦承，不为了显得尖锐而硬批。
 
 ### 11.1 可借鉴证据清单
@@ -754,6 +756,7 @@ agent-evals/src/
 | OpenCode | 内置 `build` 和只读 `plan` agent，`plan` 禁止 edit；`explore` 子代理只允许搜索/读取等探索工具；写文件后返回 LSP diagnostics。 | `C:/Users/Msi/Desktop/agent/opencode-1.14.30/packages/opencode/src/agent/agent.ts:123`, `C:/Users/Msi/Desktop/agent/opencode-1.14.30/packages/opencode/src/agent/agent.ts:160`, `C:/Users/Msi/Desktop/agent/opencode-1.14.30/packages/opencode/src/tool/write.ts:73` | 可借鉴只读规划/审稿模式、探索子代理权限边界、写后诊断反馈。 |
 | OpenClaw | Memory embedding SDK 暴露 provider registry、batch helpers、input limit、multimodal path 分类；ACP persistent binding tests 覆盖 session key、cwd mismatch reinit、error-state reinit。 | `C:/Users/Msi/Desktop/agent/openclaw-main/packages/memory-host-sdk/src/engine-embeddings.ts:3`, `C:/Users/Msi/Desktop/agent/openclaw-main/packages/memory-host-sdk/src/engine-embeddings.ts:28`, `C:/Users/Msi/Desktop/agent/openclaw-main/src/acp/persistent-bindings.test.ts:887` | 可借鉴 Project Brain embedding provider 抽象和长会话绑定恢复；当前不建议照搬多渠道 gateway。 |
 | Hermes Agent | Cron job 运行时禁用部分 toolsets，并设置 `skip_memory=True`，注释说明 cron system prompts 会污染 user representations；skill usage sidecar 只允许 curator 处理 agent-created skills。 | `C:/Users/Msi/Desktop/agent/hermes-agent-2026.4.30/cron/scheduler.py:1044`, `C:/Users/Msi/Desktop/agent/hermes-agent-2026.4.30/cron/scheduler.py:1051`, `C:/Users/Msi/Desktop/agent/hermes-agent-2026.4.30/tools/skill_usage.py:1`, `C:/Users/Msi/Desktop/agent/hermes-agent-2026.4.30/tools/skill_usage.py:151` | 这是反向边界证据：后台自动任务、技能自改、长期记忆必须强约束，不能污染写作项目。 |
+| code-review-graph | Tree-sitter AST / SQLite graph / MCP tools 组合出 minimal context、impact radius、review context、graph traversal；README 自报 token reduction，同时承认小型单文件变更可能更贵、impact precision 会保守过报。 | `C:/Users/Msi/Desktop/agent/code-review-graph-main/README.md:77`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/README.md:126`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/README.md:141`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/README.md:146`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/README.md:181`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/code_review_graph/tools/context.py:37`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/code_review_graph/tools/review.py:24`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/code_review_graph/changes.py:275`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/code_review_graph/graph.py:625`, `C:/Users/Msi/Desktop/agent/code-review-graph-main/code_review_graph/tools/query.py:573` | 可借鉴 graph-shaped context assembly、minimal context first、blast-radius discipline 和预算化遍历；不能照搬代码 AST/call graph 到小说写作域。 |
 
 Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-harness-core`、Writer Agent Kernel、TaskPacket、typed WriterOperation、approval/audit、operation lifecycle、trajectory export、Story Contract、Chapter Mission、Promise Ledger、Project Brain rerank。P4 的任务是补齐控制面和反馈土壤，不是重复建设通用 agent runtime。
 
@@ -858,6 +861,48 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 不允许后台自动任务绕过 WriterOperation。
    - 不允许 LLM 直接写永久 Canon / Promise / Style。
    - 已新增 eval：`writer_agent:memory_auto_write_cannot_bypass_review`，覆盖保存观察触发 Canon / Promise 候选时只产生 proposal 和 `writer.memory_candidate_created`，不会直接写入 Canon / Promise ledger。
+6. Story Impact Radius Context Pack。（第一阶段已完成：内部类型、种子提取、故事图构建、BFS 遍历、预算报告和 5 个 eval；尚未接入默认写作 context pack；借鉴 `code-review-graph` 的上下文组装纪律）
+   - 证据判断：`code-review-graph` 的可迁移部分不是 Tree-sitter，也不是代码 call graph，而是“先最小上下文、再按变更/任务计算影响半径、再按预算抽取相关证据、最后暴露风险和截断”的流程。
+   - Forge 不能照搬函数、类、调用者、测试覆盖这些代码语义；小说域需要转译为角色、设定、伏笔、章节任务、result feedback、Project Brain chunk、source revision 和 Story Contract / Mission / Canon / Promise 的证据关系。
+   - 新增内部类型：
+     - `WriterStoryGraphNode { id, kind, label, source_ref, source_revision, chapter, confidence, summary }`
+     - `WriterStoryGraphEdge { from, to, kind, evidence_ref, confidence }`
+     - `WriterStoryImpactRadius { seed_nodes, impacted_nodes, impacted_sources, edges, risk, truncated, reasons }`
+   - Seed 来源：
+     - active chapter / selected text / cursor prefix
+     - accepted text operation / proposal durable save observation
+     - manual request objective
+     - Chapter Mission clauses / must_not / expected ending
+     - open promise / canon entity / Project Brain chunk source refs
+     - post-write diagnostic report / result feedback
+   - Edge kind 第一版：
+     - `mentions_entity`
+     - `updates_promise`
+     - `supports_mission`
+     - `contradicts_canon`
+     - `depends_on_result`
+     - `same_source_revision`
+     - `shared_keyword`
+   - Context pack 流程：
+     - 先生成 minimal writer context：当前任务、章节、mission、关键 canon/promise、context pressure、风险等级、建议下一步 diagnostic/tool。
+     - 把当前任务或已接受 operation 映射到 seed story nodes。
+     - 在 Project Brain knowledge index、WriterMemory ledger、mission/result feedback 上做 max depth + char budget 遍历。
+     - 综合 writing relevance、graph distance、risk、source confidence 排序。
+     - 输出 budget report：requested/provided chars、truncated nodes、dropped high-risk sources、为什么纳入/丢弃。
+     - 将摘要写入 `writer.context_pack_built` 或新增 `writer.story_impact_radius_built` run event；事件只记录预算、节点类型、source refs 和 reasons，不记录正文原文。
+   - 写作版 guidance：
+     - 受影响 promise 没有 payoff target。
+     - 受影响 canon 证据不足或来源 revision 过旧。
+     - operation 触碰了 Chapter Mission `must_not`。
+     - Project Brain chunk 与 Canon / Mission 互相冲突。
+     - context pressure 导致高风险来源被截断。
+   - 第一阶段 eval 必须先行：
+     - `writer_agent:story_impact_radius_includes_impacted_promise_under_budget`
+     - `writer_agent:story_impact_radius_excludes_semantic_distractor`
+     - `writer_agent:story_impact_radius_reports_truncated_sources`
+     - `writer_agent:story_impact_radius_maps_operation_to_story_nodes`
+     - `writer_agent:story_impact_radius_small_change_stays_minimal`
+   - 产品验收不看“图更复杂”，只看长篇写作效果：关键伏笔召回率、设定误报率、mission drift 发现率、作者采纳率、context pressure 下的高风险遗漏数是否改善。
 
 验收：
 
@@ -871,6 +916,11 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:project_brain_embedding_provider_limits`（已完成）
 - `writer_agent:project_brain_embedding_provider_registry`（已完成）
 - `writer_agent:memory_auto_write_cannot_bypass_review`（已完成）
+- `writer_agent:story_impact_radius_includes_impacted_promise_under_budget`（已完成）
+- `writer_agent:story_impact_radius_excludes_semantic_distractor`（已完成）
+- `writer_agent:story_impact_radius_reports_truncated_sources`（已完成）
+- `writer_agent:story_impact_radius_maps_operation_to_story_nodes`（已完成）
+- `writer_agent:story_impact_radius_small_change_stays_minimal`（已完成）
 
 ### 11.4 行动闭环：工具调用与外部互动
 
@@ -1090,6 +1140,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 不允许子代理直接写正文、Canon、Promise、Style、Story Contract、Chapter Mission。
 - 不用泛用 agent persona 替代 Story Contract / Chapter Mission。
 - 不把 Project Brain 变成没有来源、没有版本、没有质量门槛的大杂烩向量库。
+- 不把 `code-review-graph` 的 Tree-sitter、函数调用图、测试覆盖缺口硬搬到小说写作；Forge 只能借鉴 impact-radius 上下文组装纪律，并转译为故事证据图。
 
 原因：
 
@@ -1110,15 +1161,18 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 5. Project Brain knowledge index / graph。（第一阶段已完成）
    - 已先做来源可解释：index / node / shared-keyword graph / path guard / eval / Graph 页 Brain 模式已落地；第一层 graph filtering、search、source detail、source history、read-only source revision compare、source revision restore 和 reference/back-reference navigation 已落地；embedding provider registry / profile / input limit / batch status / retry policy / compatibility fallback 第一阶段已落地；chunk source_ref / source_revision / source_kind / chunk_index / archived metadata 已落地。
    - 剩余：provider-specific embedding 质量校准、真实 Story Bible / 章节数据召回质量验证，以及把索引 revision 恢复和正文/Story Bible 恢复整合到同一可审查恢复体验。
-6. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
+6. Story Impact Radius Context Pack。（第一阶段已完成：类型 + 故事图 + 5 eval）
+   - 先补 eval 和内部类型，再接入真实 context pack；目标是让 Forge 知道“这次写作动作会影响哪些故事事实”，而不是只按相似文本和固定 ledger 顺序塞上下文。
+   - 第一阶段只做只读 radius report、budget report 和 Inspector/trajectory 摘要，不自动写 Canon / Promise / Mission。
+7. Isolated research / diagnostic subtask workspace。（第一阶段已完成）
    - 已建立只读/隔离/evidence-only 后端边界；subtask started/completed run event、trajectory export 和 Inspect Subtasks 筛选已落地；真实 run loop 自动调度和外部检索工具仍未完成。
-7. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
+8. Inspector timeline + trajectory export upgrade。（第一阶段已完成）
    - 已有后端 Inspector timeline / Companion-safe summary / redaction warning / local-only export 标记；前端 Inspect 模式已覆盖只读 timeline 筛选、failure、task_receipt、task_artifact、provider budget、save_completed、save-to-feedback latency、multi-session metric trend、proposal context budget drilldown、post-write diagnostics、当前 context pressure、持久化 per-session context pressure trend 和 failure recovery 排查跳转；Forge trajectory 已可额外导出 Claude-Code-style / HF Agent Trace Viewer compatible JSONL。
-8. Provider call budget。（第一阶段已完成）
+9. Provider call budget。（第一阶段已完成）
    - 已有 token/cost estimation、approval-required/warn/blocked 决策和 remediation；章节生成 provider call 前置门禁、`writer.provider_budget` run event、Explore 审批卡、已批准 budget 前端传递和后端覆盖校验已接入；Project Brain chat answer provider call 已有后端 preflight / run event / failure bundle；manual request AgentLoop 每轮 provider call 已有后端 budget guard / run event / failure bundle；external research subtask 已有 provider budget report / failure bundle helper 和 run event 覆盖；Project Brain/manual retry UI 和后端批准凭证覆盖校验已接入；真实外部检索工具调用接入和 external research 审批 UI 仍未完成。
-9. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）
+10. Post-write diagnostics。（保存观察 + accepted operation 路径第一阶段已完成）
    - 保存观察会生成 post-write diagnostic report，写入 run event、trace snapshot 和 trajectory；accepted inline/proposal text operation durable-save 路径也会带保存后正文复跑 diagnostics，并输出 proposal / operation 级 source refs；Companion Audit 页已能查看最近报告；Inspect 模式已有最近 post-write diagnostics 摘要、save_completed 专用筛选、save-to-feedback latency 和多 session latency 趋势；`writer.save_completed` 已串联 save result、post-write report id 和诊断计数。剩余是真实连续写作 fixture 校准。
-10. External tool remediation。（第一阶段已完成）
+11. External tool remediation。（第一阶段已完成）
    - ToolExecution 失败结果已有结构化 remediation，并已映射进 `WriterFailureEvidenceBundle` / `writer.error` run event / Inspector `failure` event；Research 子任务 tool/provider 失败已有 subtask 证据包覆盖；真实外部公开资料 provider/tool 集成仍未完成。
 
 ### 11.9 P4 完成定义
@@ -1257,13 +1311,14 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 3. 增加 WriterTaskReceipt 和 failure evidence bundle。（第一阶段已完成：章节生成 receipt、长诊断 diagnostic_report artifact、保存前校验、writer.error / writer.task_artifact run event、trajectory export）
 4. 增加 memory correction / reinforcement。（第一阶段已完成：reviewed memory candidates 的 correction/reinforcement signal）
 5. 增加 Project Brain knowledge index / graph。（第一阶段已完成：index / node / edge / path guard / chunk source-version metadata / source history / read-only revision compare / source revision restore / eval / Graph 页 Brain 模式）
-6. 增加 isolated research / diagnostic subtask workspace。（第一阶段已完成：artifact workspace / tool policy / evidence-only result / eval）
-7. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / task_receipt + task_artifact filter / save_completed filter / save-to-feedback latency / proposal context budget drilldown / redaction warning / local-only export marker / Trace Viewer compatible JSONL）
-8. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
-9. 增加 post-write diagnostics。（保存观察 + accepted operation + Audit UI + save_completed link 第一阶段已完成：report / run event / trace snapshot / trajectory export / eval / UI summary / save_completed inspector filter）
-10. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
-11. 增加 metacognitive gate。（第一阶段已完成：`WriterMetacognitiveSnapshot` 从 trace 聚合 context pressure、failure bundle、post-write diagnostics、低置信 proposal、重复忽略率和 durable-save 健康度，输出风险等级和建议动作；Inspector / trajectory / eval 已接入；写作 run-loop 会在高风险时阻断 GhostWriting / InlineRewrite / ChapterGeneration，operation 层会阻断正文写入，同时保留 Planning Review、Continuity Diagnostic 和 mission calibration 等恢复路径；Inspector 元认知卡片已补恢复 CTA，可跳转 Review、诊断/保存、失败、上下文和 meta 视图，也可触发专用 `run_metacognitive_recovery` 只读恢复命令。剩余：真实作者项目阈值校准，以及把 Planning Review 结果进一步持久化为可回放 artifact。）
-12. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、task artifact、failure evidence、memory correction/reinforcement、memory candidate run event、memory auto-write review boundary、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard/chunk source/version metadata/source history/revision compare/source revision restore、Project Brain embedding provider profile/input limit/batch status/provider registry fallback、isolated research/diagnostic subtask workspace、research subtask started/completed run event、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、metacognitive recovery provider budget/read-only boundary、research subtask provider budget、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、product metrics multi-session trend、metacognitive snapshot、metacognitive write gate、metacognitive recovery boundary、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；P2 static guard 已覆盖 metacognitive recovery chips 只存在 Inspect；后续重点转向真实作者长会话校准和更丰富的恢复 artifact。）
+6. 增加 Story Impact Radius Context Pack。（第一阶段已完成：内部类型 WriterStoryGraphNode / WriterStoryGraphEdge / WriterStoryImpactRadius / StoryImpactBudgetReport，种子提取 extract_seed_nodes，故事图构建 build_story_graph，BFS 遍历 compute_story_impact_radius，5 个 eval 全部通过；剩余：接入默认写作 context pack，不照搬代码 AST/call graph）
+7. 增加 isolated research / diagnostic subtask workspace。（第一阶段已完成：artifact workspace / tool policy / evidence-only result / eval）
+8. 增加 inspector timeline 和 trajectory export upgrade。（第一阶段已完成：backend timeline / companion-safe summary / task_receipt + task_artifact filter / save_completed filter / save-to-feedback latency / proposal context budget drilldown / redaction warning / local-only export marker / Trace Viewer compatible JSONL）
+9. 增加 provider call budget。（第一阶段已完成：token/cost estimation / approval-required decision / remediation / chapter-generation preflight / eval）
+10. 增加 post-write diagnostics。（保存观察 + accepted operation + Audit UI + save_completed link 第一阶段已完成：report / run event / trace snapshot / trajectory export / eval / UI summary / save_completed inspector filter）
+11. 增加 external tool error remediation。（第一阶段已完成：ToolExecution remediation / missing tool / permission denied / handler failure eval / failure bundle 映射 / Inspector failure event）
+12. 增加 metacognitive gate。（第一阶段已完成：`WriterMetacognitiveSnapshot` 从 trace 聚合 context pressure、failure bundle、post-write diagnostics、低置信 proposal、重复忽略率和 durable-save 健康度，输出风险等级和建议动作；Inspector / trajectory / eval 已接入；写作 run-loop 会在高风险时阻断 GhostWriting / InlineRewrite / ChapterGeneration，operation 层会阻断正文写入，同时保留 Planning Review、Continuity Diagnostic 和 mission calibration 等恢复路径；Inspector 元认知卡片已补恢复 CTA，可跳转 Review、诊断/保存、失败、上下文和 meta 视图，也可触发专用 `run_metacognitive_recovery` 只读恢复命令。剩余：真实作者项目阈值校准，以及把 Planning Review 结果进一步持久化为可回放 artifact。）
+13. 补齐 P4 eval。（当前 P4 新增 eval 已覆盖 run event、planning mode、task receipt、task artifact、failure evidence、memory correction/reinforcement、memory candidate run event、memory auto-write review boundary、operation approval decision run event、context pack built run event、model started run event、tool called run event、Project Brain knowledge index/path guard/chunk source/version metadata/source history/revision compare/source revision restore、Project Brain embedding provider profile/input limit/batch status/provider registry fallback、isolated research/diagnostic subtask workspace、research subtask started/completed run event、inspector timeline、trajectory redaction、Trace Viewer compatible export、provider budget、chapter-generation provider preflight、Project Brain provider preflight/approval retry、manual request provider preflight/approval retry、metacognitive recovery provider budget/read-only boundary、research subtask provider budget、provider budget approval coverage、provider budget run event、post-write diagnostics、accepted-operation post-write diagnostics、save_completed/post-write linkage、product metrics multi-session trend、metacognitive snapshot、metacognitive write gate、metacognitive recovery boundary、external tool remediation、tool remediation failure bundle 和 research subtask failure bundle；新增 Story Impact Radius eval 后才允许把它接入默认写作 context pack；P2 static guard 已覆盖 metacognitive recovery chips 只存在 Inspect；后续重点转向真实作者长会话校准和更丰富的恢复 artifact。）
 
 ## 14. 完成定义
 
