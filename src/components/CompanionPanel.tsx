@@ -3,13 +3,37 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
 import { Commands, Events } from "../protocol";
+import {
+  canonUpdateOperation,
+  chapterMissionDraftFromSummary,
+  debtPrimaryOperation,
+  diagnosticSeverityClass,
+  emptyChapterMissionDraft,
+  emptyStoryContractDraft,
+  formatBytes,
+  hasChapterMissionContent,
+  hasStoryContractContent,
+  isEditorTextOperation,
+  isEnhancedGhost,
+  mergeProposal,
+  nextChapterLabel,
+  operationApproval,
+  operationLabel,
+  primaryOperation,
+  queuePrimaryOperation,
+  severityBadgeClass,
+  severityClass,
+  storyContractDraftFromSummary,
+  storageStatusClass,
+  type ChapterMissionDraft,
+  type StoryContractDraft,
+} from "./CompanionPanel.helpers";
 import type {
   WriterAgentStatus,
   WriterAgentLedgerSnapshot,
   AgentProposal,
   BackupTarget,
   FileBackupInfo,
-  OperationApproval,
   OperationResult,
   ProposalFeedback,
   ProjectStorageDiagnostics,
@@ -17,8 +41,6 @@ import type {
   StoryDebtSnapshot,
   StoryDebtEntry,
   StoryReviewQueueEntry,
-  StoryContractSummary,
-  ChapterMissionSummary,
   WriterAgentTraceSnapshot,
   WriterPostWriteDiagnosticReport,
   WriterProposalTrace,
@@ -39,134 +61,10 @@ interface ApplyOperationResult {
   error?: string;
 }
 
-function proposalSlotKey(proposal: AgentProposal): string {
-  const target = proposal.target ? `${proposal.target.from}:${proposal.target.to}` : "none";
-  if (proposal.kind === "ghost") {
-    return `${proposal.observationId}|${proposal.kind}|${target}`;
-  }
-
-  const memorySlot = memoryOperationSlot(primaryOperation(proposal));
-  if (memorySlot) return memorySlot;
-
-  const evidence = proposal.evidence[0];
-  const evidenceKey = evidence ? `${evidence.source}:${evidence.reference}` : "";
-  const previewKey = proposal.preview.replace(/\s+/g, " ").slice(0, 80);
-  return `${proposal.observationId}|${proposal.kind}|${target}|${evidenceKey}|${previewKey}`;
-}
-
-function memoryOperationSlot(operation: WriterOperation | undefined): string | null {
-  if (operation?.kind === "canon.upsert_entity") {
-    const entity = operation.entity as { kind?: unknown; name?: unknown };
-    if (typeof entity.kind === "string" && typeof entity.name === "string") {
-      return `memory|canon|${entity.kind}|${entity.name}`;
-    }
-  }
-  if (operation?.kind === "promise.add") {
-    const promise = operation.promise as { kind?: unknown; title?: unknown };
-    if (typeof promise.kind === "string" && typeof promise.title === "string") {
-      return `memory|promise|${promise.kind}|${promise.title}`;
-    }
-  }
-  return null;
-}
-
-function isEnhancedGhost(proposal: AgentProposal): boolean {
-  return proposal.kind === "ghost" && proposal.rationale.includes("LLM增强续写");
-}
-
-function priorityWeight(priority: AgentProposal["priority"]): number {
-  if (priority === "urgent") return 2;
-  if (priority === "normal") return 1;
-  return 0;
-}
-
-function shouldReplaceProposal(existing: AgentProposal, incoming: AgentProposal): boolean {
-  if (isEnhancedGhost(incoming) && !isEnhancedGhost(existing)) return true;
-  if (priorityWeight(incoming.priority) > priorityWeight(existing.priority)) return true;
-  return incoming.confidence > existing.confidence + 0.05;
-}
-
-function isEditorTextOperation(
-  operation: WriterOperation,
-): operation is Extract<WriterOperation, { kind: "text.insert" | "text.replace" }> {
-  return operation.kind === "text.insert" || operation.kind === "text.replace";
-}
-
-function primaryOperation(proposal: AgentProposal): WriterOperation | undefined {
-  return proposal.alternatives?.[0]?.operation ?? proposal.operations[0];
-}
-
-function queuePrimaryOperation(entry: StoryReviewQueueEntry): WriterOperation | undefined {
-  return entry.operations[0];
-}
-
-function debtPrimaryOperation(entry: StoryDebtEntry): WriterOperation | undefined {
-  return entry.operations[0];
-}
-
-function canonUpdateOperation(operations: WriterOperation[]): WriterOperation | undefined {
-  return operations.find((operation) => operation.kind === "canon.update_attribute");
-}
-
-function operationLabel(operation: WriterOperation): string {
-  if (operation.kind === "promise.resolve") return "Resolve";
-  if (operation.kind === "promise.defer") return "Defer";
-  if (operation.kind === "promise.abandon") return "Abandon";
-  if (operation.kind === "canon.update_attribute") return "Update Canon";
-  if (operation.kind === "text.replace") return "Apply Fix";
-  if (operation.kind === "text.insert") return "Insert";
-  return "Apply";
-}
-
-function operationApproval(
-  source: string,
-  reason: string,
-  proposalId?: string,
-): OperationApproval {
-  return {
-    source,
-    actor: "author",
-    reason,
-    proposalId,
-    surfacedToUser: true,
-    createdAt: Date.now(),
-  };
-}
-
-function nextChapterLabel(chapter?: string | null): string {
-  const match = chapter?.match(/(\d+)(?!.*\d)/);
-  return match ? `Chapter-${Number(match[1]) + 1}` : "later chapter";
-}
-
-function severityClass(severity: StoryReviewQueueEntry["severity"]): string {
-  if (severity === "error") return "border-danger/40 bg-danger/10";
-  if (severity === "warning") return "border-accent/30 bg-accent-subtle/20";
-  return "border-border-subtle bg-bg-raised";
-}
-
-function severityBadgeClass(severity: StoryReviewQueueEntry["severity"]): string {
-  if (severity === "error") return "bg-danger/20 text-danger";
-  if (severity === "warning") return "bg-accent-subtle text-accent";
-  return "bg-bg-deep text-text-muted";
-}
-
-function storageStatusClass(status: string): string {
-  if (status === "ok") return "text-success";
-  if (status === "missing") return "text-text-muted";
-  if (status === "error") return "text-danger";
-  return "text-accent";
-}
-
 function postWriteReportTone(report: WriterPostWriteDiagnosticReport): SecondBrainTone {
   if (report.errorCount > 0) return "danger";
   if (report.warningCount > 0) return "accent";
   return "success";
-}
-
-function diagnosticSeverityClass(severity: string): string {
-  if (severity === "Error" || severity === "error") return "bg-danger/20 text-danger";
-  if (severity === "Warning" || severity === "warning") return "bg-accent-subtle text-accent";
-  return "bg-bg-surface text-text-muted";
 }
 
 function memoryReliabilityTone(status: string): SecondBrainTone {
@@ -189,90 +87,6 @@ function postWriteReportCounts(report: WriterPostWriteDiagnosticReport): string 
   return `${report.errorCount} errors · ${report.warningCount} warnings · ${report.infoCount} info`;
 }
 
-function formatBytes(bytes?: number): string {
-  if (bytes === undefined) return "-";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function mergeProposal(prev: AgentProposal[], incoming: AgentProposal): AgentProposal[] {
-  const incomingSlot = proposalSlotKey(incoming);
-  const existingIndex = prev.findIndex((proposal) => proposalSlotKey(proposal) === incomingSlot);
-  if (existingIndex < 0) return [incoming, ...prev].slice(0, 20);
-
-  const existing = prev[existingIndex];
-  if (!shouldReplaceProposal(existing, incoming)) return prev;
-
-  const next = prev.filter((_, index) => index !== existingIndex);
-  return [incoming, ...next].slice(0, 20);
-}
-
-function emptyStoryContractDraft(): StoryContractDraft {
-  return {
-    title: "",
-    genre: "",
-    targetReader: "",
-    readerPromise: "",
-    first30ChapterPromise: "",
-    mainConflict: "",
-    structuralBoundary: "",
-    toneContract: "",
-  };
-}
-
-function storyContractDraftFromSummary(
-  contract: StoryContractSummary | null | undefined,
-): StoryContractDraft {
-  return {
-    title: contract?.title ?? "",
-    genre: contract?.genre ?? "",
-    targetReader: contract?.targetReader ?? "",
-    readerPromise: contract?.readerPromise ?? "",
-    first30ChapterPromise: contract?.first30ChapterPromise ?? "",
-    mainConflict: contract?.mainConflict ?? "",
-    structuralBoundary: contract?.structuralBoundary ?? "",
-    toneContract: contract?.toneContract ?? "",
-  };
-}
-
-function emptyChapterMissionDraft(): ChapterMissionDraft {
-  return {
-    mission: "",
-    mustInclude: "",
-    mustNot: "",
-    expectedEnding: "",
-    status: "active",
-    sourceRef: "author",
-  };
-}
-
-function chapterMissionDraftFromSummary(
-  mission: ChapterMissionSummary | null | undefined,
-): ChapterMissionDraft {
-  return {
-    mission: mission?.mission ?? "",
-    mustInclude: mission?.mustInclude ?? "",
-    mustNot: mission?.mustNot ?? "",
-    expectedEnding: mission?.expectedEnding ?? "",
-    status: mission?.status === "in_progress" ? "active" : mission?.status || "active",
-    sourceRef: mission?.sourceRef || "author",
-  };
-}
-
-function hasStoryContractContent(draft: StoryContractDraft): boolean {
-  return Object.values(draft).some((value) => value.trim().length > 0);
-}
-
-function hasChapterMissionContent(draft: ChapterMissionDraft): boolean {
-  return [
-    draft.mission,
-    draft.mustInclude,
-    draft.mustNot,
-    draft.expectedEnding,
-  ].some((value) => value.trim().length > 0);
-}
-
 type SecondBrainTone = "neutral" | "accent" | "danger" | "success";
 
 interface SecondBrainItem {
@@ -280,26 +94,6 @@ interface SecondBrainItem {
   value: string;
   detail?: string;
   tone: SecondBrainTone;
-}
-
-interface StoryContractDraft {
-  title: string;
-  genre: string;
-  targetReader: string;
-  readerPromise: string;
-  first30ChapterPromise: string;
-  mainConflict: string;
-  structuralBoundary: string;
-  toneContract: string;
-}
-
-interface ChapterMissionDraft {
-  mission: string;
-  mustInclude: string;
-  mustNot: string;
-  expectedEnding: string;
-  status: string;
-  sourceRef: string;
 }
 
 function compactLine(text: string | undefined, fallback: string, max = 96): string {
