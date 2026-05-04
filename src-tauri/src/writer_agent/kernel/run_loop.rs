@@ -77,7 +77,12 @@ impl WriterAgentKernel {
                 &self.memory,
                 None,
             );
-        self.record_story_impact_radius_run_event(&impact_radius, &impact_budget, now_ms());
+        self.record_story_impact_radius_run_event(
+            &request.observation.id,
+            &impact_radius,
+            &impact_budget,
+            now_ms(),
+        );
         let mut task_packet = build_task_packet_for_observation(
             &self.project_id,
             &self.session_id,

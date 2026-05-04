@@ -719,11 +719,15 @@ impl WriterAgentKernel {
 
     pub(super) fn record_story_impact_radius_run_event(
         &mut self,
+        observation_id: &str,
         radius: &crate::writer_agent::story_impact::WriterStoryImpactRadius,
         budget: &crate::writer_agent::story_impact::StoryImpactBudgetReport,
         ts_ms: u64,
     ) {
-        let source_refs: Vec<String> = radius.impacted_sources.iter().cloned().collect();
+        let mut source_refs: Vec<String> = vec![observation_id.to_string()];
+        source_refs.extend(radius.impacted_sources.iter().cloned());
+        source_refs.sort();
+        source_refs.dedup();
         let node_kinds: Vec<&str> = radius
             .impacted_nodes
             .iter()
@@ -732,9 +736,10 @@ impl WriterAgentKernel {
         self.record_run_event(
             "story_impact_radius_built",
             ts_ms,
-            None,
+            Some(observation_id.to_string()),
             source_refs,
             serde_json::json!({
+                "observationId": observation_id,
                 "seedCount": radius.seed_nodes.len(),
                 "impactedNodeCount": radius.impacted_nodes.len(),
                 "edgeCount": radius.edges.len(),

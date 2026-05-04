@@ -160,17 +160,17 @@ pub fn extract_seed_nodes(
     }
 
     // Open promises (top 3 by priority).
-    if let Ok(open) = memory.get_open_promises() {
-        for (kind, title, description, introduced) in open.iter().take(3) {
+    if let Ok(open) = memory.get_open_promise_summaries() {
+        for promise in open.iter().take(3) {
             seeds.push(WriterStoryGraphNode {
-                id: format!("promise:{}:{}", kind, title),
+                id: format!("promise:{}", promise.id),
                 kind: StoryNodeKind::PlotPromise,
-                label: title.clone(),
-                source_ref: format!("promise:{}:{}", kind, title),
+                label: promise.title.clone(),
+                source_ref: format!("promise:{}", promise.id),
                 source_revision: None,
-                chapter: Some(introduced.clone()),
+                chapter: Some(promise.introduced_chapter.clone()),
                 confidence: 0.85,
-                summary: description.clone(),
+                summary: promise.description.clone(),
             });
         }
     }
@@ -485,11 +485,13 @@ pub fn compute_story_impact_radius(
         reasons.push(format!("种子节点: {}", seed.label));
     }
 
-    // Build adjacency index: node_id → outgoing edges (avoids O(n²) scan).
+    // Build an undirected adjacency index so radius catches both dependencies
+    // and dependents, matching the conservative blast-radius discipline.
     let mut adjacency: std::collections::HashMap<&str, Vec<&WriterStoryGraphEdge>> =
         std::collections::HashMap::new();
     for edge in graph_edges {
         adjacency.entry(edge.from.as_str()).or_default().push(edge);
+        adjacency.entry(edge.to.as_str()).or_default().push(edge);
     }
     // Build node lookup: node_id → &node.
     let node_lookup: std::collections::HashMap<&str, &WriterStoryGraphNode> =
@@ -503,12 +505,17 @@ pub fn compute_story_impact_radius(
         let mut next_frontier = Vec::new();
 
         for node_id in &frontier {
-            let outgoing = adjacency.get(node_id.as_str());
-            for edge in outgoing.into_iter().flatten() {
-                if impacted_ids.contains(edge.to.as_str()) {
+            let adjacent = adjacency.get(node_id.as_str());
+            for edge in adjacent.into_iter().flatten() {
+                let target_id = if edge.from == *node_id {
+                    edge.to.as_str()
+                } else {
+                    edge.from.as_str()
+                };
+                if impacted_ids.contains(target_id) {
                     continue;
                 }
-                if let Some(target) = node_lookup.get(edge.to.as_str()) {
+                if let Some(target) = node_lookup.get(target_id) {
                     let node_chars = target.summary.chars().count();
                     if total_chars + node_chars > budget_limit {
                         truncated = true;
@@ -528,8 +535,8 @@ pub fn compute_story_impact_radius(
                         continue;
                     }
                     total_chars += node_chars;
-                    impacted_ids.insert(edge.to.clone());
-                    next_frontier.push(edge.to.clone());
+                    impacted_ids.insert(target.id.clone());
+                    next_frontier.push(target.id.clone());
                     impacted_edges.push((*edge).clone());
                     reasons.push(format!(
                         "距离 {}: {} -> {} ({})",
@@ -851,6 +858,39 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("promise:1")),
             "Promise should be in impacted sources"
+        );
+    }
+
+    #[test]
+    fn traverses_reverse_edges_for_dependents() {
+        let seeds = vec![make_node(
+            "canon:1",
+            StoryNodeKind::CanonEntity,
+            "寒玉戒指",
+            0.9,
+            "实体: 寒玉戒指",
+        )];
+        let nodes = vec![
+            seeds[0].clone(),
+            make_node(
+                "mission:ch3",
+                StoryNodeKind::ChapterMission,
+                "第三章任务",
+                0.9,
+                "推进寒玉戒指线索",
+            ),
+        ];
+        let edges = vec![make_edge(
+            "mission:ch3",
+            "canon:1",
+            StoryEdgeKind::SupportsMission,
+        )];
+
+        let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+
+        assert!(
+            radius.impacted_nodes.iter().any(|n| n.id == "mission:ch3"),
+            "Reverse traversal should include mission depending on seeded canon"
         );
     }
 

@@ -14,6 +14,10 @@ use agent_writer_lib::writer_agent::context_relevance::{
     format_text_chunk_relevance, rerank_text_chunks, writing_scene_types,
 };
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
+use agent_writer_lib::writer_agent::kernel::{
+    WriterAgentApprovalMode, WriterAgentFrontendState, WriterAgentRunRequest,
+    WriterAgentStreamMode, WriterAgentTask,
+};
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::observation::ObservationReason;
 use agent_writer_lib::writer_agent::observation::ObservationSource;
@@ -2452,8 +2456,8 @@ pub fn run_end_to_end_mission_drift_detection_eval() -> EvalResult {
 // ── Story Impact Radius ──
 
 use agent_writer_lib::writer_agent::story_impact::{
-    compute_story_impact_radius, StoryEdgeKind, StoryImpactRisk, StoryNodeKind,
-    WriterStoryGraphEdge, WriterStoryGraphNode,
+    build_story_graph, compute_story_impact, compute_story_impact_radius, extract_seed_nodes,
+    StoryEdgeKind, StoryImpactRisk, StoryNodeKind, WriterStoryGraphEdge, WriterStoryGraphNode,
 };
 
 fn make_si_node(
@@ -2686,6 +2690,201 @@ pub fn run_story_impact_radius_maps_operation_to_story_nodes_eval() -> EvalResul
             radius.impacted_nodes.len(),
             radius.impacted_sources.len()
         ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_traverses_reverse_edges_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let seeds = vec![make_si_node(
+        "canon:1",
+        StoryNodeKind::CanonEntity,
+        "jade ring",
+        0.9,
+        "entity: jade ring",
+    )];
+    let nodes = vec![
+        seeds[0].clone(),
+        make_si_node(
+            "mission:ch3",
+            StoryNodeKind::ChapterMission,
+            "ch3 mission",
+            0.9,
+            "advance jade ring clue",
+        ),
+    ];
+    let edges = vec![make_si_edge(
+        "mission:ch3",
+        "canon:1",
+        StoryEdgeKind::SupportsMission,
+    )];
+    let radius = compute_story_impact_radius(&seeds, &nodes, &edges, 500);
+    if !radius.impacted_nodes.iter().any(|n| n.id == "mission:ch3") {
+        errors.push("reverse traversal should include dependent mission".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_traverses_reverse_edges",
+        format!(
+            "impacted={} reverseIncluded={}",
+            radius.impacted_nodes.len(),
+            radius.impacted_nodes.iter().any(|n| n.id == "mission:ch3")
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_impact_radius_memory_seed_ids_align_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    let promise_id = memory
+        .add_promise(
+            "object_whereabouts",
+            "寒玉戒指",
+            "寒玉戒指被黑衣人夺走，必须在第五章回收。",
+            "Chapter-2",
+            "Chapter-5",
+            8,
+        )
+        .unwrap();
+    let observation = observation_in_chapter("林墨摸了摸空荡荡的手指。", "Chapter-3");
+    let kernel = WriterAgentKernel::new("eval", memory);
+    let pack = kernel.context_pack_for_default(AgentTask::GhostWriting, &observation);
+    let seeds = extract_seed_nodes(&observation, &pack, &kernel.memory);
+    let (nodes, _edges) = build_story_graph(&kernel.memory, "eval");
+    let expected_id = format!("promise:{}", promise_id);
+    if !seeds.iter().any(|n| n.id == expected_id) {
+        errors.push(format!("seed missing expected promise id {}", expected_id));
+    }
+    if !nodes.iter().any(|n| n.id == expected_id) {
+        errors.push(format!("graph missing expected promise id {}", expected_id));
+    }
+    let (radius, _budget) = compute_story_impact(&observation, &pack, &kernel.memory, Some(500));
+    if !radius.impacted_nodes.iter().any(|n| n.id == expected_id) {
+        errors.push("radius should include memory-backed promise seed".to_string());
+    }
+    eval_result(
+        "writer_agent:story_impact_radius_memory_seed_ids_align",
+        format!(
+            "seed={} graph={} impacted={}",
+            seeds.iter().any(|n| n.id == expected_id),
+            nodes.iter().any(|n| n.id == expected_id),
+            radius.impacted_nodes.iter().any(|n| n.id == expected_id)
+        ),
+        errors,
+    )
+}
+
+struct StoryImpactEvalToolHandler;
+
+#[async_trait::async_trait]
+impl agent_harness_core::ToolHandler for StoryImpactEvalToolHandler {
+    async fn execute(
+        &self,
+        tool_name: &str,
+        _args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"reachedHandler": true, "tool": tool_name}))
+    }
+}
+
+pub fn run_story_impact_radius_run_event_links_observation_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "寒玉戒指线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_whereabouts",
+            "寒玉戒指",
+            "寒玉戒指被黑衣人夺走，必须回收。",
+            "Chapter-2",
+            "Chapter-5",
+            8,
+        )
+        .unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨摸了摸空荡荡的手指。", "Chapter-3");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let observation_id = obs.id.clone();
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "这段接下来怎么推进？".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨摸了摸空荡荡的手指。".to_string(),
+            paragraph: "林墨摸了摸空荡荡的手指。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    if let Err(error) =
+        kernel.prepare_task_run(request, provider, StoryImpactEvalToolHandler, "gpt-4o-mini")
+    {
+        errors.push(format!("prepare_task_run failed: {}", error));
+    }
+    let trace = kernel.trace_snapshot(20);
+    let event = trace
+        .run_events
+        .iter()
+        .find(|event| event.event_type == "writer.story_impact_radius_built");
+    match event {
+        Some(event) => {
+            if event.task_id.as_deref() != Some(observation_id.as_str()) {
+                errors.push(format!(
+                    "story impact event task_id should be observation id, got {:?}",
+                    event.task_id
+                ));
+            }
+            if !event
+                .source_refs
+                .iter()
+                .any(|source| source == &observation_id)
+            {
+                errors.push(format!(
+                    "story impact event source_refs missing observation id: {:?}",
+                    event.source_refs
+                ));
+            }
+            if event
+                .data
+                .get("observationId")
+                .and_then(|value| value.as_str())
+                != Some(observation_id.as_str())
+            {
+                errors.push(format!(
+                    "story impact event payload missing observationId: {:?}",
+                    event.data
+                ));
+            }
+        }
+        None => errors.push("missing writer.story_impact_radius_built run event".to_string()),
+    }
+
+    eval_result(
+        "writer_agent:story_impact_radius_run_event_links_observation",
+        format!("event={} observation={}", event.is_some(), observation_id),
         errors,
     )
 }

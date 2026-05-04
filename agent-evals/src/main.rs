@@ -169,6 +169,9 @@ fn main() {
     results.push(run_story_impact_radius_excludes_semantic_distractor_eval());
     results.push(run_story_impact_radius_reports_truncated_sources_eval());
     results.push(run_story_impact_radius_maps_operation_to_story_nodes_eval());
+    results.push(run_story_impact_radius_traverses_reverse_edges_eval());
+    results.push(run_story_impact_radius_memory_seed_ids_align_eval());
+    results.push(run_story_impact_radius_run_event_links_observation_eval());
     results.push(run_story_impact_radius_small_change_stays_minimal_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
