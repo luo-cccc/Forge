@@ -1,9 +1,12 @@
 use crate::fixtures::*;
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
-use agent_writer_lib::writer_agent::memory::{ChapterResultSummary, WriterMemory};
+use agent_writer_lib::writer_agent::memory::{
+    ChapterMissionSummary, ChapterResultSummary, WriterMemory,
+};
 use agent_writer_lib::writer_agent::observation::{ObservationReason, ObservationSource};
 use agent_writer_lib::writer_agent::proposal::{EvidenceSource, ProposalKind};
+use agent_writer_lib::writer_agent::trajectory::export_trace_snapshot;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
 use std::path::Path;
 
@@ -19,6 +22,7 @@ pub fn run_product_scenario_evals() -> Vec<EvalResult> {
         run_scenario_style_feedback_affects_ghost_context_eval(),
         run_scenario_manual_ask_records_decision_eval(),
         run_scenario_context_explainability_for_longform_eval(),
+        run_continuous_writing_fixture_20_chapters_eval(),
     ]
 }
 
@@ -650,4 +654,407 @@ fn run_scenario_context_explainability_for_longform_eval() -> EvalResult {
         ),
         errors,
     )
+}
+
+fn run_continuous_writing_fixture_20_chapters_eval() -> EvalResult {
+    let db_path = std::env::temp_dir().join(format!(
+        "forge-continuous-writing-20-{}-{}.sqlite",
+        std::process::id(),
+        now_ms()
+    ));
+    let mut errors = Vec::new();
+    let session_a_metrics;
+    let session_b_metrics;
+    let session_b_debt;
+    let session_b_context_sources;
+    let latest_result_count;
+    let mission_completed;
+    let mission_drifted;
+    let promise_context_hit;
+    let promise_recall_hit;
+    let trace_has_product_trend;
+    let trace_has_context_recall;
+    let trajectory_has_save;
+
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        seed_continuous_writing_memory(&memory);
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "continuous-20-session-a".to_string();
+        simulate_continuous_writing_session(&mut kernel, 1, 10, 30);
+        session_a_metrics = kernel.trace_snapshot(120).product_metrics;
+    }
+
+    {
+        let memory = WriterMemory::open(&db_path).unwrap();
+        let mut kernel = WriterAgentKernel::new("eval", memory);
+        kernel.session_id = "continuous-20-session-b".to_string();
+        simulate_continuous_writing_session(&mut kernel, 11, 20, 140);
+
+        let obs = observation_in_chapter(
+            "林墨把霜铃塔钥按进潮汐祭账的暗格，决定先保住张三，而不是揭开白昼王座的来源。",
+            "Chapter-20",
+        );
+        let pack = kernel.context_pack_for_default(AgentTask::PlanningReview, &obs);
+        session_b_context_sources = pack
+            .sources
+            .iter()
+            .map(|source| format!("{:?}", source.source))
+            .collect::<Vec<_>>();
+        promise_context_hit = pack.sources.iter().any(|source| {
+            source.source == ContextSource::PromiseSlice && source.content.contains("霜铃塔钥")
+        });
+
+        let ledger = kernel.ledger_snapshot();
+        latest_result_count = ledger.recent_chapter_results.len();
+        mission_completed = ledger
+            .chapter_missions
+            .iter()
+            .filter(|mission| mission.status == "completed")
+            .count();
+        mission_drifted = ledger
+            .chapter_missions
+            .iter()
+            .filter(|mission| mission.status == "drifted")
+            .count();
+
+        let snapshot = kernel.trace_snapshot(200);
+        session_b_metrics = snapshot.product_metrics.clone();
+        session_b_debt = kernel.story_debt_snapshot();
+        promise_recall_hit = snapshot
+            .context_recalls
+            .iter()
+            .any(|recall| recall.source == "PromiseLedger" && recall.snippet.contains("霜铃塔钥"));
+        trace_has_product_trend = snapshot.product_metrics_trend.session_count >= 2
+            && snapshot.product_metrics_trend.recent_sessions.len() >= 2
+            && snapshot
+                .product_metrics_trend
+                .overall_average_save_to_feedback_ms
+                .is_some()
+            && snapshot
+                .product_metrics_trend
+                .save_to_feedback_delta_ms
+                .is_some();
+        trace_has_context_recall = !snapshot.context_recalls.is_empty();
+        let export = export_trace_snapshot("eval", &kernel.session_id, &snapshot);
+        trajectory_has_save = export
+            .jsonl
+            .contains("\"eventType\":\"writer.save_completed\"")
+            && export
+                .jsonl
+                .contains("\"eventType\":\"writer.product_metrics_trend\"")
+            && export
+                .jsonl
+                .contains("\"eventType\":\"writer.context_recall\"");
+    }
+
+    let _ = std::fs::remove_file(&db_path);
+
+    if latest_result_count < 20 {
+        errors.push(format!(
+            "continuous fixture recorded only {} chapter results",
+            latest_result_count
+        ));
+    }
+    if mission_completed < 6 {
+        errors.push(format!(
+            "continuous fixture completed too few missions: {}",
+            mission_completed
+        ));
+    }
+    if mission_drifted == 0 {
+        errors.push("continuous fixture did not preserve a mission drift case".to_string());
+    }
+    if session_b_debt.promise_count == 0 || session_b_debt.mission_count == 0 {
+        errors.push(format!(
+            "story debt did not include both promise and mission debt: promise={} mission={}",
+            session_b_debt.promise_count, session_b_debt.mission_count
+        ));
+    }
+    if !promise_context_hit {
+        errors.push("planning context did not recall the long-running key promise".to_string());
+    }
+    if !promise_recall_hit {
+        errors.push("context recall ledger did not record PromiseLedger evidence".to_string());
+    }
+    if session_a_metrics.proposal_count < 2 || session_b_metrics.proposal_count < 2 {
+        errors.push(format!(
+            "sessions produced too few proposals: a={} b={}",
+            session_a_metrics.proposal_count, session_b_metrics.proposal_count
+        ));
+    }
+    if session_b_metrics.feedback_count < 2
+        || session_b_metrics.average_save_to_feedback_ms.is_none()
+    {
+        errors.push(format!(
+            "session-b feedback/save metrics incomplete: feedback={} latency={:?}",
+            session_b_metrics.feedback_count, session_b_metrics.average_save_to_feedback_ms
+        ));
+    }
+    if session_b_metrics.promise_recall_hit_rate <= 0.0 {
+        errors.push("promise recall hit rate did not move above zero".to_string());
+    }
+    if !trace_has_product_trend {
+        errors.push("product metrics trend did not prove multi-session replay".to_string());
+    }
+    if !trace_has_context_recall {
+        errors.push("trace snapshot lacked context recalls".to_string());
+    }
+    if !trajectory_has_save {
+        errors.push("trajectory did not export save/metrics/context events".to_string());
+    }
+
+    eval_result(
+        "writer_agent:continuous_writing_fixture_20_chapters",
+        format!(
+            "expected=20-chapter continuous product fixture actual=results:{} completed:{} drifted:{} debt:{} promiseDebt:{} missionDebt:{} sources:{:?} aFeedback:{} bFeedback:{} bLatency:{:?}",
+            latest_result_count,
+            mission_completed,
+            mission_drifted,
+            session_b_debt.total,
+            session_b_debt.promise_count,
+            session_b_debt.mission_count,
+            session_b_context_sources,
+            session_a_metrics.feedback_count,
+            session_b_metrics.feedback_count,
+            session_b_metrics.average_save_to_feedback_ms
+        ),
+        errors,
+    )
+}
+
+fn seed_continuous_writing_memory(memory: &WriterMemory) {
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "霜塔旧账",
+            "长篇玄幻悬疑",
+            "林墨在二十章内追查霜铃塔钥与潮汐祭账的因果，同时保护张三的灰色忠诚。",
+            "林墨必须在守护张三与揭开白昼王座之间持续付出代价。",
+            "不得提前揭示白昼王座真正来源；不得把霜铃塔钥当作普通钥匙处理。",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &["寒影刀客".to_string()],
+            "主角，惯用寒影刀，追查霜铃塔钥与潮汐祭账。",
+            &serde_json::json!({"weapon": "寒影刀", "loyalty": "protects Zhang San"}),
+            0.92,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "张三",
+            &["账房".to_string()],
+            "张三保管过潮汐祭账，动机可疑但多次保护林墨。",
+            &serde_json::json!({"holdsLedger": true, "trust": "unstable"}),
+            0.88,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "object",
+            "霜铃塔钥",
+            &["塔钥".to_string()],
+            "开启霜铃塔旧门的钥匙，与潮汐祭账缺页互相印证。",
+            &serde_json::json!({"location": "with Lin Mo", "risk": "reveals old debt"}),
+            0.9,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "object",
+            "潮汐祭账",
+            &["祭账".to_string()],
+            "记载白昼王座旧债的账册，缺页仍未找回。",
+            &serde_json::json!({"missingPage": true}),
+            0.87,
+        )
+        .unwrap();
+    memory
+        .upsert_canon_rule(
+            "白昼王座的真正来源必须延后到二十章后再揭示。",
+            "mystery_boundary",
+            8,
+            "fixture",
+        )
+        .unwrap();
+    memory
+        .upsert_style_preference("accepted_Ghost", "短句、克制、少解释", true)
+        .unwrap();
+    memory
+        .add_promise_with_entities(
+            "object_whereabouts",
+            "霜铃塔钥",
+            "霜铃塔钥能打开旧门，但不能提前解释白昼王座来源",
+            "Chapter-1",
+            "Chapter-20",
+            8,
+            &["霜铃塔钥".to_string(), "白昼王座".to_string()],
+        )
+        .unwrap();
+    memory
+        .add_promise_with_entities(
+            "mystery_clue",
+            "潮汐祭账缺页",
+            "潮汐祭账缺页记录张三背叛的真实原因",
+            "Chapter-3",
+            "Chapter-18",
+            7,
+            &["潮汐祭账".to_string(), "张三".to_string()],
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "emotional_debt",
+            "张三的真正道歉",
+            "张三欠林墨一次不带借口的道歉",
+            "Chapter-5",
+            "Chapter-16",
+            6,
+        )
+        .unwrap();
+
+    for chapter in 1..=20 {
+        let mission = continuous_chapter_mission(chapter);
+        memory.upsert_chapter_mission(&mission).unwrap();
+    }
+}
+
+fn continuous_chapter_mission(chapter: usize) -> ChapterMissionSummary {
+    ChapterMissionSummary {
+        id: 0,
+        project_id: "eval".to_string(),
+        chapter_title: format!("Chapter-{}", chapter),
+        mission: format!(
+            "推进林墨与张三围绕霜铃塔钥、潮汐祭账和第{}章压力的选择。",
+            chapter
+        ),
+        must_include: continuous_must_include(chapter),
+        must_not: if chapter >= 15 {
+            "提前揭示白昼王座来源".to_string()
+        } else {
+            "跳过霜铃塔钥因果".to_string()
+        },
+        expected_ending: continuous_expected_ending(chapter),
+        status: "active".to_string(),
+        source_ref: format!("fixture:chapter-mission:{}", chapter),
+        updated_at: String::new(),
+    }
+}
+
+fn continuous_must_include(chapter: usize) -> String {
+    match chapter {
+        1 | 2 => "霜铃塔钥".to_string(),
+        3 | 4 => "潮汐祭账".to_string(),
+        5 | 6 => "张三".to_string(),
+        7 | 8 => "旧门".to_string(),
+        9 | 10 => "寒影刀".to_string(),
+        11 | 12 => "缺页".to_string(),
+        13 | 14 => "信任".to_string(),
+        15 | 16 => "道歉".to_string(),
+        17 | 18 => "祭账".to_string(),
+        _ => "霜铃塔钥".to_string(),
+    }
+}
+
+fn continuous_expected_ending(chapter: usize) -> String {
+    continuous_must_include(chapter)
+}
+
+fn simulate_continuous_writing_session(
+    kernel: &mut WriterAgentKernel,
+    start: usize,
+    end: usize,
+    feedback_delay_ms: u64,
+) {
+    for chapter in start..=end {
+        kernel.active_chapter = Some(format!("Chapter-{}", chapter));
+        let paragraph = continuous_chapter_text(chapter);
+        kernel
+            .observe(save_observation(
+                &paragraph,
+                &format!("Chapter-{}", chapter),
+            ))
+            .unwrap();
+
+        if matches!(chapter, 4 | 9 | 13 | 17 | 20) {
+            let observation = observation_in_chapter(&paragraph, &format!("Chapter-{}", chapter));
+            let continuation = format!(
+                "林墨把第{}章的选择压低成一句话：先保住人，再追问债。",
+                chapter
+            );
+            let proposal = kernel
+                .create_llm_ghost_proposal(observation, continuation.clone(), "fixture-model")
+                .unwrap();
+            let operation = proposal.operations[0].clone();
+            kernel
+                .record_operation_durable_save(
+                    Some(proposal.id.clone()),
+                    operation,
+                    format!("editor_save:chapter-{}", chapter),
+                )
+                .unwrap();
+            kernel
+                .apply_feedback(ProposalFeedback {
+                    proposal_id: proposal.id.clone(),
+                    action: if matches!(chapter, 13) {
+                        FeedbackAction::Edited
+                    } else {
+                        FeedbackAction::Accepted
+                    },
+                    final_text: Some(continuation),
+                    reason: Some(format!("continuous fixture chapter {}", chapter)),
+                    created_at: now_ms() + feedback_delay_ms + chapter as u64,
+                })
+                .unwrap();
+        } else if matches!(chapter, 6 | 15) {
+            let observation = observation_in_chapter(&paragraph, &format!("Chapter-{}", chapter));
+            let proposal = kernel
+                .create_llm_ghost_proposal(
+                    observation,
+                    "张三忽然解释了一切，白昼王座来源也被说破。".to_string(),
+                    "fixture-model",
+                )
+                .unwrap();
+            kernel
+                .apply_feedback(ProposalFeedback {
+                    proposal_id: proposal.id.clone(),
+                    action: FeedbackAction::Rejected,
+                    final_text: None,
+                    reason: Some("作者拒绝过早揭示核心谜底".to_string()),
+                    created_at: now_ms() + feedback_delay_ms + chapter as u64,
+                })
+                .unwrap();
+        }
+    }
+}
+
+fn continuous_chapter_text(chapter: usize) -> String {
+    match chapter {
+        1 => "林墨发现霜铃塔钥在旧井边发冷，决定把它藏进袖中。线索没有解释来源，只留下新的疑问。".to_string(),
+        2 => "林墨握着霜铃塔钥听见塔内铃声，发现钥齿和旧门铜痕相合，选择暂不告诉张三。".to_string(),
+        3 => "张三交出潮汐祭账，林墨发现账册缺页，怀疑有人删去了白昼王座的旧债。".to_string(),
+        4 => "潮汐祭账被雨水打湿，林墨确认缺页边缘有霜铃塔印，新的敌人开始追查账册。".to_string(),
+        5 => "张三挡下追兵，林墨决定暂时相信他，却仍把霜铃塔钥握在掌心。".to_string(),
+        6 => "张三拒绝说明背叛原因，林墨发现他的伤口来自旧门机关，信任仍被怀疑撕扯。".to_string(),
+        7 => "林墨带张三返回旧门，霜铃塔钥只转动半圈，门后传来账册缺页被焚的气味。".to_string(),
+        8 => "旧门忽然合拢，林墨选择救张三而不是追门后黑影，新的危险压住了钥匙线索。".to_string(),
+        9 => "林墨拔出寒影刀，发现刀身映出潮汐祭账缺页的编号，敌人杀意逼近。".to_string(),
+        10 => "寒影刀斩断锁链，林墨确认旧门机关会吞掉持钥者的记忆，新的选择变得更重。".to_string(),
+        11 => "林墨在废庙发现缺页拓印，潮汐祭账的空白处只留下张三的旧名。".to_string(),
+        12 => "缺页拓印被敌人夺走，林墨发现张三曾试图保护孩子，危机转向城南码头。".to_string(),
+        13 => "林墨没有直接追问张三，而是把信任押在他递来的半页祭账上。".to_string(),
+        14 => "张三承认自己曾背叛林墨，林墨选择继续同行，信任变成有条件的交换。".to_string(),
+        15 => "白昼王座来源忽然被说破，整章只写山色、雨声和远处灯火，林墨没有见到张三，也没有处理道歉。".to_string(),
+        16 => "张三终于低头道歉，林墨没有原谅，却决定让他活到潮汐祭账真相出现。".to_string(),
+        17 => "祭账缺页在塔底重现，林墨发现霜铃塔钥能换来一次延后揭示的机会。".to_string(),
+        18 => "林墨用祭账缺页逼退敌人，仍没有说破白昼王座来源，只把债推到更深处。".to_string(),
+        19 => "林墨把霜铃塔钥交还张三保管，决定先保护活人，再追问白昼王座。".to_string(),
+        20 => "霜铃塔钥插进暗格，潮汐祭账展开新页，林墨发现这不是结局，只是更大的债。".to_string(),
+        _ => "林墨继续推进线索。".to_string(),
+    }
 }

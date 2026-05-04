@@ -128,7 +128,7 @@ pub(crate) fn product_metrics_from_trace(
     let recalls = context_recalls.unwrap_or_default();
     let promise_recalls = recalls
         .iter()
-        .filter(|recall| recall.source == "PromiseSlice")
+        .filter(|recall| is_promise_context_recall(&recall.source))
         .count() as u64;
     let promise_recall_hit_rate = ratio(promise_recalls, recalls.len() as u64);
 
@@ -294,6 +294,10 @@ fn ratio(numerator: u64, denominator: u64) -> f64 {
     } else {
         numerator as f64 / denominator as f64
     }
+}
+
+fn is_promise_context_recall(source: &str) -> bool {
+    matches!(source, "PromiseSlice" | "PromiseLedger")
 }
 
 #[derive(Default)]

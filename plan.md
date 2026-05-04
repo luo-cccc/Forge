@@ -26,7 +26,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 关键保存风险已处理：dirty state、chapter switching、autosave、inline operation、accepted feedback、batch generation dirty protection。
 - `ask_agent` 已不再在 command 层直接创建旧 `AgentLoop`，现在通过 Writer Agent Kernel 的 `prepare_task_run` / `run_task` 执行。
 - Operation lifecycle 已进入 trace：proposed、approved、applied、durably_saved、feedback_recorded。
-- Command boundary audit 已覆盖 51 个 Tauri commands，并进入 `npm run verify`。
+- Command boundary audit 已覆盖 52 个 Tauri commands，并进入 `npm run verify`。
 - Tauri command handlers 已全部移入 `src-tauri/src/commands/*`；`src-tauri/src/lib.rs` 当前不再包含 `#[tauri::command]`。
 - AppState、启动期 Hermes/Writer memory DB 打开、legacy DB migration、kernel seed 逻辑已抽入 `src-tauri/src/app_state.rs`。
 - Semantic lint payload/event 和设定/诊断 lint 逻辑已抽入 `src-tauri/src/semantic_lint.rs`。
@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 当前约 170 行，主要保留模块 wiring、Tauri setup 和 command registration。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前本轮已验证：`cargo run -p agent-evals --quiet` 152/152 passing，新增 `writer_agent:continuity_diagnostic_artifact_recorded` 覆盖 ContinuityDiagnostic 完整 run 后把模型诊断答案登记为 `diagnostic_report` task artifact，并进入 `writer.task_artifact` run event、trajectory 和 Inspector `task_artifact` 事件；`writer_agent:goal_drift_creates_story_debt` 覆盖 accepted operation durable-save 后写诊断把 mission drift 进入 pending proposal / story debt；`writer_agent:generic_persona_not_used_as_foundation` 覆盖 TaskPacket beliefs / required context 来自 Story Contract、Chapter Mission、Promise、Canon、作者风格和反馈等写作基础来源；`writer_agent:promise_payoff_planner_prioritizes_nearby_debts` 继续覆盖本章 payoff、远期高优先级伏笔 defer、must_not overlap 避免打扰和 resolved promise quiet；`writer_agent:belief_conflict_explains_sources` 继续覆盖 Story Contract / Chapter Mission / Canon / Promise Ledger / Project Brain 来源解释；完整 `npm run verify` passing。
+- 当前本轮已验证：`cargo run -p agent-evals --quiet` 153/153 passing，新增 `writer_agent:continuous_writing_fixture_20_chapters` 覆盖两段 session、连续 20 章保存观察、Story Contract / Chapter Mission / Canon / Promise / Style foundation、长线伏笔召回、任务漂移、作者采纳/编辑/拒绝反馈、durable save、multi-session product metrics trend、trajectory save/metrics/context export；并修正 `promise_recall_hit_rate` 统计口径，使当前 context recall 存储中的 `PromiseLedger` 证据源和旧 `PromiseSlice` 名称都计入 promise recall。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 - P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，ContinuityDiagnostic 已有只读 receipt、diagnostic_report task artifact、trajectory 回放和 Inspector receipt/artifact 筛选；记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report，accepted operation 后写诊断已会把诊断结果注册为可审查 proposal / story debt，不自动改写正文；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口。
 
@@ -44,7 +44,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract / Chapter Mission 仍偏基础表单，还没有成为每次生成、诊断、保存的强门禁体验。
-- `agent-evals/src/product_scenarios.rs` 已集中承载 10 个真实长篇产品场景 eval；下一步要继续提升场景真实性和失败解释质量，而不是只堆数量。
+- `agent-evals/src/product_scenarios.rs` 已集中承载 11 个真实长篇产品场景 eval；新增连续 20 章合成 fixture 已把多章保存、伏笔、任务漂移、作者反馈和产品指标串成同一条可验证链路。下一步要继续引入真实作者项目数据对照，而不是只堆数量或合成场景。
 - `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入职责模块，kernel facade 当前约 450 行。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。
 
 ## 2. 总体原则
@@ -387,12 +387,13 @@ proposed -> approved -> applied -> durably_saved -> feedback_recorded
 - chapter mission completion rate
 - manual ask converted-to-operation rate
 
-当前状态：工程第一版已完成，但产品验证不能按完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。多 session 第一阶段已完成：`WriterAgentTraceSnapshot.productMetricsTrend` 会从持久化 `writer_run_events` 按 session 聚合 proposal / feedback / operation lifecycle，Inspect 模式展示最近 session 的 save-to-feedback 平均值、上一 session 对照、总体平均值和 delta，trajectory JSONL 额外导出 `writer.product_metrics_trend`。剩余工作是用真实连续写作场景证明这些指标与作者价值相关。
+当前状态：工程第一版已完成，但产品验证不能按真实作者项目完成态理解。上述指标已从 Writer Agent trace 派生，并随 trajectory JSONL 以 `writer.product_metrics` 事件导出；Companion 写作模式会摘要采纳率和保存健康度。多 session 第一阶段已完成：`WriterAgentTraceSnapshot.productMetricsTrend` 会从持久化 `writer_run_events` 按 session 聚合 proposal / feedback / operation lifecycle，Inspect 模式展示最近 session 的 save-to-feedback 平均值、上一 session 对照、总体平均值和 delta，trajectory JSONL 额外导出 `writer.product_metrics_trend`。连续写作验证第一阶段已完成：`writer_agent:continuous_writing_fixture_20_chapters` 用合成 20 章长篇项目覆盖保存观察、任务漂移、伏笔召回、作者反馈和指标趋势。剩余工作是用真实作者项目数据证明这些指标与作者价值相关，并校准阈值。
 
 验收标准：
 
 - 本地 trajectory export 可包含匿名化指标摘要。（已完成）
 - Companion / debug view 能查看最近写作 session 的 agent 有用程度。（已完成第一阶段：Companion 显示当前摘要，Inspect 显示多 session 趋势）
+- 连续 10-20 章 fixture 能把保存、反馈、伏笔、任务漂移、story debt 和 product metrics 串成同一条可回放证据链。（已完成第一阶段：合成 20 章 fixture）
 
 ## 8. P2：上下文、记忆、检索继续补强
 
@@ -513,7 +514,7 @@ Verification：
 
 目标：`lib.rs` 只保留 app setup、command registration 和少量跨模块 glue。
 
-当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 51 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 当前约 170 行，只保留模块 wiring、Tauri setup 和 command registration。
+当前状态：已完成。command handler 拆分已完成；`lib.rs` 当前有 0 个 `#[tauri::command]`，所有 52 个 Tauri commands 都在 `src-tauri/src/commands/*` 下。`src-tauri/src/app_state.rs` 已承接 AppState、锁 helper、memory DB 初始化、legacy DB migration 和 Writer Kernel seed。`src-tauri/src/semantic_lint.rs` 已承接 SemanticLint payload/event、设定冲突 lint 和 Writer Agent diagnostic lint。`src-tauri/src/memory_context.rs` 已承接 manual request context injection、用户画像读取、章节 embedding、近期技能抽取和 LLM memory candidate 生成。`src-tauri/src/observation_bridge.rs` 已承接 Agent/editor/manual observation payload 和 WriterObservation 转换逻辑。`src-tauri/src/editor_realtime.rs` 已承接 editor ghost rendering、ambient output 转发、editor prediction 清理、realtime cowrite 开关和 LLM ghost proposal flow。`api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs` 已承接原先散落在 root 的通用 helper 和写作保存观察 helper。`src-tauri/src/tests.rs` 已承接原 `lib.rs` 内联测试。`lib.rs` 当前约 170 行，只保留模块 wiring、Tauri setup 和 command registration。
 
 建议模块：
 
@@ -1005,10 +1006,13 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 4. Product metrics 趋势。
    - 当前已有 acceptance rate、ignored suggestion rate、promise recall、canon false-positive、mission completion、durable save、save-to-feedback latency。
    - 多 session 第一阶段已完成：`productMetricsTrend` 从持久化 `writer_run_events` 按 session 聚合最近/上一 session 的 save-to-feedback latency、总体平均值、delta、采纳率和 durable save 成功率；Inspect 模式展示趋势，trajectory 导出 `writer.product_metrics_trend`。
-   - 下一步增加真实项目 fixture 对照和更长历史窗口校准。
+   - 连续写作第一阶段已完成：`writer_agent:continuous_writing_fixture_20_chapters` 使用两段 session / 临时 SQLite 持久化 run event，验证 20 章保存观察、作者反馈、durable save、story debt 和 `writer.product_metrics_trend` 能在同一条轨迹中回放。
+   - `promise_recall_hit_rate` 已修正为同时识别 context recall 里的 `PromiseLedger` 和旧 `PromiseSlice` 来源，避免当前证据映射下 promise recall 被错误计为 0。
+   - 下一步增加真实作者项目 fixture 对照和更长历史窗口校准。
 5. Continuous writing fixture。
-   - 不只测单函数输出。
-   - 至少覆盖连续 10-20 章的设定、伏笔、物件、角色关系、任务漂移、作者反馈。
+   - 当前状态：第一阶段已完成。新增 `writer_agent:continuous_writing_fixture_20_chapters`，不只测单函数输出，而是通过 `WriterAgentKernel::observe`、`create_llm_ghost_proposal`、durable save、`apply_feedback`、trace snapshot 和 trajectory export 走真实链路。
+   - 覆盖连续 20 章的设定、伏笔、物件、角色关系、任务漂移、作者采纳/编辑/拒绝反馈。
+   - 边界：当前仍是合成作者项目 fixture；它证明工程链路能跨章节回放和计算指标，不证明真实作者数据上的阈值、召回率和误报率已经达标。
 
 验收：
 
@@ -1025,7 +1029,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - `writer_agent:tool_called_run_event`（已完成）
 - `writer_agent:tool_executor_audit_records_tool_called`（已完成）
 - `writer_agent:product_metrics_multi_session_trend`（已完成）
-- `writer_agent:continuous_writing_fixture_20_chapters`
+- `writer_agent:continuous_writing_fixture_20_chapters`（已完成第一阶段：合成 20 章连续写作 product fixture）
 
 ### 11.7 不建议照搬的机制
 
