@@ -716,6 +716,39 @@ impl WriterAgentKernel {
             })
             .ok();
     }
+
+    pub(super) fn record_story_impact_radius_run_event(
+        &mut self,
+        radius: &crate::writer_agent::story_impact::WriterStoryImpactRadius,
+        budget: &crate::writer_agent::story_impact::StoryImpactBudgetReport,
+        ts_ms: u64,
+    ) {
+        let source_refs: Vec<String> = radius.impacted_sources.iter().cloned().collect();
+        let node_kinds: Vec<&str> = radius
+            .impacted_nodes
+            .iter()
+            .map(|n| n.kind.as_str())
+            .collect();
+        self.record_run_event(
+            "story_impact_radius_built",
+            ts_ms,
+            None,
+            source_refs,
+            serde_json::json!({
+                "seedCount": radius.seed_nodes.len(),
+                "impactedNodeCount": radius.impacted_nodes.len(),
+                "edgeCount": radius.edges.len(),
+                "risk": format!("{:?}", radius.risk),
+                "truncated": radius.truncated,
+                "truncatedNodeCount": budget.truncated_node_count,
+                "budgetLimit": budget.budget_limit,
+                "providedChars": budget.provided_chars,
+                "requestedChars": budget.requested_chars,
+                "impactedNodeKinds": node_kinds,
+                "reasons": budget.reasons,
+            }),
+        );
+    }
 }
 
 fn observation_source_refs(observation: &WriterObservation) -> Vec<String> {

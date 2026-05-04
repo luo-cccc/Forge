@@ -70,6 +70,14 @@ impl WriterAgentKernel {
             .collect::<Vec<_>>();
         let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
         self.record_context_pack_built_run_event(&request.observation, &context_pack, now_ms());
+        let (impact_radius, impact_budget) =
+            crate::writer_agent::story_impact::compute_story_impact(
+                &request.observation,
+                &context_pack,
+                &self.memory,
+                None,
+            );
+        self.record_story_impact_radius_run_event(&impact_radius, &impact_budget, now_ms());
         let mut task_packet = build_task_packet_for_observation(
             &self.project_id,
             &self.session_id,

@@ -94,6 +94,22 @@ pub struct StoryImpactBudgetReport {
     pub reasons: Vec<String>,
 }
 
+impl StoryNodeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StoryNodeKind::CanonEntity => "canon_entity",
+            StoryNodeKind::CanonRule => "canon_rule",
+            StoryNodeKind::PlotPromise => "plot_promise",
+            StoryNodeKind::ChapterMission => "chapter_mission",
+            StoryNodeKind::ResultFeedback => "result_feedback",
+            StoryNodeKind::ProjectBrainChunk => "project_brain_chunk",
+            StoryNodeKind::Decision => "decision",
+            StoryNodeKind::StoryContract => "story_contract",
+            StoryNodeKind::SeedTask => "seed_task",
+        }
+    }
+}
+
 impl StoryEdgeKind {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -384,6 +400,69 @@ pub fn build_story_graph(
         }
     }
 
+    // ContradictsCanon edges: canon rule ↔ entity where the rule restricts the entity.
+    let canon_entity_ids: Vec<String> = nodes
+        .iter()
+        .filter(|n| matches!(n.kind, StoryNodeKind::CanonEntity))
+        .map(|n| n.id.clone())
+        .collect();
+    let canon_rule_ids: Vec<String> = nodes
+        .iter()
+        .filter(|n| matches!(n.kind, StoryNodeKind::CanonRule))
+        .map(|n| n.id.clone())
+        .collect();
+    for rule_id in &canon_rule_ids {
+        if let Some(rule_node) = nodes.iter().find(|n| &n.id == rule_id) {
+            let rule_lower = rule_node.label.to_lowercase();
+            for entity_id in &canon_entity_ids {
+                if let Some(entity_node) = nodes.iter().find(|n| &n.id == entity_id) {
+                    let entity_label_lower = entity_node.label.to_lowercase();
+                    // Edge if rule text mentions the entity, or entity summary mentions rule category.
+                    if rule_lower.contains(&entity_label_lower)
+                        || entity_node.summary.to_lowercase().contains(&rule_lower)
+                    {
+                        edges.push(WriterStoryGraphEdge {
+                            from: rule_id.clone(),
+                            to: entity_id.clone(),
+                            kind: StoryEdgeKind::ContradictsCanon,
+                            evidence_ref: format!(
+                                "canon_rule_entity:{}:{}",
+                                rule_node.label, entity_node.label
+                            ),
+                            confidence: 0.65,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // SameSourceRevision edges: nodes sharing the same chapter or source revision.
+    for i in 0..nodes.len() {
+        for j in (i + 1)..nodes.len() {
+            let a = &nodes[i];
+            let b = &nodes[j];
+            let share_chapter =
+                a.chapter.is_some() && b.chapter.is_some() && a.chapter == b.chapter;
+            let share_revision = a.source_revision.is_some()
+                && b.source_revision.is_some()
+                && a.source_revision == b.source_revision;
+            if share_chapter || share_revision {
+                edges.push(WriterStoryGraphEdge {
+                    from: a.id.clone(),
+                    to: b.id.clone(),
+                    kind: StoryEdgeKind::SameSourceRevision,
+                    evidence_ref: format!(
+                        "same_source:{}:{}",
+                        a.chapter.as_deref().unwrap_or("?"),
+                        b.chapter.as_deref().unwrap_or("?")
+                    ),
+                    confidence: 0.5,
+                });
+            }
+        }
+    }
+
     (nodes, edges)
 }
 
@@ -406,7 +485,17 @@ pub fn compute_story_impact_radius(
         reasons.push(format!("种子节点: {}", seed.label));
     }
 
-    // BFS traversal from seeds.
+    // Build adjacency index: node_id → outgoing edges (avoids O(n²) scan).
+    let mut adjacency: std::collections::HashMap<&str, Vec<&WriterStoryGraphEdge>> =
+        std::collections::HashMap::new();
+    for edge in graph_edges {
+        adjacency.entry(edge.from.as_str()).or_default().push(edge);
+    }
+    // Build node lookup: node_id → &node.
+    let node_lookup: std::collections::HashMap<&str, &WriterStoryGraphNode> =
+        graph_nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+    // BFS traversal from seeds with adjacency-indexed edges.
     let mut frontier: Vec<String> = seeds.iter().map(|s| s.id.clone()).collect();
     let mut depth = 0;
 
@@ -414,39 +503,41 @@ pub fn compute_story_impact_radius(
         let mut next_frontier = Vec::new();
 
         for node_id in &frontier {
-            for edge in graph_edges {
-                if edge.from == *node_id && !impacted_ids.contains(&edge.to) {
-                    if let Some(target) = graph_nodes.iter().find(|n| n.id == edge.to) {
-                        let node_chars = target.summary.chars().count();
-                        if total_chars + node_chars > budget_limit {
-                            truncated = true;
-                            if target.confidence > 0.7
-                                || matches!(
-                                    target.kind,
-                                    StoryNodeKind::PlotPromise | StoryNodeKind::CanonEntity
-                                )
-                            {
-                                reasons.push(format!(
-                                    "预算截断: {} (需要 {} 字符, 剩余 {} 字符)",
-                                    target.label,
-                                    node_chars,
-                                    budget_limit.saturating_sub(total_chars)
-                                ));
-                            }
-                            continue;
+            let outgoing = adjacency.get(node_id.as_str());
+            for edge in outgoing.into_iter().flatten() {
+                if impacted_ids.contains(edge.to.as_str()) {
+                    continue;
+                }
+                if let Some(target) = node_lookup.get(edge.to.as_str()) {
+                    let node_chars = target.summary.chars().count();
+                    if total_chars + node_chars > budget_limit {
+                        truncated = true;
+                        if target.confidence > 0.7
+                            || matches!(
+                                target.kind,
+                                StoryNodeKind::PlotPromise | StoryNodeKind::CanonEntity
+                            )
+                        {
+                            reasons.push(format!(
+                                "预算截断: {} (需要 {} 字符, 剩余 {} 字符)",
+                                target.label,
+                                node_chars,
+                                budget_limit.saturating_sub(total_chars)
+                            ));
                         }
-                        total_chars += node_chars;
-                        impacted_ids.insert(edge.to.clone());
-                        next_frontier.push(edge.to.clone());
-                        impacted_edges.push(edge.clone());
-                        reasons.push(format!(
-                            "距离 {}: {} -> {} ({})",
-                            depth + 1,
-                            node_id,
-                            target.label,
-                            edge.kind.as_str()
-                        ));
+                        continue;
                     }
+                    total_chars += node_chars;
+                    impacted_ids.insert(edge.to.clone());
+                    next_frontier.push(edge.to.clone());
+                    impacted_edges.push((*edge).clone());
+                    reasons.push(format!(
+                        "距离 {}: {} -> {} ({})",
+                        depth + 1,
+                        node_id,
+                        target.label,
+                        edge.kind.as_str()
+                    ));
                 }
             }
         }
