@@ -21,6 +21,7 @@ export const Commands = {
   getAgentKernelStatus: "get_agent_kernel_status",
   getProjectBrainKnowledgeGraph: "get_project_brain_knowledge_graph",
   getProjectStorageDiagnostics: "get_project_storage_diagnostics",
+  getAmbientEntityHints: "get_ambient_entity_hints",
   getWriterAgentLedger: "get_writer_agent_ledger",
   getWriterAgentPendingProposals: "get_writer_agent_pending_proposals",
   getWriterAgentStatus: "get_writer_agent_status",
@@ -179,6 +180,8 @@ export interface ParallelDraftPayload {
   paragraph: string;
   selectedText: string;
   chapterTitle?: string;
+  missionContext?: string;
+  promiseContext?: string;
 }
 
 export interface SearchStatus {
@@ -1291,6 +1294,7 @@ export interface ContextRecallSummary {
 export const WriterAgentCommands = {
   getWriterAgentStatus: "get_writer_agent_status",
   getWriterAgentLedger: "get_writer_agent_ledger",
+  getAmbientEntityHints: "get_ambient_entity_hints",
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
   getWriterAgentInspectorTimeline: "get_writer_agent_inspector_timeline",

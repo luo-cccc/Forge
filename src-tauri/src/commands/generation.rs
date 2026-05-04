@@ -40,6 +40,10 @@ pub(crate) struct ParallelDraftPayload {
     paragraph: String,
     selected_text: String,
     chapter_title: Option<String>,
+    #[serde(default)]
+    mission_context: String,
+    #[serde(default)]
+    promise_context: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -589,14 +593,27 @@ pub async fn generate_parallel_drafts(
         payload.selected_text.trim()
     };
 
+    let mission_block = if payload.mission_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n## 本章任务约束\n{}\n", payload.mission_context)
+    };
+    let promise_block = if payload.promise_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n## 未兑现伏笔参考\n{}\n", payload.promise_context)
+    };
+
     let prompt = format!(
         "你是中文小说共创写手。请顺着用户已有文本，生成三个不同方向的平行草稿。\n\
          输出格式必须严格为：\n\
          A: ...\nB: ...\nC: ...\n\
-         每个版本 2-5 句，可以分段；不要解释，不要 Markdown。\n\
+         每个版本 2-5 句，可以分段；每个版本末尾用括号标注关联的创作依据。不要解释，不要 Markdown。\n\
          A 偏顺势推进，B 偏冲突加压，C 偏情绪转折。\n\
-         ## 章节\n{}\n## 光标前文\n{}\n## 光标后文\n{}\n## 当前焦点\n{}",
+         ## 章节\n{}{}{}\n## 光标前文\n{}\n## 光标后文\n{}\n## 当前焦点\n{}",
         chapter,
+        mission_block,
+        promise_block,
         agent_harness_core::truncate_context(&payload.prefix, 3000),
         agent_harness_core::truncate_context(&payload.suffix, 1000),
         focus,

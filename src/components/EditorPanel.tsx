@@ -197,7 +197,12 @@ function buildSemanticLintPayload(editor: Editor, chapterTitle: string): Semanti
   };
 }
 
-function buildParallelDraftPayload(editor: Editor, chapterTitle: string): ParallelDraftPayload {
+function buildParallelDraftPayload(
+  editor: Editor,
+  chapterTitle: string,
+  missionContext?: string,
+  promiseContext?: string,
+): ParallelDraftPayload {
   const { from, to } = editor.state.selection;
   const $from = editor.state.doc.resolve(from);
   const docStart = Math.max(0, from - PARALLEL_DRAFT_PREFIX_CHARS);
@@ -209,6 +214,8 @@ function buildParallelDraftPayload(editor: Editor, chapterTitle: string): Parall
     paragraph: editor.state.doc.textBetween($from.start(), $from.end(), " "),
     selectedText: from < to ? editor.state.doc.textBetween(from, to, " ") : "",
     chapterTitle,
+    missionContext: missionContext ?? "",
+    promiseContext: promiseContext ?? "",
   };
 }
 
@@ -348,6 +355,7 @@ export default function EditorPanel({
   const snoozedUntil = useAppStore((s) => s.snoozedUntil);
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const entityCards = useAppStore((s) => s.entityCards);
+  const addEntityCard = useAppStore((s) => s.addEntityCard);
   const [showToast, setShowToast] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
@@ -634,6 +642,47 @@ export default function EditorPanel({
       });
     }, SEMANTIC_LINT_IDLE_MS);
   }, [agentMode, currentChapter, editor]);
+
+  useEffect(() => {
+    if (!editor || agentMode === "off" || !currentChapter) return;
+    const AMBIENT_LORE_IDLE_MS = 4000;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const scheduleCheck = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const paragraph = editor.state.doc.textBetween(
+          Math.max(0, editor.state.selection.from - 200),
+          Math.min(editor.state.doc.content.size, editor.state.selection.to + 200),
+          " ",
+        ).trim();
+        if (!paragraph) return;
+
+        invoke<{ keyword: string; content: string; chapter: string }[]>(
+          Commands.getAmbientEntityHints,
+          { paragraph, chapter: currentChapter },
+        )
+          .then((hints) => {
+            for (const hint of hints) {
+              addEntityCard(hint);
+            }
+          })
+          .catch(() => {});
+      }, AMBIENT_LORE_IDLE_MS);
+    };
+
+    const onActivity = () => scheduleCheck();
+    scheduleCheck();
+
+    const root = editor.view.dom;
+    root.addEventListener("keyup", onActivity);
+    root.addEventListener("mouseup", onActivity);
+    return () => {
+      clearTimeout(timer);
+      root.removeEventListener("keyup", onActivity);
+      root.removeEventListener("mouseup", onActivity);
+    };
+  }, [agentMode, currentChapter, editor, addEntityCard]);
 
   useEffect(() => {
     if (!editor || agentMode === "off") return;
@@ -1150,7 +1199,10 @@ export default function EditorPanel({
       if (!isTauri()) {
         throw new Error("Parallel drafts require the Tauri desktop runtime and an API key.");
       }
-      const payload = buildParallelDraftPayload(editor, currentChapter);
+      const missionCtx = chapterMission
+        ? `任务: ${chapterMission.mission}; 必保: ${chapterMission.mustInclude}; 禁止: ${chapterMission.mustNot}`
+        : "";
+      const payload = buildParallelDraftPayload(editor, currentChapter, missionCtx);
       const drafts = await invoke<ParallelDraft[]>(Commands.generateParallelDrafts, { payload });
       setParallelDrafts(drafts);
     } catch (e) {
@@ -1164,10 +1216,17 @@ export default function EditorPanel({
     (text: string) => {
       if (!editor) return;
       const insertAt = editor.state.selection.from;
-      editor.chain().focus().insertContent(text).setTextSelection(insertAt + text.length).run();
-      incrementActionEpoch();
+      editor.commands.setInlinePreview({
+        id: `draft-${Date.now()}`,
+        kind: "text.insert",
+        from: insertAt,
+        to: insertAt,
+        text,
+        chapter: currentChapter ?? "",
+        revision: currentChapterRevision ?? "",
+      });
     },
-    [editor, incrementActionEpoch],
+    [editor, currentChapter, currentChapterRevision],
   );
 
   useEffect(() => {

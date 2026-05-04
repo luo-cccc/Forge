@@ -381,3 +381,56 @@ pub fn agent_observe(
         suggestion_id: Some(suggestion_id),
     })
 }
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AmbientEntityHint {
+    keyword: String,
+    content: String,
+    chapter: String,
+}
+
+#[tauri::command]
+pub fn get_ambient_entity_hints(
+    state: tauri::State<'_, AppState>,
+    paragraph: String,
+    chapter: String,
+) -> Result<Vec<AmbientEntityHint>, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    let names = kernel
+        .ledger_snapshot()
+        .canon_entities
+        .iter()
+        .map(|e| e.name.clone())
+        .collect::<Vec<_>>();
+
+    let mut hints = Vec::new();
+    for name in names {
+        if name.len() < 2 || !paragraph.contains(&name) {
+            continue;
+        }
+        if hints.iter().any(|h: &AmbientEntityHint| h.keyword == name) {
+            continue;
+        }
+        let facts = kernel
+            .memory
+            .get_canon_facts_for_entity(&name)
+            .unwrap_or_default();
+        let summary = if facts.is_empty() {
+            "Canon entity".to_string()
+        } else {
+            facts
+                .iter()
+                .take(3)
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
+        hints.push(AmbientEntityHint {
+            keyword: name.clone(),
+            content: summary,
+            chapter: chapter.clone(),
+        });
+    }
+    Ok(hints)
+}
