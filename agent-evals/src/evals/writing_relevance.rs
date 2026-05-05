@@ -747,3 +747,79 @@ pub fn run_project_brain_author_fixture_rerank_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_project_brain_chapter_proximity_rerank_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-12",
+            "林墨必须追查寒玉戒指下落，并用北境宗门线索回收前文伏笔。",
+            "寒玉戒指下落",
+            "不要回到远古王座支线",
+            "以北境宗门的新证据收束。",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-12".to_string());
+    let focus = ProjectBrainFocus::from_kernel("寒玉戒指下落下一步怎么写？", &kernel);
+    let chunks = vec![
+        Chunk {
+            id: "distant-ring-archive".to_string(),
+            chapter: "Chapter-2".to_string(),
+            text: "林墨第一次听说寒玉戒指下落与北境宗门有关，这个旧线索需要以后回收。".to_string(),
+            embedding: vec![0.0, 1.0],
+            keywords: vec!["寒玉戒指".to_string(), "北境宗门".to_string()],
+            topic: Some("寒玉戒指下落".to_string()),
+            source_ref: None,
+            source_revision: None,
+            source_kind: None,
+            chunk_index: None,
+            archived: false,
+        },
+        Chunk {
+            id: "nearby-ring-setup".to_string(),
+            chapter: "Chapter-11".to_string(),
+            text: "黑衣人带着寒玉戒指逼近北境宗门，林墨发现宗门旧印能指向戒指下落。".to_string(),
+            embedding: vec![0.0, 1.0],
+            keywords: vec!["寒玉戒指".to_string(), "北境宗门".to_string()],
+            topic: Some("寒玉戒指下落".to_string()),
+            source_ref: None,
+            source_revision: None,
+            source_kind: None,
+            chunk_index: None,
+            archived: false,
+        },
+    ];
+    let raw_results = vec![(90.0, &chunks[0]), (90.0, &chunks[1])];
+    let reranked = rerank_project_brain_results_with_focus(raw_results, &focus);
+    let first_id = reranked
+        .first()
+        .map(|(_, _, chunk)| chunk.id.as_str())
+        .unwrap_or("none");
+    let first_explanation = reranked
+        .first()
+        .map(|(_, reasons, _)| format_text_chunk_relevance(reasons))
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+    if first_id != "nearby-ring-setup" {
+        errors.push(format!(
+            "nearby chapter chunk should outrank same-topic distant archive chunk, got {}",
+            first_id
+        ));
+    }
+    if !first_explanation.contains("chapter proximity adjacent chapter") {
+        errors.push(format!(
+            "rerank explanation missing chapter proximity signal: {}",
+            first_explanation
+        ));
+    }
+
+    eval_result(
+        "writer_agent:project_brain_chapter_proximity_rerank",
+        format!("first={} explanation={}", first_id, first_explanation),
+        errors,
+    )
+}

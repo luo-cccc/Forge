@@ -132,6 +132,7 @@ fn main() {
     results.push(run_project_brain_avoid_terms_preserve_payoff_eval());
     results.push(run_project_brain_must_not_boundary_eval());
     results.push(run_project_brain_author_fixture_rerank_eval());
+    results.push(run_project_brain_chapter_proximity_rerank_eval());
     results.push(run_project_brain_knowledge_index_graph_eval());
     results.push(run_project_brain_knowledge_index_path_guard_eval());
     results.push(run_project_brain_chunk_source_version_eval());

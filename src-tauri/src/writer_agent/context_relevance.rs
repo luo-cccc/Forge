@@ -449,7 +449,7 @@ fn relevance_reason_text(reasons: &[String]) -> String {
     } else {
         reasons
             .iter()
-            .take(4)
+            .take(5)
             .cloned()
             .collect::<Vec<_>>()
             .join("; ")
