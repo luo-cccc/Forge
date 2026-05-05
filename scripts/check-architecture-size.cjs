@@ -18,6 +18,48 @@ const budgets = [
     rationale: "Kernel facade should own state and public API while implementation lives in focused modules.",
   },
   {
+    label: "Writer kernel chapters",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "chapters.rs"),
+    maxLines: 640,
+    rationale: "Chapter result, mission calibration, and next-beat helpers should stay bounded.",
+  },
+  {
+    label: "Writer kernel metrics",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "metrics.rs"),
+    maxLines: 620,
+    rationale: "Product metric derivation should not absorb unrelated trace or snapshot logic.",
+  },
+  {
+    label: "Writer kernel snapshots",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "snapshots.rs"),
+    maxLines: 590,
+    rationale: "Snapshot assembly should stay focused on read-model projection.",
+  },
+  {
+    label: "Writer kernel operations",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "operations.rs"),
+    maxLines: 540,
+    rationale: "Operation approval, execution, durable-save, and diagnostics flow should stay bounded.",
+  },
+  {
+    label: "Writer kernel run loop",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "run_loop.rs"),
+    maxLines: 500,
+    rationale: "Run preparation and preflight orchestration should not become a second kernel facade.",
+  },
+  {
+    label: "Writer kernel memory feedback",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "memory_feedback.rs"),
+    maxLines: 500,
+    rationale: "Memory feedback and suppression logic should remain separate from extraction and execution.",
+  },
+  {
+    label: "Writer kernel trace recording events",
+    file: path.join("src-tauri", "src", "writer_agent", "kernel", "trace_recording", "event_recording.rs"),
+    maxLines: 520,
+    rationale: "Run-event recording should stay visible as a real Rust submodule rather than hidden include content.",
+  },
+  {
     label: "Eval facade",
     file: path.join("agent-evals", "src", "evals.rs"),
     maxLines: 120,
@@ -71,6 +113,8 @@ for (const budget of budgets) {
 
 checkCompanionHelpersBoundary();
 checkEvalRootBoundary();
+checkKernelFacadeBoundary();
+checkKernelIncludeBoundary();
 
 if (failures.length > 0) {
   console.error("\nArchitecture size guard failed:");
@@ -182,6 +226,47 @@ function checkEvalRootBoundary() {
     );
   } else {
     console.log("ok   agent-evals/src: eval implementations are isolated under evals/.");
+  }
+}
+
+function checkKernelFacadeBoundary() {
+  const kernelFacadePath = path.join(repoRoot, "src-tauri", "src", "writer_agent", "kernel.rs");
+  const source = fs.readFileSync(kernelFacadePath, "utf8");
+  const wildcardExports = source
+    .split(/\r?\n/)
+    .map((line, index) => ({ line: index + 1, text: line.trim() }))
+    .filter(({ text }) => /pub(?:\([^)]*\))?\s+use\s+[^;]+::\*/.test(text));
+
+  if (wildcardExports.length > 0) {
+    failures.push(
+      `src-tauri/src/writer_agent/kernel.rs: wildcard facade exports are not allowed (${wildcardExports
+        .map(({ line }) => `line ${line}`)
+        .join(", ")})`,
+    );
+  } else {
+    console.log("ok   src-tauri/src/writer_agent/kernel.rs: facade exports are explicit.");
+  }
+}
+
+function checkKernelIncludeBoundary() {
+  const traceRecordingFacade = path.join(
+    repoRoot,
+    "src-tauri",
+    "src",
+    "writer_agent",
+    "kernel",
+    "trace_recording.rs",
+  );
+  const offenders = [];
+  const source = fs.readFileSync(traceRecordingFacade, "utf8");
+  if (source.includes("include!(")) {
+    offenders.push(path.relative(repoRoot, traceRecordingFacade));
+  }
+
+  if (offenders.length > 0) {
+    failures.push(`src-tauri/src/writer_agent/kernel/trace_recording.rs: include! is not allowed (${offenders.join(", ")})`);
+  } else {
+    console.log("ok   src-tauri/src/writer_agent/kernel/trace_recording.rs: uses Rust modules, not include!.");
   }
 }
 

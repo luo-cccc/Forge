@@ -1,5 +1,9 @@
 use super::*;
 
+mod event_recording;
+mod helpers;
+mod task_packet;
+
 pub struct SaveCompletedEventContext {
     pub observation_id: String,
     pub chapter_title: Option<String>,
@@ -14,7 +18,3 @@ pub struct ModelStartedEventContext {
     pub provider: String,
     pub stream: bool,
 }
-
-include!("trace_recording/task_packet.in.rs");
-include!("trace_recording/event_recording.in.rs");
-include!("trace_recording/helpers.in.rs");

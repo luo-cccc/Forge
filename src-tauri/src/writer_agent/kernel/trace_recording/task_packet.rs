@@ -1,3 +1,17 @@
+use super::helpers::{context_pack_built_reports, observation_source_refs, proposal_source_refs};
+use super::WriterAgentKernel;
+use crate::writer_agent::context::{AgentTask, WritingContextPack};
+use crate::writer_agent::kernel::{
+    attach_story_contract_quality_gate_to_task_packet, build_task_packet_for_observation,
+    operation_affected_scope, operation_kind_label, snippet, WriterContextPackBuiltRunEvent,
+    WriterOperationLifecycleState, WriterOperationLifecycleTrace, WriterRunEvent,
+    WriterTaskPacketTrace,
+};
+use crate::writer_agent::observation::WriterObservation;
+use crate::writer_agent::operation::WriterOperation;
+use crate::writer_agent::proposal::AgentProposal;
+use agent_harness_core::TaskPacket;
+
 impl WriterAgentKernel {
     pub fn run_events(&self, limit: usize) -> Vec<WriterRunEvent> {
         let persisted = self
@@ -34,7 +48,7 @@ impl WriterAgentKernel {
         Ok(())
     }
 
-    pub(super) fn record_task_packet_for(
+    pub(in crate::writer_agent::kernel) fn record_task_packet_for(
         &mut self,
         task: AgentTask,
         observation: &WriterObservation,
@@ -69,7 +83,7 @@ impl WriterAgentKernel {
         self.push_task_packet_trace(observation.id.clone(), format!("{:?}", task), packet);
     }
 
-    pub(super) fn push_task_packet_trace(
+    pub(in crate::writer_agent::kernel) fn push_task_packet_trace(
         &mut self,
         observation_id: String,
         task: String,
@@ -119,7 +133,7 @@ impl WriterAgentKernel {
         self.task_packets.push(trace);
     }
 
-    pub(super) fn push_operation_lifecycle(
+    pub(in crate::writer_agent::kernel) fn push_operation_lifecycle(
         &mut self,
         proposal_id: Option<String>,
         operation: &WriterOperation,
@@ -165,7 +179,10 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_observation_run_event(&mut self, observation: &WriterObservation) {
+    pub(in crate::writer_agent::kernel) fn record_observation_run_event(
+        &mut self,
+        observation: &WriterObservation,
+    ) {
         self.record_run_event(
             "observation",
             observation.created_at,
@@ -184,7 +201,11 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_proposal_run_event(&mut self, proposal: &AgentProposal, created_at: u64) {
+    pub(in crate::writer_agent::kernel) fn record_proposal_run_event(
+        &mut self,
+        proposal: &AgentProposal,
+        created_at: u64,
+    ) {
         let observation = self
             .observations
             .iter()
@@ -214,7 +235,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_memory_candidate_created_run_event(
+    pub(in crate::writer_agent::kernel) fn record_memory_candidate_created_run_event(
         &mut self,
         proposal: &AgentProposal,
         slot: String,
@@ -244,7 +265,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_context_pack_built_run_event(
+    pub(in crate::writer_agent::kernel) fn record_context_pack_built_run_event(
         &mut self,
         observation: &WriterObservation,
         context_pack: &WritingContextPack,
@@ -268,7 +289,7 @@ impl WriterAgentKernel {
         );
 
         self.record_context_pack_built_event(
-            crate::writer_agent::kernel::WriterContextPackBuiltRunEvent {
+            WriterContextPackBuiltRunEvent {
                 task_id: task_id.clone(),
                 task: format!("{:?}", context_pack.task),
                 source_count: context_pack.sources.len(),
@@ -282,5 +303,4 @@ impl WriterAgentKernel {
             created_at,
         );
     }
-
 }

@@ -1,3 +1,14 @@
+use super::helpers::{chapter_context_pack_built_reports, json_object_keys};
+use super::ModelStartedEventContext;
+use super::{SaveCompletedEventContext, WriterAgentKernel};
+use crate::writer_agent::feedback::ProposalFeedback;
+use crate::writer_agent::kernel::{
+    approval_sources, operation_affected_scope, operation_kind_label, WriterAgentTask,
+    WriterContextPackBuiltRunEvent,
+};
+use crate::writer_agent::memory;
+use crate::writer_agent::operation::{OperationApproval, WriterOperation};
+
 impl WriterAgentKernel {
     pub fn record_chapter_context_pack_built_run_event(
         &mut self,
@@ -22,7 +33,7 @@ impl WriterAgentKernel {
                 .map(|source| format!("{}:{}", source.source_type, source.id)),
         );
         self.record_context_pack_built_event(
-            crate::writer_agent::kernel::WriterContextPackBuiltRunEvent {
+            WriterContextPackBuiltRunEvent {
                 task_id: task_id.clone(),
                 task: "ChapterGeneration".to_string(),
                 source_count: context.budget.source_count,
@@ -40,9 +51,9 @@ impl WriterAgentKernel {
         );
     }
 
-    fn record_context_pack_built_event(
+    pub(in crate::writer_agent::kernel) fn record_context_pack_built_event(
         &mut self,
-        event: crate::writer_agent::kernel::WriterContextPackBuiltRunEvent,
+        event: WriterContextPackBuiltRunEvent,
         source_refs: Vec<String>,
         created_at: u64,
     ) {
@@ -55,10 +66,10 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_approval_decided_run_event(
+    pub(in crate::writer_agent::kernel) fn record_approval_decided_run_event(
         &mut self,
         operation: &WriterOperation,
-        approval: Option<&super::operation::OperationApproval>,
+        approval: Option<&OperationApproval>,
         approved: bool,
         reason: &str,
         created_at: u64,
@@ -92,7 +103,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_feedback_run_event(
+    pub(in crate::writer_agent::kernel) fn record_feedback_run_event(
         &mut self,
         feedback: &ProposalFeedback,
         feedback_result: Option<&str>,
@@ -125,7 +136,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_metacognitive_gate_block_run_event(
+    pub(in crate::writer_agent::kernel) fn record_metacognitive_gate_block_run_event(
         &mut self,
         task: &WriterAgentTask,
         task_id: impl Into<String>,
@@ -153,7 +164,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_task_receipt_run_event(
+    pub(in crate::writer_agent::kernel) fn record_task_receipt_run_event(
         &mut self,
         receipt: &crate::writer_agent::task_receipt::WriterTaskReceipt,
     ) {
@@ -177,7 +188,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_task_artifact_run_event(
+    pub(in crate::writer_agent::kernel) fn record_task_artifact_run_event(
         &mut self,
         artifact: &crate::writer_agent::task_receipt::WriterTaskArtifact,
     ) {
@@ -190,7 +201,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_post_write_diagnostic_report(
+    pub(in crate::writer_agent::kernel) fn record_post_write_diagnostic_report(
         &mut self,
         report: &crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport,
     ) {
@@ -203,7 +214,7 @@ impl WriterAgentKernel {
         );
     }
 
-    pub(super) fn record_save_completed_run_event(
+    pub(in crate::writer_agent::kernel) fn record_save_completed_run_event(
         &mut self,
         ctx: SaveCompletedEventContext,
         proposal_id: Option<String>,
@@ -402,7 +413,7 @@ impl WriterAgentKernel {
         );
     }
 
-    fn record_run_event(
+    pub(in crate::writer_agent::kernel) fn record_run_event(
         &mut self,
         event_type: &str,
         ts_ms: u64,
@@ -433,7 +444,7 @@ impl WriterAgentKernel {
             .ok();
     }
 
-    pub(super) fn record_story_impact_radius_run_event(
+    pub(in crate::writer_agent::kernel) fn record_story_impact_radius_run_event(
         &mut self,
         observation_id: &str,
         radius: &crate::writer_agent::story_impact::WriterStoryImpactRadius,

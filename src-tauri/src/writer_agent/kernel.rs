@@ -38,11 +38,20 @@ pub use super::inspector::{
 pub use super::metacognition::{
     WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
 };
-pub(crate) use chapters::*;
+pub(crate) use chapters::{
+    calibrated_mission_status, chapter_mission_result_proposals, chapter_result_from_observation,
+    cue_hit_score, derive_next_beat, mission_result_haystack, proposal_id, proposal_trace_summary,
+};
 pub(crate) use ghost::{
     context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
 };
-pub use helpers::*;
+pub use helpers::tool_filter_for_task;
+pub(crate) use helpers::{
+    approval_sources, normalize_chapter_mission_status, operation_affected_scope,
+    operation_has_kernel_durable_save, operation_is_write_capable, operation_kind_label,
+    operation_requires_durable_save, save_result_is_success,
+};
+pub use helpers::{ghost_confidence, ghost_quality_risks, task_requires_story_grounding};
 pub(crate) use memory_candidates::{
     canon_attribute_merge_candidate_proposal, canon_candidate_proposal,
     canon_conflict_candidate_proposal, extract_new_canon_entities,
@@ -65,10 +74,17 @@ pub(crate) use metrics::product_metrics_trend_from_run_events;
 pub use metrics::{
     WriterProductMetricSessionTrend, WriterProductMetrics, WriterProductMetricsTrend,
 };
-pub(crate) use ops::*;
-pub(crate) use prompts::*;
+pub(crate) use ops::execute_writer_operation;
+pub(crate) use prompts::{
+    objective_for_run_task, render_context_pack_for_prompt, render_run_system_prompt,
+    source_refs_from_context_pack, success_criteria_for_run_task, tool_filter_for_run_request,
+};
 pub(crate) use proposals_ext::{priority_weight, proposal_expired, should_replace_proposal};
-pub(crate) use review::*;
+pub(crate) use review::{
+    queue_severity_weight, queue_status_weight, story_debt_category_weight,
+    story_debt_from_open_promise, story_debt_from_review_entry, story_debt_status_weight,
+    story_review_queue_entry,
+};
 pub use run_loop_ext::{
     WriterAgentApprovalMode, WriterAgentContextPackSummary, WriterAgentFrontendState,
     WriterAgentPreparedRun, WriterAgentRunRequest, WriterAgentRunResult, WriterAgentStreamMode,
