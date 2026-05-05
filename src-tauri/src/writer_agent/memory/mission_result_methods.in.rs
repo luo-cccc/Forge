@@ -3,8 +3,10 @@ impl WriterMemory {
         self.conn.execute(
             "INSERT INTO chapter_missions
              (project_id, chapter_title, mission, must_include, must_not, expected_ending,
-              status, source_ref, updated_at, blocked_reason, retired_history)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10)
+              status, source_ref, updated_at, blocked_reason, retired_history,
+              reader_lack_this_chapter, relationship_soil_this_chapter, pressure_scene,
+              interest_mechanism, payoff_target, payoff_path, next_lack_opened)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(project_id, chapter_title) DO UPDATE SET
                 mission=excluded.mission,
                 must_include=excluded.must_include,
@@ -14,7 +16,14 @@ impl WriterMemory {
                 source_ref=excluded.source_ref,
                 updated_at=datetime('now'),
                 blocked_reason=excluded.blocked_reason,
-                retired_history=excluded.retired_history",
+                retired_history=excluded.retired_history,
+                reader_lack_this_chapter=excluded.reader_lack_this_chapter,
+                relationship_soil_this_chapter=excluded.relationship_soil_this_chapter,
+                pressure_scene=excluded.pressure_scene,
+                interest_mechanism=excluded.interest_mechanism,
+                payoff_target=excluded.payoff_target,
+                payoff_path=excluded.payoff_path,
+                next_lack_opened=excluded.next_lack_opened",
             rusqlite::params![
                 mission.project_id,
                 mission.chapter_title,
@@ -26,6 +35,13 @@ impl WriterMemory {
                 mission.source_ref,
                 mission.blocked_reason,
                 mission.retired_history,
+                mission.reader_lack_this_chapter,
+                mission.relationship_soil_this_chapter,
+                mission.pressure_scene,
+                mission.interest_mechanism,
+                mission.payoff_target,
+                mission.payoff_path,
+                mission.next_lack_opened,
             ],
         )?;
         self.conn.query_row(
@@ -44,7 +60,10 @@ impl WriterMemory {
             .query_row(
                 "SELECT id, project_id, chapter_title, mission, must_include, must_not,
                         expected_ending, status, source_ref, updated_at,
-                        blocked_reason, retired_history
+                        blocked_reason, retired_history,
+                        reader_lack_this_chapter, relationship_soil_this_chapter,
+                        pressure_scene, interest_mechanism, payoff_target,
+                        payoff_path, next_lack_opened
                  FROM chapter_missions WHERE project_id=?1 AND chapter_title=?2",
                 rusqlite::params![project_id, chapter_title],
                 chapter_mission_from_row,
@@ -101,6 +120,7 @@ impl WriterMemory {
             updated_at: String::new(),
             blocked_reason: String::new(),
             retired_history: String::new(),
+            ..Default::default()
         };
         self.upsert_chapter_mission(&summary)?;
         Ok(true)

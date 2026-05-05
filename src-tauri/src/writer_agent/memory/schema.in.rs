@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -107,6 +107,13 @@ CREATE TABLE IF NOT EXISTS chapter_missions (
     expected_ending TEXT DEFAULT '',
     status TEXT DEFAULT 'draft',
     source_ref TEXT DEFAULT '',
+    reader_lack_this_chapter TEXT DEFAULT '',
+    relationship_soil_this_chapter TEXT DEFAULT '',
+    pressure_scene TEXT DEFAULT '',
+    interest_mechanism TEXT DEFAULT '',
+    payoff_target TEXT DEFAULT '',
+    payoff_path TEXT DEFAULT '',
+    next_lack_opened TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE(project_id, chapter_title)
@@ -220,6 +227,69 @@ CREATE TABLE IF NOT EXISTS manual_agent_turns (
     source_refs_json TEXT DEFAULT '[]',
     created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS reader_compensation_profiles (
+    project_id TEXT PRIMARY KEY,
+    target_reader TEXT DEFAULT '',
+    primary_lack TEXT DEFAULT '',
+    secondary_lacks_json TEXT DEFAULT '[]',
+    protagonist_proxy_state TEXT DEFAULT '',
+    dominant_relationship_soil TEXT DEFAULT '',
+    pressure_mode TEXT DEFAULT '',
+    payoff_mode TEXT DEFAULT '',
+    payoff_path TEXT DEFAULT '',
+    escalation_ladder TEXT DEFAULT '',
+    forbidden_shortcuts_json TEXT DEFAULT '[]',
+    confidence REAL DEFAULT 0.5,
+    source_refs_json TEXT DEFAULT '[]',
+    pending_approval INTEGER DEFAULT 1,
+    approved_by TEXT DEFAULT '',
+    approved_at TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS emotional_debt_lifecycles (
+    debt_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    debt_kind TEXT NOT NULL DEFAULT '',
+    relationship_soil TEXT DEFAULT '',
+    introduced_by_scene TEXT DEFAULT '',
+    interest_mechanism TEXT DEFAULT '',
+    payoff_contract TEXT DEFAULT '',
+    payoff_window TEXT DEFAULT '',
+    current_state TEXT DEFAULT 'introduced',
+    overdue_risk TEXT DEFAULT 'medium',
+    rollover_target TEXT DEFAULT '',
+    source_refs_json TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS emotional_debt_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    debt_kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    introduced_at TEXT DEFAULT '',
+    introduced_chapter TEXT DEFAULT '',
+    introduced_ref TEXT DEFAULT '',
+    relationship_soil TEXT DEFAULT '',
+    pressure_evidence TEXT DEFAULT '',
+    interest_mechanism TEXT DEFAULT '',
+    payoff_contract TEXT DEFAULT '',
+    payoff_status TEXT DEFAULT 'open',
+    expected_payoff_window TEXT DEFAULT '',
+    payoff_path TEXT DEFAULT '',
+    overdue_risk TEXT DEFAULT 'medium',
+    rollover_target TEXT DEFAULT '',
+    risk_level TEXT DEFAULT 'medium',
+    related_promise_ids_json TEXT DEFAULT '[]',
+    source_refs_json TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 "#;
 
 const INDEX_SCHEMA: &str = r#"
@@ -248,4 +318,11 @@ CREATE INDEX IF NOT EXISTS idx_context_recalls_project_count ON writer_context_r
 CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_session_seq ON writer_run_events(project_id, session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_ts ON writer_run_events(project_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_manual_agent_turns_project_created_at ON manual_agent_turns(project_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_rcp_project ON reader_compensation_profiles(project_id);
+CREATE INDEX IF NOT EXISTS idx_edl_project_state ON emotional_debt_lifecycles(project_id, current_state);
+CREATE INDEX IF NOT EXISTS idx_edl_kind ON emotional_debt_lifecycles(debt_kind);
+CREATE INDEX IF NOT EXISTS idx_edlgr_project_status ON emotional_debt_ledger(project_id, payoff_status);
+CREATE INDEX IF NOT EXISTS idx_edlgr_kind_risk ON emotional_debt_ledger(debt_kind, overdue_risk);
+CREATE INDEX IF NOT EXISTS idx_edlgr_introduced ON emotional_debt_ledger(introduced_chapter);
 "#;

@@ -13,6 +13,13 @@ fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chapter
         updated_at: row.get(9)?,
         blocked_reason: row.get::<_, String>(10).unwrap_or_default(),
         retired_history: row.get::<_, String>(11).unwrap_or_default(),
+        reader_lack_this_chapter: row.get::<_, String>(12).unwrap_or_default(),
+        relationship_soil_this_chapter: row.get::<_, String>(13).unwrap_or_default(),
+        pressure_scene: row.get::<_, String>(14).unwrap_or_default(),
+        interest_mechanism: row.get::<_, String>(15).unwrap_or_default(),
+        payoff_target: row.get::<_, String>(16).unwrap_or_default(),
+        payoff_path: row.get::<_, String>(17).unwrap_or_default(),
+        next_lack_opened: row.get::<_, String>(18).unwrap_or_default(),
     })
 }
 

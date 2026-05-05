@@ -8,7 +8,8 @@ use super::context_relevance::{
 };
 use super::kernel::derive_next_beat;
 use super::memory::{
-    CreativeDecisionSummary, PlotPromiseSummary, StoryContractQuality, WriterMemory,
+    push_contract_line, CreativeDecisionSummary, PlotPromiseSummary, StoryContractQuality,
+    WriterMemory,
 };
 use super::observation::WriterObservation;
 

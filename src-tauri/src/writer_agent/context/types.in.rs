@@ -28,6 +28,7 @@ pub enum ContextSource {
     NextChapter,
     NeighborText,
     StoryImpactRadius,
+    ReaderCompensation,
 }
 
 /// Task type determines which sources to include and their priority order.
@@ -93,6 +94,7 @@ impl AgentTask {
                 (ContextSource::StoryImpactRadius, 10, 1200),
                 (ContextSource::ResultFeedback, 10, 2200),
                 (ContextSource::OutlineSlice, 10, 6000),
+                (ContextSource::ReaderCompensation, 10, 500),
                 (ContextSource::PreviousChapter, 9, 5000),
                 (ContextSource::PromiseSlice, 8, 4000),
                 (ContextSource::DecisionSlice, 8, 2000),
@@ -118,6 +120,7 @@ impl AgentTask {
                 (ContextSource::ChapterMission, 11, 900),
                 (ContextSource::ProjectBrief, 10, 800),
                 (ContextSource::ResultFeedback, 10, 900),
+                (ContextSource::ReaderCompensation, 10, 400),
                 (ContextSource::NextBeat, 10, 700),
                 (ContextSource::StoryImpactRadius, 9, 700),
                 (ContextSource::PromiseSlice, 9, 900),
@@ -314,6 +317,7 @@ impl WritingContextPack {
             "AuthorStyle",
             "RagExcerpt",
             "StoryImpactRadius",
+            "ReaderCompensation",
         ];
         let excluded: Vec<_> = all_known
             .iter()

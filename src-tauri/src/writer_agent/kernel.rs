@@ -482,6 +482,7 @@ fn diagnostic_to_proposal(
         DiagnosticCategory::PacingNote => ProposalKind::StyleNote,
         DiagnosticCategory::CharacterVoiceInconsistency => ProposalKind::StyleNote,
         DiagnosticCategory::TimelineIssue => ProposalKind::ContinuityWarning,
+        DiagnosticCategory::PayoffGap => ProposalKind::PlotPromise,
     };
     let evidence = diagnostic
         .evidence

@@ -494,6 +494,48 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "retired_history",
         "retired_history TEXT DEFAULT ''",
     )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "reader_lack_this_chapter",
+        "reader_lack_this_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "relationship_soil_this_chapter",
+        "relationship_soil_this_chapter TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "pressure_scene",
+        "pressure_scene TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "interest_mechanism",
+        "interest_mechanism TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "payoff_target",
+        "payoff_target TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "payoff_path",
+        "payoff_path TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_missions",
+        "next_lack_opened",
+        "next_lack_opened TEXT DEFAULT ''",
+    )?;
 
     ensure_column(
         conn,

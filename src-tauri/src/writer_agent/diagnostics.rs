@@ -13,3 +13,4 @@ include!("diagnostics/helpers_extract.in.rs");
 include!("diagnostics/helpers_violations.in.rs");
 include!("diagnostics/helpers_promise.in.rs");
 include!("diagnostics/helpers_tests.in.rs");
+include!("diagnostics/payoff.in.rs");

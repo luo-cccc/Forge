@@ -368,6 +368,7 @@ fn continuous_chapter_mission(chapter: usize) -> ChapterMissionSummary {
         updated_at: String::new(),
         blocked_reason: String::new(),
         retired_history: String::new(),
+        ..Default::default()
     }
 }
 
@@ -561,6 +562,7 @@ fn seed_real_author_project_memory(memory: &WriterMemory) {
                 updated_at: String::new(),
                 blocked_reason: String::new(),
                 retired_history: String::new(),
+        ..Default::default()
             })
             .unwrap();
     }

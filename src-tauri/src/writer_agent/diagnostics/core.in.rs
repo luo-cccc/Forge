@@ -29,6 +29,7 @@ pub enum DiagnosticCategory {
     TimelineIssue,
     CharacterVoiceInconsistency,
     PacingNote,
+    PayoffGap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

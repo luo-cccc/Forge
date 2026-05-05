@@ -151,6 +151,20 @@ pub struct ChapterMissionSummary {
     pub blocked_reason: String,
     #[serde(default)]
     pub retired_history: String,
+    #[serde(default)]
+    pub reader_lack_this_chapter: String,
+    #[serde(default)]
+    pub relationship_soil_this_chapter: String,
+    #[serde(default)]
+    pub pressure_scene: String,
+    #[serde(default)]
+    pub interest_mechanism: String,
+    #[serde(default)]
+    pub payoff_target: String,
+    #[serde(default)]
+    pub payoff_path: String,
+    #[serde(default)]
+    pub next_lack_opened: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -207,6 +221,13 @@ impl ChapterMissionSummary {
         if self.status == "retired" && !self.retired_history.trim().is_empty() {
             push_contract_line(&mut lines, "退役说明", &self.retired_history);
         }
+        push_contract_line(&mut lines, "读者缺口", &self.reader_lack_this_chapter);
+        push_contract_line(&mut lines, "关系土壤", &self.relationship_soil_this_chapter);
+        push_contract_line(&mut lines, "压迫场景", &self.pressure_scene);
+        push_contract_line(&mut lines, "计息机制", &self.interest_mechanism);
+        push_contract_line(&mut lines, "补偿目标", &self.payoff_target);
+        push_contract_line(&mut lines, "补偿路径", &self.payoff_path);
+        push_contract_line(&mut lines, "下一层缺口", &self.next_lack_opened);
         lines.join("\n")
     }
 }
@@ -410,7 +431,7 @@ impl StoryContractSummary {
     }
 }
 
-fn push_contract_line(lines: &mut Vec<String>, label: &str, value: &str) {
+pub(crate) fn push_contract_line(lines: &mut Vec<String>, label: &str, value: &str) {
     let value = value.trim();
     if !value.is_empty() {
         lines.push(format!("{}: {}", label, value));
@@ -543,6 +564,72 @@ pub struct ManualAgentTurnSummary {
     pub created_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaderCompensationProfile {
+    pub target_reader: String,
+    pub primary_lack: String,
+    pub secondary_lacks: Vec<String>,
+    pub protagonist_proxy_state: String,
+    pub dominant_relationship_soil: String,
+    pub pressure_mode: String,
+    pub payoff_mode: String,
+    pub payoff_path: String,
+    pub escalation_ladder: String,
+    pub forbidden_shortcuts: Vec<String>,
+    pub confidence: f64,
+    pub source_refs: Vec<String>,
+    pub pending_approval: bool,
+    pub approved_by: String,
+    pub approved_at: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EmotionalDebtLifecycle {
+    pub debt_id: String,
+    pub debt_kind: String,
+    pub relationship_soil: String,
+    pub introduced_by_scene: String,
+    pub interest_mechanism: String,
+    pub payoff_contract: String,
+    pub payoff_window: String,
+    pub current_state: String,
+    pub overdue_risk: String,
+    pub rollover_target: String,
+    pub source_refs: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EmotionalDebtSummary {
+    pub id: i64,
+    pub project_id: String,
+    pub debt_kind: String,
+    pub title: String,
+    pub description: String,
+    pub introduced_at: String,
+    pub introduced_chapter: String,
+    pub introduced_ref: String,
+    pub relationship_soil: String,
+    pub pressure_evidence: String,
+    pub interest_mechanism: String,
+    pub payoff_contract: String,
+    pub payoff_status: String,
+    pub expected_payoff_window: String,
+    pub payoff_path: String,
+    pub overdue_risk: String,
+    pub rollover_target: String,
+    pub risk_level: String,
+    pub related_promise_ids: Vec<String>,
+    pub source_refs: Vec<String>,
+    pub updated_at: String,
+}
+
 impl WriterMemory {
     pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -560,3 +647,6 @@ include!("memory/tracing_impl.in.rs");
 include!("memory/tracing_migrate.in.rs");
 include!("memory/tracing_helpers.in.rs");
 include!("memory/tracing_tests.in.rs");
+include!("memory/reader_compensation_methods.in.rs");
+include!("memory/emotional_debt_lifecycle_methods.in.rs");
+include!("memory/emotional_debt_ledger_methods.in.rs");

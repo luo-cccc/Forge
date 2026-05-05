@@ -103,7 +103,9 @@ pub fn build_chapter_settlement_queue_with_evidence(
             };
             match diagnostic.category {
                 DiagnosticCategory::CanonConflict => canon_updates.push(item),
-                DiagnosticCategory::UnresolvedPromise => promise_updates.push(item),
+                DiagnosticCategory::UnresolvedPromise | DiagnosticCategory::PayoffGap => {
+                    promise_updates.push(item)
+                }
                 DiagnosticCategory::StoryContractViolation
                 | DiagnosticCategory::ChapterMissionViolation => mission_suggestions.push(item),
                 DiagnosticCategory::CharacterVoiceInconsistency
@@ -293,7 +295,7 @@ fn priority_for_diagnostic(severity: &DiagnosticSeverity) -> &'static str {
 fn settlement_category_for_diagnostic(category: &DiagnosticCategory) -> &'static str {
     match category {
         DiagnosticCategory::CanonConflict => "canon",
-        DiagnosticCategory::UnresolvedPromise => "promise",
+        DiagnosticCategory::UnresolvedPromise | DiagnosticCategory::PayoffGap => "promise",
         DiagnosticCategory::StoryContractViolation
         | DiagnosticCategory::ChapterMissionViolation => "mission",
         DiagnosticCategory::CharacterVoiceInconsistency | DiagnosticCategory::PacingNote => "style",
@@ -306,6 +308,7 @@ fn requires_approval_for_diagnostic(category: &DiagnosticCategory) -> bool {
         category,
         DiagnosticCategory::CanonConflict
             | DiagnosticCategory::UnresolvedPromise
+            | DiagnosticCategory::PayoffGap
             | DiagnosticCategory::StoryContractViolation
             | DiagnosticCategory::ChapterMissionViolation
     )
@@ -314,7 +317,9 @@ fn requires_approval_for_diagnostic(category: &DiagnosticCategory) -> bool {
 fn suggested_action_for_diagnostic(category: &DiagnosticCategory) -> &'static str {
     match category {
         DiagnosticCategory::CanonConflict => "审查并确认是否更新 Canon",
-        DiagnosticCategory::UnresolvedPromise => "审查伏笔状态，确认兑现、延期或放弃",
+        DiagnosticCategory::UnresolvedPromise | DiagnosticCategory::PayoffGap => {
+            "审查伏笔/情绪债务状态，确认兑现、延期或放弃"
+        }
         DiagnosticCategory::StoryContractViolation => "审查 Story Contract 偏离",
         DiagnosticCategory::ChapterMissionViolation => "审查 Chapter Mission 状态",
         DiagnosticCategory::TimelineIssue => "审查时间线连续性风险",

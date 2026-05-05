@@ -277,6 +277,8 @@ pub fn assemble_observation_context(
         observation.prefix.clone()
     };
     let cursor_suffix = observation.suffix.clone();
+    let reader_compensation =
+        build_reader_compensation_context(&observation.project_id, observation, memory);
 
     assemble_context_pack(
         task,
@@ -293,6 +295,7 @@ pub fn assemble_observation_context(
             ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
             ContextSource::AuthorStyle => non_empty(author_style.clone()),
             ContextSource::StoryImpactRadius => None,
+            ContextSource::ReaderCompensation => non_empty(reader_compensation.clone()),
             _ => None,
         },
         total_budget,
@@ -381,3 +384,46 @@ fn build_project_brief(project_id: &str, memory: &WriterMemory) -> String {
         .unwrap_or_default()
 }
 
+
+fn build_reader_compensation_context(
+    project_id: &str,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+) -> String {
+    let mut lines = Vec::new();
+    if let Ok(Some(profile)) = memory.get_reader_compensation_profile(project_id) {
+        if !profile.target_reader.trim().is_empty() {
+            push_contract_line(&mut lines, "目标读者", &profile.target_reader);
+        }
+        if !profile.primary_lack.trim().is_empty() {
+            push_contract_line(&mut lines, "主缺口", &profile.primary_lack);
+        }
+        if !profile.dominant_relationship_soil.trim().is_empty() {
+            push_contract_line(&mut lines, "关系土壤", &profile.dominant_relationship_soil);
+        }
+    }
+    if let Some(chapter) = observation.chapter_title.as_deref() {
+        if let Ok(Some(mission)) = memory.get_chapter_mission(project_id, chapter) {
+            if !mission.pressure_scene.trim().is_empty() {
+                push_contract_line(&mut lines, "本章压迫", &mission.pressure_scene);
+            }
+            if !mission.payoff_target.trim().is_empty() {
+                push_contract_line(&mut lines, "本章补偿目标", &mission.payoff_target);
+            }
+            if !mission.next_lack_opened.trim().is_empty() {
+                push_contract_line(&mut lines, "下一层缺口", &mission.next_lack_opened);
+            }
+        }
+    }
+    if let Ok(debts) = memory.get_open_emotional_debts(project_id) {
+        let recent: Vec<_> = debts.iter().take(3).collect();
+        if !recent.is_empty() {
+            let debt_lines: Vec<_> = recent
+                .iter()
+                .map(|d| format!("  {} ({}) - {}", d.title, d.debt_kind, d.payoff_status))
+                .collect();
+            lines.push(format!("活跃情绪债务:\n{}", debt_lines.join("\n")));
+        }
+    }
+    lines.join("\n")
+}
