@@ -1,10 +1,10 @@
 //! Ghost proposal helpers for WriterAgentKernel.
 
-use super::context::{ContextSource, WritingContextPack};
-use super::intent::WritingIntent;
-use super::observation::WriterObservation;
-use super::operation::WriterOperation;
-use super::proposal::{EvidenceRef, EvidenceSource, ProposalAlternative};
+use crate::writer_agent::context::{ContextSource, WritingContextPack};
+use crate::writer_agent::intent::WritingIntent;
+use crate::writer_agent::observation::WriterObservation;
+use crate::writer_agent::operation::WriterOperation;
+use crate::writer_agent::proposal::{EvidenceRef, EvidenceSource, ProposalAlternative};
 
 pub(crate) fn draft_continuation(
     intent: &WritingIntent,
@@ -99,7 +99,7 @@ fn per_branch_evidence(
         .sources
         .iter()
         .find(|s| s.source == ContextSource::ChapterMission)
-        .map(|s| super::kernel::snippet(&s.content, 80))
+        .map(|s| crate::writer_agent::kernel::snippet(&s.content, 80))
         .unwrap_or_default();
     let canon_snippet = context_pack
         .sources
@@ -295,8 +295,8 @@ pub(crate) fn context_pack_evidence(
 
 #[cfg(test)]
 mod tests {
-    use super::super::context::{AgentTask, ContextBudgetReport, ContextExcerpt, SourceReport};
-    use super::super::observation::{ObservationReason, ObservationSource, TextRange};
+    use crate::writer_agent::context::{AgentTask, ContextBudgetReport, ContextExcerpt, SourceReport};
+    use crate::writer_agent::observation::{ObservationReason, ObservationSource, TextRange};
     use super::*;
 
     fn observation(paragraph: &str) -> WriterObservation {

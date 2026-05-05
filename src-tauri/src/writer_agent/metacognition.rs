@@ -6,8 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::kernel::WriterAgentTraceSnapshot;
-use super::kernel_run_loop::WriterAgentTask;
+use super::kernel::{WriterAgentTask, WriterAgentTraceSnapshot};
 use super::operation::WriterOperation;
 use super::run_events::WriterRunEvent;
 

@@ -2,15 +2,15 @@ use agent_harness_core::agent_loop::{EventCallback, ProviderCallContext, Provide
 use agent_harness_core::provider::{LlmMessage, Provider};
 use agent_harness_core::{AgentLoop, EffectiveToolInventory, TaskPacket, ToolHandler};
 
-use super::context::AgentTask;
-use super::observation::WriterObservation;
-use super::operation::WriterOperation;
-use super::proposal::AgentProposal;
-use super::provider_budget::{
+use crate::writer_agent::context::AgentTask;
+use crate::writer_agent::observation::WriterObservation;
+use crate::writer_agent::operation::WriterOperation;
+use crate::writer_agent::proposal::AgentProposal;
+use crate::writer_agent::provider_budget::{
     evaluate_provider_budget, WriterProviderBudgetReport, WriterProviderBudgetRequest,
     WriterProviderBudgetTask,
 };
-use super::task_receipt::WriterTaskReceipt;
+use crate::writer_agent::task_receipt::WriterTaskReceipt;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

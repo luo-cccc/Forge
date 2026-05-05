@@ -1,6 +1,6 @@
 //! Proposal lifecycle helpers for WriterAgentKernel.
 
-use super::proposal::{AgentProposal, ProposalKind, ProposalPriority};
+use crate::writer_agent::proposal::{AgentProposal, ProposalKind, ProposalPriority};
 
 pub(crate) fn should_replace_proposal(existing: &AgentProposal, incoming: &AgentProposal) -> bool {
     if is_llm_ghost(incoming) && !is_llm_ghost(existing) {

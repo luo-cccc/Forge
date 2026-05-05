@@ -274,7 +274,7 @@ impl ProjectBrainFocus {
             .memory
             .list_recent_chapter_results(&kernel.project_id, 4)
             .unwrap_or_default();
-        if let Some(next_beat) = crate::writer_agent::kernel_chapters::derive_next_beat(
+        if let Some(next_beat) = crate::writer_agent::kernel::derive_next_beat(
             kernel.active_chapter.as_deref(),
             None,
             &recent_results,

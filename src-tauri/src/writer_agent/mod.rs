@@ -1,17 +1,5 @@
 // ── Kernel (core runtime) ──
 pub mod kernel;
-pub mod kernel_chapters;
-pub mod kernel_ghost;
-pub mod kernel_helpers;
-pub mod kernel_memory_candidates;
-pub mod kernel_memory_feedback;
-pub mod kernel_metrics;
-pub mod kernel_ops;
-pub mod kernel_prompts;
-pub mod kernel_proposals;
-pub mod kernel_review;
-pub mod kernel_run_loop;
-pub mod kernel_task_packet;
 
 // ── Observation & Context ──
 pub mod context;

@@ -2725,7 +2725,7 @@ fn chapter_mission_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chapter
         must_include: row.get(4)?,
         must_not: row.get(5)?,
         expected_ending: row.get(6)?,
-        status: crate::writer_agent::kernel_helpers::normalize_chapter_mission_status(&status),
+        status: crate::writer_agent::kernel::normalize_chapter_mission_status(&status),
         source_ref: row.get(8)?,
         updated_at: row.get(9)?,
         blocked_reason: row.get::<_, String>(10).unwrap_or_default(),

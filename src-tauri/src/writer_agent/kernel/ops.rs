@@ -1,15 +1,15 @@
 //! Operation execution — typed operation dispatch.
 //! Extracted from kernel.rs.
 
-use super::kernel_helpers::{
+use super::helpers::{
     normalize_chapter_mission_status, validate_chapter_mission_summary,
     validate_story_contract_summary,
 };
-use super::kernel_memory_candidates::{
+use super::memory_candidates::{
     style_preference_memory_key, validate_style_preference_with_memory, MemoryCandidateQuality,
 };
-use super::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
-use super::operation::{execute_text_operation, OperationResult, WriterOperation};
+use crate::writer_agent::memory::{ChapterMissionSummary, StoryContractSummary, WriterMemory};
+use crate::writer_agent::operation::{execute_text_operation, OperationResult, WriterOperation};
 
 pub(crate) fn execute_writer_operation(
     memory: &mut WriterMemory,

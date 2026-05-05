@@ -1,12 +1,12 @@
 //! Prompt rendering and tool filter helpers for WriterAgentKernel.
 //! Extracted from kernel.rs.
 
-use super::context::{AgentTask, WritingContextPack};
-use super::kernel::{
+use crate::writer_agent::context::{AgentTask, WritingContextPack};
+use crate::writer_agent::kernel::{
     tool_filter_for_task, WriterAgentApprovalMode, WriterAgentKernel, WriterAgentLedgerSnapshot,
     WriterAgentRunRequest, WriterAgentTask,
 };
-use super::promise_planner::{plan_promise_payoffs, render_promise_payoff_plan};
+use crate::writer_agent::promise_planner::{plan_promise_payoffs, render_promise_payoff_plan};
 use agent_harness_core::ToolFilter;
 
 pub fn tool_filter_for_run_request(

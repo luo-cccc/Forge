@@ -35,64 +35,76 @@ use super::{memory, observation, operation, trajectory};
 pub use super::inspector::{
     WriterInspectorTimeline, WriterTimelineAudience, WriterTimelineEvent, WriterTimelineEventKind,
 };
-pub(crate) use super::kernel_chapters::*;
-pub(crate) use super::kernel_ghost::{
+pub(crate) use chapters::*;
+pub(crate) use ghost::{
     context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
 };
-pub use super::kernel_helpers::*;
-pub(crate) use super::kernel_memory_candidates::{
+pub use helpers::*;
+pub(crate) use memory_candidates::{
     canon_attribute_merge_candidate_proposal, canon_candidate_proposal,
     canon_conflict_candidate_proposal, extract_new_canon_entities,
     llm_memory_candidates_from_value, memory_candidates_from_observation,
     promise_candidate_proposal, sentence_snippet, split_sentences, CandidateSource,
 };
-pub use super::kernel_memory_candidates::{
+pub use memory_candidates::{
     extract_plot_promises, style_preference_memory_key, style_preference_taxonomy_slot,
     validate_canon_candidate, validate_canon_candidate_with_memory, validate_promise_candidate,
     validate_promise_candidate_with_dedup, validate_style_preference,
     validate_style_preference_with_memory, MemoryCandidateQuality,
 };
-pub(crate) use super::kernel_memory_feedback::{
+pub(crate) use memory_feedback::{
     memory_operation_slot, proposal_slot_key, record_memory_audit_event,
     record_memory_candidate_feedback, suppression_slot_key, MemoryCandidate,
     MemoryExtractionFeedback,
 };
-pub(crate) use super::kernel_metrics::product_metrics_from_trace;
-pub(crate) use super::kernel_metrics::product_metrics_trend_from_run_events;
-pub use super::kernel_metrics::{
+pub(crate) use metrics::product_metrics_from_trace;
+pub(crate) use metrics::product_metrics_trend_from_run_events;
+pub use metrics::{
     WriterProductMetricSessionTrend, WriterProductMetrics, WriterProductMetricsTrend,
 };
-pub(crate) use super::kernel_ops::*;
-pub(crate) use super::kernel_prompts::*;
-pub(crate) use super::kernel_proposals::{
+pub(crate) use ops::*;
+pub(crate) use prompts::*;
+pub(crate) use proposals_ext::{
     priority_weight, proposal_expired, should_replace_proposal,
 };
-pub(crate) use super::kernel_review::*;
-pub use super::kernel_run_loop::{
+pub(crate) use review::*;
+pub use run_loop_ext::{
     WriterAgentApprovalMode, WriterAgentContextPackSummary, WriterAgentFrontendState,
     WriterAgentPreparedRun, WriterAgentRunRequest, WriterAgentRunResult, WriterAgentStreamMode,
     WriterAgentTask,
 };
-pub use super::kernel_task_packet::build_task_packet_for_observation;
-pub(crate) use super::kernel_task_packet::{
+pub use task_packet::build_task_packet_for_observation;
+pub(crate) use task_packet::{
     attach_story_contract_quality_gate_to_task_packet, attach_story_impact_to_task_packet,
     context_budget_trace, trace_state_with_expiry,
 };
-pub(crate) use super::kernel_task_packet::{
+pub(crate) use task_packet::{
     story_impact_context_budget, story_impact_context_priority,
 };
 pub use super::metacognition::{
     WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
 };
 
+mod chapters;
 mod context_pack;
 mod feedback;
+mod ghost;
+mod helpers;
+mod memory_candidates;
+mod memory_feedback;
+mod metrics;
 mod observations;
 mod operations;
+mod ops;
+mod prompts;
 mod proposal_creation;
 mod proposals;
+mod proposals_ext;
+mod review;
 mod run_loop;
+mod run_loop_ext;
 mod snapshots;
+mod task_packet;
 mod trace_recording;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

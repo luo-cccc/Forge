@@ -2,15 +2,15 @@
 
 use std::collections::HashSet;
 
-use super::kernel_chapters::proposal_id;
-use super::kernel_memory_feedback::{
+use super::chapters::proposal_id;
+use super::memory_feedback::{
     memory_candidate_slot_for_canon, memory_candidate_slot_for_promise, MemoryCandidate,
     MemoryExtractionFeedback,
 };
-use super::memory::{CanonEntitySummary, PromiseKind, StylePreferenceSummary, WriterMemory};
-use super::observation::WriterObservation;
-use super::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
-use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
+use crate::writer_agent::memory::{CanonEntitySummary, PromiseKind, StylePreferenceSummary, WriterMemory};
+use crate::writer_agent::observation::WriterObservation;
+use crate::writer_agent::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
+use crate::writer_agent::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
 
 pub(crate) fn memory_candidates_from_observation(
     observation: &WriterObservation,

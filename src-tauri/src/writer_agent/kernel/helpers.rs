@@ -1,12 +1,12 @@
 //! Operation helpers, validation, and policy functions.
 //! Extracted from kernel.rs.
 
-use super::context::AgentTask;
-use super::kernel_run_loop::WriterAgentTask;
-use super::memory::{
+use crate::writer_agent::context::AgentTask;
+use super::run_loop_ext::WriterAgentTask;
+use crate::writer_agent::memory::{
     ChapterMissionSummary, StoryContractQuality, StoryContractSummary, WriterMemory,
 };
-use super::operation::WriterOperation;
+use crate::writer_agent::operation::WriterOperation;
 use agent_harness_core::{FeedbackContract, ToolFilter, ToolPolicyContract, ToolSideEffectLevel};
 
 pub(crate) fn tool_policy_for_task(task: &AgentTask) -> ToolPolicyContract {

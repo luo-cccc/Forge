@@ -2,10 +2,10 @@
 
 use std::collections::HashSet;
 
-use super::feedback::ProposalFeedback;
-use super::memory::{MemoryAuditSummary, MemoryFeedbackSummary, WriterMemory};
-use super::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
-use super::proposal::{AgentProposal, ProposalKind};
+use crate::writer_agent::feedback::ProposalFeedback;
+use crate::writer_agent::memory::{MemoryAuditSummary, MemoryFeedbackSummary, WriterMemory};
+use crate::writer_agent::operation::{CanonEntityOp, PlotPromiseOp, WriterOperation};
+use crate::writer_agent::proposal::{AgentProposal, ProposalKind};
 
 pub(crate) enum MemoryCandidate {
     Canon(CanonEntityOp),
@@ -335,8 +335,8 @@ fn preview_fingerprint(preview: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::feedback::FeedbackAction;
-    use super::super::proposal::{EvidenceRef, EvidenceSource, ProposalPriority};
+    use crate::writer_agent::feedback::FeedbackAction;
+    use crate::writer_agent::proposal::{EvidenceRef, EvidenceSource, ProposalPriority};
     use super::*;
 
     fn canon_entity(name: &str) -> CanonEntityOp {

@@ -2,11 +2,11 @@
 
 use agent_harness_core::{RequiredContext, TaskBelief, TaskPacket, TaskScope};
 
-use super::context::{AgentTask, ContextSource, WritingContextPack};
-use super::kernel_helpers::{feedback_contract_for_task, tool_policy_for_task};
-use super::memory::{ContextBudgetTrace, ContextSourceBudgetTrace, StoryContractQuality};
-use super::observation::WriterObservation;
-use super::story_impact::{
+use crate::writer_agent::context::{AgentTask, ContextSource, WritingContextPack};
+use super::helpers::{feedback_contract_for_task, tool_policy_for_task};
+use crate::writer_agent::memory::{ContextBudgetTrace, ContextSourceBudgetTrace, StoryContractQuality};
+use crate::writer_agent::observation::WriterObservation;
+use crate::writer_agent::story_impact::{
     story_impact_task_summary, StoryImpactBudgetReport, WriterStoryImpactRadius,
 };
 
@@ -205,7 +205,7 @@ fn beliefs_from_context_pack(context_pack: &WritingContextPack) -> Vec<TaskBelie
             break;
         }
         let subject = format!("{:?}", source.source);
-        let statement = super::kernel::snippet(&source.content, 180);
+        let statement = crate::writer_agent::kernel::snippet(&source.content, 180);
         if statement.trim().is_empty() {
             continue;
         }

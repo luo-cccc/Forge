@@ -2,12 +2,12 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::feedback::{FeedbackAction, ProposalFeedback};
-use super::kernel::{WriterOperationLifecycleState, WriterOperationLifecycleTrace};
-use super::kernel_helpers::{operation_affected_scope, operation_kind_label};
-use super::memory::{ChapterMissionSummary, ContextRecallSummary, RunEventSummary};
-use super::observation::{ObservationSource, WriterObservation};
-use super::proposal::{AgentProposal, ProposalKind};
+use crate::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
+use crate::writer_agent::kernel::{WriterOperationLifecycleState, WriterOperationLifecycleTrace};
+use super::helpers::{operation_affected_scope, operation_kind_label};
+use crate::writer_agent::memory::{ChapterMissionSummary, ContextRecallSummary, RunEventSummary};
+use crate::writer_agent::observation::{ObservationSource, WriterObservation};
+use crate::writer_agent::proposal::{AgentProposal, ProposalKind};
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,15 +1,15 @@
 //! Story debt, review queue, and priority ordering helpers.
 //! Extracted from kernel.rs.
 
-use super::kernel::{StoryDebtCategory, StoryDebtEntry, StoryDebtStatus, StoryReviewQueueEntry};
-use super::memory::PlotPromiseSummary;
-use super::operation::WriterOperation;
-use super::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
+use crate::writer_agent::kernel::{StoryDebtCategory, StoryDebtEntry, StoryDebtStatus, StoryReviewQueueEntry};
+use crate::writer_agent::memory::PlotPromiseSummary;
+use crate::writer_agent::operation::WriterOperation;
+use crate::writer_agent::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
 
 pub(crate) fn story_review_queue_entry(
     proposal: &AgentProposal,
     created_at: u64,
-    status: super::kernel::StoryReviewQueueStatus,
+    status: crate::writer_agent::kernel::StoryReviewQueueStatus,
 ) -> StoryReviewQueueEntry {
     StoryReviewQueueEntry {
         id: format!("review_{}", proposal.id),
@@ -29,11 +29,11 @@ pub(crate) fn story_review_queue_entry(
 
 pub(crate) fn review_severity_for_priority(
     priority: &ProposalPriority,
-) -> super::kernel::StoryReviewSeverity {
+) -> crate::writer_agent::kernel::StoryReviewSeverity {
     match priority {
-        ProposalPriority::Urgent => super::kernel::StoryReviewSeverity::Error,
-        ProposalPriority::Normal => super::kernel::StoryReviewSeverity::Warning,
-        ProposalPriority::Ambient => super::kernel::StoryReviewSeverity::Info,
+        ProposalPriority::Urgent => crate::writer_agent::kernel::StoryReviewSeverity::Error,
+        ProposalPriority::Normal => crate::writer_agent::kernel::StoryReviewSeverity::Warning,
+        ProposalPriority::Ambient => crate::writer_agent::kernel::StoryReviewSeverity::Info,
     }
 }
 
@@ -73,8 +73,8 @@ pub(crate) fn story_debt_from_review_entry(
         category: story_debt_category_for_review(entry),
         severity: entry.severity.clone(),
         status: match entry.status {
-            super::kernel::StoryReviewQueueStatus::Snoozed => StoryDebtStatus::Snoozed,
-            super::kernel::StoryReviewQueueStatus::Expired => StoryDebtStatus::Stale,
+            crate::writer_agent::kernel::StoryReviewQueueStatus::Snoozed => StoryDebtStatus::Snoozed,
+            crate::writer_agent::kernel::StoryReviewQueueStatus::Expired => StoryDebtStatus::Stale,
             _ => StoryDebtStatus::Open,
         },
         title: entry.title.clone(),
@@ -130,9 +130,9 @@ pub(crate) fn story_debt_from_open_promise(
         chapter_title: active_chapter.clone(),
         category: StoryDebtCategory::Promise,
         severity: if promise.priority >= 5 {
-            super::kernel::StoryReviewSeverity::Warning
+            crate::writer_agent::kernel::StoryReviewSeverity::Warning
         } else {
-            super::kernel::StoryReviewSeverity::Info
+            crate::writer_agent::kernel::StoryReviewSeverity::Info
         },
         status: StoryDebtStatus::Open,
         title: format!("Open promise: {}", promise.title),
@@ -278,20 +278,20 @@ pub(crate) fn story_debt_status_weight(status: &StoryDebtStatus) -> i32 {
     }
 }
 
-pub(crate) fn queue_status_weight(status: &super::kernel::StoryReviewQueueStatus) -> i32 {
+pub(crate) fn queue_status_weight(status: &crate::writer_agent::kernel::StoryReviewQueueStatus) -> i32 {
     match status {
-        super::kernel::StoryReviewQueueStatus::Pending => 4,
-        super::kernel::StoryReviewQueueStatus::Snoozed => 3,
-        super::kernel::StoryReviewQueueStatus::Expired => 2,
-        super::kernel::StoryReviewQueueStatus::Accepted => 1,
-        super::kernel::StoryReviewQueueStatus::Ignored => 0,
+        crate::writer_agent::kernel::StoryReviewQueueStatus::Pending => 4,
+        crate::writer_agent::kernel::StoryReviewQueueStatus::Snoozed => 3,
+        crate::writer_agent::kernel::StoryReviewQueueStatus::Expired => 2,
+        crate::writer_agent::kernel::StoryReviewQueueStatus::Accepted => 1,
+        crate::writer_agent::kernel::StoryReviewQueueStatus::Ignored => 0,
     }
 }
 
-pub(crate) fn queue_severity_weight(severity: &super::kernel::StoryReviewSeverity) -> i32 {
+pub(crate) fn queue_severity_weight(severity: &crate::writer_agent::kernel::StoryReviewSeverity) -> i32 {
     match severity {
-        super::kernel::StoryReviewSeverity::Error => 2,
-        super::kernel::StoryReviewSeverity::Warning => 1,
-        super::kernel::StoryReviewSeverity::Info => 0,
+        crate::writer_agent::kernel::StoryReviewSeverity::Error => 2,
+        crate::writer_agent::kernel::StoryReviewSeverity::Warning => 1,
+        crate::writer_agent::kernel::StoryReviewSeverity::Info => 0,
     }
 }
