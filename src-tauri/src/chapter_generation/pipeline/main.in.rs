@@ -69,7 +69,7 @@ pub async fn run_chapter_generation_pipeline(
         Some(context.target.title.clone()),
     ));
 
-    let draft = match generate_chapter_draft(
+    let mut draft = match generate_chapter_draft(
         &config.settings,
         &context,
         config.payload.provider_budget_approval.as_ref(),
@@ -89,6 +89,83 @@ pub async fn run_chapter_generation_pipeline(
             return PipelineTerminal::Failed(error);
         }
     };
+
+    match chapter_contract_outcome(
+        &draft.content,
+        &context.chapter_contract,
+        ChapterContractPhase::ModelOutput,
+    ) {
+        ChapterContractOutcome::UnderMinChars => {
+            emit(ChapterGenerationEvent::progress(
+                &request_id,
+                PHASE_CONTINUATION,
+                "running",
+                "初稿字数不足，正在续写以满足章节长度约束...",
+                55,
+                Some(context.target.title.clone()),
+            ));
+            let continuation = match continue_chapter_draft(
+                &config.settings,
+                &context,
+                &draft.content,
+            )
+            .await
+            {
+                Ok(text) => text,
+                Err(error) => {
+                    emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
+                    return PipelineTerminal::Failed(error);
+                }
+            };
+            if !continuation.is_empty() {
+                if !draft.content.ends_with('\n') {
+                    draft.content.push('\n');
+                }
+                draft.content.push_str(&continuation);
+                draft.content = draft.content.trim().to_string();
+                draft.output_chars = char_count(&draft.content);
+            }
+        }
+        ChapterContractOutcome::OverMaxChars => {
+            emit(ChapterGenerationEvent::progress(
+                &request_id,
+                PHASE_COMPRESS,
+                "running",
+                "初稿字数超出目标区间，正在压缩正文...",
+                55,
+                Some(context.target.title.clone()),
+            ));
+            let compressed = match compress_chapter_draft(
+                &config.settings,
+                &context,
+                &draft.content,
+            )
+            .await
+            {
+                Ok(text) => text,
+                Err(error) => {
+                    emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
+                    return PipelineTerminal::Failed(error);
+                }
+            };
+            if !compressed.is_empty() {
+                draft.content = compressed.trim().to_string();
+                draft.output_chars = char_count(&draft.content);
+            }
+        }
+        ChapterContractOutcome::Valid
+        | ChapterContractOutcome::UnderSaveFloor
+        | ChapterContractOutcome::OverSaveCeiling => {}
+    }
+
+    if let Err(error) = validate_generated_content(
+        &draft.content,
+        &context.chapter_contract,
+        ChapterContractPhase::ModelOutput,
+    ) {
+        emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
+        return PipelineTerminal::Failed(error);
+    }
 
     emit(ChapterGenerationEvent::progress(
         &request_id,

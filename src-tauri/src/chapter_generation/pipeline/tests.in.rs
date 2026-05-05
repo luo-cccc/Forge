@@ -232,6 +232,26 @@ mod tests {
     }
 
     #[test]
+    fn chapter_contract_outcome_marks_under_min_and_over_max() {
+        assert_eq!(
+            chapter_contract_outcome(
+                &"甲".repeat(2_999),
+                &ChapterContract::default(),
+                ChapterContractPhase::ModelOutput,
+            ),
+            ChapterContractOutcome::UnderMinChars
+        );
+        assert_eq!(
+            chapter_contract_outcome(
+                &"甲".repeat(4_001),
+                &ChapterContract::default(),
+                ChapterContractPhase::ModelOutput,
+            ),
+            ChapterContractOutcome::OverMaxChars
+        );
+    }
+
+    #[test]
     fn maps_http_429_to_provider_rate_limited() {
         let err = map_provider_error("API error 429: too many requests".to_string());
         assert_eq!(err.code, "PROVIDER_RATE_LIMITED");

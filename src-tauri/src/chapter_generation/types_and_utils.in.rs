@@ -18,6 +18,8 @@ use crate::{llm_runtime, storage};
 
 pub const PHASE_STARTED: &str = "chapter_generation_started";
 pub const PHASE_CONTEXT_BUILT: &str = "chapter_generation_context_built";
+pub const PHASE_CONTINUATION: &str = "chapter_generation_continuation";
+pub const PHASE_COMPRESS: &str = "chapter_generation_compress";
 pub const PHASE_PROGRESS: &str = "chapter_generation_progress";
 pub const PHASE_CONFLICT: &str = "chapter_generation_conflict";
 pub const PHASE_COMPLETED: &str = "chapter_generation_completed";
@@ -485,6 +487,15 @@ pub enum ChapterContractPhase {
     Save,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChapterContractOutcome {
+    Valid,
+    UnderMinChars,
+    OverMaxChars,
+    UnderSaveFloor,
+    OverSaveCeiling,
+}
+
 pub fn char_count(text: &str) -> usize {
     text.chars().count()
 }
@@ -742,4 +753,32 @@ pub fn validate_generated_content(
     }
 
     Ok(())
+}
+
+pub fn chapter_contract_outcome(
+    content: &str,
+    contract: &ChapterContract,
+    phase: ChapterContractPhase,
+) -> ChapterContractOutcome {
+    let output_chars = char_count(content);
+    match phase {
+        ChapterContractPhase::ModelOutput => {
+            if output_chars < contract.min_chars {
+                ChapterContractOutcome::UnderMinChars
+            } else if output_chars > contract.max_chars {
+                ChapterContractOutcome::OverMaxChars
+            } else {
+                ChapterContractOutcome::Valid
+            }
+        }
+        ChapterContractPhase::Save => {
+            if output_chars < contract.save_hard_floor_chars {
+                ChapterContractOutcome::UnderSaveFloor
+            } else if output_chars > contract.save_hard_ceiling_chars {
+                ChapterContractOutcome::OverSaveCeiling
+            } else {
+                ChapterContractOutcome::Valid
+            }
+        }
+    }
 }

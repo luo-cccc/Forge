@@ -85,6 +85,74 @@ Aim for {} Chinese characters, keep the output within {}-{} Chinese characters, 
     })
 }
 
+pub async fn continue_chapter_draft(
+    settings: &llm_runtime::LlmSettings,
+    context: &BuiltChapterContext,
+    existing_content: &str,
+) -> Result<String, ChapterGenerationError> {
+    let system_prompt = format!(
+        "You are a professional Chinese novelist continuing a chapter draft. \
+Write only additional chapter prose that follows seamlessly from the existing draft. \
+Do not repeat earlier sentences, do not include analysis, and keep continuity stable. \
+The finished chapter should move toward {} Chinese characters and remain within {}-{} Chinese characters.",
+        context.chapter_contract.target_chars,
+        context.chapter_contract.min_chars,
+        context.chapter_contract.max_chars
+    );
+    let user_prompt = format!(
+        "Target chapter: {}\n\nExisting draft:\n{}\n\nProject context:\n{}\n\nContinue the chapter with new prose only.",
+        context.target.title,
+        existing_content,
+        context.prompt_context
+    );
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": user_prompt}),
+    ];
+    llm_runtime::chat_text_profile(
+        settings,
+        messages,
+        llm_runtime::LlmRequestProfile::ChapterContinuation,
+        PROVIDER_TIMEOUT_SECS,
+    )
+    .await
+    .map(|text| text.trim().to_string())
+    .map_err(map_provider_error)
+}
+
+pub async fn compress_chapter_draft(
+    settings: &llm_runtime::LlmSettings,
+    context: &BuiltChapterContext,
+    existing_content: &str,
+) -> Result<String, ChapterGenerationError> {
+    let system_prompt = format!(
+        "You are a professional Chinese novelist compressing a chapter draft. \
+Preserve continuity, anchors, and scene consequences while tightening the prose. \
+Write only the full revised chapter prose. Keep the chapter within {}-{} Chinese characters.",
+        context.chapter_contract.min_chars,
+        context.chapter_contract.max_chars
+    );
+    let user_prompt = format!(
+        "Target chapter: {}\n\nCurrent draft:\n{}\n\nProject context:\n{}\n\nRewrite the chapter more tightly without dropping important anchors.",
+        context.target.title,
+        existing_content,
+        context.prompt_context
+    );
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": user_prompt}),
+    ];
+    llm_runtime::chat_text_profile(
+        settings,
+        messages,
+        llm_runtime::LlmRequestProfile::ChapterCompress,
+        PROVIDER_TIMEOUT_SECS,
+    )
+    .await
+    .map(|text| text.trim().to_string())
+    .map_err(map_provider_error)
+}
+
 pub fn chapter_generation_provider_budget(
     settings: &llm_runtime::LlmSettings,
     messages: &[serde_json::Value],

@@ -24,6 +24,8 @@ pub enum LlmRequestProfile {
     GeneralChat,
     Json,
     ChapterDraft,
+    ChapterContinuation,
+    ChapterCompress,
     GhostPreview,
     Analysis,
     ParallelDraft,
@@ -51,6 +53,8 @@ struct RequestProfileConfig {
     general_chat: LlmRequestOptions,
     json: LlmRequestOptions,
     chapter_draft: LlmRequestOptions,
+    chapter_continuation: LlmRequestOptions,
+    chapter_compress: LlmRequestOptions,
     ghost_preview: LlmRequestOptions,
     analysis: LlmRequestOptions,
     parallel_draft: LlmRequestOptions,
@@ -133,6 +137,8 @@ fn profile_temperature_env(profile: LlmRequestProfile) -> Option<&'static str> {
         LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_TEMPERATURE"),
         LlmRequestProfile::Json => Some("OPENAI_JSON_TEMPERATURE"),
         LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_TEMPERATURE"),
+        LlmRequestProfile::ChapterContinuation => Some("OPENAI_CHAPTER_CONTINUATION_TEMPERATURE"),
+        LlmRequestProfile::ChapterCompress => Some("OPENAI_CHAPTER_COMPRESS_TEMPERATURE"),
         LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_TEMPERATURE"),
         LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_TEMPERATURE"),
         LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_TEMPERATURE"),
@@ -147,6 +153,8 @@ fn profile_max_tokens_env(profile: LlmRequestProfile) -> Option<&'static str> {
         LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_MAX_TOKENS"),
         LlmRequestProfile::Json => Some("OPENAI_JSON_MAX_TOKENS"),
         LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_MAX_TOKENS"),
+        LlmRequestProfile::ChapterContinuation => Some("OPENAI_CHAPTER_CONTINUATION_MAX_TOKENS"),
+        LlmRequestProfile::ChapterCompress => Some("OPENAI_CHAPTER_COMPRESS_MAX_TOKENS"),
         LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_MAX_TOKENS"),
         LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_MAX_TOKENS"),
         LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_MAX_TOKENS"),
@@ -161,6 +169,8 @@ fn profile_reasoning_env(profile: LlmRequestProfile) -> Option<&'static str> {
         LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_DISABLE_REASONING"),
         LlmRequestProfile::Json => Some("OPENAI_JSON_DISABLE_REASONING"),
         LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_DISABLE_REASONING"),
+        LlmRequestProfile::ChapterContinuation => Some("OPENAI_CHAPTER_CONTINUATION_DISABLE_REASONING"),
+        LlmRequestProfile::ChapterCompress => Some("OPENAI_CHAPTER_COMPRESS_DISABLE_REASONING"),
         LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_DISABLE_REASONING"),
         LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_DISABLE_REASONING"),
         LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_DISABLE_REASONING"),
@@ -198,6 +208,8 @@ fn default_profile_options(
             disable_reasoning: config.json.disable_reasoning,
         },
         LlmRequestProfile::ChapterDraft => config.chapter_draft,
+        LlmRequestProfile::ChapterContinuation => config.chapter_continuation,
+        LlmRequestProfile::ChapterCompress => config.chapter_compress,
         LlmRequestProfile::GhostPreview => config.ghost_preview,
         LlmRequestProfile::Analysis => config.analysis,
         LlmRequestProfile::ParallelDraft => config.parallel_draft,
@@ -687,6 +699,22 @@ mod tests {
             LlmRequestOptions {
                 temperature: config.chapter_draft.temperature,
                 max_tokens: config.chapter_draft.max_tokens,
+                disable_reasoning: true
+            }
+        );
+        assert_eq!(
+            request_options(&settings, LlmRequestProfile::ChapterContinuation),
+            LlmRequestOptions {
+                temperature: config.chapter_continuation.temperature,
+                max_tokens: config.chapter_continuation.max_tokens,
+                disable_reasoning: true
+            }
+        );
+        assert_eq!(
+            request_options(&settings, LlmRequestProfile::ChapterCompress),
+            LlmRequestOptions {
+                temperature: config.chapter_compress.temperature,
+                max_tokens: config.chapter_compress.max_tokens,
                 disable_reasoning: true
             }
         );
