@@ -13,8 +13,8 @@ use agent_harness_core::{PermissionMode, PermissionPolicy};
 
 use super::canon::CanonEngine;
 use super::context::{
-    assemble_observation_context, assemble_observation_context_with_default_budget, AgentTask,
-    WritingContextPack,
+    append_context_source_with_budget, assemble_observation_context,
+    assemble_observation_context_with_default_budget, AgentTask, ContextSource, WritingContextPack,
 };
 use super::diagnostics::{
     DiagnosticCategory, DiagnosticResult, DiagnosticSeverity, DiagnosticsEngine,
@@ -74,7 +74,12 @@ pub use super::kernel_run_loop::{
     WriterAgentTask,
 };
 pub use super::kernel_task_packet::build_task_packet_for_observation;
-pub(crate) use super::kernel_task_packet::{context_budget_trace, trace_state_with_expiry};
+pub(crate) use super::kernel_task_packet::{
+    attach_story_impact_to_task_packet, context_budget_trace, trace_state_with_expiry,
+};
+pub(crate) use super::kernel_task_packet::{
+    story_impact_context_budget, story_impact_context_priority,
+};
 pub use super::metacognition::{
     WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
 };

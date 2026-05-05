@@ -140,6 +140,18 @@ where
         &self.tool_inventory
     }
 
+    pub fn task_packet(&self) -> &TaskPacket {
+        &self.task_packet
+    }
+
+    pub fn system_prompt(&self) -> &str {
+        &self.agent.config.system_prompt
+    }
+
+    pub fn source_refs(&self) -> &[String] {
+        &self.source_refs
+    }
+
     pub fn first_round_provider_budget(
         &self,
         task: WriterProviderBudgetTask,

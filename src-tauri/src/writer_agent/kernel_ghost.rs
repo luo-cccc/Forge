@@ -269,6 +269,7 @@ pub(crate) fn context_pack_evidence(
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
             ContextSource::OutlineSlice => EvidenceSource::Outline,
             ContextSource::ResultFeedback => EvidenceSource::ChapterText,
+            ContextSource::StoryImpactRadius => EvidenceSource::StoryImpactRadius,
             _ => EvidenceSource::ChapterText,
         };
         evidence.push(EvidenceRef {

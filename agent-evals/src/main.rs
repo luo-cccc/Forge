@@ -1,14 +1,8 @@
 mod evals;
-mod evals_extra;
-mod evals_extra2;
 mod fixtures;
-mod product_scenarios;
 
 use crate::evals::*;
-use crate::evals_extra::*;
-use crate::evals_extra2::*;
 use crate::fixtures::*;
-use crate::product_scenarios::*;
 
 use std::path::Path;
 
@@ -106,6 +100,7 @@ fn main() {
     results.push(run_chapter_generation_task_receipt_required_eval());
     results.push(run_continuity_diagnostic_task_receipt_eval());
     results.push(run_continuity_diagnostic_artifact_recorded_eval());
+    results.push(run_planning_review_artifact_recorded_eval());
     results.push(run_task_receipt_mismatch_blocks_write_eval());
     results.push(run_failure_evidence_bundle_eval());
     results.extend(run_product_scenario_evals());
@@ -172,6 +167,8 @@ fn main() {
     results.push(run_story_impact_radius_traverses_reverse_edges_eval());
     results.push(run_story_impact_radius_memory_seed_ids_align_eval());
     results.push(run_story_impact_radius_run_event_links_observation_eval());
+    results.push(run_story_impact_radius_enters_task_packet_eval());
+    results.push(run_story_impact_radius_enters_prompt_context_eval());
     results.push(run_story_impact_radius_small_change_stays_minimal_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();

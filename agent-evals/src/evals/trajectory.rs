@@ -1086,3 +1086,40 @@ pub fn run_context_pack_built_run_event_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_trajectory_product_metrics_present_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+    kernel.observe(observation("林墨停在旧门前。")).unwrap();
+
+    let export = kernel.export_trajectory(100);
+    let mut errors = Vec::new();
+    if export.jsonl.is_empty() {
+        errors.push("trajectory export is empty".to_string());
+    }
+    let has_metrics = export.jsonl.contains("writer.product_metrics");
+    if !has_metrics {
+        errors.push("trajectory missing product_metrics event".to_string());
+    }
+
+    eval_result(
+        "writer_agent:trajectory_product_metrics_present",
+        format!(
+            "jsonlBytes={} hasMetrics={}",
+            export.jsonl.len(),
+            has_metrics
+        ),
+        errors,
+    )
+}

@@ -95,4 +95,6 @@ pub enum EvidenceSource {
     ChapterMission,
     #[serde(rename = "author_feedback")]
     AuthorFeedback,
+    #[serde(rename = "story_impact_radius")]
+    StoryImpactRadius,
 }

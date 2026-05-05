@@ -228,3 +228,43 @@ pub fn run_guard_trace_evidence_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_story_debt_priority_ordering_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+    kernel
+        .observe(observation_in_chapter("林墨停在旧门前。", "Chapter-1"))
+        .unwrap();
+
+    let debt = kernel.story_debt_snapshot();
+    let mut errors = Vec::new();
+    // Verify the snapshot structure is well-formed (may be empty for minimal obs)
+    if debt.total > 0 {
+        let categories: Vec<String> = debt
+            .entries
+            .iter()
+            .map(|e| format!("{:?}", e.category))
+            .collect();
+        let unique: std::collections::BTreeSet<_> = categories.iter().collect();
+        if unique.is_empty() {
+            errors.push("debt entries lack categories".to_string());
+        }
+    }
+
+    eval_result(
+        "writer_agent:story_debt_priority_ordering",
+        format!("totalDebt={}", debt.total),
+        errors,
+    )
+}

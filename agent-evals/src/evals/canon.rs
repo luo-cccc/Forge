@@ -342,3 +342,140 @@ pub fn run_character_conflict_flag_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_canon_false_positive_suppression_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .upsert_canon_entity(
+            "weapon",
+            "长刀",
+            &["刀".to_string(), "武器".to_string()],
+            "林墨的佩刀",
+            &serde_json::json!({"材质": "玄铁"}),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨拔出长刀，刀锋在月光下泛着冷光。",
+            "Chapter-1",
+        ))
+        .unwrap();
+
+    let mut errors = Vec::new();
+    let canon_warnings = proposals
+        .iter()
+        .filter(|p| p.kind == ProposalKind::ContinuityWarning)
+        .count();
+    if canon_warnings > 0 {
+        errors.push(format!(
+            "{} canon warnings on consistent weapon use",
+            canon_warnings
+        ));
+    }
+
+    eval_result(
+        "writer_agent:canon_false_positive_suppression",
+        format!("canonWarnings={}", canon_warnings),
+        errors,
+    )
+}
+
+pub fn run_same_entity_attribute_merge_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .upsert_canon_entity(
+            "character",
+            "林墨",
+            &[],
+            "林墨惯用寒影刀的刀客。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.9,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨的师门是北境寒山宗，他仍握着寒影刀。", "Chapter-4");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+
+    let proposals = kernel.create_llm_memory_proposals(
+        obs,
+        serde_json::json!({
+            "canon": [{
+                "kind": "character",
+                "name": "林墨",
+                "summary": "林墨出身北境寒山宗，惯用寒影刀。",
+                "attributes": { "origin": "北境寒山宗" },
+                "confidence": 0.88
+            }],
+            "promises": []
+        }),
+        "eval-model",
+    );
+
+    let merge_ops = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| {
+            matches!(
+                operation,
+                WriterOperation::CanonUpdateAttribute {
+                    entity,
+                    attribute,
+                    value,
+                    ..
+                } if entity == "林墨" && attribute == "origin" && value == "北境寒山宗"
+            )
+        })
+        .count();
+    let entity_upserts = proposals
+        .iter()
+        .flat_map(|proposal| proposal.operations.iter())
+        .filter(|operation| matches!(operation, WriterOperation::CanonUpsertEntity { .. }))
+        .count();
+    let conflict_reviews = proposals
+        .iter()
+        .filter(|proposal| proposal.kind == ProposalKind::ContinuityWarning)
+        .count();
+
+    let mut errors = Vec::new();
+    if merge_ops != 1 {
+        errors.push(format!(
+            "expected one canon.update_attribute merge op, got {}",
+            merge_ops
+        ));
+    }
+    if entity_upserts != 0 {
+        errors.push(format!(
+            "same-entity merge should not upsert whole entity, got {}",
+            entity_upserts
+        ));
+    }
+    if conflict_reviews != 0 {
+        errors.push(format!(
+            "non-conflicting attribute merge should not create conflict review, got {}",
+            conflict_reviews
+        ));
+    }
+
+    eval_result(
+        "writer_agent:same_entity_attribute_merge",
+        format!(
+            "mergeOps={} entityUpserts={} conflictReviews={}",
+            merge_ops, entity_upserts, conflict_reviews
+        ),
+        errors,
+    )
+}

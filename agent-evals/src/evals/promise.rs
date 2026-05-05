@@ -659,3 +659,199 @@ pub fn run_story_review_queue_promise_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_promise_object_cross_chapter_tracking_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_whereabouts",
+            "寒玉戒指",
+            "林墨母亲的遗物被黑衣人夺走",
+            "Chapter-2",
+            "Chapter-5",
+            4,
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-3".to_string());
+
+    let pack = kernel.context_pack_for_default(
+        AgentTask::GhostWriting,
+        &observation_in_chapter("林墨摸了摸空荡荡的手指。", "Chapter-3"),
+    );
+    let promise_in_ctx = pack.sources.iter().any(|s| s.content.contains("寒玉戒指"));
+
+    let mut errors = Vec::new();
+    let promises = kernel.memory.get_open_promise_summaries().unwrap();
+    let ring = promises.iter().find(|p| p.title.contains("寒玉"));
+    if ring.is_none() {
+        errors.push("object promise not found in ledger".to_string());
+    }
+    if !promise_in_ctx && ring.is_some() {
+        errors.push("open object promise missing from context pack".to_string());
+    }
+
+    eval_result(
+        "writer_agent:promise_object_cross_chapter_tracking",
+        format!(
+            "promiseInContext={} lastSeen={}",
+            promise_in_ctx,
+            ring.map(|p| p.last_seen_chapter.as_str()).unwrap_or("none")
+        ),
+        errors,
+    )
+}
+
+pub fn run_promise_kind_extraction_from_text_eval() -> EvalResult {
+    let mut errors = Vec::new();
+
+    // Object whereabouts
+    let mut obs = observation("张三带走了那枚玉佩，从此下落不明。");
+    obs.chapter_title = Some("Chapter-3".to_string());
+    let promises = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "张三带走了那枚玉佩，从此下落不明。",
+        &obs,
+    );
+    let has_object = promises
+        .iter()
+        .any(|p| p.kind.contains("object_whereabouts"));
+    if !has_object {
+        errors.push(format!(
+            "object whereabouts not detected, got kinds: {:?}",
+            promises.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>()
+        ));
+    }
+
+    // Mystery clue
+    let mut obs2 = observation("这个秘密已经埋藏了二十年。");
+    obs2.chapter_title = Some("Chapter-1".to_string());
+    let promises2 = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "这个秘密已经埋藏了二十年。",
+        &obs2,
+    );
+    let has_mystery = promises2.iter().any(|p| p.kind.contains("mystery_clue"));
+    if !has_mystery {
+        errors.push("mystery clue not detected for secret".to_string());
+    }
+
+    // Priority: object/mystery should get higher priority than generic
+    if !promises.is_empty() && promises[0].priority < 4 {
+        errors.push(format!(
+            "object promise should have priority >= 4, got {}",
+            promises[0].priority
+        ));
+    }
+
+    eval_result(
+        "writer_agent:promise_kind_extraction_from_text",
+        format!(
+            "objectPromises={} mysteryPromises={} objPriority={}",
+            promises.len(),
+            promises2.len(),
+            promises.first().map(|p| p.priority).unwrap_or(0)
+        ),
+        errors,
+    )
+}
+
+pub fn run_promise_related_entities_extraction_eval() -> EvalResult {
+    let mut obs = observation("张三带走了林墨的玉佩，从此下落不明。");
+    obs.chapter_title = Some("Chapter-3".to_string());
+    let promises = agent_writer_lib::writer_agent::kernel::extract_plot_promises(
+        "张三带走了林墨的玉佩，从此下落不明。",
+        &obs,
+    );
+
+    let mut errors = Vec::new();
+    if promises.is_empty() {
+        errors.push("no promises extracted".to_string());
+    } else {
+        let p = &promises[0];
+        if p.related_entities.is_empty() || p.related_entities[0] == "unknown" {
+            errors.push(format!(
+                "related_entities should contain named entities, got: {:?}",
+                p.related_entities
+            ));
+        }
+    }
+
+    eval_result(
+        "writer_agent:promise_related_entities_extraction",
+        format!(
+            "promises={} entities={:?}",
+            promises.len(),
+            promises.first().map(|p| &p.related_entities)
+        ),
+        errors,
+    )
+}
+
+pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .add_promise(
+            "mystery_clue",
+            "玉佩下落",
+            "张三带走了玉佩",
+            "Ch1",
+            "Ch5",
+            4,
+        )
+        .unwrap();
+
+    use agent_writer_lib::writer_agent::kernel::{
+        validate_promise_candidate_with_dedup, MemoryCandidateQuality,
+    };
+    use agent_writer_lib::writer_agent::operation::PlotPromiseOp;
+
+    let duplicate = PlotPromiseOp {
+        kind: "mystery_clue".to_string(),
+        title: "玉佩下落".to_string(),
+        description: "张三带走了玉佩，去向不明。".to_string(),
+        introduced_chapter: "Ch2".to_string(),
+        expected_payoff: "Ch5".to_string(),
+        priority: 4,
+        related_entities: vec!["张三".to_string(), "玉佩".to_string()],
+    };
+    let new_promise = PlotPromiseOp {
+        kind: "object_whereabouts".to_string(),
+        title: "寒玉戒指".to_string(),
+        description: "林墨母亲的遗物在旧门后被发现。".to_string(),
+        introduced_chapter: "Ch3".to_string(),
+        expected_payoff: "Ch6".to_string(),
+        priority: 4,
+        related_entities: vec!["林墨".to_string(), "戒指".to_string()],
+    };
+
+    let mut errors = Vec::new();
+    match validate_promise_candidate_with_dedup(&duplicate, &memory) {
+        MemoryCandidateQuality::Duplicate { .. } => {}
+        other => errors.push(format!(
+            "expected Duplicate for same-title promise, got {:?}",
+            other
+        )),
+    }
+    match validate_promise_candidate_with_dedup(&new_promise, &memory) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for unique promise, got {:?}",
+            other
+        )),
+    }
+
+    eval_result(
+        "writer_agent:promise_dedup_against_existing",
+        format!("duplicate detected correctly"),
+        errors,
+    )
+}

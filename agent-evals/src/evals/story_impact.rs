@@ -444,6 +444,220 @@ pub fn run_story_impact_radius_run_event_links_observation_eval() -> EvalResult 
     )
 }
 
+pub fn run_story_impact_radius_enters_task_packet_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "寒玉戒指线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_whereabouts",
+            "寒玉戒指",
+            "寒玉戒指被黑衣人夺走，必须回收。",
+            "Chapter-2",
+            "Chapter-5",
+            8,
+        )
+        .unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation_in_chapter("林墨摸了摸空荡荡的手指。", "Chapter-3");
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "这段接下来怎么推进？".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨摸了摸空荡荡的手指。".to_string(),
+            paragraph: "林墨摸了摸空荡荡的手指。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared =
+        kernel.prepare_task_run(request, provider, StoryImpactEvalToolHandler, "gpt-4o-mini");
+    match prepared {
+        Ok(prepared) => {
+            let has_required_context = prepared
+                .task_packet()
+                .required_context
+                .iter()
+                .any(|context| context.source_type == "StoryImpactRadius" && context.required);
+            let has_belief = prepared.task_packet().beliefs.iter().any(|belief| {
+                belief.subject == "Story Impact Radius"
+                    && belief
+                        .source
+                        .as_deref()
+                        .is_some_and(|source| source == "writer.story_impact_radius_built")
+                    && belief.statement.contains("risk=")
+            });
+            if !has_required_context {
+                errors.push("task packet missing required StoryImpactRadius context".to_string());
+            }
+            if !has_belief {
+                errors.push("task packet missing Story Impact Radius belief summary".to_string());
+            }
+            eval_result(
+                "writer_agent:story_impact_radius_enters_task_packet",
+                format!(
+                    "requiredContext={} belief={}",
+                    has_required_context, has_belief
+                ),
+                errors,
+            )
+        }
+        Err(error) => eval_result(
+            "writer_agent:story_impact_radius_enters_task_packet",
+            format!("prepare=false error={}", error),
+            vec![format!("prepare_task_run failed: {}", error)],
+        ),
+    }
+}
+
+pub fn run_story_impact_radius_enters_prompt_context_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "寒玉戒指线推动林墨做选择。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-3",
+            "林墨必须追查寒玉戒指下落，但不能直接揭开黑衣人身份。",
+            "寒玉戒指下落",
+            "直接揭开黑衣人身份",
+            "以新的疑问收束。",
+            "eval",
+        )
+        .unwrap();
+    memory
+        .add_promise(
+            "object_whereabouts",
+            "寒玉戒指",
+            "寒玉戒指被黑衣人夺走，必须回收。",
+            "Chapter-2",
+            "Chapter-5",
+            8,
+        )
+        .unwrap();
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let obs = observation_in_chapter("林墨摸了摸空荡荡的手指。", "Chapter-3");
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::ManualRequest,
+        observation: obs,
+        user_instruction: "这段接下来怎么推进？".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨摸了摸空荡荡的手指。".to_string(),
+            paragraph: "林墨摸了摸空荡荡的手指。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: true,
+            has_outline: true,
+        },
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared =
+        kernel.prepare_task_run(request, provider, StoryImpactEvalToolHandler, "gpt-4o-mini");
+
+    match prepared {
+        Ok(prepared) => {
+            let prompt = prepared.system_prompt();
+            let prompt_has_source = prompt.contains("## StoryImpactRadius")
+                && prompt.contains("Story Impact Radius")
+                && prompt.contains("risk:");
+            let source_refs_have_impact = prepared
+                .source_refs()
+                .iter()
+                .any(|source| source == "StoryImpactRadius");
+            let trace = kernel.trace_snapshot(20);
+            let context_event_has_impact = trace.run_events.iter().any(|event| {
+                event.event_type == "writer.context_pack_built"
+                    && event
+                        .source_refs
+                        .iter()
+                        .any(|source| source == "context_source:StoryImpactRadius")
+                    && event
+                        .data
+                        .get("sourceReports")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|reports| {
+                            reports.iter().any(|report| {
+                                report.get("source").and_then(|value| value.as_str())
+                                    == Some("StoryImpactRadius")
+                                    && report
+                                        .get("provided")
+                                        .and_then(|value| value.as_u64())
+                                        .unwrap_or(0)
+                                        > 0
+                            })
+                        })
+            });
+            if !prompt_has_source {
+                errors.push("system prompt missing StoryImpactRadius context source".to_string());
+            }
+            if !source_refs_have_impact {
+                errors.push("prepared source refs missing StoryImpactRadius".to_string());
+            }
+            if !context_event_has_impact {
+                errors.push(
+                    "context_pack_built run event missing StoryImpactRadius source report"
+                        .to_string(),
+                );
+            }
+            eval_result(
+                "writer_agent:story_impact_radius_enters_prompt_context",
+                format!(
+                    "prompt={} sourceRefs={} contextEvent={}",
+                    prompt_has_source, source_refs_have_impact, context_event_has_impact
+                ),
+                errors,
+            )
+        }
+        Err(error) => eval_result(
+            "writer_agent:story_impact_radius_enters_prompt_context",
+            format!("prepare=false error={}", error),
+            vec![format!("prepare_task_run failed: {}", error)],
+        ),
+    }
+}
+
 pub fn run_story_impact_radius_small_change_stays_minimal_eval() -> EvalResult {
     let mut errors = Vec::new();
     let seeds = vec![make_si_node(

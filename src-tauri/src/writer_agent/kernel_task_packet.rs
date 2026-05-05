@@ -6,6 +6,9 @@ use super::context::{AgentTask, ContextSource, WritingContextPack};
 use super::kernel_helpers::{feedback_contract_for_task, tool_policy_for_task};
 use super::memory::{ContextBudgetTrace, ContextSourceBudgetTrace};
 use super::observation::WriterObservation;
+use super::story_impact::{
+    story_impact_task_summary, StoryImpactBudgetReport, WriterStoryImpactRadius,
+};
 
 pub(crate) fn context_budget_trace(pack: &WritingContextPack) -> ContextBudgetTrace {
     ContextBudgetTrace {
@@ -81,6 +84,28 @@ pub fn build_task_packet_for_observation(
     packet.tool_policy = tool_policy_for_task(&task);
     packet.feedback = feedback_contract_for_task(&task);
     packet
+}
+
+pub(crate) fn attach_story_impact_to_task_packet(
+    packet: &mut TaskPacket,
+    radius: &WriterStoryImpactRadius,
+    budget: &StoryImpactBudgetReport,
+) {
+    let summary = story_impact_task_summary(radius, budget);
+    if summary.trim().is_empty() {
+        return;
+    }
+
+    packet.beliefs.push(
+        TaskBelief::new("Story Impact Radius", summary.clone(), 0.82)
+            .with_source("writer.story_impact_radius_built"),
+    );
+    packet.required_context.push(RequiredContext::new(
+        "StoryImpactRadius",
+        "Review impacted story facts, risk, and budget truncation before drafting or planning.",
+        summary.chars().count().max(1),
+        true,
+    ));
 }
 
 fn constraints_for_task(task: &AgentTask) -> Vec<String> {
@@ -169,6 +194,7 @@ fn belief_confidence(source: &ContextSource) -> f32 {
         | ContextSource::NextChapter
         | ContextSource::NeighborText => 0.75,
         ContextSource::AuthorStyle | ContextSource::OutlineSlice | ContextSource::RagExcerpt => 0.7,
+        ContextSource::StoryImpactRadius => 0.82,
     }
 }
 
@@ -222,6 +248,9 @@ fn context_source_purpose(source: &ContextSource) -> &'static str {
         ContextSource::PreviousChapter => "Maintain continuity from previous chapters.",
         ContextSource::NextChapter => "Avoid blocking the next planned chapter.",
         ContextSource::NeighborText => "Maintain nearby prose flow.",
+        ContextSource::StoryImpactRadius => {
+            "Review impacted story facts, risk, and budget truncation before drafting or planning."
+        }
     }
 }
 
@@ -229,6 +258,22 @@ fn is_required_context_source(task: &AgentTask, source: &ContextSource) -> bool 
     task.required_source_budgets()
         .iter()
         .any(|(required, _)| required == source)
+}
+
+pub(crate) fn story_impact_context_budget(task: &AgentTask) -> usize {
+    task.source_priorities()
+        .iter()
+        .find(|(source, _, _)| source == &ContextSource::StoryImpactRadius)
+        .map(|(_, _, budget)| *budget)
+        .unwrap_or(420)
+}
+
+pub(crate) fn story_impact_context_priority(task: &AgentTask) -> u8 {
+    task.source_priorities()
+        .iter()
+        .find(|(source, _, _)| source == &ContextSource::StoryImpactRadius)
+        .map(|(_, priority, _)| *priority)
+        .unwrap_or(8)
 }
 
 pub(crate) fn trace_state_with_expiry(state: &str, expires_at: Option<u64>, now: u64) -> String {

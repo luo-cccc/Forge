@@ -70,6 +70,7 @@ for (const budget of budgets) {
 }
 
 checkCompanionHelpersBoundary();
+checkEvalRootBoundary();
 
 if (failures.length > 0) {
   console.error("\nArchitecture size guard failed:");
@@ -159,6 +160,28 @@ function checkCompanionHelpersBoundary() {
     } else {
       console.log(`ok   ${relativePath}: helper boundary has no hooks, JSX, or side-effect APIs.`);
     }
+  }
+}
+
+function checkEvalRootBoundary() {
+  const evalSrcDir = path.join(repoRoot, "agent-evals", "src");
+  const allowedRootFiles = new Set(["evals.rs", "fixtures.rs", "main.rs"]);
+  if (!fs.existsSync(evalSrcDir)) {
+    failures.push("agent-evals/src: missing");
+    return;
+  }
+
+  const rootRustFiles = fs
+    .readdirSync(evalSrcDir)
+    .filter((entry) => entry.endsWith(".rs"))
+    .sort();
+  const unexpected = rootRustFiles.filter((entry) => !allowedRootFiles.has(entry));
+  if (unexpected.length > 0) {
+    failures.push(
+      `agent-evals/src: root eval implementation files must live under evals/ (${unexpected.join(", ")})`,
+    );
+  } else {
+    console.log("ok   agent-evals/src: eval implementations are isolated under evals/.");
   }
 }
 

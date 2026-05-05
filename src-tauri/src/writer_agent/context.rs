@@ -42,6 +42,7 @@ pub enum ContextSource {
     PreviousChapter,
     NextChapter,
     NeighborText,
+    StoryImpactRadius,
 }
 
 /// Task type determines which sources to include and their priority order.
@@ -77,6 +78,7 @@ impl AgentTask {
                 (ContextSource::CursorPrefix, 10, 800),
                 (ContextSource::ChapterMission, 10, 520),
                 (ContextSource::NextBeat, 10, 420),
+                (ContextSource::StoryImpactRadius, 9, 420),
                 (ContextSource::ResultFeedback, 9, 420),
                 (ContextSource::ProjectBrief, 9, 420),
                 (ContextSource::CursorSuffix, 9, 400),
@@ -90,6 +92,7 @@ impl AgentTask {
             AgentTask::ContinuityDiagnostic => vec![
                 (ContextSource::CursorPrefix, 10, 300),
                 (ContextSource::CanonSlice, 10, 800),
+                (ContextSource::StoryImpactRadius, 9, 500),
                 (ContextSource::ChapterMission, 9, 420),
                 (ContextSource::NextBeat, 9, 420),
                 (ContextSource::ResultFeedback, 9, 420),
@@ -102,6 +105,7 @@ impl AgentTask {
                 (ContextSource::ProjectBrief, 11, 1600),
                 (ContextSource::ChapterMission, 11, 2200),
                 (ContextSource::NextBeat, 11, 1600),
+                (ContextSource::StoryImpactRadius, 10, 1200),
                 (ContextSource::ResultFeedback, 10, 2200),
                 (ContextSource::OutlineSlice, 10, 6000),
                 (ContextSource::PreviousChapter, 9, 5000),
@@ -116,6 +120,7 @@ impl AgentTask {
                 (ContextSource::SelectedText, 10, 2000),
                 (ContextSource::CursorPrefix, 9, 500),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::StoryImpactRadius, 8, 360),
                 (ContextSource::ChapterMission, 8, 500),
                 (ContextSource::NextBeat, 8, 360),
                 (ContextSource::ProjectBrief, 8, 400),
@@ -129,6 +134,7 @@ impl AgentTask {
                 (ContextSource::ProjectBrief, 10, 800),
                 (ContextSource::ResultFeedback, 10, 900),
                 (ContextSource::NextBeat, 10, 700),
+                (ContextSource::StoryImpactRadius, 9, 700),
                 (ContextSource::PromiseSlice, 9, 900),
                 (ContextSource::CanonSlice, 9, 900),
                 (ContextSource::DecisionSlice, 8, 600),
@@ -142,6 +148,7 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 10, 500),
                 (ContextSource::PromiseSlice, 9, 300),
                 (ContextSource::DecisionSlice, 9, 300),
+                (ContextSource::StoryImpactRadius, 8, 260),
                 (ContextSource::NextBeat, 8, 260),
                 (ContextSource::ChapterMission, 8, 360),
                 (ContextSource::ProjectBrief, 8, 300),
@@ -152,6 +159,7 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 10, 2000),
                 (ContextSource::PromiseSlice, 9, 1000),
                 (ContextSource::NextBeat, 9, 800),
+                (ContextSource::StoryImpactRadius, 9, 700),
                 (ContextSource::ResultFeedback, 9, 900),
                 (ContextSource::DecisionSlice, 9, 800),
                 (ContextSource::ChapterMission, 8, 800),
@@ -162,6 +170,7 @@ impl AgentTask {
                 (ContextSource::SelectedText, 10, 1200),
                 (ContextSource::CursorPrefix, 9, 1400),
                 (ContextSource::CursorSuffix, 8, 500),
+                (ContextSource::StoryImpactRadius, 8, 500),
                 (ContextSource::ChapterMission, 8, 700),
                 (ContextSource::NextBeat, 8, 600),
                 (ContextSource::ProjectBrief, 8, 600),
@@ -183,6 +192,7 @@ impl AgentTask {
                 (ContextSource::NextBeat, 160),
                 (ContextSource::ProjectBrief, 160),
                 (ContextSource::ResultFeedback, 140),
+                (ContextSource::StoryImpactRadius, 140),
                 (ContextSource::CanonSlice, 180),
                 (ContextSource::PromiseSlice, 140),
             ],
@@ -193,12 +203,14 @@ impl AgentTask {
                 (ContextSource::NextBeat, 140),
                 (ContextSource::ProjectBrief, 120),
                 (ContextSource::ResultFeedback, 120),
+                (ContextSource::StoryImpactRadius, 140),
             ],
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 500),
                 (ContextSource::ChapterMission, 700),
                 (ContextSource::NextBeat, 700),
                 (ContextSource::ResultFeedback, 700),
+                (ContextSource::StoryImpactRadius, 300),
                 (ContextSource::OutlineSlice, 1_000),
                 (ContextSource::PreviousChapter, 800),
                 (ContextSource::PromiseSlice, 600),
@@ -211,11 +223,13 @@ impl AgentTask {
                 (ContextSource::NextBeat, 140),
                 (ContextSource::ProjectBrief, 120),
                 (ContextSource::ResultFeedback, 120),
+                (ContextSource::StoryImpactRadius, 120),
             ],
             AgentTask::PlanningReview => vec![
                 (ContextSource::ChapterMission, 300),
                 (ContextSource::ProjectBrief, 220),
                 (ContextSource::ResultFeedback, 220),
+                (ContextSource::StoryImpactRadius, 220),
                 (ContextSource::PromiseSlice, 240),
                 (ContextSource::CanonSlice, 240),
             ],
@@ -226,12 +240,14 @@ impl AgentTask {
                 (ContextSource::ChapterMission, 120),
                 (ContextSource::ProjectBrief, 120),
                 (ContextSource::ResultFeedback, 120),
+                (ContextSource::StoryImpactRadius, 120),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 600),
                 (ContextSource::PromiseSlice, 240),
                 (ContextSource::NextBeat, 240),
                 (ContextSource::ResultFeedback, 240),
+                (ContextSource::StoryImpactRadius, 180),
                 (ContextSource::ChapterMission, 240),
                 (ContextSource::ProjectBrief, 180),
             ],
@@ -242,6 +258,7 @@ impl AgentTask {
                 (ContextSource::NextBeat, 220),
                 (ContextSource::ProjectBrief, 180),
                 (ContextSource::ResultFeedback, 180),
+                (ContextSource::StoryImpactRadius, 180),
                 (ContextSource::CanonSlice, 220),
                 (ContextSource::PromiseSlice, 180),
             ],
@@ -311,6 +328,7 @@ impl WritingContextPack {
             "CursorSuffix",
             "AuthorStyle",
             "RagExcerpt",
+            "StoryImpactRadius",
         ];
         let excluded: Vec<_> = all_known
             .iter()
@@ -471,6 +489,74 @@ pub fn assemble_context_pack(
     }
 }
 
+pub fn append_context_source_with_budget(
+    pack: &mut WritingContextPack,
+    source: ContextSource,
+    content: String,
+    requested: usize,
+    priority: u8,
+    evidence_ref: Option<String>,
+) {
+    if content.trim().is_empty() {
+        return;
+    }
+
+    let remaining = pack.budget_limit.saturating_sub(pack.total_chars);
+    let alloc = requested.min(remaining);
+    let included = char_window(&content, 0, alloc);
+    let provided = included.chars().count();
+    if provided == 0 {
+        pack.budget_report.source_reports.push(SourceReport {
+            source: format!("{:?}", source),
+            requested,
+            provided: 0,
+            truncated: content.chars().count() > 0,
+            reason: format!(
+                "{:?} derived source was dropped because the context budget was exhausted before allocation.",
+                pack.task
+            ),
+            truncation_reason: Some(format!(
+                "ContextPack total budget of {} chars was exhausted before this source could be included.",
+                pack.budget_limit
+            )),
+        });
+        return;
+    }
+
+    pack.total_chars += provided;
+    pack.budget_report.used += provided;
+    pack.budget_report.wasted = pack.budget_limit.saturating_sub(pack.total_chars);
+    let truncated = content.chars().count() > provided;
+    pack.sources.push(ContextExcerpt {
+        source: source.clone(),
+        content: included,
+        char_count: provided,
+        truncated,
+        priority,
+        evidence_ref,
+    });
+    pack.sources
+        .sort_by(|left, right| right.priority.cmp(&left.priority));
+    pack.budget_report.source_reports.push(SourceReport {
+        source: format!("{:?}", source),
+        requested,
+        provided,
+        truncated,
+        reason: format!(
+            "{:?} derived source included after story impact radius calculation.",
+            pack.task
+        ),
+        truncation_reason: if truncated {
+            Some(format!(
+                "Source content was limited by remaining ContextPack budget of {} chars.",
+                provided
+            ))
+        } else {
+            None
+        },
+    });
+}
+
 struct SourceDraft {
     source: ContextSource,
     priority: u8,
@@ -572,6 +658,7 @@ pub fn assemble_observation_context(
             ContextSource::PromiseSlice => non_empty(promise_slice.clone()),
             ContextSource::DecisionSlice => non_empty(decision_slice.clone()),
             ContextSource::AuthorStyle => non_empty(author_style.clone()),
+            ContextSource::StoryImpactRadius => None,
             _ => None,
         },
         total_budget,

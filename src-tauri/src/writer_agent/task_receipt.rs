@@ -572,6 +572,7 @@ fn is_diagnostic_required_source(source: &ContextSource) -> bool {
             | ContextSource::NextBeat
             | ContextSource::PromiseSlice
             | ContextSource::DecisionSlice
+            | ContextSource::StoryImpactRadius
     )
 }
 

@@ -68,8 +68,7 @@ impl WriterAgentKernel {
             .iter()
             .flat_map(|proposal| proposal.operations.clone())
             .collect::<Vec<_>>();
-        let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
-        self.record_context_pack_built_run_event(&request.observation, &context_pack, now_ms());
+        let mut context_pack = self.context_pack_for_default(task.clone(), &request.observation);
         let (impact_radius, impact_budget) =
             crate::writer_agent::story_impact::compute_story_impact(
                 &request.observation,
@@ -77,6 +76,19 @@ impl WriterAgentKernel {
                 &self.memory,
                 None,
             );
+        let impact_summary = crate::writer_agent::story_impact::story_impact_context_summary(
+            &impact_radius,
+            &impact_budget,
+        );
+        append_context_source_with_budget(
+            &mut context_pack,
+            ContextSource::StoryImpactRadius,
+            impact_summary,
+            story_impact_context_budget(&task),
+            story_impact_context_priority(&task),
+            Some(format!("story_impact_radius:{}", request.observation.id)),
+        );
+        self.record_context_pack_built_run_event(&request.observation, &context_pack, now_ms());
         self.record_story_impact_radius_run_event(
             &request.observation.id,
             &impact_radius,
@@ -92,6 +104,7 @@ impl WriterAgentKernel {
             &objective_for_run_task(&request.task),
             success_criteria_for_run_task(&request.task),
         );
+        attach_story_impact_to_task_packet(&mut task_packet, &impact_radius, &impact_budget);
         task_packet.validate().map_err(|error| error.to_string())?;
         self.push_task_packet_trace(
             request.observation.id.clone(),

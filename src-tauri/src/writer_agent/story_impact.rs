@@ -124,6 +124,111 @@ impl StoryEdgeKind {
     }
 }
 
+pub fn story_impact_task_summary(
+    radius: &WriterStoryImpactRadius,
+    budget: &StoryImpactBudgetReport,
+) -> String {
+    let key_nodes = radius
+        .impacted_nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, StoryNodeKind::SeedTask))
+        .take(6)
+        .map(|node| format!("{}:{}", node.kind.as_str(), compact_chars(&node.label, 48)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let reasons = radius
+        .reasons
+        .iter()
+        .take(4)
+        .map(|reason| compact_chars(reason, 96))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    compact_chars(
+        &format!(
+            "risk={:?}; impactedNodes={}; edges={}; budget={}/{} chars; truncated={}; keyNodes={}; reasons={}",
+            radius.risk,
+            radius.impacted_nodes.len(),
+            radius.edges.len(),
+            budget.provided_chars,
+            budget.budget_limit,
+            radius.truncated,
+            if key_nodes.is_empty() { "none" } else { &key_nodes },
+            if reasons.is_empty() { "none" } else { &reasons },
+        ),
+        480,
+    )
+}
+
+pub fn story_impact_context_summary(
+    radius: &WriterStoryImpactRadius,
+    budget: &StoryImpactBudgetReport,
+) -> String {
+    let key_nodes = radius
+        .impacted_nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, StoryNodeKind::SeedTask))
+        .take(8)
+        .map(|node| {
+            format!(
+                "- {} [{} confidence {:.2}]: {}",
+                compact_chars(&node.label, 64),
+                node.kind.as_str(),
+                node.confidence,
+                compact_chars(&node.summary, 140)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let reasons = radius
+        .reasons
+        .iter()
+        .take(6)
+        .map(|reason| format!("- {}", compact_chars(reason, 140)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dropped = if budget.dropped_high_risk_sources.is_empty() {
+        "none".to_string()
+    } else {
+        budget
+            .dropped_high_risk_sources
+            .iter()
+            .take(4)
+            .map(|source| compact_chars(source, 120))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+
+    format!(
+        "Story Impact Radius\nrisk: {:?}\nimpacted nodes: {}\nedges: {}\nbudget: {}/{} chars\ntruncated: {}\ndropped high-risk sources: {}\nkey impacted nodes:\n{}\nwhy included:\n{}",
+        radius.risk,
+        radius.impacted_nodes.len(),
+        radius.edges.len(),
+        budget.provided_chars,
+        budget.budget_limit,
+        radius.truncated,
+        dropped,
+        if key_nodes.trim().is_empty() {
+            "- none".to_string()
+        } else {
+            key_nodes
+        },
+        if reasons.trim().is_empty() {
+            "- none".to_string()
+        } else {
+            reasons
+        },
+    )
+}
+
+fn compact_chars(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut out = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// Extract seed nodes from the current observation and context pack.
 pub fn extract_seed_nodes(
     observation: &WriterObservation,

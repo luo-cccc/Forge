@@ -37,7 +37,7 @@ agent-harness-core/          Reusable agent runtime foundation
   task_packet.rs             Five-axis task contract
   tool_registry.rs           Tool inventory and side-effect policy
 
-agent-evals/                 Regression evals for writer-agent behavior
+agent-evals/                 Regression evals for writer-agent behavior, organized by evals/* responsibility modules
 docs/                        Architecture plans and project status
 scripts/                     Local static checks
 ```
@@ -146,12 +146,12 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 80 tests passing
-- `cargo test -p agent-writer`: 191 tests passing
-- `cargo run -p agent-evals`: 173/173 evals passing
+- `cargo test -p agent-writer`: 197 tests passing
+- `cargo run -p agent-evals`: 176/176 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:audit`: 56 commands, 0 issues
-- `npm run check:architecture`: 7/7 files within budget
+- `npm run check:architecture`: 7/7 files within budget, eval root guard passing
 - `npm run lint`: passing
 - `npm run build`: passing
 - `cargo fmt --all -- --check`: passing

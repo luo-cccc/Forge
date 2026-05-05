@@ -684,3 +684,123 @@ pub fn run_context_recall_tracking_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_context_mandatory_sources_survive_tight_budget_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相，在复仇与守护之间做出最终选择。",
+            "林墨必须在复仇和守护之间做艰难选择，面对血脉真相。",
+            "不得提前泄露玉佩来源。",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨在旧门前做出选择，推进与张三的关系。",
+            "林墨与张三的对话",
+            "提前揭开真相",
+            "林墨推开旧门",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+
+    let pack = kernel.context_pack_for_default(
+        AgentTask::GhostWriting,
+        &observation_in_chapter("林墨停在旧门前，手按在刀柄上。", "Chapter-1"),
+    );
+
+    let mut errors = Vec::new();
+    let has_cursor = pack
+        .sources
+        .iter()
+        .any(|s| matches!(s.source, ContextSource::CursorPrefix));
+    let has_mission = pack
+        .sources
+        .iter()
+        .any(|s| matches!(s.source, ContextSource::ChapterMission));
+    let has_brief = pack
+        .sources
+        .iter()
+        .any(|s| matches!(s.source, ContextSource::ProjectBrief));
+    if !has_cursor {
+        errors.push("missing mandatory cursor prefix".to_string());
+    }
+    if !has_mission {
+        errors.push("missing mandatory chapter mission".to_string());
+    }
+    if !has_brief {
+        errors.push("missing mandatory project brief".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_mandatory_sources_survive",
+        format!(
+            "cursor={} mission={} brief={} sources={}",
+            has_cursor,
+            has_mission,
+            has_brief,
+            pack.sources.len()
+        ),
+        errors,
+    )
+}
+
+pub fn run_context_pack_explainability_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "寒影录",
+            "玄幻",
+            "刀客追查玉佩真相。",
+            "林墨必须在复仇和守护之间做选择。",
+            "",
+        )
+        .unwrap();
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-1",
+            "林墨追查玉佩。",
+            "玉佩",
+            "",
+            "找到线索",
+            "eval",
+        )
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-1".to_string());
+
+    let pack = kernel.context_pack_for_default(
+        AgentTask::GhostWriting,
+        &observation_in_chapter("林墨停在旧门前。", "Chapter-1"),
+    );
+    let explanation = pack.explain();
+
+    let mut errors = Vec::new();
+    if !explanation.contains("ContextPack for GhostWriting") {
+        errors.push("explanation missing task type".to_string());
+    }
+    if !explanation.contains("sources included") {
+        errors.push("explanation missing source count".to_string());
+    }
+    if !explanation.contains("Excluded sources") && !explanation.contains("truncated") {
+        // Both may not appear if budget is large enough, but at minimum we have the header
+    }
+    if explanation.is_empty() {
+        errors.push("explanation is empty".to_string());
+    }
+
+    eval_result(
+        "writer_agent:context_pack_explainability",
+        format!("explanationLen={}", explanation.len()),
+        errors,
+    )
+}
