@@ -13,6 +13,9 @@ pub struct HarnessConfig {
     pub vector_top_k: usize,
     /// LLM 请求超时 (秒)
     pub request_timeout_secs: u64,
+    /// 缓存策略 — 默认禁用后台 keepalive
+    pub cache_keepalive_enabled: bool,
+    pub extended_cache_enabled: bool,
 }
 
 impl Default for HarnessConfig {
@@ -26,6 +29,8 @@ impl Default for HarnessConfig {
             max_memory_rounds: 20,
             vector_top_k: 5,
             request_timeout_secs: 60,
+            cache_keepalive_enabled: false,
+            extended_cache_enabled: false,
         }
     }
 }

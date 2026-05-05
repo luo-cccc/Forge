@@ -43,6 +43,7 @@ impl Provider for StaticDiagnosticProvider {
             usage: Some(UsageInfo {
                 input_tokens: 512,
                 output_tokens: self.answer.chars().count() as u64 / 3,
+                cached_tokens: None,
             }),
         })
     }

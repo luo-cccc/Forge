@@ -47,6 +47,11 @@ pub enum AgentLoopEvent {
         rounds: u32,
         tool_calls: u32,
         tokens_used: u64,
+        cached_tokens: Option<u64>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        ttft_ms: Option<u64>,
+        total_provider_duration_ms: u64,
     },
 }
 
@@ -97,6 +102,9 @@ pub struct AgentLoop<P: Provider, H: ToolHandler> {
     pub messages: Vec<LlmMessage>,
     pub on_event: Option<EventCallback>,
     pub provider_call_guard: Option<ProviderCallGuard>,
+    pub last_usage: Option<crate::provider::UsageInfo>,
+    pub ttft_ms: Option<u64>,
+    pub total_provider_duration_ms: u64,
 }
 
 impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
@@ -113,6 +121,9 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             messages: Vec::new(),
             on_event: None,
             provider_call_guard: None,
+            last_usage: None,
+            ttft_ms: None,
+            total_provider_duration_ms: 0,
         }
     }
 
@@ -277,6 +288,7 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
 
             // Call LLM with streaming — forward text chunks to UI
             let event_cb = self.on_event.clone();
+            let call_start = std::time::Instant::now();
             let response = self
                 .provider
                 .stream_call(
@@ -294,6 +306,10 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
                 .inspect_err(|e| {
                     self.emit(AgentLoopEvent::Error { message: e.clone() });
                 })?;
+            let call_duration_ms = call_start.elapsed().as_millis() as u64;
+            self.total_provider_duration_ms += call_duration_ms;
+            self.ttft_ms = Some(call_duration_ms);
+            self.last_usage = response.usage.clone();
 
             let response_tool_calls = response.tool_calls.unwrap_or_default();
 
@@ -406,10 +422,16 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
             return Err(msg);
         }
 
+        let usage = self.last_usage.clone();
         self.emit(AgentLoopEvent::Complete {
             rounds,
             tool_calls: total_tool_calls,
             tokens_used: self.estimate_tokens(),
+            cached_tokens: usage.as_ref().and_then(|u| u.cached_tokens),
+            input_tokens: usage.as_ref().map(|u| u.input_tokens),
+            output_tokens: usage.as_ref().map(|u| u.output_tokens),
+            ttft_ms: self.ttft_ms,
+            total_provider_duration_ms: self.total_provider_duration_ms,
         });
 
         Ok(final_text)

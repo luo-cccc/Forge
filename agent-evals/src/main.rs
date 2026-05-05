@@ -194,6 +194,45 @@ fn main() {
     results.push(run_supervised_sprint_stops_before_unapproved_save_eval());
     results.push(run_supervised_sprint_carries_forward_settlement_feedback_eval());
     results.push(run_supervised_sprint_records_receipts_per_chapter_eval());
+    // 11.4C Reader Compensation Model evals
+    results.push(run_reader_compensation_profile_extracts_lack_eval());
+    results.push(run_reader_compensation_profile_requires_author_approval_eval());
+    results.push(run_reader_compensation_profile_preserves_project_tone_eval());
+    results.push(run_emotional_debt_lifecycle_tracks_partial_payoff_eval());
+    results.push(run_emotional_debt_lifecycle_rolls_over_after_payoff_eval());
+    results.push(run_emotional_debt_lifecycle_flags_overdue_without_autowrite_eval());
+    results.push(run_chapter_mission_tracks_pressure_and_payoff_eval());
+    results.push(run_chapter_mission_opens_next_reader_lack_eval());
+    results.push(run_chapter_mission_tracks_relationship_soil_eval());
+    results.push(run_emotional_debt_created_from_pressure_scene_eval());
+    results.push(run_emotional_debt_payoff_closes_with_evidence_eval());
+    results.push(run_emotional_debt_does_not_autowrite_promise_eval());
+    results.push(run_emotional_debt_tracks_interest_mechanism_eval());
+    results.push(run_payoff_diagnostic_flags_pressure_without_payoff_eval());
+    results.push(run_payoff_diagnostic_flags_unearned_payoff_eval());
+    results.push(run_payoff_diagnostic_flags_overfilled_lack_eval());
+    results.push(run_payoff_diagnostic_flags_repetitive_interest_mechanism_eval());
+    // 11.4D Cache-Aware Context Spine evals
+    results.push(run_context_spine_keeps_static_prefix_first_eval());
+    results.push(run_context_spine_moves_hot_buffer_last_eval());
+    results.push(run_context_spine_does_not_drop_required_sources_eval());
+    results.push(run_prompt_cache_event_records_prefix_hashes_eval());
+    results.push(run_prompt_cache_event_redacts_prompt_text_eval());
+    results.push(run_provider_usage_parses_cached_tokens_eval());
+    results.push(run_context_spine_reports_prefix_churn_eval());
+    results.push(run_inspector_shows_cache_miss_reason_eval());
+    results.push(run_companion_hides_prompt_cache_internals_eval());
+    results.push(run_focus_shift_rebuilds_focus_pack_only_eval());
+    results.push(run_focus_pack_uses_story_impact_sources_eval());
+    results.push(run_project_stable_prefix_changes_only_after_approval_eval());
+    results.push(run_event_driven_compaction_after_verified_save_eval());
+    results.push(run_compaction_report_keeps_source_refs_eval());
+    results.push(run_compaction_does_not_autowrite_long_term_memory_eval());
+    results.push(run_cache_keepalive_requires_author_approval_eval());
+    results.push(run_cache_maintenance_uses_provider_budget_eval());
+    results.push(run_extended_cache_requires_explicit_policy_eval());
+    results.push(run_trajectory_exports_prompt_cache_metrics_eval());
+    results.push(run_product_metrics_tracks_cache_stability_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

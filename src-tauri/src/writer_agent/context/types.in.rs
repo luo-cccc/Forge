@@ -73,6 +73,7 @@ impl AgentTask {
                 (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::OutlineSlice, 6, 500),
                 (ContextSource::AuthorStyle, 5, 300),
+                (ContextSource::ReaderCompensation, 5, 250),
                 (ContextSource::RagExcerpt, 4, 400),
             ],
             AgentTask::ContinuityDiagnostic => vec![
@@ -86,6 +87,7 @@ impl AgentTask {
                 (ContextSource::DecisionSlice, 9, 300),
                 (ContextSource::OutlineSlice, 9, 500),
                 (ContextSource::RagExcerpt, 8, 600),
+                (ContextSource::ReaderCompensation, 7, 300),
             ],
             AgentTask::ChapterGeneration => vec![
                 (ContextSource::ProjectBrief, 11, 1600),
@@ -115,6 +117,7 @@ impl AgentTask {
                 (ContextSource::CanonSlice, 7, 400),
                 (ContextSource::DecisionSlice, 7, 300),
                 (ContextSource::AuthorStyle, 6, 300),
+                (ContextSource::ReaderCompensation, 7, 300),
             ],
             AgentTask::PlanningReview => vec![
                 (ContextSource::ChapterMission, 11, 900),
@@ -142,6 +145,7 @@ impl AgentTask {
                 (ContextSource::ProjectBrief, 8, 300),
                 (ContextSource::ResultFeedback, 8, 260),
                 (ContextSource::AuthorStyle, 8, 300),
+                (ContextSource::ReaderCompensation, 4, 180),
             ],
             AgentTask::CanonMaintenance => vec![
                 (ContextSource::CanonSlice, 10, 2000),
@@ -153,6 +157,7 @@ impl AgentTask {
                 (ContextSource::ChapterMission, 8, 800),
                 (ContextSource::ProjectBrief, 8, 600),
                 (ContextSource::OutlineSlice, 8, 1000),
+                (ContextSource::ReaderCompensation, 4, 180),
             ],
             AgentTask::ManualRequest => vec![
                 (ContextSource::SelectedText, 10, 1200),
@@ -168,6 +173,7 @@ impl AgentTask {
                 (ContextSource::DecisionSlice, 7, 500),
                 (ContextSource::AuthorStyle, 6, 400),
                 (ContextSource::RagExcerpt, 5, 400),
+                (ContextSource::ReaderCompensation, 4, 180),
             ],
         }
     }

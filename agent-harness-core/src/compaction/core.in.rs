@@ -1,3 +1,83 @@
+/// What triggered the compaction — water level or a specific domain event.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionTrigger {
+    /// Traditional water-level trigger (token threshold exceeded).
+    WaterLevel,
+    /// Chapter save completed + post-write diagnostics finished.
+    ChapterSaveVerified,
+    /// Planning Review artifact completed.
+    PlanningReviewComplete,
+    /// Continuity Diagnostic artifact completed.
+    ContinuityDiagnosticComplete,
+    /// Focus node was forcibly switched (chapter/scene/entity change).
+    FocusNodeSwitch,
+    /// Provider context pressure exceeded high-water mark.
+    ProviderPressureHigh,
+    /// Tool failure recovery completed (doom loop exit, error recovery).
+    ToolFailureRecovery,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for CompactionTrigger {
+    fn default() -> Self {
+        Self::WaterLevel
+    }
+}
+
+impl CompactionTrigger {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::WaterLevel => "water_level",
+            Self::ChapterSaveVerified => "chapter_save_verified",
+            Self::PlanningReviewComplete => "planning_review_complete",
+            Self::ContinuityDiagnosticComplete => "continuity_diagnostic_complete",
+            Self::FocusNodeSwitch => "focus_node_switch",
+            Self::ProviderPressureHigh => "provider_pressure_high",
+            Self::ToolFailureRecovery => "tool_failure_recovery",
+        }
+    }
+
+    pub fn is_domain_event(&self) -> bool {
+        !matches!(self, Self::WaterLevel)
+    }
+}
+
+/// Report produced when compaction is triggered by an event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextSpineCompactionReport {
+    /// What triggered this compaction.
+    #[serde(default)]
+    pub trigger: CompactionTrigger,
+    /// Source references that were included in the compaction scope.
+    pub input_source_refs: Vec<String>,
+    /// Which spine layer received the compaction output.
+    pub target_layer: String,
+    /// Confidence score for the summary (0.0-1.0).
+    pub summary_confidence: f64,
+    /// Whether the summary was validated (e.g., against canon/promises).
+    pub validated: bool,
+    /// Whether the compaction output is approved for ProjectStablePrefix.
+    pub allowed_into_stable_prefix: bool,
+    /// Human-readable reason for the target layer decision.
+    pub layer_decision_reason: String,
+}
+
+impl Default for ContextSpineCompactionReport {
+    fn default() -> Self {
+        Self {
+            trigger: CompactionTrigger::WaterLevel,
+            input_source_refs: Vec::new(),
+            target_layer: "FocusPack".to_string(),
+            summary_confidence: 0.0,
+            validated: false,
+            allowed_into_stable_prefix: false,
+            layer_decision_reason: "Default: compaction output enters FocusPack; long-term memory requires proposal + approval.".to_string(),
+        }
+    }
+}
+
 /// Configuration for context compaction.
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
@@ -9,6 +89,8 @@ pub struct CompactionConfig {
     pub max_summary_tokens: u64,
     /// Context window limit for the model being used.
     pub context_limit_tokens: u64,
+    /// Enable event-driven compaction triggers (in addition to water level).
+    pub event_triggers_enabled: bool,
 }
 
 impl Default for CompactionConfig {
@@ -18,6 +100,7 @@ impl Default for CompactionConfig {
             trigger_fraction: 0.70,
             max_summary_tokens: 800,
             context_limit_tokens: 120_000,
+            event_triggers_enabled: false,
         }
     }
 }
@@ -59,6 +142,13 @@ pub struct CompactionResult {
     /// Recovery level applied (overflow scenarios).
     #[serde(default)]
     pub recovery_level: Option<String>,
+    /// What triggered this compaction.
+    #[serde(default)]
+    
+    pub trigger: CompactionTrigger,
+    /// Event-driven compaction report (None for water-level compactions).
+    #[serde(default)]
+    pub spine_report: Option<ContextSpineCompactionReport>,
 }
 
 /// A checkpoint recorded during compaction.
@@ -196,10 +286,12 @@ pub fn build_compaction_prompt(messages_to_compact: &[LlmMessage]) -> String {
 /// Perform full compaction: LLM summarizes old messages, summary injected as system message,
 /// preserved messages kept at the tail.
 /// Returns the compacted message list and a report.
-pub async fn compact_messages<P: Provider>(
+pub async fn compact_messages_with_trigger<P: Provider>(
     messages: &[LlmMessage],
     config: &CompactionConfig,
     provider: &P,
+    trigger: CompactionTrigger,
+    source_refs: Vec<String>,
 ) -> Result<(Vec<LlmMessage>, CompactionResult), String> {
     let total = messages.len();
     if total <= config.preserve_recent {
@@ -216,6 +308,8 @@ pub async fn compact_messages<P: Provider>(
                 tokens_saved_by_tool_truncation: 0,
                 boundary_summary: String::new(),
                 recovery_level: None,
+                trigger: trigger.clone(),
+                spine_report: None,
             },
         ));
     }
@@ -294,8 +388,35 @@ pub async fn compact_messages<P: Provider>(
                 preserved.len()
             ),
             recovery_level: None,
+            trigger: trigger.clone(),
+            spine_report: if trigger.is_domain_event() {
+                Some(ContextSpineCompactionReport {
+                    trigger: trigger.clone(),
+                    input_source_refs: source_refs,
+                    target_layer: if trigger == CompactionTrigger::ChapterSaveVerified {
+                        "FocusPack".to_string()
+                    } else {
+                        "EphemeralScratch".to_string()
+                    },
+                    summary_confidence: 0.7,
+                    validated: trigger == CompactionTrigger::ChapterSaveVerified,
+                    allowed_into_stable_prefix: false,
+                    layer_decision_reason: "Compaction output enters FocusPack or EphemeralScratch; long-term memory requires proposal + approval.".to_string(),
+                })
+            } else {
+                None
+            },
         },
     ))
+}
+
+/// Convenience wrapper: compact with water-level trigger (backward compatible).
+pub async fn compact_messages<P: Provider>(
+    messages: &[LlmMessage],
+    config: &CompactionConfig,
+    provider: &P,
+) -> Result<(Vec<LlmMessage>, CompactionResult), String> {
+    compact_messages_with_trigger(messages, config, provider, CompactionTrigger::WaterLevel, vec![]).await
 }
 
 #[cfg(test)]

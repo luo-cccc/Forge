@@ -1166,6 +1166,8 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 结论：这套逻辑适合成为 Forge 的一层 `Reader Compensation Model`，不适合变成硬编码爽文模板。它应该帮助 agent 判断“本章为什么让读者想看下去”，而不是替代 Story Contract、Chapter Mission、Promise Ledger、Author Voice 或作者审美。
 
+补充判断：用户提出的“制造情绪债务，然后兑现”可以作为 11.4C 的结构化升级，但不应照搬其“信用卡、赌场、抖音推送没有本质区别”的操控性表述。对 Forge 有价值的是“情绪期待的建立、延迟、累积、兑现和升级”这一生命周期模型；产品表达必须改写为作者可审查的连载节奏工具，而不是成瘾机制或硬套爽文套路。
+
 证据依据：
 
 - 核心链条：`现实缺憾 -> 代入主角 -> 制造压迫 -> 释放补偿 -> 获得爽感 -> 形成追读`：`C:/Users/Msi/Desktop/写作逻辑.md:5`。
@@ -1182,40 +1184,48 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - Forge 现有 Story Contract 更偏“作品承诺”；Chapter Mission 更偏“本章任务”；Promise Ledger 更偏“故事债务”。读者情绪补偿模型应补上“读者为什么在这一章获得心理回收”的判断层。
 - 这不是让 Forge 只写爽文，而是让 agent 对商业网文、类型文、连载文增加读者心理视角；严肃文学、慢热文、强作者表达项目可以降低该模型权重。
 - 该模型必须可解释、可关闭、可按项目类型调权重；不能在后台强行把所有作品改成打脸/暴富/升级模板。
+- “人物关系是催生债务的土壤”值得吸收：情绪债务往往来自师徒认可、亲密误解、敌对羞辱、家族压迫、同伴背叛、群体轻视、自我亏欠等关系结构，而不只是抽象的缺钱、缺爱、缺尊严。
+- “套路是债务的计息方式”只能转译为 `interest_mechanism`：误解延迟、压迫升级、公开羞辱、资源稀缺、承诺延后、反转遮蔽等机制会放大期待；Forge 只能识别与提示风险，不能用套路模板替作者决定剧情。
 
 任务：
 
 1. 新增 `ReaderCompensationProfile`。（P1）
-   - 字段：`target_reader`、`primary_lack`、`secondary_lacks`、`protagonist_proxy_state`、`pressure_mode`、`payoff_mode`、`payoff_path`、`escalation_ladder`、`forbidden_shortcuts`、`confidence`、`source_refs`。
+   - 字段：`target_reader`、`primary_lack`、`secondary_lacks`、`protagonist_proxy_state`、`dominant_relationship_soil`、`pressure_mode`、`payoff_mode`、`payoff_path`、`escalation_ladder`、`forbidden_shortcuts`、`confidence`、`source_refs`。
    - 来源：Story Contract、作者输入、旧稿接管报告、章节保存结果、作者反馈。
    - 边界：只作为 story foundation candidate；写入项目长期设定必须经过作者 approval。
    - 验收 eval：`writer_agent:reader_compensation_profile_extracts_lack`、`writer_agent:reader_compensation_profile_requires_author_approval`、`writer_agent:reader_compensation_profile_preserves_project_tone`。
-2. 扩展 Chapter Mission 的情绪补偿字段。（P1）
-   - 新增或派生：`reader_lack_this_chapter`、`pressure_scene`、`payoff_target`、`payoff_path`、`next_lack_opened`。
+2. 新增 `EmotionalDebtLifecycle`。（P1）
+   - 生命周期状态：`introduced`、`escalating`、`partially_paid`、`paid`、`rolled_over`、`abandoned`。
+   - 字段：`debt_id`、`debt_kind`、`relationship_soil`、`introduced_by_scene`、`interest_mechanism`、`payoff_contract`、`payoff_window`、`current_state`、`overdue_risk`、`rollover_target`、`source_refs`。
+   - 目标：把“压迫 -> 兑现”从单章二元判断升级成跨章节生命周期，支持小兑现、延迟兑现、旧债滚入新债和过期风险。
+   - 边界：该生命周期只描述读者期待和证据链，不把作者表达压缩成留存算法；不得自动生成操控性文案，不自动改写正文。
+   - 验收 eval：`writer_agent:emotional_debt_lifecycle_tracks_partial_payoff`、`writer_agent:emotional_debt_lifecycle_rolls_over_after_payoff`、`writer_agent:emotional_debt_lifecycle_flags_overdue_without_autowrite`。
+3. 扩展 Chapter Mission 的情绪补偿字段。（P1）
+   - 新增或派生：`reader_lack_this_chapter`、`relationship_soil_this_chapter`、`pressure_scene`、`interest_mechanism`、`payoff_target`、`payoff_path`、`next_lack_opened`。
    - 目标：每章不只知道“要发生什么”，还知道“压迫了什么缺口、回收什么不甘、结尾打开什么更大缺口”。
    - 边界：这些字段作为 Planning Review / Chapter Generation 的辅助 context，不自动覆盖作者原有 mission 文案。
-   - 验收 eval：`writer_agent:chapter_mission_tracks_pressure_and_payoff`、`writer_agent:chapter_mission_opens_next_reader_lack`。
-3. 新增 `Emotional Debt Ledger`。（P1）
+   - 验收 eval：`writer_agent:chapter_mission_tracks_pressure_and_payoff`、`writer_agent:chapter_mission_opens_next_reader_lack`、`writer_agent:chapter_mission_tracks_relationship_soil`。
+4. 新增 `Emotional Debt Ledger`。（P1）
    - 类型第一版：`dignity_debt`、`scarcity_debt`、`powerlessness_debt`、`safety_debt`、`affection_debt`、`recognition_debt`、`fate_debt`。
-   - 字段：debt id、kind、introduced_at、pressure_evidence、payoff_status、expected_payoff_window、payoff_path、risk、source_refs。
+   - 字段：debt id、kind、introduced_at、relationship_soil、pressure_evidence、interest_mechanism、payoff_contract、payoff_status、expected_payoff_window、payoff_path、overdue_risk、rollover_target、risk、source_refs。
    - 与 Promise Ledger 的关系：Promise Ledger 记录故事承诺；Emotional Debt Ledger 记录读者心理承诺。两者可交叉引用，但不混成一个表。
-   - 验收 eval：`writer_agent:emotional_debt_created_from_pressure_scene`、`writer_agent:emotional_debt_payoff_closes_with_evidence`、`writer_agent:emotional_debt_does_not_autowrite_promise`。
-4. 新增 `Payoff Diagnostic` 写后诊断。（P2）
-   - 保存后检查：是否有压迫无补偿、补偿无前置压迫、爽点没有回收对应缺憾、一次性填满导致追读断点、补偿路径与项目气质冲突。
+   - 验收 eval：`writer_agent:emotional_debt_created_from_pressure_scene`、`writer_agent:emotional_debt_payoff_closes_with_evidence`、`writer_agent:emotional_debt_does_not_autowrite_promise`、`writer_agent:emotional_debt_tracks_interest_mechanism`。
+5. 新增 `Payoff Diagnostic` 写后诊断。（P2）
+   - 保存后检查：是否有压迫无补偿、补偿无前置压迫、爽点没有回收对应缺憾、关系土壤不足导致债务悬空、计息机制过度重复、一次性填满导致追读断点、补偿路径与项目气质冲突。
    - 输出：只读 diagnostic report + 可审查 story debt proposal，不自动改正文、不自动改 ledger。
    - 与 11.4B `Chapter Settlement Queue` 对接：Payoff Diagnostic 的高风险项进入 settlement queue 的 emotional / continuity 分组。
-   - 验收 eval：`writer_agent:payoff_diagnostic_flags_pressure_without_payoff`、`writer_agent:payoff_diagnostic_flags_unearned_payoff`、`writer_agent:payoff_diagnostic_flags_overfilled_lack`。
-5. Planning Review 增加读者补偿链审查。（P2）
-   - Planning Review 输出：目标读者缺口、主角承载方式、本章压迫场景、本章补偿点、补偿路径、下一层缺口、风险。
+   - 验收 eval：`writer_agent:payoff_diagnostic_flags_pressure_without_payoff`、`writer_agent:payoff_diagnostic_flags_unearned_payoff`、`writer_agent:payoff_diagnostic_flags_overfilled_lack`、`writer_agent:payoff_diagnostic_flags_repetitive_interest_mechanism`。
+6. Planning Review 增加读者补偿链审查。（P2）
+   - Planning Review 输出：目标读者缺口、主角承载方式、人物关系土壤、本章压迫场景、计息机制、本章补偿点、补偿路径、下一层缺口、风险。
    - 该审查只读，不生成正文、不修改 Canon / Promise / Emotional Debt。
-   - 验收 eval：`writer_agent:planning_review_reports_reader_compensation_chain`、`writer_agent:planning_review_keeps_compensation_read_only`。
-6. Context Pack 增加受预算约束的 `ReaderCompensation` source。（P2）
+   - 验收 eval：`writer_agent:planning_review_reports_reader_compensation_chain`、`writer_agent:planning_review_keeps_compensation_read_only`、`writer_agent:planning_review_reports_emotional_debt_lifecycle`。
+7. Context Pack 增加受预算约束的 `ReaderCompensation` source。（P2）
    - 优先级：ChapterGeneration / PlanningReview / InlineRewrite 高；ContinuityDiagnostic 中等；Project Brain 问答默认低。
-   - 内容必须短：当前主缺口、当前章压迫/补偿目标、最近未回收 emotional debt、下一层缺口。
+   - 内容必须短：当前主缺口、关系土壤、当前章压迫/补偿目标、最近未回收 emotional debt、当前 lifecycle state、下一层缺口。
    - 边界：不要把完整读者心理分析塞进 prompt；只给模型当前行动必要的少量信号。
    - 验收 eval：`writer_agent:reader_compensation_enters_chapter_generation_context`、`writer_agent:reader_compensation_budget_stays_compact`。
-7. 产品指标增加读者补偿链指标。（P3）
-   - 指标：`pressure_to_payoff_ratio`、`unearned_payoff_count`、`open_emotional_debt_count`、`payoff_path_diversity`、`next_lack_handoff_rate`。
+8. 产品指标增加读者补偿链指标。（P3）
+   - 指标：`pressure_to_payoff_ratio`、`unearned_payoff_count`、`open_emotional_debt_count`、`overdue_emotional_debt_count`、`payoff_path_diversity`、`interest_mechanism_repetition`、`relationship_soil_coverage`、`next_lack_handoff_rate`。
    - 用途：只用于 Inspector / trajectory / eval 校准，不向普通 Companion 默认暴露复杂指标。
    - 验收 eval：`writer_agent:product_metrics_tracks_payoff_chain`、`writer_agent:trajectory_exports_reader_compensation_metrics`。
 
@@ -1224,7 +1234,78 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 不把“读者缺什么”变成唯一创作起点；作者表达、人物成长、世界观好奇和关系张力仍是并列基础。
 - 不把所有项目默认判定为打脸、暴富、升级、复仇、甜宠；这些只是文件举例，不是 Forge 的固定类型枚举上限。
 - 不把“爽点”做成机械打分器。Forge 应输出证据和风险，而不是替作者裁决审美。
+- 不把“情绪债务”当成操控读者的成瘾机制；Forge 只能帮助作者管理期待和兑现节奏，不能把创作目标改写为最大化留存刺激。
+- 不把套路库当成债务计息引擎；`interest_mechanism` 必须来自当前作品证据、人物关系和作者选择，而不是默认套模板。
 - 不允许模型为了补偿链自动改写 Canon / Promise / Story Contract / Chapter Mission；所有长期记忆和正文写入仍走 proposal + approval。
+
+### 11.4D Cache-Aware Context Spine 落地计划
+
+来源：`C:/Users/Msi/Desktop/方案设想.md`。该文件提出把发往云端模型的上下文拆成“极寒层”静态前缀和“高热层”动态 buffer，用图谱节点承载长期记忆，用事件触发的后台压缩维持长会话一致性，并把 Rust 核心作为独立执行引擎。该方向和 Forge 当前的 Writer Kernel / Context Pack / Project Brain / Provider Budget / Compaction / Inspector trace 有明显交集，但必须从“缓存友好上下文脊柱”角度落地，不能包装成不可验证的底层推理黑箱。
+
+结论：可以作为 Forge 的性能与上下文质量升级，但不应重建一套脱离 Writer Kernel 的新 agent runtime。11.4D 的目标是让每次模型调用更稳定地复用静态前缀、更清楚地区分项目长期事实和当前任务热信息，并把缓存命中、TTFT、token 成本和压缩事件纳入可回放 trace。
+
+证据依据：
+
+- OpenAI Prompt Caching 官方文档明确说明：缓存命中依赖 prompt 的 exact prefix matches，并建议把静态或重复内容放在 prompt 开头，把动态、用户特定内容放在末尾；缓存从 1024 tokens 以上请求开始生效，`usage.prompt_tokens_details.cached_tokens` 可用于观测命中量。来源：https://platform.openai.com/docs/guides/prompt-caching。
+- OpenAI 文档还说明 in-memory prompt cache 通常在 5-10 分钟无活动后过期，最长可到约 1 小时；扩展缓存可配置更长保留，但不是所有模型都支持，且有数据保留边界。因此 `方案设想.md` 中“近乎零重复调用”和“保活机制”只能作为优化假设，不能作为默认产品承诺。
+- Forge 现有 `agent-harness-core/src/context_pack.rs` 已有 `ContextPacker`、source budget、truncation report；`src-tauri/src/writer_agent/kernel/run_loop.rs` 已在准备 run 时组装 Context Pack、Story Impact、TaskPacket、Provider Budget 和 run event；`agent-harness-core/src/compaction/core.in.rs` 已有 compact / microcompact / overflow recovery 的基础报告。11.4D 应复用这些链路。
+- Forge 当前 `agent-harness-core/src/prompt_cache.rs` 只有本地 fingerprint / hit-miss 统计，并未接入真实 provider response 的 `cached_tokens`、TTFT 或 cache key；`src-tauri/src/llm_runtime.rs` 的 chat/stream 路径也尚未记录 provider usage。这里是实际缺口。
+
+产品判断：
+
+- “极寒层 / 高热层”可以落地为 `ContextSpineLayer`，不是物理复制两套 prompt。目标是稳定 prefix 顺序、降低无意义前缀抖动、让动态内容靠后进入模型。
+- 图谱节点状态机适合 Forge，但节点应绑定写作域：Book Contract、Chapter Mission、Canon entity、Promise、Emotional Debt、Author Voice、Research Source、Project Brain chunk，而不是泛化成“业务节点”。
+- BYOK 成本防御要靠可观测预算和作者授权，不靠默认后台 keepalive。任何为了缓存保活而主动发起 provider call 的行为都必须显示审批、预算上限、可关闭，并记录 `writer.prompt_cache` / `writer.provider_budget` run event。
+- 事件驱动压缩值得吸收，但“影子调用”必须是可审计 maintenance task；不能静默改写长期记忆，不能把未验证摘要写入 Canon / Promise / Reader Compensation / Project Brain。
+
+任务：
+
+1. 新增 `ContextSpineLayer` 与稳定 prompt 顺序。（P1）
+   - 层级第一版：`FrozenPrefix`、`ProjectStablePrefix`、`FocusPack`、`HotBuffer`、`EphemeralScratch`。
+   - `FrozenPrefix`：系统写作协议、工具边界、输出格式、北极星约束；要求同一 task/profile 下尽量字节稳定。
+   - `ProjectStablePrefix`：Story Contract、Book Contract、项目风格、长期 Canon/Promise/Author Voice 的短摘要；只在作者批准长期设定变化后刷新。
+   - `FocusPack`：当前章节相关 Project Brain / Story Impact / Chapter Mission / Reader Compensation slice；跟随焦点节点变更。
+   - `HotBuffer`：当前用户指令、选中文本、cursor prefix/suffix、本轮草稿和最近反馈。
+   - `EphemeralScratch`：工具试错日志、临时推理产物、失败诊断细节；默认不进入稳定前缀。
+   - 验收 eval：`writer_agent:context_spine_keeps_static_prefix_first`、`writer_agent:context_spine_moves_hot_buffer_last`、`writer_agent:context_spine_does_not_drop_required_sources`。
+2. 增加 prefix fingerprint 与 cache observability。（P1）
+   - 为每次 provider call 记录：`frozen_prefix_fingerprint`、`project_stable_fingerprint`、`focus_pack_fingerprint`、`dynamic_tail_fingerprint`、`prompt_cache_key`、`estimated_prefix_tokens`、`estimated_dynamic_tokens`。
+   - 在 OpenAI/OpenAI-compatible provider usage 可用时解析 `cached_tokens`、prompt tokens、completion tokens、total tokens；stream 路径至少记录 TTFT、duration、estimated tokens 和 provider 是否返回 usage。
+   - 新增 `writer.prompt_cache` run event，只记录统计、hash 和 source refs，不记录原始 prompt。
+   - 验收 eval：`writer_agent:prompt_cache_event_records_prefix_hashes`、`writer_agent:prompt_cache_event_redacts_prompt_text`、`writer_agent:provider_usage_parses_cached_tokens`。
+3. 给 Context Pack 增加 cache stability report。（P1）
+   - 在现有 context budget report 上追加：每个 source 所属 spine layer、是否会破坏稳定前缀、刷新原因、上次 fingerprint、当前 fingerprint。
+   - Inspector 显示“为什么这次没有命中缓存”：静态前缀变化、ProjectStablePrefix 刷新、工具 schema 变化、focus 节点切换、dynamic tail 过大、provider 未返回 usage。
+   - Companion 默认只显示成本/延迟风险摘要，不展示 hash、raw trace 或 provider 细节。
+   - 验收 eval：`writer_agent:context_spine_reports_prefix_churn`、`writer_agent:inspector_shows_cache_miss_reason`、`writer_agent:companion_hides_prompt_cache_internals`。
+4. 将 Project Brain 焦点节点接入 `FocusPack` 状态机。（P2）
+   - 焦点节点类型：chapter、scene、canon entity、promise、emotional debt、research source、author voice sample。
+   - 焦点切换只重建 `FocusPack` 和 `HotBuffer`，不刷新 `FrozenPrefix`；只有 Story Contract / 长期设定 approval 才刷新 `ProjectStablePrefix`。
+   - 与 Story Impact Radius 对接：从焦点节点出发取双向影响半径，预算内输出短摘要和 source refs。
+   - 验收 eval：`writer_agent:focus_shift_rebuilds_focus_pack_only`、`writer_agent:focus_pack_uses_story_impact_sources`、`writer_agent:project_stable_prefix_changes_only_after_approval`。
+5. 把 compaction 从纯水位触发升级为事件触发。（P2）
+   - 触发条件第一版：章节保存成功并完成 post-write diagnostics、Planning Review artifact 完成、Continuity Diagnostic artifact 完成、焦点节点强制切换、provider context pressure 高水位、tool failure recovery 完成。
+   - 输出 `ContextSpineCompactionReport`：触发事件、输入 source refs、压缩目标层、摘要置信度、验证状态、是否允许进入 ProjectStablePrefix。
+   - 压缩结果默认进入 `FocusPack` 或 `EphemeralScratch`；进入长期记忆仍走 proposal + approval。
+   - 验收 eval：`agent_harness:event_driven_compaction_after_verified_save`、`writer_agent:compaction_report_keeps_source_refs`、`writer_agent:compaction_does_not_autowrite_long_term_memory`。
+6. 建立 BYOK cache / budget policy。（P2）
+   - 禁止默认后台 keepalive provider call。
+   - 可选维护任务必须具备：作者显式开启、单次/每日 token 与金额上限、provider budget preflight、取消入口、run event、Inspector 可见。
+   - 对 OpenAI extended prompt cache 这类保留策略，必须在 UI 文案中说明数据保留差异；默认使用 provider 的普通 in-memory 缓存行为。
+   - 验收 eval：`writer_agent:cache_keepalive_requires_author_approval`、`writer_agent:cache_maintenance_uses_provider_budget`、`writer_agent:extended_cache_requires_explicit_policy`。
+7. 性能指标进入产品质量闭环。（P3）
+   - 指标：`cache_hit_token_ratio`、`static_prefix_churn_rate`、`focus_pack_rebuild_count`、`ttft_ms`、`provider_duration_ms`、`estimated_cost_saved`、`cache_miss_reason_count`。
+   - Inspector 可按 session 展示趋势；trajectory export 输出 redacted JSONL；README / project-status 只写真实可测基线。
+   - 用途：只用于性能和上下文稳定性诊断，不作为写作质量评分。
+   - 验收 eval：`writer_agent:trajectory_exports_prompt_cache_metrics`、`writer_agent:product_metrics_tracks_cache_stability`。
+
+不建议照搬：
+
+- 不宣称 Forge 已实现“Causal Autoregressive Buffer”学术算法；文档中只能说借鉴静态前缀与动态尾部的工程思想。
+- 不承诺“近乎零成本”或“近乎零重复调用”；只能以真实 `cached_tokens`、TTFT、token usage 和 provider 账单差异为准。
+- 不默认发起保活调用；BYOK 下任何额外 provider 消耗都必须作者批准。
+- 不把压缩摘要当成事实来源。摘要只是二级证据，长期记忆写入仍要指向原始章节、诊断 artifact 或作者批准记录。
+- 不把 cache 优化凌驾于写作上下文质量。Story Contract、Chapter Mission、Canon、Promise、Reader Compensation 等 required context 不能为了命中缓存被省略。
 
 ### 11.5 目标与信念：自主性的灵魂
 

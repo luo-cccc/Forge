@@ -42,6 +42,7 @@ impl Provider for TwoRoundBudgetProvider {
                 finish_reason: "tool_calls".to_string(),
                 usage: Some(UsageInfo {
                     input_tokens: 256,
+                cached_tokens: None,
                     output_tokens: 32,
                 }),
             })
@@ -52,6 +53,7 @@ impl Provider for TwoRoundBudgetProvider {
                 finish_reason: "stop".to_string(),
                 usage: Some(UsageInfo {
                     input_tokens: 512,
+                cached_tokens: None,
                     output_tokens: 16,
                 }),
             })

@@ -111,6 +111,14 @@ pub fn get_writer_agent_companion_timeline_summary(
 }
 
 #[tauri::command]
+pub fn get_reader_compensation_review_chain(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::writer_agent::kernel::ReaderCompensationReviewChain, String> {
+    let kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
+    Ok(kernel.reader_compensation_review_chain())
+}
+
+#[tauri::command]
 pub fn apply_proposal_feedback(
     state: tauri::State<'_, AppState>,
     feedback: crate::writer_agent::ProposalFeedback,

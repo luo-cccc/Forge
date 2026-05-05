@@ -119,6 +119,7 @@ mod snapshots;
 mod task_packet;
 mod trace_recording;
 pub use trace_recording::{ModelStartedEventContext, SaveCompletedEventContext};
+pub use snapshots::ReaderCompensationReviewChain;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WriterAgentStatus {
@@ -414,6 +415,7 @@ pub struct WriterAgentKernel {
     observation_counter: u64,
     proposal_counter: u64,
     pub active_chapter: Option<String>,
+    pub last_spine: Option<crate::writer_agent::context::ContextSpine>,
 }
 
 struct SuppressedProposalSlot {
@@ -455,6 +457,7 @@ impl WriterAgentKernel {
             observation_counter: 0,
             proposal_counter: 0,
             active_chapter: None,
+            last_spine: None,
         }
     }
 }

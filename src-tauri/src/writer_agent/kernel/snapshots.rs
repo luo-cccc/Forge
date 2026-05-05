@@ -374,6 +374,7 @@ impl WriterAgentKernel {
             &self.operation_lifecycle,
             self.memory.list_context_recalls(&self.project_id, 50),
             self.memory.list_chapter_missions(&self.project_id, 250),
+            self.memory.list_emotional_debts(&self.project_id, 500),
         )
     }
 
@@ -553,3 +554,4 @@ fn context_source_trends(proposals: &[WriterProposalTrace]) -> Vec<WriterContext
     });
     trends
 }
+include!("reader_compensation_review.in.rs");

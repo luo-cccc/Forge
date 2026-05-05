@@ -150,6 +150,10 @@ impl OpenAiCompatProvider {
                         }
                         // Usage
                         if let Some(u) = json.get("usage") {
+                            let cached = u
+                                .get("prompt_tokens_details")
+                                .and_then(|d| d.get("cached_tokens"))
+                                .and_then(|v| v.as_u64());
                             usage = Some(UsageInfo {
                                 input_tokens: u
                                     .get("prompt_tokens")
@@ -159,6 +163,7 @@ impl OpenAiCompatProvider {
                                     .get("completion_tokens")
                                     .and_then(|v| v.as_u64())
                                     .unwrap_or(0),
+                                cached_tokens: cached,
                             });
                         }
                     }

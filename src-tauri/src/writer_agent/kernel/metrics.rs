@@ -30,6 +30,21 @@ pub struct WriterProductMetrics {
     pub chapter_mission_completion_rate: f64,
     pub durable_save_success_rate: f64,
     pub average_save_to_feedback_ms: Option<u64>,
+    pub pressure_to_payoff_ratio: f64,
+    pub unearned_payoff_count: u64,
+    pub open_emotional_debt_count: u64,
+    pub overdue_emotional_debt_count: u64,
+    pub payoff_path_diversity: f64,
+    pub interest_mechanism_repetition: f64,
+    pub relationship_soil_coverage: f64,
+    pub next_lack_handoff_rate: f64,
+    pub cache_hit_token_ratio: f64,
+    pub static_prefix_churn_rate: f64,
+    pub focus_pack_rebuild_count: u64,
+    pub ttft_ms_p50: Option<u64>,
+    pub provider_duration_ms_p50: Option<u64>,
+    pub estimated_cost_saved: f64,
+    pub cache_miss_reason_counts: std::collections::HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -83,6 +98,7 @@ pub(crate) fn product_metrics_from_trace(
     operation_lifecycle: &[WriterOperationLifecycleTrace],
     context_recalls: Result<Vec<ContextRecallSummary>, rusqlite::Error>,
     chapter_missions: Result<Vec<ChapterMissionSummary>, rusqlite::Error>,
+    emotional_debts: Result<Vec<crate::writer_agent::memory::EmotionalDebtSummary>, rusqlite::Error>,
 ) -> WriterProductMetrics {
     let proposal_count = proposals.len() as u64;
     let feedback_count = feedback_events.len() as u64;
@@ -172,6 +188,63 @@ pub(crate) fn product_metrics_from_trace(
         .filter(|mission| mission.status == "completed")
         .count() as u64;
     let chapter_mission_completion_rate = ratio(completed_missions, missions.len() as u64);
+    let mission_with_next: usize = missions
+        .iter()
+        .filter(|m| !m.next_lack_opened.trim().is_empty())
+        .count();
+    let next_lack_handoff_rate = ratio(mission_with_next as u64, missions.len() as u64);
+
+    let debts = emotional_debts.unwrap_or_default();
+    let open_debt_count = debts
+        .iter()
+        .filter(|d| d.payoff_status == "open")
+        .count() as u64;
+    let overdue_debt_count = debts
+        .iter()
+        .filter(|d| d.overdue_risk == "high" && d.payoff_status == "open")
+        .count() as u64;
+    let paid_count = debts
+        .iter()
+        .filter(|d| d.payoff_status == "paid")
+        .count() as u64;
+    let pressure_to_payoff_ratio = ratio(paid_count, open_debt_count + paid_count);
+    let relationship_soil_coverage = ratio(
+        debts
+            .iter()
+            .filter(|d| !d.relationship_soil.trim().is_empty())
+            .count() as u64,
+        debts.len() as u64,
+    );
+    let payoff_paths: std::collections::HashSet<&str> = debts
+        .iter()
+        .filter_map(|d| {
+            if d.payoff_path.trim().is_empty() {
+                None
+            } else {
+                Some(d.payoff_path.as_str())
+            }
+        })
+        .collect();
+    let payoff_path_diversity = if !payoff_paths.is_empty() {
+        (payoff_paths.len() as f64).ln() / (debts.len().max(1) as f64).ln().max(1.0)
+    } else {
+        0.0
+    };
+    let interest_mechanisms: std::collections::HashSet<&str> = debts
+        .iter()
+        .filter_map(|d| {
+            if d.interest_mechanism.trim().is_empty() {
+                None
+            } else {
+                Some(d.interest_mechanism.as_str())
+            }
+        })
+        .collect();
+    let interest_mechanism_repetition = if !debts.is_empty() && !interest_mechanisms.is_empty() {
+        1.0 - (interest_mechanisms.len() as f64 / debts.len() as f64).min(1.0)
+    } else {
+        0.0
+    };
 
     let durable_saves = operation_lifecycle
         .iter()
@@ -237,6 +310,21 @@ pub(crate) fn product_metrics_from_trace(
         chapter_mission_completion_rate,
         durable_save_success_rate,
         average_save_to_feedback_ms,
+        pressure_to_payoff_ratio,
+        unearned_payoff_count: 0,
+        open_emotional_debt_count: open_debt_count,
+        overdue_emotional_debt_count: overdue_debt_count,
+        payoff_path_diversity,
+        interest_mechanism_repetition,
+        relationship_soil_coverage,
+        next_lack_handoff_rate,
+        cache_hit_token_ratio: 0.0,
+        static_prefix_churn_rate: 0.0,
+        focus_pack_rebuild_count: 0,
+        ttft_ms_p50: None,
+        provider_duration_ms_p50: None,
+        estimated_cost_saved: 0.0,
+        cache_miss_reason_counts: std::collections::HashMap::new(),
     }
 }
 

@@ -63,6 +63,7 @@ pub struct LlmResponse {
 pub struct UsageInfo {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cached_tokens: Option<u64>,
 }
 
 /// Configuration for an LLM call.

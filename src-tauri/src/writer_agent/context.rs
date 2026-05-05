@@ -16,3 +16,4 @@ use super::observation::WriterObservation;
 include!("context/types.in.rs");
 include!("context/assembly.in.rs");
 include!("context/seed.in.rs");
+include!("context/spine.in.rs");
