@@ -302,7 +302,9 @@ fn context_source_purpose(source: &ContextSource) -> &'static str {
         ContextSource::StoryImpactRadius => {
             "Review impacted story facts, risk, and budget truncation before drafting or planning."
         }
-        ContextSource::ReaderCompensation => "Ground the task in reader emotional compensation context.",
+        ContextSource::ReaderCompensation => {
+            "Ground the task in reader emotional compensation context."
+        }
     }
 }
 

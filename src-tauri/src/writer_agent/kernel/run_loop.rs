@@ -270,48 +270,7 @@ impl WriterAgentKernel {
             Some(format!("story_impact_radius:{}", request.observation.id)),
         );
         self.record_context_pack_built_run_event(&request.observation, &context_pack, now_ms());
-        let spine = crate::writer_agent::context::ContextSpine::from_pack(&context_pack);
-        let stability = spine.build_stability_report(self.last_spine.as_ref());
-        self.run_events.append(
-            &self.project_id,
-            &self.session_id,
-            "context_spine",
-            now_ms(),
-            Some(request.observation.id.clone()),
-            vec![format!(
-                "spine:{}:{}:{}",
-                spine.frozen_fingerprint, spine.stable_fingerprint, spine.focus_fingerprint
-            )],
-            serde_json::json!({
-                "frozenFingerprint": spine.frozen_fingerprint,
-                "stableFingerprint": spine.stable_fingerprint,
-                "focusFingerprint": spine.focus_fingerprint,
-                "estimatedPrefixTokens": spine.estimated_prefix_tokens(),
-                "estimatedDynamicTokens": spine.estimated_dynamic_tokens(),
-                "missReasons": stability.miss_reasons,
-                "prefixChurnSources": stability.prefix_churn_sources,
-            }),
-        );
-        self.last_spine = Some(spine);
-        let focus_changed = self.focus.switch_to(
-            crate::writer_agent::context::FocusNodeKind::Chapter,
-            request.observation.chapter_title.as_deref().unwrap_or("unknown"),
-        );
-        if focus_changed {
-            self.run_events.append(
-                &self.project_id,
-                &self.session_id,
-                "compaction_trigger",
-                now_ms(),
-                self.active_chapter.clone(),
-                vec!["focus_node_switch".to_string()],
-                serde_json::json!({
-                    "trigger": "focus_node_switch",
-                    "isDomainEvent": true,
-                    "previousNodeId": self.focus.active_node_id,
-                }),
-            );
-        }
+        self.record_context_spine_run_events(&request.observation, &context_pack, now_ms());
         self.record_story_impact_radius_run_event(
             &request.observation.id,
             &impact_radius,
@@ -489,33 +448,9 @@ impl WriterAgentKernel {
                 } else {
                     agent_harness_core::CompactionTrigger::ContinuityDiagnosticComplete
                 };
-                self.record_compaction_trigger_event(
-                    &trigger,
-                    &result.source_refs,
-                    now_ms(),
-                );
+                self.record_compaction_trigger_event(&trigger, &result.source_refs, now_ms());
             }
         }
         Ok(())
-    }
-
-    fn record_compaction_trigger_event(
-        &mut self,
-        trigger: &agent_harness_core::CompactionTrigger,
-        source_refs: &[String],
-        ts_ms: u64,
-    ) {
-        self.run_events.append(
-            &self.project_id,
-            &self.session_id,
-            "compaction_trigger",
-            ts_ms,
-            self.active_chapter.clone(),
-            source_refs.to_vec(),
-            serde_json::json!({
-                "trigger": trigger.label(),
-                "isDomainEvent": trigger.is_domain_event(),
-            }),
-        );
     }
 }

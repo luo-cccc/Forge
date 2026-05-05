@@ -106,10 +106,10 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
 - `cargo test -p agent-writer`: 209 tests passing
-- `cargo run -p agent-evals`: 200/200 evals passing
+- `cargo run -p agent-evals`: 244/244 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
-- `npm run check:audit`: 56 commands, 0 issues
+- `npm run check:audit`: 57 commands, 0 issues
 - `npm run check:architecture`: 14/14 files within budget, eval root guard passing
 - `npm run lint`: passing
 - `npm run build`: passing

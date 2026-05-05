@@ -115,11 +115,12 @@ mod proposals_ext;
 mod review;
 mod run_loop;
 mod run_loop_ext;
+mod run_loop_spine;
 mod snapshots;
 mod task_packet;
 mod trace_recording;
-pub use trace_recording::{ModelStartedEventContext, SaveCompletedEventContext};
 pub use snapshots::ReaderCompensationReviewChain;
+pub use trace_recording::{ModelStartedEventContext, SaveCompletedEventContext};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WriterAgentStatus {

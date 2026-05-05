@@ -118,6 +118,8 @@ mod microcompact_tests {
             tokens_saved_by_tool_truncation: 500,
             boundary_summary: "compacted 10 messages, preserved 3 messages".to_string(),
             recovery_level: None,
+            trigger: CompactionTrigger::default(),
+            spine_report: None,
         };
         assert!(
             !report.checkpoints.is_empty(),

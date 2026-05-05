@@ -83,10 +83,11 @@ use commands::settings::{check_api_key, set_api_key};
 use commands::writer_agent::{
     agent_observe, apply_proposal_feedback, approve_writer_operation, get_agent_domain_profile,
     get_agent_kernel_status, get_agent_tools, get_ambient_entity_hints,
-    get_effective_agent_tool_inventory, get_story_debt_snapshot, get_story_review_queue,
-    get_reader_compensation_review_chain, get_writer_agent_companion_timeline_summary, get_writer_agent_inspector_timeline,
-    get_writer_agent_ledger, get_writer_agent_pending_proposals, get_writer_agent_status,
-    get_writer_agent_trace, record_implicit_ghost_rejection, record_writer_operation_durable_save,
+    get_effective_agent_tool_inventory, get_reader_compensation_review_chain,
+    get_story_debt_snapshot, get_story_review_queue, get_writer_agent_companion_timeline_summary,
+    get_writer_agent_inspector_timeline, get_writer_agent_ledger,
+    get_writer_agent_pending_proposals, get_writer_agent_status, get_writer_agent_trace,
+    record_implicit_ghost_rejection, record_writer_operation_durable_save,
 };
 pub(crate) use manual_agent::ManualAgentTurn;
 
@@ -147,7 +148,8 @@ pub fn run() {
             get_story_debt_snapshot,
             get_writer_agent_trace,
             get_writer_agent_inspector_timeline,
-            get_reader_compensation_review_chain, get_writer_agent_companion_timeline_summary,
+            get_reader_compensation_review_chain,
+            get_writer_agent_companion_timeline_summary,
             apply_proposal_feedback,
             record_implicit_ghost_rejection,
             approve_writer_operation,

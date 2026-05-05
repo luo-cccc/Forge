@@ -556,6 +556,7 @@ mod tests {
                 preserve_recent: 1,
                 trigger_fraction: 0.70,
                 max_summary_tokens: 200,
+                event_triggers_enabled: false,
                 context_limit_tokens: 8_000,
             },
             &SummaryProvider,
