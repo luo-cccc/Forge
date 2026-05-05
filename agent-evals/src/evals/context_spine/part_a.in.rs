@@ -1,4 +1,4 @@
-use agent_writer_lib::writer_agent::context::{ContextSpine, ContextSpineLayer};
+use agent_writer_lib::writer_agent::context::{ContextExcerpt, ContextSource, ContextSpine, ContextSpineLayer};
 use agent_writer_lib::writer_agent::context::{
     AgentTask, WritingContextPack,
 };
@@ -13,6 +13,29 @@ fn make_pack() -> WritingContextPack {
             total_budget: 20000,
             used: 0,
             wasted: 20000,
+            source_reports: vec![],
+        },
+    }
+}
+
+fn make_pack_with_project_brief(content: &str) -> WritingContextPack {
+    let char_count = content.chars().count();
+    WritingContextPack {
+        task: AgentTask::ChapterGeneration,
+        sources: vec![ContextExcerpt {
+            source: ContextSource::ProjectBrief,
+            content: content.to_string(),
+            char_count,
+            truncated: false,
+            priority: 11,
+            evidence_ref: Some("story_contract:eval".to_string()),
+        }],
+        total_chars: char_count,
+        budget_limit: 20000,
+        budget_report: agent_writer_lib::writer_agent::context::ContextBudgetReport {
+            total_budget: 20000,
+            used: char_count,
+            wasted: 20000usize.saturating_sub(char_count),
             source_reports: vec![],
         },
     }
@@ -137,6 +160,23 @@ pub fn run_context_spine_reports_prefix_churn_eval() -> EvalResult {
         // With same content, fingerprints should match — no churn
     }
     eval_result("context_spine_reports_prefix_churn", String::new(), errors)
+}
+
+pub fn run_context_spine_fingerprint_changes_for_same_length_content_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let spine_a = ContextSpine::from_pack(&make_pack_with_project_brief("主角必须守住旧门。"));
+    let spine_b = ContextSpine::from_pack(&make_pack_with_project_brief("主角必须离开旧门。"));
+    if spine_a.stable_fingerprint == spine_b.stable_fingerprint {
+        errors.push(
+            "stable fingerprint must change when same-length project context content changes"
+                .to_string(),
+        );
+    }
+    eval_result(
+        "context_spine_fingerprint_changes_for_same_length_content",
+        String::new(),
+        errors,
+    )
 }
 
 pub fn run_inspector_shows_cache_miss_reason_eval() -> EvalResult {

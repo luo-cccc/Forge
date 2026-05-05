@@ -263,7 +263,10 @@ fn classify_source(source: &ContextSource) -> ContextSpineLayer {
 fn layer_fingerprint(sources: &[ContextExcerpt]) -> u64 {
     let mut combined = String::new();
     for s in sources {
-        combined.push_str(&format!("{:?}:{}:", s.source, s.char_count));
+        combined.push_str(&format!(
+            "{:?}:{}:{}:",
+            s.source, s.char_count, s.content
+        ));
     }
     fnv1a_hash(combined.as_bytes())
 }

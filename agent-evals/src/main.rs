@@ -227,6 +227,7 @@ fn main() {
     results.push(run_prompt_cache_event_redacts_prompt_text_eval());
     results.push(run_provider_usage_parses_cached_tokens_eval());
     results.push(run_context_spine_reports_prefix_churn_eval());
+    results.push(run_context_spine_fingerprint_changes_for_same_length_content_eval());
     results.push(run_inspector_shows_cache_miss_reason_eval());
     results.push(run_companion_hides_prompt_cache_internals_eval());
     results.push(run_focus_shift_rebuilds_focus_pack_only_eval());

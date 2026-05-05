@@ -12,7 +12,7 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only behind `WriterAgentKernel.prepare_task_run()` / `WriterAgentPreparedRun.run()`. `ask_agent` in lib.rs calls the kernel path, with no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are re-exported through `writer_agent::kernel` and implemented in `writer_agent/kernel/run_loop_ext.rs`.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 56 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 57 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
@@ -92,7 +92,7 @@ P1 is in progress:
 - Manual `ask_agent` requests now run through WriterAgentKernel.prepare_task_run() with ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
 - Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs; weak Story Contract grounding is also preserved as an explicit TaskPacket risk signal instead of disappearing from trace.
 - Operation lifecycle is tracked end-to-end: proposed → approved → applied → durably_saved → feedback_recorded, with durable-save-before-feedback enforcement.
-- A static command boundary audit classifies all 56 Tauri commands by risk level and verifies audit coverage for write paths.
+- A static command boundary audit classifies all 57 Tauri commands by risk level and verifies audit coverage for write paths.
 - P2 UI guardrails now include both static AST checks and a React server-render write-mode DOM guard. `npm run check:p2` verifies that default Companion code paths keep raw trace/task-packet/operation internals and metacognitive recovery action chips in Inspect mode; `npm run check:p2-render` renders write mode with internal trace fixtures and fails if Inspector-only strings or raw lifecycle/task-packet/run-event sentinels reach the author-facing DOM.
 - Product metrics are derived from trace data and emitted in trajectory JSONL as `writer.product_metrics`.
 - Metacognitive run-health is now derived from trace data and emitted in trajectory JSONL as `writer.metacognition`; the first hard-gate slice blocks risky write runs and direct text writes without blocking read-only or recovery workflows.
@@ -106,7 +106,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
 - `cargo test -p agent-writer`: 209 tests passing
-- `cargo run -p agent-evals`: 244/244 evals passing
+- `cargo run -p agent-evals`: 245/245 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:audit`: 57 commands, 0 issues

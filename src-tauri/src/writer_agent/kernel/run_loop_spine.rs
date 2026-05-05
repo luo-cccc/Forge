@@ -31,6 +31,7 @@ impl WriterAgentKernel {
         );
         self.last_spine = Some(spine);
 
+        let previous_node_id = self.focus.active_node_id.clone();
         let focus_changed = self.focus.switch_to(
             crate::writer_agent::context::FocusNodeKind::Chapter,
             observation.chapter_title.as_deref().unwrap_or("unknown"),
@@ -46,7 +47,8 @@ impl WriterAgentKernel {
                 serde_json::json!({
                     "trigger": "focus_node_switch",
                     "isDomainEvent": true,
-                    "previousNodeId": self.focus.active_node_id,
+                    "previousNodeId": previous_node_id,
+                    "currentNodeId": self.focus.active_node_id,
                 }),
             );
         }
