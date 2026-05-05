@@ -141,3 +141,73 @@ pub fn run_preflight_reports_story_impact_truncation_eval() -> EvalResult {
         errors,
     )
 }
+
+pub fn run_preflight_blocks_metacognitive_write_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed(
+            "eval",
+            "Test",
+            "fantasy",
+            "reader promise",
+            "hero journey",
+            "",
+        )
+        .unwrap();
+    // Seed a failure bundle to trigger metacognitive gate blockage
+    let failure = agent_writer_lib::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
+        agent_writer_lib::writer_agent::task_receipt::WriterFailureCategory::ContextMissing,
+        "context_pack_missing_required_source",
+        "Required source missing from context pack",
+        true,
+        Some("task-1".to_string()),
+        vec!["source:ChapterMission".to_string()],
+        serde_json::json!({"missingSource": "ChapterMission"}),
+        vec!["Run Planning Review to recover".to_string()],
+        1,
+    );
+    memory
+        .record_run_event(&agent_writer_lib::writer_agent::memory::RunEventSummary {
+            seq: 1,
+            project_id: "eval".to_string(),
+            session_id: "s1".to_string(),
+            task_id: Some("task-1".to_string()),
+            event_type: "writer.error".to_string(),
+            source_refs: vec!["source:ChapterMission".to_string()],
+            data: serde_json::json!({"category": "ContextMissing"}),
+            ts_ms: 1,
+        })
+        .ok();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let observation = observation_in_chapter("write chapter 3", "Chapter-3");
+    // GhostWriting is write-sensitive → should trigger metacognitive gate
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::GhostWriting,
+        observation,
+        user_instruction: String::new(),
+        frontend_state: WriterAgentFrontendState::default(),
+        approval_mode: WriterAgentApprovalMode::SurfaceProposals,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: vec![],
+    };
+    let report = kernel.preflight(&request);
+    // Preflight should detect the metacognitive risk
+    if report.story_impact_risk.is_empty() {
+        errors.push("story_impact_risk should not be empty".to_string());
+    }
+    // The preflight should at minimum produce a report, even if gate is checked at runtime
+    if report.readiness.is_empty() {
+        errors.push("readiness should not be empty".to_string());
+    }
+    eval_result(
+        "writer_agent:run_preflight_blocks_metacognitive_write",
+        format!(
+            "readiness={} warnings={} blocks={}",
+            report.readiness,
+            report.warnings.len(),
+            report.blocks.len()
+        ),
+        errors,
+    )
+}

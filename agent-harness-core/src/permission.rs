@@ -268,3 +268,85 @@ mod tests {
         assert!(!tool_matches("search", "load_*"));
     }
 }
+
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+    use crate::tool_registry::ToolSideEffectLevel;
+
+    #[test]
+    fn permission_denies_sensitive_ssh_path() {
+        let policy = PermissionPolicy::new(PermissionMode::DangerFullAccess);
+        let ctx = ToolInvocationContext {
+            tool_name: "read_file".to_string(),
+            side_effect: ToolSideEffectLevel::Read,
+            requires_approval: false,
+            resolved_path: Some("/home/user/.ssh/id_rsa".to_string()),
+            command_preview: None,
+            source_refs: vec![],
+            task_id: None,
+        };
+        let decision = policy.authorize_with_context(&ctx);
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn permission_denies_dangerous_rm_rf_command() {
+        let policy = PermissionPolicy::new(PermissionMode::DangerFullAccess);
+        let ctx = ToolInvocationContext {
+            tool_name: "run_shell".to_string(),
+            side_effect: ToolSideEffectLevel::Write,
+            requires_approval: false,
+            resolved_path: None,
+            command_preview: Some("rm -rf /".to_string()),
+            source_refs: vec![],
+            task_id: None,
+        };
+        let decision = policy.authorize_with_context(&ctx);
+        assert!(
+            matches!(decision, PermissionDecision::Deny { .. }),
+            "dangerous command should be denied even in FullAccess: {:?}",
+            decision
+        );
+    }
+
+    #[test]
+    fn permission_context_overrides_full_access_for_credentials() {
+        let policy = PermissionPolicy::new(PermissionMode::DangerFullAccess);
+        let ctx = ToolInvocationContext {
+            tool_name: "read_file".to_string(),
+            side_effect: ToolSideEffectLevel::Read,
+            requires_approval: false,
+            resolved_path: Some("/root/.aws/credentials".to_string()),
+            command_preview: None,
+            source_refs: vec![],
+            task_id: None,
+        };
+        let decision = policy.authorize_with_context(&ctx);
+        assert!(
+            matches!(decision, PermissionDecision::Deny { .. }),
+            "credential path should be denied even in FullAccess: {:?}",
+            decision
+        );
+    }
+
+    #[test]
+    fn safe_path_allowed_in_workspace_write() {
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let ctx = ToolInvocationContext {
+            tool_name: "load_chapter".to_string(),
+            side_effect: ToolSideEffectLevel::Read,
+            requires_approval: false,
+            resolved_path: Some("/project/chapter-1.md".to_string()),
+            command_preview: None,
+            source_refs: vec![],
+            task_id: None,
+        };
+        let decision = policy.authorize_with_context(&ctx);
+        assert!(
+            matches!(decision, PermissionDecision::Allow),
+            "safe path should be allowed: {:?}",
+            decision
+        );
+    }
+}
