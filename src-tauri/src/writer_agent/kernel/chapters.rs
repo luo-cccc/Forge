@@ -5,10 +5,14 @@ use crate::writer_agent::kernel::{
     extract_new_canon_entities, extract_plot_promises, sentence_snippet, split_sentences,
 };
 use crate::writer_agent::memory::ContextBudgetTrace;
-use crate::writer_agent::memory::{ChapterMissionSummary, ChapterResultSummary, NextBeatSummary, WriterMemory};
+use crate::writer_agent::memory::{
+    ChapterMissionSummary, ChapterResultSummary, NextBeatSummary, WriterMemory,
+};
 use crate::writer_agent::observation::WriterObservation;
 use crate::writer_agent::operation::WriterOperation;
-use crate::writer_agent::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
+use crate::writer_agent::proposal::{
+    AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority,
+};
 use std::collections::HashSet;
 
 pub(crate) fn proposal_id(session_id: &str, counter: u64) -> String {

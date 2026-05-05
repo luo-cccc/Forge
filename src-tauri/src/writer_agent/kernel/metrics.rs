@@ -2,9 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use super::helpers::{operation_affected_scope, operation_kind_label};
 use crate::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use crate::writer_agent::kernel::{WriterOperationLifecycleState, WriterOperationLifecycleTrace};
-use super::helpers::{operation_affected_scope, operation_kind_label};
 use crate::writer_agent::memory::{ChapterMissionSummary, ContextRecallSummary, RunEventSummary};
 use crate::writer_agent::observation::{ObservationSource, WriterObservation};
 use crate::writer_agent::proposal::{AgentProposal, ProposalKind};

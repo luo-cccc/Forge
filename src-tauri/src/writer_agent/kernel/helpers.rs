@@ -1,8 +1,8 @@
 //! Operation helpers, validation, and policy functions.
 //! Extracted from kernel.rs.
 
-use crate::writer_agent::context::AgentTask;
 use super::run_loop_ext::WriterAgentTask;
+use crate::writer_agent::context::AgentTask;
 use crate::writer_agent::memory::{
     ChapterMissionSummary, StoryContractQuality, StoryContractSummary, WriterMemory,
 };

@@ -1,10 +1,14 @@
 //! Story debt, review queue, and priority ordering helpers.
 //! Extracted from kernel.rs.
 
-use crate::writer_agent::kernel::{StoryDebtCategory, StoryDebtEntry, StoryDebtStatus, StoryReviewQueueEntry};
+use crate::writer_agent::kernel::{
+    StoryDebtCategory, StoryDebtEntry, StoryDebtStatus, StoryReviewQueueEntry,
+};
 use crate::writer_agent::memory::PlotPromiseSummary;
 use crate::writer_agent::operation::WriterOperation;
-use crate::writer_agent::proposal::{AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority};
+use crate::writer_agent::proposal::{
+    AgentProposal, EvidenceRef, EvidenceSource, ProposalKind, ProposalPriority,
+};
 
 pub(crate) fn story_review_queue_entry(
     proposal: &AgentProposal,
@@ -73,7 +77,9 @@ pub(crate) fn story_debt_from_review_entry(
         category: story_debt_category_for_review(entry),
         severity: entry.severity.clone(),
         status: match entry.status {
-            crate::writer_agent::kernel::StoryReviewQueueStatus::Snoozed => StoryDebtStatus::Snoozed,
+            crate::writer_agent::kernel::StoryReviewQueueStatus::Snoozed => {
+                StoryDebtStatus::Snoozed
+            }
             crate::writer_agent::kernel::StoryReviewQueueStatus::Expired => StoryDebtStatus::Stale,
             _ => StoryDebtStatus::Open,
         },
@@ -278,7 +284,9 @@ pub(crate) fn story_debt_status_weight(status: &StoryDebtStatus) -> i32 {
     }
 }
 
-pub(crate) fn queue_status_weight(status: &crate::writer_agent::kernel::StoryReviewQueueStatus) -> i32 {
+pub(crate) fn queue_status_weight(
+    status: &crate::writer_agent::kernel::StoryReviewQueueStatus,
+) -> i32 {
     match status {
         crate::writer_agent::kernel::StoryReviewQueueStatus::Pending => 4,
         crate::writer_agent::kernel::StoryReviewQueueStatus::Snoozed => 3,
@@ -288,7 +296,9 @@ pub(crate) fn queue_status_weight(status: &crate::writer_agent::kernel::StoryRev
     }
 }
 
-pub(crate) fn queue_severity_weight(severity: &crate::writer_agent::kernel::StoryReviewSeverity) -> i32 {
+pub(crate) fn queue_severity_weight(
+    severity: &crate::writer_agent::kernel::StoryReviewSeverity,
+) -> i32 {
     match severity {
         crate::writer_agent::kernel::StoryReviewSeverity::Error => 2,
         crate::writer_agent::kernel::StoryReviewSeverity::Warning => 1,

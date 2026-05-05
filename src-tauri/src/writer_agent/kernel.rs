@@ -35,6 +35,9 @@ use super::{memory, observation, operation, trajectory};
 pub use super::inspector::{
     WriterInspectorTimeline, WriterTimelineAudience, WriterTimelineEvent, WriterTimelineEventKind,
 };
+pub use super::metacognition::{
+    WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
+};
 pub(crate) use chapters::*;
 pub(crate) use ghost::{
     context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
@@ -64,9 +67,7 @@ pub use metrics::{
 };
 pub(crate) use ops::*;
 pub(crate) use prompts::*;
-pub(crate) use proposals_ext::{
-    priority_weight, proposal_expired, should_replace_proposal,
-};
+pub(crate) use proposals_ext::{priority_weight, proposal_expired, should_replace_proposal};
 pub(crate) use review::*;
 pub use run_loop_ext::{
     WriterAgentApprovalMode, WriterAgentContextPackSummary, WriterAgentFrontendState,
@@ -78,12 +79,7 @@ pub(crate) use task_packet::{
     attach_story_contract_quality_gate_to_task_packet, attach_story_impact_to_task_packet,
     context_budget_trace, trace_state_with_expiry,
 };
-pub(crate) use task_packet::{
-    story_impact_context_budget, story_impact_context_priority,
-};
-pub use super::metacognition::{
-    WriterMetacognitiveAction, WriterMetacognitiveRiskLevel, WriterMetacognitiveSnapshot,
-};
+pub(crate) use task_packet::{story_impact_context_budget, story_impact_context_priority};
 
 mod chapters;
 mod context_pack;

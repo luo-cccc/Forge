@@ -1157,6 +1157,72 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - 不默认后台整本生成。批量生成只能是受监督章节冲刺，且必须保留 receipt、budget、approval、diagnostics、settlement。
 - 不把“AI 味”当作单一审美裁判。风格守护必须以作者样章和作者反馈为来源，输出可解释证据。
 
+### 11.4C 读者情绪补偿模型落地计划
+
+来源：`C:/Users/Msi/Desktop/写作逻辑.md`。该文件提出网文的第一层底层链条是“现实缺憾 -> 代入主角 -> 制造压迫 -> 释放补偿 -> 获得爽感 -> 形成追读”，并进一步说明写作起点应先判断目标读者的心理缺口，而不是先写世界观；缺憾要通过主角承载、场景冲突化、爽点回收和递进升级来维持追读。文件也明确提醒这只能作为第一层逻辑，长篇稳定性还要叠加人物成长、世界观好奇、关系张力、节奏控制和平台生态判断。
+
+结论：这套逻辑适合成为 Forge 的一层 `Reader Compensation Model`，不适合变成硬编码爽文模板。它应该帮助 agent 判断“本章为什么让读者想看下去”，而不是替代 Story Contract、Chapter Mission、Promise Ledger、Author Voice 或作者审美。
+
+证据依据：
+
+- 核心链条：`现实缺憾 -> 代入主角 -> 制造压迫 -> 释放补偿 -> 获得爽感 -> 形成追读`：`C:/Users/Msi/Desktop/写作逻辑.md:5`。
+- 读者缺口包括缺钱、缺爱、缺尊严、缺权力、缺安全感、缺被认可、缺改变命运机会：`C:/Users/Msi/Desktop/写作逻辑.md:9`、`C:/Users/Msi/Desktop/写作逻辑.md:10`。
+- 主角要承载读者心理投影，前期弱势/屈辱/贫穷/被误解/被背叛/被压制不是单纯卖惨，而是让读者识别熟悉情绪：`C:/Users/Msi/Desktop/写作逻辑.md:18`、`C:/Users/Msi/Desktop/写作逻辑.md:21`、`C:/Users/Msi/Desktop/写作逻辑.md:23`。
+- 缺憾必须戏剧化、场景化、冲突化，而不是背景介绍：`C:/Users/Msi/Desktop/写作逻辑.md:25`、`C:/Users/Msi/Desktop/写作逻辑.md:32`。
+- 爽点不是主角单纯赢了，而是回收前面缺憾、替读者讨回不甘：`C:/Users/Msi/Desktop/写作逻辑.md:34`、`C:/Users/Msi/Desktop/写作逻辑.md:37`、`C:/Users/Msi/Desktop/写作逻辑.md:46`。
+- 补偿要递进，前期生存，中期尊严/地位/能力，后期权力/秩序/命运/世界级缺憾；每次胜利解决旧问题并打开更大问题：`C:/Users/Msi/Desktop/写作逻辑.md:48`、`C:/Users/Msi/Desktop/写作逻辑.md:53`、`C:/Users/Msi/Desktop/写作逻辑.md:56`。
+- 作品差异来自补偿路径：正面逆袭、反套路逆袭、碾压、智斗、经营成长、改变规则、稳定关系等：`C:/Users/Msi/Desktop/写作逻辑.md:58`、`C:/Users/Msi/Desktop/写作逻辑.md:61`、`C:/Users/Msi/Desktop/写作逻辑.md:63`、`C:/Users/Msi/Desktop/写作逻辑.md:68`。
+- 该逻辑边界：它只是第一层，还要叠加人物成长、世界观好奇、关系张力、节奏控制和平台生态判断：`C:/Users/Msi/Desktop/写作逻辑.md:83`。
+
+产品判断：
+
+- Forge 现有 Story Contract 更偏“作品承诺”；Chapter Mission 更偏“本章任务”；Promise Ledger 更偏“故事债务”。读者情绪补偿模型应补上“读者为什么在这一章获得心理回收”的判断层。
+- 这不是让 Forge 只写爽文，而是让 agent 对商业网文、类型文、连载文增加读者心理视角；严肃文学、慢热文、强作者表达项目可以降低该模型权重。
+- 该模型必须可解释、可关闭、可按项目类型调权重；不能在后台强行把所有作品改成打脸/暴富/升级模板。
+
+任务：
+
+1. 新增 `ReaderCompensationProfile`。（P1）
+   - 字段：`target_reader`、`primary_lack`、`secondary_lacks`、`protagonist_proxy_state`、`pressure_mode`、`payoff_mode`、`payoff_path`、`escalation_ladder`、`forbidden_shortcuts`、`confidence`、`source_refs`。
+   - 来源：Story Contract、作者输入、旧稿接管报告、章节保存结果、作者反馈。
+   - 边界：只作为 story foundation candidate；写入项目长期设定必须经过作者 approval。
+   - 验收 eval：`writer_agent:reader_compensation_profile_extracts_lack`、`writer_agent:reader_compensation_profile_requires_author_approval`、`writer_agent:reader_compensation_profile_preserves_project_tone`。
+2. 扩展 Chapter Mission 的情绪补偿字段。（P1）
+   - 新增或派生：`reader_lack_this_chapter`、`pressure_scene`、`payoff_target`、`payoff_path`、`next_lack_opened`。
+   - 目标：每章不只知道“要发生什么”，还知道“压迫了什么缺口、回收什么不甘、结尾打开什么更大缺口”。
+   - 边界：这些字段作为 Planning Review / Chapter Generation 的辅助 context，不自动覆盖作者原有 mission 文案。
+   - 验收 eval：`writer_agent:chapter_mission_tracks_pressure_and_payoff`、`writer_agent:chapter_mission_opens_next_reader_lack`。
+3. 新增 `Emotional Debt Ledger`。（P1）
+   - 类型第一版：`dignity_debt`、`scarcity_debt`、`powerlessness_debt`、`safety_debt`、`affection_debt`、`recognition_debt`、`fate_debt`。
+   - 字段：debt id、kind、introduced_at、pressure_evidence、payoff_status、expected_payoff_window、payoff_path、risk、source_refs。
+   - 与 Promise Ledger 的关系：Promise Ledger 记录故事承诺；Emotional Debt Ledger 记录读者心理承诺。两者可交叉引用，但不混成一个表。
+   - 验收 eval：`writer_agent:emotional_debt_created_from_pressure_scene`、`writer_agent:emotional_debt_payoff_closes_with_evidence`、`writer_agent:emotional_debt_does_not_autowrite_promise`。
+4. 新增 `Payoff Diagnostic` 写后诊断。（P2）
+   - 保存后检查：是否有压迫无补偿、补偿无前置压迫、爽点没有回收对应缺憾、一次性填满导致追读断点、补偿路径与项目气质冲突。
+   - 输出：只读 diagnostic report + 可审查 story debt proposal，不自动改正文、不自动改 ledger。
+   - 与 11.4B `Chapter Settlement Queue` 对接：Payoff Diagnostic 的高风险项进入 settlement queue 的 emotional / continuity 分组。
+   - 验收 eval：`writer_agent:payoff_diagnostic_flags_pressure_without_payoff`、`writer_agent:payoff_diagnostic_flags_unearned_payoff`、`writer_agent:payoff_diagnostic_flags_overfilled_lack`。
+5. Planning Review 增加读者补偿链审查。（P2）
+   - Planning Review 输出：目标读者缺口、主角承载方式、本章压迫场景、本章补偿点、补偿路径、下一层缺口、风险。
+   - 该审查只读，不生成正文、不修改 Canon / Promise / Emotional Debt。
+   - 验收 eval：`writer_agent:planning_review_reports_reader_compensation_chain`、`writer_agent:planning_review_keeps_compensation_read_only`。
+6. Context Pack 增加受预算约束的 `ReaderCompensation` source。（P2）
+   - 优先级：ChapterGeneration / PlanningReview / InlineRewrite 高；ContinuityDiagnostic 中等；Project Brain 问答默认低。
+   - 内容必须短：当前主缺口、当前章压迫/补偿目标、最近未回收 emotional debt、下一层缺口。
+   - 边界：不要把完整读者心理分析塞进 prompt；只给模型当前行动必要的少量信号。
+   - 验收 eval：`writer_agent:reader_compensation_enters_chapter_generation_context`、`writer_agent:reader_compensation_budget_stays_compact`。
+7. 产品指标增加读者补偿链指标。（P3）
+   - 指标：`pressure_to_payoff_ratio`、`unearned_payoff_count`、`open_emotional_debt_count`、`payoff_path_diversity`、`next_lack_handoff_rate`。
+   - 用途：只用于 Inspector / trajectory / eval 校准，不向普通 Companion 默认暴露复杂指标。
+   - 验收 eval：`writer_agent:product_metrics_tracks_payoff_chain`、`writer_agent:trajectory_exports_reader_compensation_metrics`。
+
+不建议照搬：
+
+- 不把“读者缺什么”变成唯一创作起点；作者表达、人物成长、世界观好奇和关系张力仍是并列基础。
+- 不把所有项目默认判定为打脸、暴富、升级、复仇、甜宠；这些只是文件举例，不是 Forge 的固定类型枚举上限。
+- 不把“爽点”做成机械打分器。Forge 应输出证据和风险，而不是替作者裁决审美。
+- 不允许模型为了补偿链自动改写 Canon / Promise / Story Contract / Chapter Mission；所有长期记忆和正文写入仍走 proposal + approval。
+
 ### 11.5 目标与信念：自主性的灵魂
 
 目标：Forge 的自主性来自“它知道这本书要守什么、当前章节要完成什么、哪些承诺不能忘”，不是来自泛用人格或聊天式 persona。

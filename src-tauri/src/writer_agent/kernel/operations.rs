@@ -244,8 +244,7 @@ impl WriterAgentKernel {
             self.record_save_completed_run_event(
                 SaveCompletedEventContext {
                     observation_id,
-                    chapter_title: chapter_title
-                        .or_else(|| operation_chapter(&operation)),
+                    chapter_title: chapter_title.or_else(|| operation_chapter(&operation)),
                     chapter_revision,
                     save_result: normalized,
                 },

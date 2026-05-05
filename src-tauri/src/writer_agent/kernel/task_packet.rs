@@ -2,9 +2,11 @@
 
 use agent_harness_core::{RequiredContext, TaskBelief, TaskPacket, TaskScope};
 
-use crate::writer_agent::context::{AgentTask, ContextSource, WritingContextPack};
 use super::helpers::{feedback_contract_for_task, tool_policy_for_task};
-use crate::writer_agent::memory::{ContextBudgetTrace, ContextSourceBudgetTrace, StoryContractQuality};
+use crate::writer_agent::context::{AgentTask, ContextSource, WritingContextPack};
+use crate::writer_agent::memory::{
+    ContextBudgetTrace, ContextSourceBudgetTrace, StoryContractQuality,
+};
 use crate::writer_agent::observation::WriterObservation;
 use crate::writer_agent::story_impact::{
     story_impact_task_summary, StoryImpactBudgetReport, WriterStoryImpactRadius,

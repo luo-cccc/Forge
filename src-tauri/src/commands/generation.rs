@@ -4,8 +4,8 @@ use crate::chapter_generation::{
     ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
     PipelineTerminal, SaveMode,
 };
-use crate::writer_agent::kernel::ModelStartedEventContext;
 use crate::llm_runtime;
+use crate::writer_agent::kernel::ModelStartedEventContext;
 use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};

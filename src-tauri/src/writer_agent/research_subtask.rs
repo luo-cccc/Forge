@@ -25,7 +25,6 @@ const DEFAULT_EXTERNAL_RESEARCH_OUTPUT_TOKENS: u64 = 4_096;
 
 include!("research_subtask/types.in.rs");
 
-
 include!("research_subtask/workspace.in.rs");
 include!("research_subtask/provider_budget.in.rs");
 include!("research_subtask/helpers.in.rs");

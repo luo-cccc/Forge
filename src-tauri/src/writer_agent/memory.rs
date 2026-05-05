@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 include!("memory/schema.in.rs");
 
-
 pub struct WriterMemory {
     conn: Connection,
 }
@@ -80,7 +79,6 @@ pub enum PromiseKind {
     #[serde(other)]
     Other,
 }
-
 
 impl PromiseKind {
     pub fn from_kind_str(kind: &str) -> Self {
@@ -551,8 +549,6 @@ impl WriterMemory {
         initialize_schema(&conn)?;
         Ok(Self { conn })
     }
-
-
 }
 
 include!("memory/canon_methods.in.rs");

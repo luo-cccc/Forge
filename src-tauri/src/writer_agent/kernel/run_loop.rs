@@ -123,17 +123,18 @@ impl WriterAgentKernel {
         // Story Contract quality
         let (contract_quality, _gaps) = self.contract_quality_with_gaps();
         if task_requires_story_grounding(&request.task)
-            && contract_quality <= StoryContractQuality::Vague {
-                warnings.push(crate::writer_agent::run_preflight::PreflightItem {
-                    code: "story_contract_weak".to_string(),
-                    reason: format!(
-                        "Story Contract quality is {:?}: task may lack story-level grounding",
-                        contract_quality
-                    ),
-                });
-                next_actions
-                    .push("Strengthen the Story Contract in Settings before running".to_string());
-            }
+            && contract_quality <= StoryContractQuality::Vague
+        {
+            warnings.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "story_contract_weak".to_string(),
+                reason: format!(
+                    "Story Contract quality is {:?}: task may lack story-level grounding",
+                    contract_quality
+                ),
+            });
+            next_actions
+                .push("Strengthen the Story Contract in Settings before running".to_string());
+        }
 
         // Tool inventory
         let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);

@@ -295,9 +295,11 @@ pub(crate) fn context_pack_evidence(
 
 #[cfg(test)]
 mod tests {
-    use crate::writer_agent::context::{AgentTask, ContextBudgetReport, ContextExcerpt, SourceReport};
-    use crate::writer_agent::observation::{ObservationReason, ObservationSource, TextRange};
     use super::*;
+    use crate::writer_agent::context::{
+        AgentTask, ContextBudgetReport, ContextExcerpt, SourceReport,
+    };
+    use crate::writer_agent::observation::{ObservationReason, ObservationSource, TextRange};
 
     fn observation(paragraph: &str) -> WriterObservation {
         WriterObservation {

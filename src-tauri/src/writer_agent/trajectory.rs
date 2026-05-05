@@ -53,7 +53,6 @@ struct TruncatedEvent {
     reason: &'static str,
 }
 
-
 include!("trajectory/export.in.rs");
 include!("trajectory/trace_viewer.in.rs");
 include!("trajectory/helpers.in.rs");

@@ -335,9 +335,9 @@ fn preview_fingerprint(preview: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::writer_agent::feedback::FeedbackAction;
     use crate::writer_agent::proposal::{EvidenceRef, EvidenceSource, ProposalPriority};
-    use super::*;
 
     fn canon_entity(name: &str) -> CanonEntityOp {
         CanonEntityOp {
