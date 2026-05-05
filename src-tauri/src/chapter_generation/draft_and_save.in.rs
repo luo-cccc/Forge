@@ -16,6 +16,8 @@ pub async fn generate_chapter_draft(
         "You are a professional Chinese novelist drafting a complete chapter. \
 Use the provided project context, preserve continuity, and write only chapter prose. \
 Do not include analysis, markdown fences, action tags, or meta commentary. \
+Preserve the named anchors, unresolved debts, and chapter mission constraints from the context; \
+do not silently drop active named entities, artifacts, promises, or reader-debt payoffs unless the context says they are resolved. \
 Aim for up to {} Chinese characters unless the beat clearly requires less.",
         DEFAULT_OUTPUT_SOFT_CAP_CHARS
     );

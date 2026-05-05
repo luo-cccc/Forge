@@ -71,26 +71,37 @@ OPENAI_API_KEY=...
 OPENAI_API_BASE=https://openrouter.ai/api/v1
 OPENAI_MODEL=deepseek/deepseek-v4-flash
 OPENAI_CHAT_TEMPERATURE=0.7
-OPENAI_JSON_TEMPERATURE=0.2
+OPENAI_JSON_TEMPERATURE=0.0
 OPENAI_CHAT_MAX_TOKENS=4096
 OPENAI_JSON_MAX_TOKENS=1024
 OPENAI_CHAPTER_DRAFT_TEMPERATURE=0.75
 OPENAI_CHAPTER_DRAFT_MAX_TOKENS=6000
 OPENAI_GHOST_PREVIEW_TEMPERATURE=0.55
-OPENAI_GHOST_PREVIEW_MAX_TOKENS=512
+OPENAI_GHOST_PREVIEW_MAX_TOKENS=160
 OPENAI_ANALYSIS_TEMPERATURE=0.2
-OPENAI_ANALYSIS_MAX_TOKENS=2048
+OPENAI_ANALYSIS_MAX_TOKENS=768
 OPENAI_PARALLEL_DRAFT_TEMPERATURE=0.85
-OPENAI_PARALLEL_DRAFT_MAX_TOKENS=1200
+OPENAI_PARALLEL_DRAFT_MAX_TOKENS=768
 OPENAI_MANUAL_REWRITE_TEMPERATURE=0.6
-OPENAI_MANUAL_REWRITE_MAX_TOKENS=1200
+OPENAI_MANUAL_REWRITE_MAX_TOKENS=512
 OPENAI_TOOL_CONTINUATION_TEMPERATURE=0.7
 OPENAI_TOOL_CONTINUATION_MAX_TOKENS=2048
 OPENAI_PROJECT_BRAIN_TEMPERATURE=0.3
 OPENAI_PROJECT_BRAIN_MAX_TOKENS=4096
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_INPUT_LIMIT_CHARS=8000
+OPENAI_CHAT_DISABLE_REASONING=false
+OPENAI_JSON_DISABLE_REASONING=true
+OPENAI_CHAPTER_DRAFT_DISABLE_REASONING=false
+OPENAI_GHOST_PREVIEW_DISABLE_REASONING=true
+OPENAI_ANALYSIS_DISABLE_REASONING=true
+OPENAI_PARALLEL_DRAFT_DISABLE_REASONING=true
+OPENAI_MANUAL_REWRITE_DISABLE_REASONING=true
+OPENAI_TOOL_CONTINUATION_DISABLE_REASONING=true
+OPENAI_PROJECT_BRAIN_DISABLE_REASONING=true
 ```
+
+The `*_DISABLE_REASONING` controls are provider-scoped. Forge currently sends OpenRouter reasoning controls only when `OPENAI_API_BASE` contains `openrouter.ai`; other OpenAI-compatible providers receive the standard chat payload.
 
 Real provider integration tests are opt-in so normal verification stays offline and deterministic:
 
@@ -103,6 +114,8 @@ cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -
 ```
 
 These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
+
+Latest local real-provider tuning note, recorded on 2026-05-05 with a 5-chapter "镜中墟" author-session simulation against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, minimum anchor hit rate 0.8, and 1536-dimension embeddings. The remaining measured weakness was latency tail, with p95 chat latency around 17.5s and the longest analysis call around 27.1s, so these settings should be treated as a current measured profile rather than a final optimum.
 
 ## Development
 
@@ -178,7 +191,7 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 223 tests passing
+- `cargo test -p agent-writer`: 225 tests passing
 - `cargo run -p agent-evals`: 245/245 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing

@@ -36,10 +36,11 @@ pub enum LlmRequestProfile {
 pub struct LlmRequestOptions {
     pub temperature: f64,
     pub max_tokens: u32,
+    pub disable_reasoning: bool,
 }
 
 const DEFAULT_CHAT_TEMPERATURE: f64 = 0.7;
-const DEFAULT_JSON_TEMPERATURE: f64 = 0.2;
+const DEFAULT_JSON_TEMPERATURE: f64 = 0.0;
 const DEFAULT_CHAT_MAX_TOKENS: u32 = 4_096;
 const DEFAULT_JSON_MAX_TOKENS: u32 = 1_024;
 const DEFAULT_CHAPTER_DRAFT_TEMPERATURE: f64 = 0.75;
@@ -50,12 +51,13 @@ const DEFAULT_MANUAL_REWRITE_TEMPERATURE: f64 = 0.6;
 const DEFAULT_TOOL_CONTINUATION_TEMPERATURE: f64 = 0.7;
 const DEFAULT_PROJECT_BRAIN_TEMPERATURE: f64 = 0.3;
 const DEFAULT_CHAPTER_DRAFT_MAX_TOKENS: u32 = 6_000;
-const DEFAULT_GHOST_PREVIEW_MAX_TOKENS: u32 = 512;
-const DEFAULT_ANALYSIS_MAX_TOKENS: u32 = 2_048;
-const DEFAULT_PARALLEL_DRAFT_MAX_TOKENS: u32 = 1_200;
-const DEFAULT_MANUAL_REWRITE_MAX_TOKENS: u32 = 1_200;
+const DEFAULT_GHOST_PREVIEW_MAX_TOKENS: u32 = 160;
+const DEFAULT_ANALYSIS_MAX_TOKENS: u32 = 768;
+const DEFAULT_PARALLEL_DRAFT_MAX_TOKENS: u32 = 768;
+const DEFAULT_MANUAL_REWRITE_MAX_TOKENS: u32 = 512;
 const DEFAULT_TOOL_CONTINUATION_MAX_TOKENS: u32 = 2_048;
 const DEFAULT_PROJECT_BRAIN_MAX_TOKENS: u32 = 4_096;
+const JSON_RETRY_MAX_TOKENS_CAP: u32 = 4_096;
 
 pub fn settings(api_key: String) -> LlmSettings {
     LlmSettings {
@@ -146,6 +148,31 @@ fn profile_max_tokens_env(profile: LlmRequestProfile) -> Option<&'static str> {
     }
 }
 
+fn profile_reasoning_env(profile: LlmRequestProfile) -> Option<&'static str> {
+    match profile {
+        LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_DISABLE_REASONING"),
+        LlmRequestProfile::Json => Some("OPENAI_JSON_DISABLE_REASONING"),
+        LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_DISABLE_REASONING"),
+        LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_DISABLE_REASONING"),
+        LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_DISABLE_REASONING"),
+        LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_DISABLE_REASONING"),
+        LlmRequestProfile::ManualRewrite => Some("OPENAI_MANUAL_REWRITE_DISABLE_REASONING"),
+        LlmRequestProfile::ToolContinuation => Some("OPENAI_TOOL_CONTINUATION_DISABLE_REASONING"),
+        LlmRequestProfile::ProjectBrainStream => Some("OPENAI_PROJECT_BRAIN_DISABLE_REASONING"),
+    }
+}
+
+fn parse_bool_env(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
 fn default_profile_options(
     settings: &LlmSettings,
     profile: LlmRequestProfile,
@@ -154,38 +181,47 @@ fn default_profile_options(
         LlmRequestProfile::GeneralChat => LlmRequestOptions {
             temperature: settings.chat_temperature,
             max_tokens: settings.chat_max_tokens,
+            disable_reasoning: false,
         },
         LlmRequestProfile::Json => LlmRequestOptions {
             temperature: settings.json_temperature,
             max_tokens: settings.json_max_tokens,
+            disable_reasoning: true,
         },
         LlmRequestProfile::ChapterDraft => LlmRequestOptions {
             temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
             max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
+            disable_reasoning: false,
         },
         LlmRequestProfile::GhostPreview => LlmRequestOptions {
             temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
             max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS,
+            disable_reasoning: true,
         },
         LlmRequestProfile::Analysis => LlmRequestOptions {
             temperature: DEFAULT_ANALYSIS_TEMPERATURE,
             max_tokens: DEFAULT_ANALYSIS_MAX_TOKENS,
+            disable_reasoning: true,
         },
         LlmRequestProfile::ParallelDraft => LlmRequestOptions {
             temperature: DEFAULT_PARALLEL_DRAFT_TEMPERATURE,
             max_tokens: DEFAULT_PARALLEL_DRAFT_MAX_TOKENS,
+            disable_reasoning: true,
         },
         LlmRequestProfile::ManualRewrite => LlmRequestOptions {
             temperature: DEFAULT_MANUAL_REWRITE_TEMPERATURE,
             max_tokens: DEFAULT_MANUAL_REWRITE_MAX_TOKENS,
+            disable_reasoning: true,
         },
         LlmRequestProfile::ToolContinuation => LlmRequestOptions {
             temperature: DEFAULT_TOOL_CONTINUATION_TEMPERATURE,
             max_tokens: DEFAULT_TOOL_CONTINUATION_MAX_TOKENS,
+            disable_reasoning: true,
         },
         LlmRequestProfile::ProjectBrainStream => LlmRequestOptions {
             temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
             max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS,
+            disable_reasoning: true,
         },
     }
 }
@@ -199,6 +235,9 @@ pub fn request_options(settings: &LlmSettings, profile: LlmRequestProfile) -> Ll
         max_tokens: profile_max_tokens_env(profile)
             .map(|name| parse_bounded_u32_env(name, defaults.max_tokens, 16, 65_536))
             .unwrap_or(defaults.max_tokens),
+        disable_reasoning: profile_reasoning_env(profile)
+            .map(|name| parse_bool_env(name, defaults.disable_reasoning))
+            .unwrap_or(defaults.disable_reasoning),
     }
 }
 
@@ -286,12 +325,48 @@ fn redact_api_error_body(text: &str) -> String {
     redacted
 }
 
+fn openrouter_reasoning_controls_supported(settings: &LlmSettings) -> bool {
+    settings
+        .api_base
+        .to_ascii_lowercase()
+        .contains("openrouter.ai")
+}
+
+fn apply_provider_options(
+    settings: &LlmSettings,
+    payload: &mut serde_json::Value,
+    options: LlmRequestOptions,
+) {
+    if options.disable_reasoning && openrouter_reasoning_controls_supported(settings) {
+        payload["reasoning"] = serde_json::json!({
+            "effort": "none",
+            "exclude": true
+        });
+    }
+}
+
 fn chat_request_options(settings: &LlmSettings, json_mode: bool) -> LlmRequestOptions {
     if json_mode {
         request_options(settings, LlmRequestProfile::Json)
     } else {
         request_options(settings, LlmRequestProfile::GeneralChat)
     }
+}
+
+fn json_retry_options(first: LlmRequestOptions) -> Option<LlmRequestOptions> {
+    let retry_max_tokens = first
+        .max_tokens
+        .saturating_mul(2)
+        .max(DEFAULT_JSON_MAX_TOKENS)
+        .min(JSON_RETRY_MAX_TOKENS_CAP);
+    if retry_max_tokens <= first.max_tokens && first.temperature <= 0.0 {
+        return None;
+    }
+    Some(LlmRequestOptions {
+        temperature: 0.0,
+        max_tokens: retry_max_tokens,
+        disable_reasoning: true,
+    })
 }
 
 pub async fn chat_text(
@@ -341,6 +416,7 @@ async fn chat_text_with_options(
     if json_mode {
         payload["response_format"] = serde_json::json!({"type": "json_object"});
     }
+    apply_provider_options(settings, &mut payload, options);
 
     let resp = client
         .post(endpoint(&settings.api_base, "chat/completions"))
@@ -427,8 +503,29 @@ pub async fn chat_json(
     messages: Vec<serde_json::Value>,
     timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
-    let text = chat_text(settings, messages, true, timeout_secs).await?;
-    serde_json::from_str(&text).map_err(|e| format!("Failed to parse JSON response: {}", e))
+    let options = chat_request_options(settings, true);
+    let text = chat_text(settings, messages.clone(), true, timeout_secs).await?;
+    match serde_json::from_str(&text) {
+        Ok(value) => Ok(value),
+        Err(first_error) => {
+            let Some(retry_options) = json_retry_options(options) else {
+                return Err(format!("Failed to parse JSON response: {}", first_error));
+            };
+            tracing::warn!(
+                "JSON provider response failed to parse; retrying with max_tokens={}",
+                retry_options.max_tokens
+            );
+            let retry_text =
+                chat_text_with_options(settings, messages, true, timeout_secs, retry_options)
+                    .await?;
+            serde_json::from_str(&retry_text).map_err(|retry_error| {
+                format!(
+                    "Failed to parse JSON response after retry: first={}, retry={}",
+                    first_error, retry_error
+                )
+            })
+        }
+    }
 }
 
 pub async fn stream_chat_profile(
@@ -441,17 +538,20 @@ pub async fn stream_chat_profile(
     let options = request_options(settings, profile);
     guard_chat_request(settings, &messages, u64::from(options.max_tokens))?;
     let client = client(timeout_secs)?;
+    let mut payload = serde_json::json!({
+        "model": settings.model,
+        "messages": messages,
+        "stream": true,
+        "temperature": options.temperature,
+        "max_tokens": options.max_tokens
+    });
+    apply_provider_options(settings, &mut payload, options);
+
     let resp = client
         .post(endpoint(&settings.api_base, "chat/completions"))
         .header("Authorization", format!("Bearer {}", settings.api_key))
         .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": settings.model,
-            "messages": messages,
-            "stream": true,
-            "temperature": options.temperature,
-            "max_tokens": options.max_tokens
-        }))
+        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -582,14 +682,16 @@ mod tests {
             chat_request_options(&settings, false),
             LlmRequestOptions {
                 temperature: DEFAULT_CHAT_TEMPERATURE,
-                max_tokens: DEFAULT_CHAT_MAX_TOKENS
+                max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+                disable_reasoning: false
             }
         );
         assert_eq!(
             chat_request_options(&settings, true),
             LlmRequestOptions {
                 temperature: DEFAULT_JSON_TEMPERATURE,
-                max_tokens: DEFAULT_JSON_MAX_TOKENS
+                max_tokens: DEFAULT_JSON_MAX_TOKENS,
+                disable_reasoning: true
             }
         );
     }
@@ -602,23 +704,65 @@ mod tests {
             request_options(&settings, LlmRequestProfile::ChapterDraft),
             LlmRequestOptions {
                 temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
-                max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS
+                max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
+                disable_reasoning: false
             }
         );
         assert_eq!(
             request_options(&settings, LlmRequestProfile::GhostPreview),
             LlmRequestOptions {
                 temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
-                max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS
+                max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS,
+                disable_reasoning: true
             }
         );
         assert_eq!(
             request_options(&settings, LlmRequestProfile::ProjectBrainStream),
             LlmRequestOptions {
                 temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
-                max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS
+                max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS,
+                disable_reasoning: true
             }
         );
+        assert!(request_options(&settings, LlmRequestProfile::ParallelDraft).disable_reasoning);
+    }
+
+    #[test]
+    fn json_retry_options_expand_small_budget_and_lower_temperature() {
+        let retry = json_retry_options(LlmRequestOptions {
+            temperature: 0.1,
+            max_tokens: 220,
+            disable_reasoning: true,
+        })
+        .expect("small JSON budget should retry");
+
+        assert_eq!(retry.temperature, 0.0);
+        assert_eq!(retry.max_tokens, DEFAULT_JSON_MAX_TOKENS);
+    }
+
+    #[test]
+    fn openrouter_reasoning_controls_are_provider_scoped() {
+        let settings = test_settings();
+        let options = LlmRequestOptions {
+            temperature: 0.0,
+            max_tokens: 512,
+            disable_reasoning: true,
+        };
+        let mut payload = serde_json::json!({});
+
+        apply_provider_options(&settings, &mut payload, options);
+
+        assert_eq!(payload["reasoning"]["effort"], "none");
+        assert_eq!(payload["reasoning"]["exclude"], true);
+
+        let openai_settings = LlmSettings {
+            api_base: "https://api.openai.com/v1".to_string(),
+            ..settings
+        };
+        let mut payload = serde_json::json!({});
+        apply_provider_options(&openai_settings, &mut payload, options);
+
+        assert!(payload.get("reasoning").is_none());
     }
 
     #[test]
