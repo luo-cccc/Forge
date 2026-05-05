@@ -1,6 +1,6 @@
 use agent_harness_core::provider::LlmMessage;
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct LlmSettings {
@@ -32,7 +32,8 @@ pub enum LlmRequestProfile {
     ProjectBrainStream,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LlmRequestOptions {
     pub temperature: f64,
     pub max_tokens: u32,
@@ -43,21 +44,28 @@ const DEFAULT_CHAT_TEMPERATURE: f64 = 0.7;
 const DEFAULT_JSON_TEMPERATURE: f64 = 0.0;
 const DEFAULT_CHAT_MAX_TOKENS: u32 = 4_096;
 const DEFAULT_JSON_MAX_TOKENS: u32 = 1_024;
-const DEFAULT_CHAPTER_DRAFT_TEMPERATURE: f64 = 0.75;
-const DEFAULT_GHOST_PREVIEW_TEMPERATURE: f64 = 0.55;
-const DEFAULT_ANALYSIS_TEMPERATURE: f64 = 0.2;
-const DEFAULT_PARALLEL_DRAFT_TEMPERATURE: f64 = 0.85;
-const DEFAULT_MANUAL_REWRITE_TEMPERATURE: f64 = 0.6;
-const DEFAULT_TOOL_CONTINUATION_TEMPERATURE: f64 = 0.7;
-const DEFAULT_PROJECT_BRAIN_TEMPERATURE: f64 = 0.3;
-const DEFAULT_CHAPTER_DRAFT_MAX_TOKENS: u32 = 6_000;
-const DEFAULT_GHOST_PREVIEW_MAX_TOKENS: u32 = 160;
-const DEFAULT_ANALYSIS_MAX_TOKENS: u32 = 768;
-const DEFAULT_PARALLEL_DRAFT_MAX_TOKENS: u32 = 768;
-const DEFAULT_MANUAL_REWRITE_MAX_TOKENS: u32 = 512;
-const DEFAULT_TOOL_CONTINUATION_MAX_TOKENS: u32 = 2_048;
-const DEFAULT_PROJECT_BRAIN_MAX_TOKENS: u32 = 4_096;
 const JSON_RETRY_MAX_TOKENS_CAP: u32 = 4_096;
+
+#[derive(Debug, Deserialize)]
+struct RequestProfileConfig {
+    general_chat: LlmRequestOptions,
+    json: LlmRequestOptions,
+    chapter_draft: LlmRequestOptions,
+    ghost_preview: LlmRequestOptions,
+    analysis: LlmRequestOptions,
+    parallel_draft: LlmRequestOptions,
+    manual_rewrite: LlmRequestOptions,
+    tool_continuation: LlmRequestOptions,
+    project_brain_stream: LlmRequestOptions,
+}
+
+fn request_profile_config() -> &'static RequestProfileConfig {
+    static CONFIG: std::sync::OnceLock<RequestProfileConfig> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        serde_json::from_str(include_str!("../../config/llm-request-profiles.json"))
+            .expect("llm-request-profiles.json must be valid")
+    })
+}
 
 pub fn settings(api_key: String) -> LlmSettings {
     LlmSettings {
@@ -177,52 +185,25 @@ fn default_profile_options(
     settings: &LlmSettings,
     profile: LlmRequestProfile,
 ) -> LlmRequestOptions {
+    let config = request_profile_config();
     match profile {
         LlmRequestProfile::GeneralChat => LlmRequestOptions {
             temperature: settings.chat_temperature,
             max_tokens: settings.chat_max_tokens,
-            disable_reasoning: false,
+            disable_reasoning: config.general_chat.disable_reasoning,
         },
         LlmRequestProfile::Json => LlmRequestOptions {
             temperature: settings.json_temperature,
             max_tokens: settings.json_max_tokens,
-            disable_reasoning: true,
+            disable_reasoning: config.json.disable_reasoning,
         },
-        LlmRequestProfile::ChapterDraft => LlmRequestOptions {
-            temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
-            max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::GhostPreview => LlmRequestOptions {
-            temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
-            max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::Analysis => LlmRequestOptions {
-            temperature: DEFAULT_ANALYSIS_TEMPERATURE,
-            max_tokens: DEFAULT_ANALYSIS_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::ParallelDraft => LlmRequestOptions {
-            temperature: DEFAULT_PARALLEL_DRAFT_TEMPERATURE,
-            max_tokens: DEFAULT_PARALLEL_DRAFT_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::ManualRewrite => LlmRequestOptions {
-            temperature: DEFAULT_MANUAL_REWRITE_TEMPERATURE,
-            max_tokens: DEFAULT_MANUAL_REWRITE_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::ToolContinuation => LlmRequestOptions {
-            temperature: DEFAULT_TOOL_CONTINUATION_TEMPERATURE,
-            max_tokens: DEFAULT_TOOL_CONTINUATION_MAX_TOKENS,
-            disable_reasoning: true,
-        },
-        LlmRequestProfile::ProjectBrainStream => LlmRequestOptions {
-            temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
-            max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS,
-            disable_reasoning: true,
-        },
+        LlmRequestProfile::ChapterDraft => config.chapter_draft,
+        LlmRequestProfile::GhostPreview => config.ghost_preview,
+        LlmRequestProfile::Analysis => config.analysis,
+        LlmRequestProfile::ParallelDraft => config.parallel_draft,
+        LlmRequestProfile::ManualRewrite => config.manual_rewrite,
+        LlmRequestProfile::ToolContinuation => config.tool_continuation,
+        LlmRequestProfile::ProjectBrainStream => config.project_brain_stream,
     }
 }
 
@@ -699,28 +680,29 @@ mod tests {
     #[test]
     fn profile_request_options_use_feature_specific_defaults() {
         let settings = test_settings();
+        let config = request_profile_config();
 
         assert_eq!(
             request_options(&settings, LlmRequestProfile::ChapterDraft),
             LlmRequestOptions {
-                temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
-                max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
+                temperature: config.chapter_draft.temperature,
+                max_tokens: config.chapter_draft.max_tokens,
                 disable_reasoning: true
             }
         );
         assert_eq!(
             request_options(&settings, LlmRequestProfile::GhostPreview),
             LlmRequestOptions {
-                temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
-                max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS,
+                temperature: config.ghost_preview.temperature,
+                max_tokens: config.ghost_preview.max_tokens,
                 disable_reasoning: true
             }
         );
         assert_eq!(
             request_options(&settings, LlmRequestProfile::ProjectBrainStream),
             LlmRequestOptions {
-                temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
-                max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS,
+                temperature: config.project_brain_stream.temperature,
+                max_tokens: config.project_brain_stream.max_tokens,
                 disable_reasoning: true
             }
         );

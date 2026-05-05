@@ -37,6 +37,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - First-pass anchor carry scoring is now covered by `writer_agent:anchor_carry_metric`. It catches the concrete failure mode exposed by real testing: a draft can mention every anchor while carrying none of them through action, dialogue, consequence, or payoff pressure.
 - The real-provider calibration chain now has two levels: a Rust `api_integration_tests::real_author_session_three_chapter_smoke` gate for repeatable opt-in regression checks, and the ignored local 5-chapter runner for richer tuning metrics. The latest 5-chapter run with chapter reasoning disabled and carry scoring enabled reached `minAnchorCarryRate=0.8` with `p95ChatLatencyMs=13398`.
 - The long-session runner now lives at `scripts/real-author-session-runner.cjs` and reads shared anchor-carry heuristics from `config/anchor-carry-heuristics.json`, so Node calibration and Rust scoring no longer drift from two separate rule lists.
+- The long-session runner and Rust runtime now also share profile defaults from `config/llm-request-profiles.json`, so chapter/ghost/analysis/parallel/manual profile baselines no longer diverge between local calibration and product code.
 
 ## Next Calibration Targets
 

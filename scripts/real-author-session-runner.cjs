@@ -4,7 +4,9 @@ const path = require("path");
 const repoRoot = path.resolve(__dirname, "..");
 const reportPath = path.join(repoRoot, "reports", "real_author_session_metrics.json");
 const anchorCarryConfigPath = path.join(repoRoot, "config", "anchor-carry-heuristics.json");
+const requestProfileConfigPath = path.join(repoRoot, "config", "llm-request-profiles.json");
 const anchorCarryConfig = JSON.parse(fs.readFileSync(anchorCarryConfigPath, "utf8"));
+const requestProfileConfig = JSON.parse(fs.readFileSync(requestProfileConfigPath, "utf8"));
 
 function loadDotEnv() {
   const envPath = path.join(repoRoot, ".env");
@@ -49,12 +51,12 @@ function parseBool(name, fallback) {
 
 function profileOptions(profile) {
   const defaults = {
-    chapter: { temperature: 0.75, maxTokens: 760, disableReasoning: true },
-    ghost: { temperature: 0.55, maxTokens: 160, disableReasoning: true },
-    analysis: { temperature: 0.2, maxTokens: 240, disableReasoning: true },
-    parallel: { temperature: 0.85, maxTokens: 220, disableReasoning: true },
-    manual: { temperature: 0.6, maxTokens: 160, disableReasoning: true },
-    json: { temperature: 0.0, maxTokens: 512, disableReasoning: true },
+    chapter: requestProfileConfig.chapter_draft,
+    ghost: requestProfileConfig.ghost_preview,
+    analysis: requestProfileConfig.analysis,
+    parallel: requestProfileConfig.parallel_draft,
+    manual: requestProfileConfig.manual_rewrite,
+    json: requestProfileConfig.json,
   }[profile];
   const envPrefix = {
     chapter: "OPENAI_CHAPTER_DRAFT",
@@ -66,7 +68,7 @@ function profileOptions(profile) {
   }[profile];
   return {
     temperature: parseNumber(`${envPrefix}_TEMPERATURE`, defaults.temperature, 0, 2),
-    maxTokens: parseInteger(`${envPrefix}_MAX_TOKENS`, defaults.maxTokens, 16, 4096),
+    maxTokens: parseInteger(`${envPrefix}_MAX_TOKENS`, defaults.maxTokens, 16, 65536),
     disableReasoning: parseBool(`${envPrefix}_DISABLE_REASONING`, defaults.disableReasoning),
   };
 }
