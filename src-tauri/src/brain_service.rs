@@ -19,5 +19,10 @@ use crate::writer_agent::task_receipt::{WriterFailureCategory, WriterFailureEvid
 use crate::{llm_runtime, storage};
 
 include!("brain_service/types.in.rs");
-include!("brain_service/functions_a.in.rs");
-include!("brain_service/functions_b.in.rs");
+include!("brain_service/functions_a_ingest.in.rs");
+include!("brain_service/functions_a_embedding.in.rs");
+include!("brain_service/functions_a_knowledge.in.rs");
+include!("brain_service/functions_b_index.in.rs");
+include!("brain_service/functions_b_query.in.rs");
+include!("brain_service/functions_b_search.in.rs");
+include!("brain_service/functions_b_tests.in.rs");

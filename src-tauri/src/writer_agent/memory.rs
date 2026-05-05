@@ -809,4 +809,7 @@ include!("memory/promises_methods.in.rs");
 include!("memory/style_contract_methods.in.rs");
 include!("memory/mission_result_methods.in.rs");
 include!("memory/feedback_methods.in.rs");
-include!("memory/tracing_methods.in.rs");
+include!("memory/tracing_impl.in.rs");
+include!("memory/tracing_migrate.in.rs");
+include!("memory/tracing_helpers.in.rs");
+include!("memory/tracing_tests.in.rs");

@@ -9,4 +9,7 @@ use super::operation::{AnnotationSeverity, WriterOperation};
 use serde::{Deserialize, Serialize};
 
 include!("diagnostics/core.in.rs");
-include!("diagnostics/helpers.in.rs");
+include!("diagnostics/helpers_extract.in.rs");
+include!("diagnostics/helpers_violations.in.rs");
+include!("diagnostics/helpers_promise.in.rs");
+include!("diagnostics/helpers_tests.in.rs");
