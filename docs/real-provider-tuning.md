@@ -42,10 +42,11 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - The long-session runner and Rust runtime now also share profile defaults from `config/llm-request-profiles.json`, so chapter/ghost/analysis/parallel/manual profile baselines no longer diverge between local calibration and product code.
 - The current best measured chapter-draft profile is `maxTokens=640` with the stronger anchor-participation prompt. In the latest 5-chapter run it reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8`, with no findings raised by the runner.
 - Targeted real-provider probes for on-demand tools showed `analysis.maxTokens=384` and `parallel_draft.maxTokens=512` are the best current tradeoff. `analysis` kept useful output around `avgChars=282` while lowering repeated-run `p95` versus the older 768-token setting in end-to-end runs, and `parallel_draft=512` outperformed both `768` and `384` in focused latency probes without hurting the A/B/C output format.
+- The dedicated repeated-runs chapter probe now lives at `scripts/chapter-stability-probe.cjs`. With identical frozen inputs, `chapter3` showed `latencyStddev≈6.1s`, `charsStddev≈97`, and `anchorCarryRate` ranging from `0.6` to `1.0`, which indicates both provider jitter and prompt-level instability. `chapter4` showed `latencyStddev≈7.1s`, but much lower content spread (`charsStddev≈36`, `anchorCarryRate 0.8..1.0`), which points more strongly to provider jitter than prompt drift.
 
 ## Next Calibration Targets
 
 - Run the same scenario against at least one longer real author project and one different provider/model before hardening the defaults further.
 - Calibrate the new anchor-carry metric against real generated chapters and author judgments; the current version is deterministic and useful, but still heuristic.
 - Capture provider usage and TTFT for streaming paths so Context Spine / prompt-cache work can be tuned against real latency rather than local fingerprints alone.
-- Split analysis and parallel draft behind explicit user actions if latency tail remains above the acceptable write-flow threshold.
+- Narrow the `chapter3` prompt/context shape first; its repeated-run spread shows prompt instability on top of provider jitter.

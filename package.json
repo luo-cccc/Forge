@@ -12,6 +12,7 @@
     "check:architecture": "node scripts/check-architecture-size.cjs",
     "baseline": "node scripts/verification-baseline.cjs --write",
     "check:baseline": "node scripts/verification-baseline.cjs --check",
+    "probe:chapter-stability": "node scripts/chapter-stability-probe.cjs",
     "clean:reports": "node scripts/clean-eval-reports.cjs",
     "real:author-session": "node scripts/real-author-session-runner.cjs",
     "lint": "eslint .",

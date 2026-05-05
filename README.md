@@ -117,6 +117,8 @@ These tests require a real `OPENAI_API_KEY`; do not use them in CI without an ex
 
 Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. The current best measured chapter profile uses `maxTokens=640` plus the stronger anchor-participation prompt and reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8` in the latest 5-chapter run. `analysis` and `parallel_draft` were also re-tuned as explicit on-demand tools rather than new gated flows: the current shared defaults are `analysis.maxTokens=384` and `parallel_draft.maxTokens=512`. There is now an opt-in real `api_integration_tests::real_author_session_three_chapter_smoke` gate in Rust in addition to the versioned `npm run real:author-session` long-session runner. Both the runner and the Rust runtime now read the same profile baseline and anchor-carry heuristics from `config/`. See `docs/real-provider-tuning.md` for the sanitized evidence log.
 
+For chapter stability debugging there is also a dedicated repeated-runs probe: `npm run probe:chapter-stability`. It freezes the chapter 3/4 inputs and repeats the same provider call so provider jitter and prompt instability can be measured separately.
+
 ## Development
 
 Install dependencies:
