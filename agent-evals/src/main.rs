@@ -212,6 +212,13 @@ fn main() {
     results.push(run_payoff_diagnostic_flags_unearned_payoff_eval());
     results.push(run_payoff_diagnostic_flags_overfilled_lack_eval());
     results.push(run_payoff_diagnostic_flags_repetitive_interest_mechanism_eval());
+    results.push(run_planning_review_reports_reader_compensation_chain_eval());
+    results.push(run_planning_review_keeps_compensation_read_only_eval());
+    results.push(run_planning_review_reports_emotional_debt_lifecycle_eval());
+    results.push(run_reader_compensation_enters_chapter_generation_context_eval());
+    results.push(run_reader_compensation_budget_stays_compact_eval());
+    results.push(run_product_metrics_tracks_payoff_chain_eval());
+    results.push(run_trajectory_exports_reader_compensation_metrics_eval());
     // 11.4D Cache-Aware Context Spine evals
     results.push(run_context_spine_keeps_static_prefix_first_eval());
     results.push(run_context_spine_moves_hot_buffer_last_eval());

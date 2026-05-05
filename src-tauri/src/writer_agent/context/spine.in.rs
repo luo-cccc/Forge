@@ -274,3 +274,67 @@ fn now_ms() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
+
+/// Focus node types — writing-domain anchor points for FocusPack assembly.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FocusNodeKind {
+    Chapter,
+    Scene,
+    CanonEntity,
+    Promise,
+    EmotionalDebt,
+    ResearchSource,
+    AuthorVoiceSample,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusState {
+    pub active_node_kind: FocusNodeKind,
+    pub active_node_id: String,
+    pub active_chapter: Option<String>,
+    pub active_scene: Option<String>,
+    pub related_entity_ids: Vec<String>,
+    pub related_promise_ids: Vec<String>,
+    pub last_switched_at: u64,
+}
+
+impl Default for FocusState {
+    fn default() -> Self {
+        Self {
+            active_node_kind: FocusNodeKind::Chapter,
+            active_node_id: String::new(),
+            active_chapter: None,
+            active_scene: None,
+            related_entity_ids: Vec::new(),
+            related_promise_ids: Vec::new(),
+            last_switched_at: 0,
+        }
+    }
+}
+
+impl FocusState {
+    pub fn switch_to(&mut self, kind: FocusNodeKind, node_id: &str) -> bool {
+        let changed = self.active_node_kind != kind || self.active_node_id != node_id;
+        if changed {
+            self.active_node_kind = kind;
+            self.active_node_id = node_id.to_string();
+            self.last_switched_at = now_ms();
+        }
+        changed
+    }
+
+    pub fn set_chapter(&mut self, chapter: Option<&str>, scene: Option<&str>) {
+        self.active_chapter = chapter.map(|s| s.to_string());
+        self.active_scene = scene.map(|s| s.to_string());
+    }
+
+    pub fn focus_fingerprint(&self) -> u64 {
+        let mut data = format!("{:?}:{}", self.active_node_kind, self.active_node_id);
+        if let Some(ref ch) = self.active_chapter {
+            data.push_str(&format!(":ch={}", ch));
+        }
+        fnv1a_hash(data.as_bytes())
+    }
+}
