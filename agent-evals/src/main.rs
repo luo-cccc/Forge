@@ -170,6 +170,8 @@ fn main() {
     results.push(run_story_impact_radius_enters_task_packet_eval());
     results.push(run_story_impact_radius_enters_prompt_context_eval());
     results.push(run_story_impact_radius_small_change_stays_minimal_eval());
+    results.push(run_story_impact_radius_prioritizes_high_value_nodes_eval());
+    results.push(run_story_impact_budget_counts_only_reached_drops_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

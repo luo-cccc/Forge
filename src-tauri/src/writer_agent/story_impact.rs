@@ -69,6 +69,7 @@ pub struct WriterStoryImpactRadius {
     pub seed_nodes: Vec<WriterStoryGraphNode>,
     pub impacted_nodes: Vec<WriterStoryGraphNode>,
     pub impacted_sources: Vec<String>,
+    pub dropped_nodes: Vec<WriterStoryGraphNode>,
     pub edges: Vec<WriterStoryGraphEdge>,
     pub risk: StoryImpactRisk,
     pub truncated: bool,
@@ -579,6 +580,8 @@ pub fn compute_story_impact_radius(
     budget_limit: usize,
 ) -> WriterStoryImpactRadius {
     let mut impacted_ids = std::collections::HashSet::new();
+    let mut dropped_ids = std::collections::HashSet::new();
+    let mut dropped_nodes = Vec::new();
     let mut impacted_edges = Vec::new();
     let mut reasons = Vec::new();
     let mut total_chars: usize = 0;
@@ -608,6 +611,7 @@ pub fn compute_story_impact_radius(
 
     while depth < MAX_TRAVERSAL_DEPTH && !frontier.is_empty() {
         let mut next_frontier = Vec::new();
+        let mut candidates: Vec<(&WriterStoryGraphNode, &WriterStoryGraphEdge, &str)> = Vec::new();
 
         for node_id in &frontier {
             let adjacent = adjacency.get(node_id.as_str());
@@ -617,41 +621,59 @@ pub fn compute_story_impact_radius(
                 } else {
                     edge.from.as_str()
                 };
-                if impacted_ids.contains(target_id) {
+                if impacted_ids.contains(target_id) || dropped_ids.contains(target_id) {
                     continue;
                 }
                 if let Some(target) = node_lookup.get(target_id) {
-                    let node_chars = target.summary.chars().count();
-                    if total_chars + node_chars > budget_limit {
-                        truncated = true;
-                        if target.confidence > 0.7
-                            || matches!(
-                                target.kind,
-                                StoryNodeKind::PlotPromise | StoryNodeKind::CanonEntity
-                            )
-                        {
-                            reasons.push(format!(
-                                "预算截断: {} (需要 {} 字符, 剩余 {} 字符)",
-                                target.label,
-                                node_chars,
-                                budget_limit.saturating_sub(total_chars)
-                            ));
-                        }
-                        continue;
-                    }
-                    total_chars += node_chars;
-                    impacted_ids.insert(target.id.clone());
-                    next_frontier.push(target.id.clone());
-                    impacted_edges.push((*edge).clone());
-                    reasons.push(format!(
-                        "距离 {}: {} -> {} ({})",
-                        depth + 1,
-                        node_id,
-                        target.label,
-                        edge.kind.as_str()
-                    ));
+                    candidates.push((target, edge, node_id.as_str()));
                 }
             }
+        }
+
+        candidates.sort_by(|(left, left_edge, _), (right, right_edge, _)| {
+            story_impact_candidate_score(right, right_edge)
+                .cmp(&story_impact_candidate_score(left, left_edge))
+                .then_with(|| {
+                    left.summary
+                        .chars()
+                        .count()
+                        .cmp(&right.summary.chars().count())
+                })
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        for (target, edge, from_id) in candidates {
+            if impacted_ids.contains(target.id.as_str()) || dropped_ids.contains(target.id.as_str())
+            {
+                continue;
+            }
+            let node_chars = target.summary.chars().count();
+            if total_chars + node_chars > budget_limit {
+                truncated = true;
+                if dropped_ids.insert(target.id.clone()) {
+                    dropped_nodes.push((*target).clone());
+                }
+                if should_report_budget_drop(target) {
+                    reasons.push(format!(
+                        "预算截断: {} (需要 {} 字符, 剩余 {} 字符)",
+                        target.label,
+                        node_chars,
+                        budget_limit.saturating_sub(total_chars)
+                    ));
+                }
+                continue;
+            }
+            total_chars += node_chars;
+            impacted_ids.insert(target.id.clone());
+            next_frontier.push(target.id.clone());
+            impacted_edges.push((*edge).clone());
+            reasons.push(format!(
+                "距离 {}: {} -> {} ({})",
+                depth + 1,
+                from_id,
+                target.label,
+                edge.kind.as_str()
+            ));
         }
 
         frontier = next_frontier;
@@ -698,11 +720,56 @@ pub fn compute_story_impact_radius(
         seed_nodes: seeds.to_vec(),
         impacted_nodes,
         impacted_sources,
+        dropped_nodes,
         edges: impacted_edges,
         risk,
         truncated,
         reasons,
     }
+}
+
+fn story_impact_candidate_score(node: &WriterStoryGraphNode, edge: &WriterStoryGraphEdge) -> i32 {
+    story_node_priority(&node.kind)
+        + story_edge_priority(&edge.kind)
+        + (node.confidence * 10.0).round() as i32
+}
+
+fn story_node_priority(kind: &StoryNodeKind) -> i32 {
+    match kind {
+        StoryNodeKind::PlotPromise => 90,
+        StoryNodeKind::ChapterMission => 80,
+        StoryNodeKind::StoryContract => 75,
+        StoryNodeKind::CanonRule => 70,
+        StoryNodeKind::CanonEntity => 65,
+        StoryNodeKind::ResultFeedback => 55,
+        StoryNodeKind::Decision => 45,
+        StoryNodeKind::ProjectBrainChunk => 35,
+        StoryNodeKind::SeedTask => 100,
+    }
+}
+
+fn story_edge_priority(kind: &StoryEdgeKind) -> i32 {
+    match kind {
+        StoryEdgeKind::UpdatesPromise => 35,
+        StoryEdgeKind::SupportsMission => 30,
+        StoryEdgeKind::ContradictsCanon => 30,
+        StoryEdgeKind::DependsOnResult => 20,
+        StoryEdgeKind::MentionsEntity => 15,
+        StoryEdgeKind::SameSourceRevision => 8,
+        StoryEdgeKind::SharedKeyword => 5,
+    }
+}
+
+fn should_report_budget_drop(node: &WriterStoryGraphNode) -> bool {
+    node.confidence > 0.7
+        || matches!(
+            node.kind,
+            StoryNodeKind::PlotPromise
+                | StoryNodeKind::ChapterMission
+                | StoryNodeKind::StoryContract
+                | StoryNodeKind::CanonRule
+                | StoryNodeKind::CanonEntity
+        )
 }
 
 /// Compute impact radius and produce a budget report.
@@ -726,23 +793,17 @@ pub fn compute_story_impact(
     let requested_chars: usize = graph_nodes.iter().map(|n| n.summary.chars().count()).sum();
 
     let dropped_high_risk: Vec<String> = radius
-        .reasons
+        .dropped_nodes
         .iter()
-        .filter(|r| r.contains("预算截断"))
-        .cloned()
+        .filter(|node| should_report_budget_drop(node))
+        .map(|node| format!("{}: {}", node.source_ref, compact_chars(&node.label, 80)))
         .collect();
 
     let report = StoryImpactBudgetReport {
         budget_limit: budget,
         requested_chars,
         provided_chars,
-        truncated_node_count: if radius.truncated {
-            graph_nodes
-                .len()
-                .saturating_sub(radius.impacted_nodes.len())
-        } else {
-            0
-        },
+        truncated_node_count: radius.dropped_nodes.len(),
         dropped_high_risk_sources: dropped_high_risk,
         reasons: radius.reasons.clone(),
     };
