@@ -21,12 +21,12 @@
   },
   "analysis": {
     "temperature": 0.2,
-    "maxTokens": 768,
+    "maxTokens": 384,
     "disableReasoning": true
   },
   "parallel_draft": {
     "temperature": 0.85,
-    "maxTokens": 768,
+    "maxTokens": 512,
     "disableReasoning": true
   },
   "manual_rewrite": {
