@@ -27,6 +27,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 | 2026-05-05T12:14Z | Enabled | 6.9s | 25.0s | 571 | 0.8 | n/a | 1.0 | 1.0 | 1.0 | 0 |
 | 2026-05-05T12:18Z | Disabled | 5.2s | 19.9s | 564 | 0.6 | n/a | 1.0 | 1.0 | 1.0 | 0 |
 | 2026-05-05T12:54Z | Disabled | 5.1s | 13.4s | 591 | 0.8 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T13:32Z | Disabled (`chapter maxTokens=640`) | 4.5s | 12.5s | 681 | 0.8 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
 
 ## Evidence-Based Findings
 
@@ -38,6 +39,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - The real-provider calibration chain now has two levels: a Rust `api_integration_tests::real_author_session_three_chapter_smoke` gate for repeatable opt-in regression checks, and the ignored local 5-chapter runner for richer tuning metrics. The latest 5-chapter run with chapter reasoning disabled and carry scoring enabled reached `minAnchorCarryRate=0.8` with `p95ChatLatencyMs=13398`.
 - The long-session runner now lives at `scripts/real-author-session-runner.cjs` and reads shared anchor-carry heuristics from `config/anchor-carry-heuristics.json`, so Node calibration and Rust scoring no longer drift from two separate rule lists.
 - The long-session runner and Rust runtime now also share profile defaults from `config/llm-request-profiles.json`, so chapter/ghost/analysis/parallel/manual profile baselines no longer diverge between local calibration and product code.
+- The current best measured chapter-draft profile is `maxTokens=640` with the stronger anchor-participation prompt. In the latest 5-chapter run it reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8`, with no findings raised by the runner.
 
 ## Next Calibration Targets
 

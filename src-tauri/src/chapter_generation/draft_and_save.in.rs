@@ -20,6 +20,8 @@ Preserve the named anchors, unresolved debts, and chapter mission constraints fr
 do not silently drop active named entities, artifacts, promises, or reader-debt payoffs unless the context says they are resolved. \
 If the context names active anchors, carry the relevant anchors into the scene through action, dialogue, consequence, or payoff pressure; \
 do not merely mention them in passing. \
+Unless the chapter plan explicitly narrows scope, at least three active anchors from the context must materially participate in the scene, \
+and at least one of them must change the immediate choice, pressure, or consequence of the chapter. \
 Aim for up to {} Chinese characters unless the beat clearly requires less.",
         DEFAULT_OUTPUT_SOFT_CAP_CHARS
     );

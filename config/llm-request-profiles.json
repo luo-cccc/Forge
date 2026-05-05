@@ -11,7 +11,7 @@
   },
   "chapter_draft": {
     "temperature": 0.75,
-    "maxTokens": 6000,
+    "maxTokens": 640,
     "disableReasoning": true
   },
   "ghost_preview": {
