@@ -18,7 +18,7 @@ P0 is complete:
 
 P1 is in progress:
 
-- Story Contract quality now has explicit Missing / Vague / Usable / Strong states and vague contracts are excluded from context packs.
+- Story Contract quality now has explicit Missing / Vague / Usable / Strong states. Vague contracts are excluded from ProjectBrief context packs, while core generation/rewrite/diagnosis TaskPackets now record a `story_contract_quality_gate` belief plus required `StoryContractQuality` context so Inspector/trajectory replay can see weak book-level grounding.
 - Chapter Mission save calibration can mark completed, drifted, or needs_review states based on save observations; author-set blocked missions now require a concrete blocked reason, and retired missions require a preserved history note before saving.
 - Promise Ledger now classifies promise kinds including plot promise, emotional debt, object whereabouts, character commitment, mystery clue, and relationship tension.
 - Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency. It also exports a first multi-session `writer.product_metrics_trend` event derived from persisted run events.
@@ -90,7 +90,7 @@ P1 is in progress:
 - Write-capable WriterOperations for memory, promises, foundation, canon, and outline now require surfaced approval context and record an approval decision before execution.
 - Legacy direct file-write commands for chapters, lore, outline, backup restore, and chapter rename now record Writer Agent audit decisions after successful writes.
 - Manual `ask_agent` requests now run through WriterAgentKernel.prepare_task_run() with ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
-- Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs.
+- Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs; weak Story Contract grounding is also preserved as an explicit TaskPacket risk signal instead of disappearing from trace.
 - Operation lifecycle is tracked end-to-end: proposed → approved → applied → durably_saved → feedback_recorded, with durable-save-before-feedback enforcement.
 - A static command boundary audit classifies all 56 Tauri commands by risk level and verifies audit coverage for write paths.
 - P2 UI guardrails now include both static AST checks and a React server-render write-mode DOM guard. `npm run check:p2` verifies that default Companion code paths keep raw trace/task-packet/operation internals and metacognitive recovery action chips in Inspect mode; `npm run check:p2-render` renders write mode with internal trace fixtures and fails if Inspector-only strings or raw lifecycle/task-packet/run-event sentinels reach the author-facing DOM.
@@ -106,7 +106,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 81 tests passing
 - `cargo test -p agent-writer`: 198 tests passing
-- `cargo run -p agent-evals`: 179/179 evals passing
+- `cargo run -p agent-evals`: 181/181 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:audit`: 56 commands, 0 issues

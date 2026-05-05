@@ -4,7 +4,7 @@ use agent_harness_core::{RequiredContext, TaskBelief, TaskPacket, TaskScope};
 
 use super::context::{AgentTask, ContextSource, WritingContextPack};
 use super::kernel_helpers::{feedback_contract_for_task, tool_policy_for_task};
-use super::memory::{ContextBudgetTrace, ContextSourceBudgetTrace};
+use super::memory::{ContextBudgetTrace, ContextSourceBudgetTrace, StoryContractQuality};
 use super::observation::WriterObservation;
 use super::story_impact::{
     story_impact_task_summary, StoryImpactBudgetReport, WriterStoryImpactRadius,
@@ -106,6 +106,54 @@ pub(crate) fn attach_story_impact_to_task_packet(
         summary.chars().count().max(1),
         true,
     ));
+}
+
+pub(crate) fn attach_story_contract_quality_gate_to_task_packet(
+    packet: &mut TaskPacket,
+    task: &AgentTask,
+    quality: StoryContractQuality,
+    quality_gaps: &[String],
+) {
+    if !agent_task_requires_story_grounding(task) || quality > StoryContractQuality::Vague {
+        return;
+    }
+
+    let gap_summary = if quality_gaps.is_empty() {
+        "no detailed gaps recorded".to_string()
+    } else {
+        quality_gaps
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let statement = format!(
+        "StoryContract quality is {:?}: this task may lack book-level grounding. Gaps: {}. Strengthen the Story Contract before trusting generation or diagnosis.",
+        quality, gap_summary
+    );
+
+    packet.beliefs.push(
+        TaskBelief::new("Story Contract Quality", statement.clone(), 0.9)
+            .with_source("story_contract_quality_gate"),
+    );
+    packet.required_context.push(RequiredContext::new(
+        "StoryContractQuality",
+        "Warn when story-level grounding is missing or too vague for this task.",
+        statement.chars().count().max(1),
+        true,
+    ));
+}
+
+pub(crate) fn agent_task_requires_story_grounding(task: &AgentTask) -> bool {
+    matches!(
+        task,
+        AgentTask::ChapterGeneration
+            | AgentTask::GhostWriting
+            | AgentTask::InlineRewrite
+            | AgentTask::ContinuityDiagnostic
+            | AgentTask::PlanningReview
+    )
 }
 
 fn constraints_for_task(task: &AgentTask) -> Vec<String> {

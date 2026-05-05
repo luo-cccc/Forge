@@ -162,13 +162,18 @@ impl WriterAgentKernel {
         }
     }
 
-    pub(super) fn contract_quality(&self) -> StoryContractQuality {
+    pub(super) fn contract_quality_with_gaps(&self) -> (StoryContractQuality, Vec<String>) {
         self.memory
             .get_story_contract(&self.project_id)
             .ok()
             .flatten()
-            .map(|contract| contract.quality())
-            .unwrap_or(StoryContractQuality::Missing)
+            .map(|contract| (contract.quality(), contract.quality_gaps()))
+            .unwrap_or_else(|| {
+                (
+                    StoryContractQuality::Missing,
+                    vec!["Story Contract is missing".to_string()],
+                )
+            })
     }
 
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {

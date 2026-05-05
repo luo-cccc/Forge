@@ -442,6 +442,144 @@ pub fn run_task_packet_trace_eval() -> EvalResult {
     )
 }
 
+pub fn run_story_contract_quality_gate_enters_task_packet_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed("eval", "寒影录", "玄幻", "一个故事", "选择", "")
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let proposals = kernel
+        .observe(observation_in_chapter(
+            "林墨停在旧门前，指尖按住寒玉戒指，风从门缝里吹出旧灰，他意识到必须继续追问张三却不能急着揭开真相。",
+            "Chapter-1",
+        ))
+        .unwrap();
+    let trace = kernel.trace_snapshot(10);
+    let packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "GhostWriting")
+        .map(|trace| &trace.packet);
+
+    let mut errors = Vec::new();
+    if !proposals
+        .iter()
+        .any(|proposal| proposal.kind == ProposalKind::Ghost)
+    {
+        errors.push("fixture did not create ghost proposal".to_string());
+    }
+    if packet.is_none() {
+        errors.push("missing GhostWriting task packet trace".to_string());
+    }
+    if !packet.is_some_and(|packet| {
+        packet.beliefs.iter().any(|belief| {
+            belief.source.as_deref() == Some("story_contract_quality_gate")
+                && belief.statement.contains("Vague")
+                && belief.statement.contains("Gaps:")
+        })
+    }) {
+        errors.push("task packet trace missed StoryContract quality belief".to_string());
+    }
+    if !packet.is_some_and(|packet| {
+        packet.required_context.iter().any(|context| {
+            context.source_type == "StoryContractQuality"
+                && context.required
+                && context.purpose.contains("story-level grounding")
+        })
+    }) {
+        errors.push("task packet trace missed required StoryContractQuality context".to_string());
+    }
+
+    eval_result(
+        "writer_agent:story_contract_quality_gate_enters_task_packet",
+        format!(
+            "proposals={} beliefs={} requiredContext={}",
+            proposals.len(),
+            packet.map(|packet| packet.beliefs.len()).unwrap_or(0),
+            packet
+                .map(|packet| packet.required_context.len())
+                .unwrap_or(0)
+        ),
+        errors,
+    )
+}
+
+pub fn run_story_contract_quality_gate_enters_prepared_run_eval() -> EvalResult {
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+    memory
+        .ensure_story_contract_seed("eval", "寒影录", "玄幻", "一个故事", "选择", "")
+        .unwrap();
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    let mut obs = observation_in_chapter("林墨停在旧门前，指尖按住寒玉戒指。", "Chapter-1");
+    obs.source = ObservationSource::ManualRequest;
+    obs.reason = ObservationReason::Explicit;
+    let request = WriterAgentRunRequest {
+        task: WriterAgentTask::PlanningReview,
+        observation: obs,
+        user_instruction: "只审查这一章下一步，不写正文。".to_string(),
+        frontend_state: WriterAgentFrontendState {
+            truncated_context: "林墨停在旧门前，指尖按住寒玉戒指。".to_string(),
+            paragraph: "林墨停在旧门前，指尖按住寒玉戒指。".to_string(),
+            selected_text: String::new(),
+            memory_context: String::new(),
+            has_lore: false,
+            has_outline: false,
+        },
+        approval_mode: WriterAgentApprovalMode::ReadOnly,
+        stream_mode: WriterAgentStreamMode::Text,
+        manual_history: Vec::new(),
+    };
+    let provider = std::sync::Arc::new(
+        agent_harness_core::provider::openai_compat::OpenAiCompatProvider::new(
+            "https://api.invalid/v1",
+            "sk-eval",
+            "gpt-4o-mini",
+        ),
+    );
+    let prepared = kernel.prepare_task_run(request, provider, EvalToolHandler, "gpt-4o-mini");
+    let trace = kernel.trace_snapshot(10);
+    let trace_packet = trace
+        .task_packets
+        .iter()
+        .find(|packet| packet.task == "PlanningReview")
+        .map(|trace| &trace.packet);
+
+    let mut errors = Vec::new();
+    let prepared_packet = match &prepared {
+        Ok(prepared) => Some(prepared.task_packet()),
+        Err(error) => {
+            errors.push(format!("prepare_task_run failed: {}", error));
+            None
+        }
+    };
+    for (label, packet) in [("prepared", prepared_packet), ("trace", trace_packet)] {
+        if !packet.is_some_and(|packet| {
+            packet
+                .beliefs
+                .iter()
+                .any(|belief| belief.source.as_deref() == Some("story_contract_quality_gate"))
+                && packet.required_context.iter().any(|context| {
+                    context.source_type == "StoryContractQuality" && context.required
+                })
+        }) {
+            errors.push(format!(
+                "{} task packet missed StoryContract quality gate",
+                label
+            ));
+        }
+    }
+
+    eval_result(
+        "writer_agent:story_contract_quality_gate_enters_prepared_run",
+        format!(
+            "prepared={} tracePackets={}",
+            prepared.is_ok(),
+            trace.task_packets.len()
+        ),
+        errors,
+    )
+}
+
 pub fn run_generic_persona_not_used_as_foundation_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory

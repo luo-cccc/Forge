@@ -105,6 +105,13 @@ impl WriterAgentKernel {
             success_criteria_for_run_task(&request.task),
         );
         attach_story_impact_to_task_packet(&mut task_packet, &impact_radius, &impact_budget);
+        let (contract_quality, contract_quality_gaps) = self.contract_quality_with_gaps();
+        attach_story_contract_quality_gate_to_task_packet(
+            &mut task_packet,
+            &task,
+            contract_quality,
+            &contract_quality_gaps,
+        );
         task_packet.validate().map_err(|error| error.to_string())?;
         self.push_task_packet_trace(
             request.observation.id.clone(),
@@ -134,21 +141,6 @@ impl WriterAgentKernel {
             });
         if let Some(receipt) = task_receipt.as_ref() {
             self.record_task_receipt_run_event(receipt);
-        }
-
-        if task_requires_story_grounding(&request.task) {
-            let quality = self.contract_quality();
-            if quality <= StoryContractQuality::Vague {
-                task_packet.beliefs.push(TaskBelief {
-                    subject: "Story Contract Quality".to_string(),
-                    statement: format!(
-                        "StoryContract quality is {:?}: this task may lack story-level grounding. Consider strengthening the Story Contract in settings.",
-                        quality
-                    ),
-                    confidence: 0.9f32,
-                    source: Some("story_contract_quality_gate".to_string()),
-                });
-            }
         }
 
         let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);

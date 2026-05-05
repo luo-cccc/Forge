@@ -7,7 +7,7 @@ use std::sync::Arc;
 use agent_harness_core::agent_loop::EventCallback;
 use agent_harness_core::provider::Provider;
 use agent_harness_core::{
-    default_writing_tool_registry, AgentLoop, AgentLoopConfig, TaskBelief, TaskPacket, ToolHandler,
+    default_writing_tool_registry, AgentLoop, AgentLoopConfig, TaskPacket, ToolHandler,
 };
 use agent_harness_core::{PermissionMode, PermissionPolicy};
 
@@ -75,7 +75,8 @@ pub use super::kernel_run_loop::{
 };
 pub use super::kernel_task_packet::build_task_packet_for_observation;
 pub(crate) use super::kernel_task_packet::{
-    attach_story_impact_to_task_packet, context_budget_trace, trace_state_with_expiry,
+    attach_story_contract_quality_gate_to_task_packet, attach_story_impact_to_task_packet,
+    context_budget_trace, trace_state_with_expiry,
 };
 pub(crate) use super::kernel_task_packet::{
     story_impact_context_budget, story_impact_context_priority,

@@ -44,7 +44,7 @@ impl WriterAgentKernel {
         objective: &str,
         success_criteria: Vec<String>,
     ) {
-        let packet = build_task_packet_for_observation(
+        let mut packet = build_task_packet_for_observation(
             &self.project_id,
             &self.session_id,
             task.clone(),
@@ -52,6 +52,13 @@ impl WriterAgentKernel {
             context_pack,
             objective,
             success_criteria,
+        );
+        let (contract_quality, contract_quality_gaps) = self.contract_quality_with_gaps();
+        attach_story_contract_quality_gate_to_task_packet(
+            &mut packet,
+            &task,
+            contract_quality,
+            &contract_quality_gaps,
         );
         if let Err(error) = packet.validate() {
             tracing::warn!(

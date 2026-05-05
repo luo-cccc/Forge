@@ -95,6 +95,8 @@ fn main() {
     results.push(run_operation_approval_decided_run_event_eval());
     results.push(run_context_pack_built_run_event_eval());
     results.push(run_task_packet_trace_eval());
+    results.push(run_story_contract_quality_gate_enters_task_packet_eval());
+    results.push(run_story_contract_quality_gate_enters_prepared_run_eval());
     results.push(run_generic_persona_not_used_as_foundation_eval());
     results.push(run_chapter_generation_task_packet_trace_eval());
     results.push(run_chapter_generation_task_receipt_required_eval());
