@@ -14,6 +14,7 @@ pub mod run_events;
 pub mod trajectory;
 
 // ── Authoring Modules ──
+pub mod anchor_carry;
 pub mod author_voice;
 pub mod belief_conflict;
 pub mod canon;

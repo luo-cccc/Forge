@@ -81,6 +81,67 @@ fn simulate_real_author_writing_session(kernel: &mut WriterAgentKernel, feedback
     }
 }
 
+pub fn run_anchor_carry_metric_eval() -> EvalResult {
+    let anchors = ["寒影刀", "张三", "镜中墟", "霜铃塔", "旧债"]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let bare_mentions =
+        "本章出现寒影刀、张三、镜中墟、霜铃塔和旧债，但它们只是背景名词。";
+    let carried_scene = "林墨拔出寒影刀逼问张三：“旧债今天要还。”镜中墟的门因此重新打开，霜铃塔账册牵出新的代价。";
+    let bare = score_anchor_carry(bare_mentions, &anchors);
+    let carried = score_anchor_carry(carried_scene, &anchors);
+    let mut errors = Vec::new();
+
+    if bare.mention_rate < 1.0 {
+        errors.push(format!(
+            "bare mention fixture should mention every anchor: {:.2}",
+            bare.mention_rate
+        ));
+    }
+    if bare.carry_rate > 0.2 {
+        errors.push(format!(
+            "bare mention fixture should not be treated as carried: {:.2}",
+            bare.carry_rate
+        ));
+    }
+    if carried.mention_rate < 1.0 {
+        errors.push(format!(
+            "carried fixture should mention every anchor: {:.2}",
+            carried.mention_rate
+        ));
+    }
+    if carried.carry_rate < 0.8 {
+        errors.push(format!(
+            "carried fixture should carry most anchors: {:.2}",
+            carried.carry_rate
+        ));
+    }
+    if !carried.items.iter().any(|item| {
+        item.anchor == "寒影刀" && item.carry_modes.iter().any(|mode| mode == "action")
+    }) {
+        errors.push("carried fixture did not mark 寒影刀 as action-bearing".to_string());
+    }
+    if !carried.items.iter().any(|item| {
+        item.anchor == "旧债"
+            && item
+                .carry_modes
+                .iter()
+                .any(|mode| mode == "payoff_pressure")
+    }) {
+        errors.push("carried fixture did not mark 旧债 as payoff-pressure-bearing".to_string());
+    }
+
+    eval_result(
+        "writer_agent:anchor_carry_metric",
+        format!(
+            "bare mention={:.2} carry={:.2}; carried mention={:.2} carry={:.2}; carried={:?}",
+            bare.mention_rate, bare.carry_rate, carried.mention_rate, carried.carry_rate, carried.items
+        ),
+        errors,
+    )
+}
+
 pub fn run_real_author_long_session_calibration_eval() -> EvalResult {
     let db_path = std::env::temp_dir().join(format!(
         "forge-real-author-calibration-{}-{}.sqlite",

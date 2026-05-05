@@ -33,10 +33,11 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - Short profile schema stability is acceptable in the current measured setup: JSON validity, A/B/C branch validity, and hook detection all stayed at 1.0 in the recorded runs.
 - Chapter reasoning disabled lowered average latency in both disabled-vs-enabled comparisons, but the latest disabled run had lower minimum anchor hit rate. The project should not claim a final optimum yet.
 - The remaining bottleneck is latency tail. Even with reasoning disabled, one JSON call reached about 31.7s in the latest run, so provider/network variance and profile-specific retries still need observation.
+- First-pass anchor carry scoring is now covered by `writer_agent:anchor_carry_metric`. It catches the concrete failure mode exposed by real testing: a draft can mention every anchor while carrying none of them through action, dialogue, consequence, or payoff pressure.
 
 ## Next Calibration Targets
 
 - Run the same scenario against at least one longer real author project and one different provider/model before hardening the defaults further.
-- Add a stricter anchor-carry metric that scores whether anchors participate in action, dialogue, consequence, or payoff pressure instead of counting mention hits only.
+- Calibrate the new anchor-carry metric against real generated chapters and author judgments; the current version is deterministic and useful, but still heuristic.
 - Capture provider usage and TTFT for streaming paths so Context Spine / prompt-cache work can be tuned against real latency rather than local fingerprints alone.
 - Split analysis and parallel draft behind explicit user actions if latency tail remains above the acceptable write-flow threshold.

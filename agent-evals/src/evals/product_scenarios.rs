@@ -1,4 +1,5 @@
 use crate::fixtures::*;
+use agent_writer_lib::writer_agent::anchor_carry::score_anchor_carry;
 use agent_writer_lib::writer_agent::context::{AgentTask, ContextSource};
 use agent_writer_lib::writer_agent::feedback::{FeedbackAction, ProposalFeedback};
 use agent_writer_lib::writer_agent::memory::{
@@ -27,6 +28,7 @@ pub fn run_product_scenario_evals() -> Vec<EvalResult> {
         run_scenario_context_explainability_for_longform_eval(),
         run_continuous_writing_fixture_20_chapters_eval(),
         run_real_author_long_session_calibration_eval(),
+        run_anchor_carry_metric_eval(),
     ]
 }
 
