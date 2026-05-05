@@ -1,0 +1,42 @@
+# Real Provider Tuning Log
+
+Last updated: 2026-05-05
+
+This log records sanitized evidence from local real-provider runs. It deliberately excludes API keys, raw generated prose, full prompts, and manuscript text. Raw local metrics live under ignored `reports/` files and should not be committed.
+
+## Environment
+
+- API base: OpenRouter-compatible endpoint.
+- Model: `deepseek/deepseek-v4-flash`.
+- Embedding model: `text-embedding-3-small`.
+- Scenario: 5-chapter "镜中墟" author-session simulation.
+- Operations per run: chapter draft, analysis, ghost preview, A/B/C parallel draft, manual rewrite, JSON extraction, and embedding for each chapter.
+
+## Current Profile Decision
+
+- Disable provider-scoped reasoning by default for short/structured profiles: JSON, ghost preview, analysis, parallel draft, manual rewrite, tool continuation, and Project Brain stream.
+- Disable provider-scoped reasoning by default for chapter draft on OpenRouter as the current latency-first default.
+- Keep the setting overridable with `OPENAI_CHAPTER_DRAFT_DISABLE_REASONING` because the A/B result shows an anchor-recall tradeoff, not an absolute quality win.
+- Strengthen the chapter prompt so active anchors must be carried through scene action, dialogue, consequence, or payoff pressure, not mentioned only as labels.
+
+## Sanitized Runs
+
+| Run | Chapter reasoning | Avg chat latency | P95 chat latency | Avg draft chars | Min anchor hit rate | JSON valid | A/B/C valid | Hook rate | Provider failures |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-05-05T11:56Z | Disabled | 5.1s | 17.5s | 662 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T12:14Z | Enabled | 6.9s | 25.0s | 571 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T12:18Z | Disabled | 5.2s | 19.9s | 564 | 0.6 | 1.0 | 1.0 | 1.0 | 0 |
+
+## Evidence-Based Findings
+
+- JSON empty-output failures were caused by reasoning-token budget consumption in earlier runs. Disabling OpenRouter reasoning for JSON fixed the observed JSON validity issue in the later 5-chapter runs.
+- Short profile schema stability is acceptable in the current measured setup: JSON validity, A/B/C branch validity, and hook detection all stayed at 1.0 in the recorded runs.
+- Chapter reasoning disabled lowered average latency in both disabled-vs-enabled comparisons, but the latest disabled run had lower minimum anchor hit rate. The project should not claim a final optimum yet.
+- The remaining bottleneck is latency tail. Even with reasoning disabled, one JSON call reached about 31.7s in the latest run, so provider/network variance and profile-specific retries still need observation.
+
+## Next Calibration Targets
+
+- Run the same scenario against at least one longer real author project and one different provider/model before hardening the defaults further.
+- Add a stricter anchor-carry metric that scores whether anchors participate in action, dialogue, consequence, or payoff pressure instead of counting mention hits only.
+- Capture provider usage and TTFT for streaming paths so Context Spine / prompt-cache work can be tuned against real latency rather than local fingerprints alone.
+- Split analysis and parallel draft behind explicit user actions if latency tail remains above the acceptable write-flow threshold.

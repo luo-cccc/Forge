@@ -18,6 +18,8 @@ Use the provided project context, preserve continuity, and write only chapter pr
 Do not include analysis, markdown fences, action tags, or meta commentary. \
 Preserve the named anchors, unresolved debts, and chapter mission constraints from the context; \
 do not silently drop active named entities, artifacts, promises, or reader-debt payoffs unless the context says they are resolved. \
+If the context names active anchors, carry the relevant anchors into the scene through action, dialogue, consequence, or payoff pressure; \
+do not merely mention them in passing. \
 Aim for up to {} Chinese characters unless the beat clearly requires less.",
         DEFAULT_OUTPUT_SOFT_CAP_CHARS
     );

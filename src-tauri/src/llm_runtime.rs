@@ -191,7 +191,7 @@ fn default_profile_options(
         LlmRequestProfile::ChapterDraft => LlmRequestOptions {
             temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
             max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
-            disable_reasoning: false,
+            disable_reasoning: true,
         },
         LlmRequestProfile::GhostPreview => LlmRequestOptions {
             temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
@@ -705,7 +705,7 @@ mod tests {
             LlmRequestOptions {
                 temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
                 max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
-                disable_reasoning: false
+                disable_reasoning: true
             }
         );
         assert_eq!(

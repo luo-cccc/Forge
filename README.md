@@ -92,7 +92,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_INPUT_LIMIT_CHARS=8000
 OPENAI_CHAT_DISABLE_REASONING=false
 OPENAI_JSON_DISABLE_REASONING=true
-OPENAI_CHAPTER_DRAFT_DISABLE_REASONING=false
+OPENAI_CHAPTER_DRAFT_DISABLE_REASONING=true
 OPENAI_GHOST_PREVIEW_DISABLE_REASONING=true
 OPENAI_ANALYSIS_DISABLE_REASONING=true
 OPENAI_PARALLEL_DRAFT_DISABLE_REASONING=true
@@ -115,7 +115,7 @@ cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -
 
 These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
 
-Latest local real-provider tuning note, recorded on 2026-05-05 with a 5-chapter "镜中墟" author-session simulation against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, minimum anchor hit rate 0.8, and 1536-dimension embeddings. The remaining measured weakness was latency tail, with p95 chat latency around 17.5s and the longest analysis call around 27.1s, so these settings should be treated as a current measured profile rather than a final optimum.
+Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. Chapter reasoning A/B showed a latency/anchor tradeoff, so Forge defaults chapter drafts to provider-scoped reasoning disabled while strengthening the chapter prompt to carry active anchors through scene action, dialogue, consequence, or payoff pressure. See `docs/real-provider-tuning.md` for the sanitized evidence log.
 
 ## Development
 
