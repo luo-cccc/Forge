@@ -416,6 +416,7 @@ pub struct WriterAgentKernel {
     proposal_counter: u64,
     pub active_chapter: Option<String>,
     pub last_spine: Option<crate::writer_agent::context::ContextSpine>,
+    pub focus: crate::writer_agent::context::FocusState,
 }
 
 struct SuppressedProposalSlot {
@@ -458,6 +459,7 @@ impl WriterAgentKernel {
             proposal_counter: 0,
             active_chapter: None,
             last_spine: None,
+            focus: crate::writer_agent::context::FocusState::default(),
         }
     }
 }

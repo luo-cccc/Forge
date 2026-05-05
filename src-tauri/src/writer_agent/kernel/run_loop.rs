@@ -293,6 +293,25 @@ impl WriterAgentKernel {
             }),
         );
         self.last_spine = Some(spine);
+        let focus_changed = self.focus.switch_to(
+            crate::writer_agent::context::FocusNodeKind::Chapter,
+            request.observation.chapter_title.as_deref().unwrap_or("unknown"),
+        );
+        if focus_changed {
+            self.run_events.append(
+                &self.project_id,
+                &self.session_id,
+                "compaction_trigger",
+                now_ms(),
+                self.active_chapter.clone(),
+                vec!["focus_node_switch".to_string()],
+                serde_json::json!({
+                    "trigger": "focus_node_switch",
+                    "isDomainEvent": true,
+                    "previousNodeId": self.focus.active_node_id,
+                }),
+            );
+        }
         self.record_story_impact_radius_run_event(
             &request.observation.id,
             &impact_radius,

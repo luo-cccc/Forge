@@ -555,3 +555,4 @@ fn context_source_trends(proposals: &[WriterProposalTrace]) -> Vec<WriterContext
     trends
 }
 include!("reader_compensation_review.in.rs");
+include!("cache_metrics.in.rs");
