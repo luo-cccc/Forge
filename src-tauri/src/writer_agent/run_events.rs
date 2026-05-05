@@ -56,6 +56,10 @@ impl WriterRunEventStore {
     pub fn len(&self) -> usize {
         self.events.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
 }
 
 pub fn normalize_source_refs(source_refs: Vec<String>) -> Vec<String> {

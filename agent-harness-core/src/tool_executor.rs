@@ -313,6 +313,36 @@ fn remediation_for_handler_error(tool_name: &str, error: &str) -> Vec<ToolExecut
     }]
 }
 
+// ── Path / command extraction for permission context ──
+
+/// Extract a resolved file path from common tool argument keys.
+fn extract_path_from_args(args: &serde_json::Value) -> Option<String> {
+    let obj = args.as_object()?;
+    for key in &["path", "file_path", "root", "outline_path", "chapter_path"] {
+        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract a command preview from common tool argument keys.
+fn extract_command_from_args(args: &serde_json::Value) -> Option<String> {
+    let obj = args.as_object()?;
+    for key in &["command", "shell_command", "cmd"] {
+        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,32 +491,4 @@ mod tests {
     }
 }
 
-// ── Path / command extraction for permission context ──
 
-/// Extract a resolved file path from common tool argument keys.
-fn extract_path_from_args(args: &serde_json::Value) -> Option<String> {
-    let obj = args.as_object()?;
-    for key in &["path", "file_path", "root", "outline_path", "chapter_path"] {
-        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Extract a command preview from common tool argument keys.
-fn extract_command_from_args(args: &serde_json::Value) -> Option<String> {
-    let obj = args.as_object()?;
-    for key in &["command", "shell_command", "cmd"] {
-        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
