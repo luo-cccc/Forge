@@ -36,7 +36,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - API key 读取、路径 helper、事件常量、事件 payload、Agent status payload、项目写入审计、章节保存观察/canon refresh/context render helper 已分别抽入 `api_key.rs`、`app_paths.rs`、`events.rs`、`event_payloads.rs`、`agent_status.rs`、`project_audit.rs`、`writer_observer.rs`。
 - 原 `lib.rs` 内联测试已抽入 `src-tauri/src/tests.rs`；`lib.rs` 已降为主要保留模块 wiring、Tauri setup 和 command registration 的 root glue，并由 `scripts/check-architecture-size.cjs` 持续约束体量预算。
 - trajectory JSONL 已导出 `writer.product_metrics`，包含采纳率、忽略率、promise recall、canon false-positive、mission completion、durable save 和 save-to-feedback latency。
-- 当前本轮验证基线由 `scripts/verification-baseline.cjs` 维护，`agent-harness-core` 为 81 tests passing，完整 `agent-evals` 为 181/181 passing；`check:baseline` 现在除同步 README / project-status 外，还会解析真实 `cargo test -- --list`、`cargo run -p agent-evals`、command audit 和 architecture guard 输出，避免只验证文档等于脚本。Story Contract 质量门槛已进入 generation/rewrite/diagnosis task packet：低质量合同会在可回放 TaskPacket trace 中产生 `story_contract_quality_gate` belief 和 `StoryContractQuality` required context。元认知硬门禁 eval 覆盖写作 run blocking、正文写入 operation blocking、恢复性 mission calibration operation 放行、以及专用恢复 run 保持只读任务边界；`WriterMetacognitiveSnapshot` 会从 context pressure、failure bundle、post-write diagnostics、低置信 proposal、重复忽略率和 durable-save 健康度聚合风险等级与建议动作，并在 Inspector / trajectory 展示 `writer.metacognition`。Inspector metacognition 卡片已补恢复 CTA，可跳转 Review、诊断/保存、失败、上下文和 meta 视图，也可通过 `run_metacognitive_recovery` 触发只读 Planning Review / Continuity Diagnostic 恢复 run。
+- 当前本轮验证基线由 `scripts/verification-baseline.cjs` 维护，`agent-harness-core` 为 88 tests passing，`agent-writer` 为 209 tests passing，完整 `agent-evals` 为 200/200 passing；`check:baseline` 现在除同步 README / project-status 外，还会解析真实 `cargo test -- --list`、`cargo run -p agent-evals`、command audit 和 architecture guard 输出，避免只验证文档等于脚本。Story Contract 质量门槛已进入 generation/rewrite/diagnosis task packet：低质量合同会在可回放 TaskPacket trace 中产生 `story_contract_quality_gate` belief 和 `StoryContractQuality` required context。元认知硬门禁 eval 覆盖写作 run blocking、正文写入 operation blocking、恢复性 mission calibration operation 放行、以及专用恢复 run 保持只读任务边界；`WriterMetacognitiveSnapshot` 会从 context pressure、failure bundle、post-write diagnostics、低置信 proposal、重复忽略率和 durable-save 健康度聚合风险等级与建议动作，并在 Inspector / trajectory 展示 `writer.metacognition`。Inspector metacognition 卡片已补恢复 CTA，可跳转 Review、诊断/保存、失败、上下文和 meta 视图，也可通过 `run_metacognitive_recovery` 触发只读 Planning Review / Continuity Diagnostic 恢复 run。
 - Writer Agent context pack 的 Canon / Promise slice 已引入写作相关性排序，并输出 `WHY writing_relevance` 解释，避免只按文本相似或固定 ledger 顺序取材。
 - P4 后端第一阶段已继续推进：WriterRunEventStore 可持久化回放，Planning / Review 只读模式有专用任务包/上下文/工具边界，章节生成已有 WriterTaskReceipt 和 failure evidence bundle，ContinuityDiagnostic 已有只读 receipt、diagnostic_report task artifact、trajectory 回放和 Inspector receipt/artifact 筛选；记忆候选反馈已有 correction / reinforcement 信号且纠错优先于强化，可审查记忆候选已记录 `writer.memory_candidate_created` run event 且明确不会直接写 ledger，WriterOperation 审批成功/拒绝已记录 `writer.approval_decided` run event，真实写作工作流的上下文组装已记录 `writer.context_pack_built` run event 且只存预算/来源摘要、不写入正文原文，章节生成 / Project Brain / manual request 在预算门禁通过、真实 provider call 启动前已记录 `writer.model_started` run event，manual AgentLoop 工具调用 start/end 已记录 `writer.tool_called` run event 且只存工具名、phase、参数 key、大小、耗时、成功/失败和 remediation code，Chapter Mission 状态机已支持 draft/active/completed/drifted/blocked/needs_review/retired 且保存结果迁移保留 Result Feedback 证据，Project Brain 已有 knowledge index / shared-keyword graph、chunk source/version metadata、source-history aggregation、active/archived revision 标记、read-only source revision compare、Graph 页 source history/compare 展示和 source revision 恢复第一阶段；该恢复只切换同一 `source_ref` 的 active/archived chunk，不回写章节正文或 Story Bible。Project Brain 也新增只读 cross-reference command 和显式作者批准的 external research 手动导入 command；导入路径被 command audit 分类为 Project Brain 写入，并要求 `author_approved` 与批准理由。Project Brain embedding 已有本地 provider registry / profile、模型维度、input limit、batch status、retry policy 和兼容回退状态的第一阶段边界，Research / Diagnostic 子任务已有隔离 artifact workspace、tool policy 和 evidence-only 结果边界，Research 子任务 start/completed 已能记录为 `writer.subtask_started` / `writer.subtask_completed` run event 并进入 Inspector subtask timeline，Research 子任务工具失败会生成带 subtask 证据的 failure bundle；Inspector timeline 有后端视图且 trajectory export 已带 redaction warning / local-only 标记，并可额外导出 Claude-Code-style / HF Agent Trace Viewer 兼容 JSONL；Provider budget 已能对超预算 provider call 输出 approval-required 决策和 remediation，章节草稿生成会在真实 provider call 前执行 budget preflight，Project Brain chat answer 会在 `stream_chat` 前执行 `project_brain_query` budget preflight，manual request 会在 AgentLoop 每一轮 provider call 前执行 `manual_request` provider budget guard，元认知恢复 run 会使用专用 `metacognitive_recovery` provider budget guard，external research subtask 已有 provider budget report / failure bundle helper，超预算会记录 `writer.provider_budget` 和 `writer.error`；Project Brain / manual request 已接入 Explore 审批卡和批准凭证重试，且 budget report 会进入 `writer.provider_budget` run event / trajectory；章节保存观察路径和 accepted inline/proposal durable-save 路径已记录 post-write diagnostic report，accepted operation 后写诊断已会把诊断结果注册为可审查 proposal / story debt，不自动改写正文；通用 ToolExecution 失败结果已带结构化 remediation，并已映射进 WriterFailureEvidenceBundle 与 Inspector failure event；Inspect failure 视图已有基于失败证据的恢复排查跳转入口；元认知第一阶段已把 trace-derived risk/action 接入 Inspector 和 trajectory，并已成为写作 run-loop / 正文写入 operation 的第一段硬门禁，同时保留 Planning Review、Continuity Diagnostic 和 mission calibration 等恢复路径；Inspector 侧已补 metacognitive block 恢复 CTA 和专用恢复 run。
 
@@ -45,7 +45,7 @@ Forge 的产品不是“带 AI 功能的写作工具”，而是“Cursor 式小
 - 前端仍保留聊天式 `AgentPanel`，容易把产品拉回“AI 聊天助手”心智。
 - Story Contract 已有 quality/quality_gaps 字段并在 CompanionPanel 可视化；低质量 Story Contract 不进入 ProjectBrief context pack，但会进入核心 TaskPacket 风险信号，覆盖 ambient ghost 和 prepared run 两条路径；Chapter Mission 状态已在 OutlinePanel/EditorPanel 展示。前端强门禁审批卡仍未接入 generation/diagnosis/save 流程。
 - `agent-evals/src/evals/product_scenarios.rs` 已集中承载 10 个长篇产品场景 eval、1 个合成 20 章连续写作 fixture，以及 1 个作者式 5 章长会话校准 fixture；这些 fixture 已把多章保存、伏笔、任务漂移、作者反馈和产品指标串成同一条可验证链路。下一步仍要继续引入真实作者项目数据对照，而不是只堆数量或合成场景。
-- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入职责模块。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。架构体量不再依赖手工维护的精确行数描述，改由 `npm run check:architecture` 检查 `lib.rs`、kernel facade、eval facade 和 CompanionPanel 拆分预算。
+- `src-tauri/src/lib.rs` command 层拆分、AppState 拆分、semantic lint 拆分、memory/context helper 拆分、observation bridge 拆分、editor realtime 拆分、root helper 拆分和测试拆分已完成；剩余主要是最终 app setup / command registration glue。`writer_agent/kernel.rs` 的 P2 拆分已完成：TaskPacket/context trace、product metrics、proposal lifecycle、ghost helper、memory feedback、memory candidate、run-loop、feedback、operation execution、snapshot、trace recording 和测试都已进入 `src-tauri/src/writer_agent/kernel/` 职责模块。`agent-evals/src/evals.rs` 也已拆成职责单一的 eval 子模块。架构体量不再依赖手工维护的精确行数描述，改由 `npm run check:architecture` 检查 `lib.rs`、kernel facade、关键 kernel 子模块、eval facade、CompanionPanel 拆分预算、kernel facade 显式导出、trace recording no-`include!` 和 eval root isolation。
 
 ## 2. 总体原则
 
@@ -582,43 +582,46 @@ src-tauri/src/manual_agent.rs
 - Root utility / event / audit / writer observation helper 有独立模块。（已完成）
 - Root tests 有独立模块。（已完成）
 - `cargo test -p agent-writer` 通过。
-- `npm run check:architecture` 通过，防止 root glue 重新膨胀。
-- `npm run check:architecture` 同时检查 CompanionPanel 的 proposal / contract / brain helper 模块不引入 React、JSX、hook-like 调用或副作用 API，避免 helper 文件变成第二个组件/副作用聚合点。（已完成）
+- `npm run check:architecture` 通过，防止 root glue、kernel facade、关键 kernel 子模块和 eval facade 重新膨胀。
+- `npm run check:architecture` 同时检查 CompanionPanel 的 proposal / contract / brain helper 模块不引入 React、JSX、hook-like 调用或副作用 API，检查 `writer_agent/kernel.rs` 不恢复 wildcard facade export，并检查 `writer_agent/kernel/trace_recording.rs` 不恢复 `include!`。（已完成）
 
 ### P2.5 拆分 `writer_agent/kernel.rs`
 
-当前状态：已完成。`writer_agent/kernel.rs` 保留 facade、状态结构、公开类型、`new()` 和少量共享转换 helper；对外 `writer_agent::kernel::*` 路径保持稳定。既有 `kernel_chapters.rs`、`kernel_helpers.rs`、`kernel_ops.rs`、`kernel_prompts.rs`、`kernel_review.rs` 继续承接章节、helper、operation、prompt、review 逻辑。`writer_agent/kernel_task_packet.rs` 已承接 TaskPacket 构建、context budget trace 和 trace state expiry helper。`writer_agent/kernel_metrics.rs` 已承接 `WriterProductMetrics` 和 trace-derived product metrics 计算。`writer_agent/kernel_proposals.rs` 已承接 proposal 替换、优先级权重和过期判断 helper。`writer_agent/kernel_ghost.rs` 已承接 ghost 续写草稿、三分支候选、continuation 清理和 context evidence 映射。`writer_agent/kernel_memory_feedback.rs` 已承接 proposal slot、suppression slot、memory extraction feedback、memory audit/feedback helper。`writer_agent/kernel_memory_candidates.rs` 已承接 memory candidate extraction、LLM candidate parsing、canon/promise candidate proposal construction、dedupe、sentence splitting 和 quality validation。`writer_agent/kernel_run_loop.rs` 已承接 run-loop 类型和 `WriterAgentPreparedRun`。`writer_agent/kernel/` 下的子模块已承接 observation handling、context pack accessors、run-loop methods、proposal creation/registration、feedback、operation execution、snapshot、trace recording 和 kernel tests。kernel facade 体量由 `npm run check:architecture` 持续守住预算。
+当前状态：已完成。`writer_agent/kernel.rs` 保留 facade、状态结构、公开类型、`new()` 和少量共享转换 helper；对外 `writer_agent::kernel::*` 路径保持稳定，但 facade 导出已从通配 re-export 收敛为显式列表。章节、helper、operation、prompt、review、TaskPacket、metrics、proposal lifecycle、ghost、memory feedback、memory candidate、run-loop 类型和 stateful impl 均已落入 `src-tauri/src/writer_agent/kernel/` 下的职责模块。`trace_recording` 已从 `.in.rs include!` 迁成正常 Rust 子模块：`trace_recording/event_recording.rs`、`trace_recording/task_packet.rs`、`trace_recording/helpers.rs`。kernel facade、关键子模块、explicit export 和 trace no-`include!` 由 `npm run check:architecture` 持续守住。
 
 建议模块：
 
 ```text
 writer_agent/
   kernel.rs              // facade / state owner
-  kernel_run_loop.rs     // unified task execution types / prepared run（已完成）
   kernel/                // stateful WriterAgentKernel impl blocks（已完成）
-  kernel_ghost.rs        // ghost proposal helpers（已完成）
-  kernel_memory_feedback.rs // memory feedback / slot helpers（已完成）
-  kernel_memory_candidates.rs // memory candidate extraction / validation（已完成）
-  kernel_task_packet.rs   // TaskPacket / context trace helpers（已完成）
-  kernel_metrics.rs       // trace-derived product metrics（已完成）
-  kernel_proposals.rs     // proposal lifecycle helpers（已完成）
-  kernel/operation.rs      // operation execution impl（已完成）
+  kernel/run_loop_ext.rs  // unified task execution types / prepared run（已完成）
+  kernel/ghost.rs         // ghost proposal helpers（已完成）
+  kernel/memory_feedback.rs // memory feedback / slot helpers（已完成）
+  kernel/memory_candidates.rs + kernel/memory_candidates/ // memory candidate extraction / validation（已完成）
+  kernel/task_packet.rs   // TaskPacket / context trace helpers（已完成）
+  kernel/metrics.rs       // trace-derived product metrics（已完成）
+  kernel/proposals_ext.rs // proposal lifecycle helpers（已完成）
+  kernel/operations.rs    // operation execution impl（已完成）
   kernel/proposal_creation.rs // proposal creation / registration impl（已完成）
   kernel/feedback.rs      // feedback impl（已完成）
-  kernel/snapshot.rs      // ledger snapshot impl（已完成）
+  kernel/snapshots.rs     // ledger snapshot impl（已完成）
   kernel/run_loop.rs      // run_task / prepared-run impl（已完成）
+  kernel/trace_recording.rs + kernel/trace_recording/ // run-event trace recording（已完成）
 ```
 
 验收标准：
 
 - kernel facade 保持清晰 API。
+- kernel facade 不恢复通配 re-export。
 - operation execution、task packet、feedback、policy 分离。
+- trace recording 不恢复 `include!` facade。
 - eval 不降级。
 - `npm run check:architecture` 通过。
 
 ### P2.6 拆分 `agent-evals/src/evals.rs`
 
-当前状态：已完成。`agent-evals/src/evals.rs` 只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；root-level `evals_extra.rs` / `evals_extra2.rs` 已清除，原遗留 eval 已按职责归档进 promise、canon、context、story_debt、trajectory、task_packet 和新增 `memory_quality` 模块，`product_scenarios` 也已移入 `agent-evals/src/evals/` 并由 facade 统一导出。`main.rs` 现在只挂载 `evals` 与 `fixtures`，不再直接依赖 legacy eval 文件；`cargo run -p agent-evals` 仍输出同一报告格式；当前完整 eval 基线由 `scripts/verification-baseline.cjs` 维护，为 181/181 passing。
+当前状态：已完成。`agent-evals/src/evals.rs` 只保留共享 imports、`EvalToolHandler`、`eval_llm_message` 和子模块 re-export；root-level `evals_extra.rs` / `evals_extra2.rs` 已清除，原遗留 eval 已按职责归档进 promise、canon、context、story_debt、trajectory、task_packet 和新增 `memory_quality` 模块，`product_scenarios` 也已移入 `agent-evals/src/evals/` 并由 facade 统一导出。`main.rs` 现在只挂载 `evals` 与 `fixtures`，不再直接依赖 legacy eval 文件；`cargo run -p agent-evals` 仍输出同一报告格式；当前完整 eval 基线由 `scripts/verification-baseline.cjs` 维护，为 200/200 passing。
 
 建议模块：
 
@@ -1522,13 +1525,13 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 6. 抽出 `editor_realtime.rs`。（已完成）
 7. 抽出 root utility / event / audit / writer observation helper。（已完成）
 8. 抽出 root tests。（已完成）
-9. 抽出 `kernel_task_packet.rs`。（已完成）
-10. 抽出 `kernel_metrics.rs`。（已完成）
-11. 抽出 `kernel_proposals.rs`。（已完成）
-12. 抽出 `kernel_ghost.rs`。（已完成）
-13. 抽出 `kernel_memory_feedback.rs`。（已完成）
-14. 抽出 `kernel_memory_candidates.rs`。（已完成）
-15. 抽出 `writer_agent/kernel/` stateful impl 子模块：observation、run-loop、feedback、operation、snapshot、trace、tests。（已完成）
+9. 抽出 `writer_agent/kernel/task_packet.rs`。（已完成）
+10. 抽出 `writer_agent/kernel/metrics.rs`。（已完成）
+11. 抽出 `writer_agent/kernel/proposals_ext.rs`。（已完成）
+12. 抽出 `writer_agent/kernel/ghost.rs`。（已完成）
+13. 抽出 `writer_agent/kernel/memory_feedback.rs`。（已完成）
+14. 抽出 `writer_agent/kernel/memory_candidates.rs` 与 `writer_agent/kernel/memory_candidates/` 子模块。（已完成）
+15. 抽出 `writer_agent/kernel/` stateful impl 子模块：observation、run-loop、feedback、operation、snapshot、trace、tests，并把 `trace_recording` 从 `.in.rs include!` 迁成正常 Rust 子模块。（已完成）
 16. 拆 `agent-evals/src/evals.rs`。（已完成：root-level legacy eval 模块已清除，`main.rs` 只通过 facade 调用职责模块）
 17. 保持 public protocol 稳定。（已完成）
 
