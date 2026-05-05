@@ -1029,7 +1029,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 
 任务：
 
-1. 增加 `WriterRunPreflightReport`。（P1，最高价值）
+1. 增加 `WriterRunPreflightReport`。（P1，已完成）
    - 基于现有 `WriterAgentKernel.prepare_task_run()`，新增不调用 provider、不执行 tool 的预检报告。
    - 输出 readiness：`ready | warning | blocked`。
    - blocked 条件第一版：metacognitive write gate 阻断、TaskPacket validate 失败、provider budget blocked、context window hard block、write-sensitive task 无审批凭证。
@@ -1037,19 +1037,19 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - report 字段：task、observation id、context pack summary、Story Impact budget summary、TaskPacket id/objective、Story Contract quality gate、tool inventory allowed/blocked counts、first-round provider budget、estimated input/output tokens、source refs、next actions。
    - 前端只在 Inspect / Explore 显示完整报告；Companion 默认只显示最少量“能否开始、为什么、下一步”。
    - 验收 eval：`writer_agent:run_preflight_ready_for_safe_planning`、`writer_agent:run_preflight_blocks_metacognitive_write`、`writer_agent:run_preflight_warns_provider_budget_approval`、`writer_agent:run_preflight_reports_story_impact_truncation`。
-2. 增强 `agent-harness-core` compaction 可观测性。（P2）
+2. 增强 `agent-harness-core` compaction 可观测性。（P2，已完成：CompactionResult 扩展 kind/checkpoints/tokens_saved_by_tool_truncation/boundary_summary/recovery_level，新增 microcompact_tool_results()，3 tests）
    - 扩展 `CompactionResult`：`kind`、`checkpoints`、`tokens_saved_by_tool_truncation`、`boundary_summary`、`recovery_level`。
    - 在 full compaction 前增加 cheap microcompact：仅压缩旧 tool result 内容，保留最近 tool pair 和 tool_call_id，不调用 provider。
    - `AgentLoopEvent::Compaction` 携带 kind/checkpoint/token saved，不只输出 before/after/count。
    - Tauri run trace 只记录 token/count/phase，不记录正文或 tool output 原文。
    - 验收 tests：`agent_harness:microcompact_preserves_recent_tool_pairs`、`agent_harness:compaction_result_records_checkpoints`、`writer_agent:compaction_event_is_redacted`。
-3. 增强调用级权限上下文。（P2）
+3. 增强调用级权限上下文。（P2，已完成：ToolInvocationContext + SENSITIVE_PATH_PATTERNS + DANGEROUS_COMMAND_PATTERNS + authorize_with_context()，4 tests）
    - 新增 `ToolInvocationContext`：tool name、side effect、requires approval、resolved path、command preview、source refs、task id。
    - `ToolExecutor` 在权限检查前从常见字段解析 `path` / `file_path` / `root` / `command`。
    - 内置 deny：credential path、workspace escape、危险 shell pattern；deny 优先级高于 allow/full access。
    - 保持 Tauri command audit 的显式 command 分类；这是 command 层，不替代 harness tool 调用级检查。
    - 验收 tests：`agent_harness:permission_denies_sensitive_paths`、`agent_harness:permission_denies_dangerous_commands`、`agent_harness:permission_context_overrides_full_access_for_credentials`、`writer_agent:tool_failure_bundle_includes_permission_context`。
-4. 只读工具并发执行。（P3，受限落地）
+4. 只读工具并发执行。（P3，未完成 — 计划下一轮落地）
    - 仅当同一轮多个 tool call 全部为 `ToolSideEffectLevel::Read` 或无共享写状态的 `ProviderCall` 时并发。
    - `Write`、`External`、approval-required、Project Brain 写入、正文写入、memory/canon/promise 相关工具继续串行。
    - 每个 tool_call 必须生成对应 tool result；单个工具失败不能取消同轮其他只读工具结果。
@@ -1235,11 +1235,11 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
    - 保存观察会生成 post-write diagnostic report，写入 run event、trace snapshot 和 trajectory；accepted inline/proposal text operation durable-save 路径也会带保存后正文复跑 diagnostics，并输出 proposal / operation 级 source refs；Companion Audit 页已能查看最近报告；Inspect 模式已有最近 post-write diagnostics 摘要、save_completed 专用筛选、save-to-feedback latency 和多 session latency 趋势；`writer.save_completed` 已串联 save result、post-write report id 和诊断计数。剩余是真实连续写作 fixture 校准。
 11. External tool remediation。（第一阶段已完成）
    - ToolExecution 失败结果已有结构化 remediation，并已映射进 `WriterFailureEvidenceBundle` / `writer.error` run event / Inspector `failure` event；Research 子任务 tool/provider 失败已有 subtask 证据包覆盖；真实外部公开资料 provider/tool 集成仍未完成。
-12. OpenHarness harness 借鉴落地。（新增计划）
-   - 第一优先级：`WriterRunPreflightReport`，把 `prepare_task_run` 的 context pack、TaskPacket、Story Impact、Story Contract quality、tool inventory 和 provider budget 汇总为不执行模型/工具的 readiness report。
-   - 第二优先级：compaction metadata / microcompact，补齐 compaction checkpoint、boundary summary 和 tool output redaction token savings。
-   - 第三优先级：调用级权限上下文，把 path / command / sensitive path / dangerous command deny rule 接入 `ToolExecutor` 权限检查。
-   - 第四优先级：只读工具并发；写入、approval、Project Brain 写路径和正文/记忆相关工具保持串行。
+12. OpenHarness harness 借鉴落地。（第一阶段完成：P1 WriterRunPreflightReport + P2 compaction 可观测性 + P2 调用级权限上下文；P3 只读工具并发未完成）
+   - 第一优先级：`WriterRunPreflightReport`（已完成：Kernel::preflight() 覆盖 metacognitive gate、context budget、Story Impact、contract quality、tool inventory、token estimate → ready/warning/blocked，4 eval）。
+   - 第二优先级：compaction metadata / microcompact（已完成：CompactionResult 扩展 + microcompact_tool_results()，3 tests）。
+   - 第三优先级：调用级权限上下文（已完成：ToolInvocationContext + SENSITIVE_PATH_PATTERNS / DANGEROUS_COMMAND_PATTERNS + authorize_with_context()，4 tests；ToolExecutor 集成待下一轮）。
+   - 第四优先级：只读工具并发（未完成 — 计划下一轮落地）。
 
 ### 11.9 P4 完成定义
 
@@ -1256,7 +1256,7 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - Provider budget 有后端估算、approval-required 决策和 remediation，且章节生成、Project Brain chat answer、manual request AgentLoop 每轮 provider call 都已有前置门禁、Explore UI approval surface 和批准凭证覆盖校验；ExternalResearch 已有 subtask provider budget report / failure bundle helper 和 run event 覆盖。Project Brain / manual request 预算失败会展示审批卡并用前端批准凭证重试。尚未强制接入所有真实 provider call，且真实外部检索工具调用和 external research 审批 UI 仍未完成。
 - 保存观察路径和 accepted operation durable-save 路径已有 post-write diagnostic report、run event 和 trajectory export；Companion Audit UI 和 Inspect 模式已展示最近报告；`writer.save_completed` 已把保存结果与 post-write report 串联，并在 Inspect 中有专用筛选/摘要。
 - 通用 ToolExecution 失败已有 remediation，并已映射到 WriterFailureEvidenceBundle 和 inspector failure surface；Inspect 模式已有 failure 筛选/摘要和恢复排查跳转入口；Research 子任务失败路径已有后端证据包，真实外部公开资料 provider/tool 集成仍未完成。
-- OpenHarness harness 借鉴短期完成定义：Writer run 能在不调用 provider / tool 的情况下产出 readiness report；compaction event 有 checkpoint 和 token savings；ToolExecutor 能基于调用参数拒绝敏感路径和危险命令；只读工具并发只在可证明无写副作用时启用。
+- OpenHarness harness 借鉴短期完成定义（3/4）：Writer run 能在不调用 provider / tool 的情况下产出 readiness report ✅；compaction event 有 checkpoint 和 token savings ✅；PermissionPolicy 能基于调用参数拒绝敏感路径和危险命令 ✅（ToolExecutor 集成待下一轮）；只读工具并发只在可证明无写副作用时启用 ❌。
 
 中期完成：
 
