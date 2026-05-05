@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Forge pre-commit hook — three-redline gating
+# Install: git config core.hooksPath .githooks
+#
+# Redlines (any failure aborts the commit):
+#   1. No Rust source file >= 800 lines
+#   2. cargo clippy --workspace -- -D warnings is clean
+#   3. No TODO/FIXME markers in production Rust (test blocks excluded)
+
+set -e
+
+RED=$'\e[31m'
+GREEN=$'\e[32m'
+YELLOW=$'\e[33m'
+RESET=$'\e[0m'
+
+fail=0
+
+echo "${YELLOW}[redline 1/3]${RESET} file size scan (limit: 800 lines)"
+oversized=$(find src-tauri agent-evals 2>/dev/null \
+    -path '*/target' -prune -o \
+    -path '*/node_modules' -prune -o \
+    -name '*.rs' -print 2>/dev/null \
+    | while read -r f; do
+        lc=$(wc -l < "$f" | tr -d ' ')
+        if [ "$lc" -ge 800 ]; then
+            echo "  $f: $lc lines"
+        fi
+      done)
+
+if [ -n "$oversized" ]; then
+    echo "${RED}FAIL${RESET} — files exceed 800 lines:"
+    echo "$oversized"
+    echo "  → split via include!() fragments before commit"
+    fail=1
+else
+    echo "${GREEN}PASS${RESET} — all Rust files under 800 lines"
+fi
+
+echo ""
+echo "${YELLOW}[redline 2/3]${RESET} cargo clippy --workspace -- -D warnings"
+if ! cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -20; then
+    echo "${RED}FAIL${RESET} — clippy reported errors"
+    fail=1
+else
+    echo "${GREEN}PASS${RESET} — clippy clean"
+fi
+
+echo ""
+echo "${YELLOW}[redline 3/3]${RESET} TODO/FIXME scan in production code"
+todo_hits=$(find src-tauri agent-evals 2>/dev/null \
+    -path '*/target' -prune -o \
+    -name '*.rs' -print 2>/dev/null \
+    | while read -r f; do
+        awk 'BEGIN{cfg=0} /#\[cfg\(test\)\]/{cfg=1} /(TODO|FIXME)/ && !cfg {print FILENAME":"FNR": "$0}' "$f"
+      done)
+
+if [ -n "$todo_hits" ]; then
+    echo "${RED}FAIL${RESET} — TODO/FIXME markers in production code:"
+    echo "$todo_hits"
+    echo "  → resolve or move into a tracked issue before commit"
+    fail=1
+else
+    echo "${GREEN}PASS${RESET} — no TODO/FIXME in production code"
+fi
+
+echo ""
+if [ "$fail" -ne 0 ]; then
+    echo "${RED}━━━ commit blocked ━━━${RESET}"
+    echo "Override only with explicit --no-verify and a reason in the commit body."
+    exit 1
+fi
+
+echo "${GREEN}━━━ all three redlines clear — commit proceeds ━━━${RESET}"
+exit 0
