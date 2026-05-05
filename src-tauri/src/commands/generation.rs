@@ -4,6 +4,7 @@ use crate::chapter_generation::{
     ChapterGenerationEvent, FrontendChapterStateSnapshot, GenerateChapterAutonomousPayload,
     PipelineTerminal, SaveMode,
 };
+use crate::writer_agent::kernel::ModelStartedEventContext;
 use crate::llm_runtime;
 use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
 use serde::{Deserialize, Serialize};
@@ -202,11 +203,13 @@ fn record_chapter_model_started(
         return;
     };
     kernel.record_model_started_run_event(
-        context.request_id.clone(),
-        report.task,
-        report.model.clone(),
-        "openai-compatible",
-        false,
+        ModelStartedEventContext {
+            task_id: context.request_id.clone(),
+            task: report.task,
+            model: report.model.clone(),
+            provider: "openai-compatible".to_string(),
+            stream: false,
+        },
         chapter_model_source_refs(context, report),
         Some(report),
         crate::agent_runtime::now_ms(),

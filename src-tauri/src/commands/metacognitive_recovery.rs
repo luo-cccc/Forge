@@ -13,8 +13,8 @@ use crate::{
     AskAgentContext, HarnessState,
 };
 use writer_agent::kernel::{
-    WriterAgentApprovalMode, WriterAgentFrontendState, WriterAgentRunRequest, WriterAgentRunResult,
-    WriterAgentStreamMode, WriterAgentTask,
+    ModelStartedEventContext, WriterAgentApprovalMode, WriterAgentFrontendState,
+    WriterAgentRunRequest, WriterAgentRunResult, WriterAgentStreamMode, WriterAgentTask,
 };
 use writer_agent::provider_budget::{
     apply_provider_budget_approval, WriterProviderBudgetDecision, WriterProviderBudgetReport,
@@ -338,11 +338,13 @@ fn record_recovery_model_started(
         return;
     };
     kernel.record_model_started_run_event(
-        task_id.to_string(),
-        report.task,
-        report.model.clone(),
-        "openai-compatible",
-        true,
+        ModelStartedEventContext {
+            task_id: task_id.to_string(),
+            task: report.task,
+            model: report.model.clone(),
+            provider: "openai-compatible".to_string(),
+            stream: true,
+        },
         source_refs,
         Some(report),
         created_at_ms,

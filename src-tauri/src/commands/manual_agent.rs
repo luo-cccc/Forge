@@ -7,6 +7,7 @@ use crate::{
     agent_runtime, events, llm_runtime, manual_agent, storage, tool_bridge, writer_agent, AppState,
     AskAgentContext, AskAgentMode, HarnessState, InlineWriterOperationEvent, ManualAgentTurn,
 };
+use writer_agent::kernel::ModelStartedEventContext;
 use writer_agent::provider_budget::{apply_provider_budget_approval, WriterProviderBudgetDecision};
 
 const MANUAL_REQUEST_PROVIDER_BUDGET_ERROR: &str =
@@ -66,11 +67,13 @@ fn record_manual_model_started(
         return;
     };
     kernel.record_model_started_run_event(
-        task_id.to_string(),
-        report.task,
-        report.model.clone(),
-        "openai-compatible",
-        true,
+        ModelStartedEventContext {
+            task_id: task_id.to_string(),
+            task: report.task,
+            model: report.model.clone(),
+            provider: "openai-compatible".to_string(),
+            stream: true,
+        },
         source_refs,
         Some(report),
         created_at_ms,

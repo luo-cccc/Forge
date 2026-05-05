@@ -349,11 +349,13 @@ pub fn run_model_started_run_event_eval() -> EvalResult {
         now_ms(),
     );
     kernel.record_model_started_run_event(
-        "model-start-1",
-        allowed_report.task,
-        allowed_report.model.clone(),
-        "openai-compatible",
-        true,
+        agent_writer_lib::writer_agent::kernel::ModelStartedEventContext {
+            task_id: "model-start-1".to_string(),
+            task: allowed_report.task,
+            model: allowed_report.model.clone(),
+            provider: "openai-compatible".to_string(),
+            stream: true,
+        },
         vec!["manual_request:model-start".to_string()],
         Some(&allowed_report),
         now_ms(),

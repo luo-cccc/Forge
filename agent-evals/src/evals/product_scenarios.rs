@@ -64,7 +64,6 @@ fn switch_observation(
     obs
 }
 
-#[allow(clippy::too_many_arguments)]
 fn record_result(
     memory: &WriterMemory,
     chapter_title: &str,

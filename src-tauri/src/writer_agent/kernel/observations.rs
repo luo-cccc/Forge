@@ -128,10 +128,12 @@ impl WriterAgentKernel {
                     );
                 self.record_post_write_diagnostic_report(&report);
                 self.record_save_completed_run_event(
-                    observation.id.clone(),
-                    observation.chapter_title.clone(),
-                    observation.chapter_revision.clone(),
-                    "chapter_save:observed",
+                    SaveCompletedEventContext {
+                        observation_id: observation.id.clone(),
+                        chapter_title: observation.chapter_title.clone(),
+                        chapter_revision: observation.chapter_revision.clone(),
+                        save_result: "chapter_save:observed".to_string(),
+                    },
                     None,
                     None,
                     Some(&report),

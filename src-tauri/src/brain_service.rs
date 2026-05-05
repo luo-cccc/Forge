@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager};
 use crate::writer_agent::context_relevance::{
     format_text_chunk_relevance, score_text_for_writing_focus,
 };
-use crate::writer_agent::kernel::WriterAgentKernel;
+use crate::writer_agent::kernel::{ModelStartedEventContext, WriterAgentKernel};
 use crate::writer_agent::provider_budget::{
     apply_provider_budget_approval, evaluate_provider_budget, WriterProviderBudgetApproval,
     WriterProviderBudgetReport, WriterProviderBudgetRequest, WriterProviderBudgetTask,
@@ -1759,11 +1759,13 @@ fn record_project_brain_model_started(
         return;
     };
     kernel.record_model_started_run_event(
-        task_id.to_string(),
-        report.task,
-        report.model.clone(),
-        "openai-compatible",
-        true,
+        ModelStartedEventContext {
+            task_id: task_id.to_string(),
+            task: report.task,
+            model: report.model.clone(),
+            provider: "openai-compatible".to_string(),
+            stream: true,
+        },
         source_refs,
         Some(report),
         created_at_ms,

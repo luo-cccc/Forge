@@ -106,6 +106,7 @@ mod run_loop_ext;
 mod snapshots;
 mod task_packet;
 mod trace_recording;
+pub use trace_recording::{ModelStartedEventContext, SaveCompletedEventContext};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WriterAgentStatus {

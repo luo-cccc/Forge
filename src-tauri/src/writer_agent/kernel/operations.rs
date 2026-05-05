@@ -242,10 +242,13 @@ impl WriterAgentKernel {
                 .map(|report| report.observation_id.clone())
                 .unwrap_or_else(|| format!("operation-save-{}", created_at));
             self.record_save_completed_run_event(
-                observation_id,
-                chapter_title.or_else(|| operation_chapter(&operation)),
-                chapter_revision,
-                normalized,
+                SaveCompletedEventContext {
+                    observation_id,
+                    chapter_title: chapter_title
+                        .or_else(|| operation_chapter(&operation)),
+                    chapter_revision,
+                    save_result: normalized,
+                },
                 resolved_proposal_id,
                 Some(operation_kind_label(&operation).to_string()),
                 report.as_ref(),

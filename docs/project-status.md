@@ -104,9 +104,9 @@ P1 is in progress:
 The expected local baseline is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
 <!-- verification-baseline:start -->
-- `cargo test -p agent-harness-core`: 81 tests passing
-- `cargo test -p agent-writer`: 198 tests passing
-- `cargo run -p agent-evals`: 184/184 evals passing
+- `cargo test -p agent-harness-core`: 88 tests passing
+- `cargo test -p agent-writer`: 209 tests passing
+- `cargo run -p agent-evals`: 200/200 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:audit`: 56 commands, 0 issues

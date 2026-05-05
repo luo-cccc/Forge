@@ -669,7 +669,6 @@ fn stable_hash64(bytes: &[u8], seed: u64) -> u64 {
 }
 
 #[allow(dead_code)]
-#[allow(clippy::too_many_arguments)]
 fn _assert_trace_types(
     _observation: &WriterObservationTrace,
     _task_packet: &WriterTaskPacketTrace,

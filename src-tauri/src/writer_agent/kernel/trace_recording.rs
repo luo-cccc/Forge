@@ -1,5 +1,20 @@
 use super::*;
 
+pub struct SaveCompletedEventContext {
+    pub observation_id: String,
+    pub chapter_title: Option<String>,
+    pub chapter_revision: Option<String>,
+    pub save_result: String,
+}
+
+pub struct ModelStartedEventContext {
+    pub task_id: String,
+    pub task: crate::writer_agent::provider_budget::WriterProviderBudgetTask,
+    pub model: String,
+    pub provider: String,
+    pub stream: bool,
+}
+
 impl WriterAgentKernel {
     pub fn run_events(&self, limit: usize) -> Vec<WriterRunEvent> {
         let persisted = self
@@ -121,7 +136,6 @@ impl WriterAgentKernel {
         self.task_packets.push(trace);
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn push_operation_lifecycle(
         &mut self,
         proposal_id: Option<String>,
@@ -490,13 +504,9 @@ impl WriterAgentKernel {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn record_save_completed_run_event(
         &mut self,
-        observation_id: impl Into<String>,
-        chapter_title: Option<String>,
-        chapter_revision: Option<String>,
-        save_result: impl Into<String>,
+        ctx: SaveCompletedEventContext,
         proposal_id: Option<String>,
         operation_kind: Option<String>,
         report: Option<
@@ -504,8 +514,10 @@ impl WriterAgentKernel {
         >,
         created_at_ms: u64,
     ) {
-        let observation_id = observation_id.into();
-        let save_result = save_result.into();
+        let observation_id = ctx.observation_id;
+        let save_result = ctx.save_result;
+        let chapter_title = ctx.chapter_title;
+        let chapter_revision = ctx.chapter_revision;
         let mut source_refs = vec![observation_id.clone()];
         if let Some(chapter) = chapter_title.as_ref() {
             source_refs.push(format!("chapter:{}", chapter));
@@ -571,21 +583,16 @@ impl WriterAgentKernel {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn record_model_started_run_event(
         &mut self,
-        task_id: impl Into<String>,
-        task: crate::writer_agent::provider_budget::WriterProviderBudgetTask,
-        model: impl Into<String>,
-        provider: impl Into<String>,
-        stream: bool,
+        ctx: ModelStartedEventContext,
         source_refs: Vec<String>,
         report: Option<&crate::writer_agent::provider_budget::WriterProviderBudgetReport>,
         created_at_ms: u64,
     ) {
-        let task_id = task_id.into();
-        let model = model.into();
-        let provider = provider.into();
+        let task_id = ctx.task_id;
+        let model = ctx.model;
+        let provider = ctx.provider;
         self.record_run_event(
             "model_started",
             created_at_ms,
@@ -593,10 +600,10 @@ impl WriterAgentKernel {
             source_refs,
             serde_json::json!({
                 "taskId": task_id,
-                "task": task,
+                "task": ctx.task,
                 "model": model,
                 "provider": provider,
-                "stream": stream,
+                "stream": ctx.stream,
                 "estimatedInputTokens": report.map(|report| report.estimated_input_tokens),
                 "requestedOutputTokens": report.map(|report| report.requested_output_tokens),
                 "estimatedTotalTokens": report.map(|report| report.estimated_total_tokens),
@@ -607,7 +614,6 @@ impl WriterAgentKernel {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn record_tool_called_run_event(
         &mut self,
         task_id: impl Into<String>,
