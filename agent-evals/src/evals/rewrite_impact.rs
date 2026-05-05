@@ -85,12 +85,13 @@ pub fn run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval() ->
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     for i in 0..30 {
+        let long_summary = format!("Entity{} has a very long summary text that should consume budget characters and cause truncation in story impact radius computation", i);
         memory
             .upsert_canon_entity(
                 "character",
                 &format!("Entity{}", i),
                 &[],
-                "summary",
+                &long_summary,
                 &serde_json::Value::Object(serde_json::Map::new()),
                 0.8,
             )

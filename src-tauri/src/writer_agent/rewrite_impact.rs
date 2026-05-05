@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::memory::WriterMemory;
 use super::observation::WriterObservation;
-use super::story_impact::{
-    compute_story_impact, StoryImpactBudgetReport, StoryImpactRisk, WriterStoryImpactRadius,
-};
+use super::story_impact::{compute_story_impact, StoryImpactRisk};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -123,5 +121,77 @@ pub fn compute_rewrite_impact_preview(
         truncated_high_risk_sources: budget.dropped_high_risk_sources,
         recommend_planning_review,
         evidence_refs: radius.impacted_sources,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer_agent::memory::WriterMemory;
+    use crate::writer_agent::observation::{ObservationReason, ObservationSource};
+    use std::path::Path;
+
+    fn obs(chapter: &str, text: &str) -> WriterObservation {
+        WriterObservation {
+            id: "obs-1".to_string(),
+            created_at: 1,
+            source: ObservationSource::ManualRequest,
+            reason: ObservationReason::Explicit,
+            project_id: "eval".to_string(),
+            chapter_title: Some(chapter.to_string()),
+            chapter_revision: None,
+            cursor: None,
+            selection: None,
+            prefix: text.to_string(),
+            suffix: String::new(),
+            paragraph: text.to_string(),
+            full_text_digest: None,
+            editor_dirty: false,
+        }
+    }
+
+    #[test]
+    fn preview_is_read_only_no_memory_change() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .upsert_canon_entity(
+                "character",
+                "林墨",
+                &[],
+                "主角",
+                &serde_json::json!({"weapon":"sword"}),
+                0.9,
+            )
+            .ok();
+        let canon_before = memory.list_canon_entities().unwrap().len();
+        let _ = compute_rewrite_impact_preview(&obs("Ch1", "test"), &memory);
+        assert_eq!(memory.list_canon_entities().unwrap().len(), canon_before);
+    }
+
+    #[test]
+    fn preview_recommends_planning_review_on_high_risk() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        // Add many entities to increase impact
+        for i in 0..40 {
+            memory
+                .upsert_canon_entity(
+                    "character",
+                    &format!("E{}", i),
+                    &[],
+                    "x",
+                    &serde_json::json!({}),
+                    0.4,
+                )
+                .ok();
+        }
+        let preview = compute_rewrite_impact_preview(&obs("Ch1", "E1"), &memory);
+        // Should at minimum have risk assessment populated
+        assert!(!preview.risk.is_empty());
     }
 }

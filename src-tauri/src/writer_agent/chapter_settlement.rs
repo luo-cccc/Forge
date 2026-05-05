@@ -154,3 +154,50 @@ pub fn build_chapter_settlement_queue(
         evidence_refs,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer_agent::memory::WriterMemory;
+    use std::path::Path;
+
+    #[test]
+    fn settlement_requires_approval_for_ledger() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .upsert_canon_entity(
+                "character",
+                "林墨",
+                &[],
+                "主角",
+                &serde_json::json!({"weapon":"sword"}),
+                0.3,
+            )
+            .ok();
+        let queue = build_chapter_settlement_queue("Ch3", "rev-1", &memory, "eval");
+        assert!(queue.requires_author_approval);
+        assert!(queue.high_priority_count > 0);
+    }
+
+    #[test]
+    fn settlement_groups_by_category() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .add_promise("plot_promise", "戒指", "遗物", "Ch1", "Ch5", 4)
+            .unwrap();
+        memory
+            .upsert_canon_entity("character", "林墨", &[], "x", &serde_json::json!({}), 0.3)
+            .ok();
+        let queue = build_chapter_settlement_queue("Ch3", "rev-1", &memory, "eval");
+        assert!(
+            !queue.canon_updates.is_empty() || !queue.promise_updates.is_empty(),
+            "should have at least one category populated"
+        );
+    }
+}

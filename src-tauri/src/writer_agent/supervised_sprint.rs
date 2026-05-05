@@ -167,7 +167,7 @@ mod tests {
 
         sprint.chapters[0].receipt_id = Some("r1".to_string());
         sprint.chapters[0].preflight_readiness = Some("ready".to_string());
-        sprint.chapters[0].status = "settled";
+        sprint.chapters[0].status = "settled".to_string();
 
         assert!(can_advance_to_next_chapter(&sprint));
         let next = advance_sprint(&mut sprint);

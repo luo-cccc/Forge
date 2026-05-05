@@ -245,3 +245,69 @@ pub fn build_project_intake_report(
         recommendations,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer_agent::memory::WriterMemory;
+    use crate::writer_agent::observation::{ObservationReason, ObservationSource};
+    use std::path::Path;
+
+    fn obs(id: &str, chapter: &str) -> WriterObservation {
+        WriterObservation {
+            id: id.to_string(),
+            created_at: 1,
+            source: ObservationSource::ManualRequest,
+            reason: ObservationReason::Explicit,
+            project_id: "eval".to_string(),
+            chapter_title: Some(chapter.to_string()),
+            chapter_revision: None,
+            cursor: None,
+            selection: None,
+            prefix: String::new(),
+            suffix: String::new(),
+            paragraph: "test".to_string(),
+            full_text_digest: None,
+            editor_dirty: false,
+        }
+    }
+
+    #[test]
+    fn intake_report_includes_all_chapters() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        let observations = vec![
+            obs("o1", "Chapter-1"),
+            obs("o2", "Chapter-2"),
+            obs("o3", "Chapter-3"),
+        ];
+        let report = build_project_intake_report("eval", &observations, &memory);
+        assert_eq!(report.chapter_count, 3);
+        assert_eq!(report.chapter_map.len(), 3);
+    }
+
+    #[test]
+    fn intake_flags_low_confidence() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .upsert_canon_entity(
+                "character",
+                "可疑角色",
+                &[],
+                "?",
+                &serde_json::json!({}),
+                0.3,
+            )
+            .ok();
+        let report = build_project_intake_report("eval", &[obs("o1", "Ch1")], &memory);
+        // Low-confidence entities should still appear in identified_characters
+        assert!(!report.identified_characters.is_empty());
+        let low = report
+            .identified_characters
+            .iter()
+            .find(|c| c.confidence < 0.6);
+        assert!(low.is_some(), "should include low-confidence entity");
+    }
+}

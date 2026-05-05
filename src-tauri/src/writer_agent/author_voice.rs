@@ -114,12 +114,37 @@ pub fn build_author_voice_snapshot(
         "formal"
     };
 
+    // Derive rhythm from style preferences when available.
+    let (avg_sentence_len, pacing) = if let Ok(prefs) = memory.list_style_preferences(10) {
+        let len_pref = prefs
+            .iter()
+            .find(|p| p.key.contains("sentence") || p.key.contains("length"));
+        let pace_pref = prefs
+            .iter()
+            .find(|p| p.key.contains("pace") || p.key.contains("fast") || p.key.contains("slow"));
+        let sl = len_pref.map(|_| 14.0).unwrap_or(18.0);
+        let pp = if let Some(p) = pace_pref {
+            if p.key.contains("fast") {
+                "fast"
+            } else if p.key.contains("slow") {
+                "slow"
+            } else {
+                "medium"
+            }
+        } else {
+            "medium"
+        };
+        (sl, pp.to_string())
+    } else {
+        (18.0, "medium".to_string())
+    };
+
     AuthorVoiceSnapshot {
         voice_id: format!("voice:{}", now_ms),
         rhythm: VoiceRhythm {
-            avg_sentence_length: 18.0,
+            avg_sentence_length: avg_sentence_len,
             sentence_variance: 5.0,
-            paragraph_pacing: "medium".to_string(),
+            paragraph_pacing: pacing,
         },
         diction: VoiceDiction {
             register: diction_register.to_string(),
@@ -167,5 +192,44 @@ pub fn compute_style_drift(
         drift_signals,
         overall_severity: overall.to_string(),
         evidence_links: voice.sample_refs.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer_agent::memory::WriterMemory;
+    use std::path::Path;
+
+    #[test]
+    fn voice_uses_author_samples() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .upsert_style_preference("sentence_length", "短句", false)
+            .ok();
+        memory
+            .upsert_style_preference("literary_prose", "文学", false)
+            .ok();
+        let voice = build_author_voice_snapshot(&memory, &["Chapter-1".to_string()], 100);
+        assert!(!voice.sample_refs.is_empty());
+        assert!(voice.confidence > 0.0);
+    }
+
+    #[test]
+    fn style_drift_links_evidence() {
+        let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+        memory
+            .ensure_story_contract_seed("eval", "T", "fantasy", "p", "j", "")
+            .unwrap();
+        memory
+            .upsert_style_preference("literary_prose", "文学表达", false)
+            .ok();
+        let voice = build_author_voice_snapshot(&memory, &["Ch1".to_string()], 100);
+        let drift = compute_style_drift(&voice, "sample text", "Chapter-2");
+        assert!(!drift.evidence_links.is_empty());
+        assert!(!drift.overall_severity.is_empty());
     }
 }
