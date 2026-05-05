@@ -134,11 +134,24 @@ impl<H: ToolHandler> ToolExecutor<H> {
             });
         };
 
-        match self.permission_policy.authorize(
-            &descriptor.name,
-            descriptor.side_effect_level,
-            descriptor.requires_approval,
-        ) {
+        // Extract path / command context from tool args for permission check.
+        let resolved_path = extract_path_from_args(&args);
+        let command_preview = extract_command_from_args(&args);
+
+        let invocation_ctx = crate::permission::ToolInvocationContext {
+            tool_name: descriptor.name.clone(),
+            side_effect: descriptor.side_effect_level,
+            requires_approval: descriptor.requires_approval,
+            resolved_path,
+            command_preview,
+            source_refs: Vec::new(),
+            task_id: None,
+        };
+
+        match self
+            .permission_policy
+            .authorize_with_context(&invocation_ctx)
+        {
             PermissionDecision::Allow => {}
             PermissionDecision::Deny { reason } | PermissionDecision::Ask { reason } => {
                 return self.emit_audit_end(ToolExecution {
@@ -446,4 +459,34 @@ mod tests {
                 if execution.tool_name == "read_tool" && execution.error.is_none()
         ));
     }
+}
+
+// ── Path / command extraction for permission context ──
+
+/// Extract a resolved file path from common tool argument keys.
+fn extract_path_from_args(args: &serde_json::Value) -> Option<String> {
+    let obj = args.as_object()?;
+    for key in &["path", "file_path", "root", "outline_path", "chapter_path"] {
+        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract a command preview from common tool argument keys.
+fn extract_command_from_args(args: &serde_json::Value) -> Option<String> {
+    let obj = args.as_object()?;
+    for key in &["command", "shell_command", "cmd"] {
+        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
 }

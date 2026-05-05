@@ -182,6 +182,19 @@ impl WriterAgentKernel {
             next_actions.push("Review warnings; task can still proceed.".to_string());
         }
 
+        let provider_budget_decision = if estimated_total > 64_000 {
+            "blocked"
+        } else if estimated_total > 32_000 {
+            "approval_required"
+        } else {
+            "allowed"
+        };
+        let source_refs: Vec<String> = context_pack
+            .sources
+            .iter()
+            .map(|s| format!("{:?}", s.source))
+            .collect();
+
         WriterRunPreflightReport {
             task: format!("{:?}", request.task),
             observation_id: observation.id.clone(),
@@ -197,6 +210,10 @@ impl WriterAgentKernel {
             tool_allowed_count: inventory.allowed.len(),
             tool_blocked_count: inventory.blocked.len(),
             estimated_input_tokens: estimated_input,
+            estimated_output_tokens: 2048,
+            provider_budget_decision: provider_budget_decision.to_string(),
+            task_packet_objective: task_packet.objective.clone(),
+            source_refs,
             next_actions,
         }
     }

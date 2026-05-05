@@ -722,7 +722,7 @@ agent-evals/src/
 
 ## 11. P4：外部 Agent 项目借鉴专项计划
 
-本节来自对 `C:/Users/Msi/Desktop/agent` 下 8 个本地 agent 项目的定向审查，其中 `code-review-graph-main` 对应 GitHub 来源 `https://github.com/tirth8205/code-review-graph.git`。目标不是把 Forge 改造成通用 agent 平台，而是在证据可追溯的前提下，把其他项目中已经证明有价值的机制裁剪到小说写作 agent 的五个核心方面。
+本节来自对 `C:/Users/Msi/Desktop/agent` 下 8 个本地 agent 项目的定向审查，其中 `code-review-graph-main` 对应 GitHub 来源 `https://github.com/tirth8205/code-review-graph.git`；另包含对 `C:/Users/Msi/Desktop/竞品` 下 18 个传统 AI 写作工具项目的垂直化竞品抽样。目标不是把 Forge 改造成通用 agent 平台或传统 AI 写作 IDE，而是在证据可追溯的前提下，把其他项目中已经证明有价值的机制裁剪到小说写作 agent 的五个核心方面。
 
 ### 11.0 证据边界
 
@@ -737,6 +737,27 @@ agent-evals/src/
 - `opencode-1.14.30`
 - `code-review-graph-main`（本地路径：`C:/Users/Msi/Desktop/agent/code-review-graph-main`；GitHub 来源：`https://github.com/tirth8205/code-review-graph.git`）
 
+已审查传统 AI 写作竞品项目：
+
+- `91Writing-main`
+- `AI_NovelGenerator-main`
+- `ai-novel-lab-master`
+- `AI-Novel-Writing-Assistant-main`
+- `AINovel-main`
+- `De-AI-Prompt-Enhancer-Writer-Booster-SKILL-main`
+- `dramatica-flow-main`
+- `inkos-master`
+- `kimi-book-writer-main`
+- `Morpheus-main`
+- `novel_ai_writer`
+- `novel-pro-main`
+- `novelvel-master`
+- `Openwrite-main`
+- `PlotPilot-2-main`
+- `vela-master`
+- `webnovel-writer-master`
+- `WenShape-main`
+
 证据纪律：
 
 - 只把 README 或源码中已经看到的机制写成依据。
@@ -744,6 +765,7 @@ agent-evals/src/
 - README 声称但未进入源码验证的能力，不能作为高置信实现依据。
 - `code-review-graph-main` 当前本地目录不是 git checkout，不从该目录推断 commit hash；只把已核对到本地 README / source function 的机制写入计划，benchmark 数字只能作为该项目自报证据，不能直接外推到 Forge。
 - `OpenHarness-main` 审查只覆盖 harness 相关源码和 README：QueryEngine、tool registry、permission checker、compaction、dry-run preview、swarm/autopilot 局部模块；结论限定为 harness 架构借鉴，不声明已完整审计整个项目。
+- `C:/Users/Msi/Desktop/竞品` 审查覆盖 18 个项目的 README / architecture 文档和少量源码抽样：只用于识别传统 AI 写作工具的共同产品形态和可迁移机制，不把各项目 README 中的营销表述等同为真实生产质量。
 - 没发现致命问题时必须坦承，不为了显得尖锐而硬批。
 
 ### 11.1 可借鉴证据清单
@@ -1061,6 +1083,79 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 - OpenHarness swarm / autopilot / plugin 全套不进入近期主路径。Forge 的产品瓶颈是长篇写作上下文质量、证据链路、作者审批、记忆边界和真实写作指标，不是通用多代理自动化规模。
 - OpenHarness 的 dry-run 是 CLI/runtime 预览；Forge 应转译为 writer run preflight，不把普通作者暴露在 provider/MCP/plugin 细节里。
 - OpenHarness 的 command-line permission hint 不直接搬到 UI；Forge UI 只显示与写作决策相关的下一步。
+
+### 11.4B 传统 AI 写作竞品垂直化借鉴计划
+
+结论：未发现 Forge 北极星的致命弱点。`C:/Users/Msi/Desktop/竞品` 下 18 个项目反而共同指向一个事实：长篇 AI 写作的核心难点不是“生成一章”，而是长期维护故事状态、伏笔承诺、作者声音、上下文证据和作者控制权。Forge 的方向应继续坚持 Cursor 式小说写作 agent，而不是退回“功能很多的 AI 写作 IDE”。
+
+证据依据：
+
+- `91Writing-main` 把“智能大纲生成与章节管理”列为核心能力：`C:/Users/Msi/Desktop/竞品/91Writing-main/README.md:38`。
+- `AI_NovelGenerator-main` 同时列出多阶段章节生成、状态追踪、语义检索、知识库集成和自动审校：`C:/Users/Msi/Desktop/竞品/AI_NovelGenerator-main/README_zh-CN.md:16`、`C:/Users/Msi/Desktop/竞品/AI_NovelGenerator-main/README_zh-CN.md:17`、`C:/Users/Msi/Desktop/竞品/AI_NovelGenerator-main/README_zh-CN.md:18`、`C:/Users/Msi/Desktop/竞品/AI_NovelGenerator-main/README_zh-CN.md:20`。
+- `ai-novel-lab-master` 自述完成 100 章、428,000+ 字，并强调大纲驱动和一致性维护：`C:/Users/Msi/Desktop/竞品/ai-novel-lab-master/README.md:38`、`C:/Users/Msi/Desktop/竞品/ai-novel-lab-master/README.md:41`、`C:/Users/Msi/Desktop/竞品/ai-novel-lab-master/README.md:43`、`C:/Users/Msi/Desktop/竞品/ai-novel-lab-master/README.md:51`。
+- `AI-Novel-Writing-Assistant-main` 把知识与设定 RAG、写作风格控制、叙事一致性和完整章节/整本生成放在同一条链路：`C:/Users/Msi/Desktop/竞品/AI-Novel-Writing-Assistant-main/README.md:23`、`C:/Users/Msi/Desktop/竞品/AI-Novel-Writing-Assistant-main/README.md:24`、`C:/Users/Msi/Desktop/竞品/AI-Novel-Writing-Assistant-main/README.md:25`。
+- `AINovel-main` 明确“灵感 -> 大纲 -> 逐章创作”，并维护世界线、人物线、感情线等全局线：`C:/Users/Msi/Desktop/竞品/AINovel-main/README.md:3`。
+- `De-AI-Prompt-Enhancer-Writer-Booster-SKILL-main` 从真实作者文章提炼写作 DNA，并提供 AI 痕迹检测、量化风格约束和风格审计脚本：`C:/Users/Msi/Desktop/竞品/De-AI-Prompt-Enhancer-Writer-Booster-SKILL-main/README.md:15`、`C:/Users/Msi/Desktop/竞品/De-AI-Prompt-Enhancer-Writer-Booster-SKILL-main/README.md:23`。
+- `dramatica-flow-main` 把因果链、情感弧线、伏笔系统和关系网络作为可追踪、可审计的工程流程：`C:/Users/Msi/Desktop/竞品/dramatica-flow-main/README.md:40`。
+- `inkos-master` 强调自主写、审、改，但也声明人工审核门控确保作者掌控：`C:/Users/Msi/Desktop/竞品/inkos-master/README.md:22`。
+- `kimi-book-writer-main` 以长上下文、多步推理生成长书，并保留 outline phase / chapter phase / checkpoint-resume 形态：`C:/Users/Msi/Desktop/竞品/kimi-book-writer-main/README.md:15`。
+- `Morpheus-main` 明确不是“给一段文本”的助手，而是 AI-native writing studio；强调 multi-agent、chapter-first workflow、memory-aware writing、reviewable and traceable：`C:/Users/Msi/Desktop/竞品/Morpheus-main/README.md:5`、`C:/Users/Msi/Desktop/竞品/Morpheus-main/README.md:11`、`C:/Users/Msi/Desktop/竞品/Morpheus-main/README.md:12`、`C:/Users/Msi/Desktop/竞品/Morpheus-main/README.md:13`、`C:/Users/Msi/Desktop/竞品/Morpheus-main/README.md:14`。
+- `novel_ai_writer` 把 200 万字长篇、三层记忆、伏笔网络图、角色管理、质量检测作为一体能力：`C:/Users/Msi/Desktop/竞品/novel_ai_writer/README.md:3`、`C:/Users/Msi/Desktop/竞品/novel_ai_writer/README.md:9`、`C:/Users/Msi/Desktop/竞品/novel_ai_writer/README.md:10`、`C:/Users/Msi/Desktop/竞品/novel_ai_writer/README.md:11`、`C:/Users/Msi/Desktop/竞品/novel_ai_writer/README.md:12`。
+- `novel-pro-main` 的核心定义是可分流、可接管、可审计、可结算的小说工作流系统，并点名伏笔回收和写后结算问题：`C:/Users/Msi/Desktop/竞品/novel-pro-main/README.md:12`、`C:/Users/Msi/Desktop/竞品/novel-pro-main/README.md:41`、`C:/Users/Msi/Desktop/竞品/novel-pro-main/README.md:43`。
+- `novelvel-master` 源码显示 pipeline 为 outline / write / review / polish，并有伏笔债务与回收功能入口：`C:/Users/Msi/Desktop/竞品/novelvel-master/orchestrator/pipeline_dsl.py:90`、`C:/Users/Msi/Desktop/竞品/novelvel-master/orchestrator/pipeline_dsl.py:91`、`C:/Users/Msi/Desktop/竞品/novelvel-master/orchestrator/pipeline_dsl.py:92`、`C:/Users/Msi/Desktop/竞品/novelvel-master/orchestrator/pipeline_dsl.py:97`、`C:/Users/Msi/Desktop/竞品/novelvel-master/app.py:165`。
+- `Openwrite-main` 明确“长篇小说不是一次性 prompt”，而是立项、设定、滚动大纲、章节写作、审查、真相文件和 workflow 的长期生产线：`C:/Users/Msi/Desktop/竞品/Openwrite-main/README.md:19`、`C:/Users/Msi/Desktop/竞品/Openwrite-main/README.md:24`。
+- `PlotPilot-2-main` 把自动驾驶生成、知识图谱管理、风格分析绑定到长篇创作平台：`C:/Users/Msi/Desktop/竞品/PlotPilot-2-main/README.md:7`。
+- `vela-master` 定位为本地优先 AI 写作 IDE，覆盖 worldbuilding、outline、draft、rewrite、review 和本地 RAG：`C:/Users/Msi/Desktop/竞品/vela-master/README.md:20`。
+- `webnovel-writer-master` 架构文档把“大纲即法律”和“发明需识别”写成系统规则，并拆出 Context / Data / 多维 Checker：`C:/Users/Msi/Desktop/竞品/webnovel-writer-master/docs/architecture.md:9`、`C:/Users/Msi/Desktop/竞品/webnovel-writer-master/docs/architecture.md:11`、`C:/Users/Msi/Desktop/竞品/webnovel-writer-master/docs/architecture.md:41`。
+- `WenShape-main` 明确关注一致性、回溯性与可维护性：`C:/Users/Msi/Desktop/竞品/WenShape-main/README.md:24`。
+
+产品判断：
+
+- 这些竞品覆盖 outline / chapter generation / RAG / story bible / foreshadowing / style / workflow / audit / autopilot。Forge 不应该照抄功能矩阵；这些功能已经是传统 AI 写作工具的公共地板，不是长期护城河。
+- Forge 的差异化应落在“agent 能维护一本书的活状态，并把每次行动变成可审查、可回放、可纠错的写作协作”。
+- 竞品中“全自动写整本书”的方向只能作为压力测试参考，不能成为 Forge 默认体验。Forge 的北极星要求作者仍然掌控正文、记忆和承诺变更。
+
+任务：
+
+1. 旧稿接管向导。（P1）
+   - 目标：让作者导入已有长篇稿件后，Forge 先读懂而不是马上改写。
+   - 输入：章节文件、现有设定、人物表、作者样章。
+   - 输出：只读 `Project Intake Report`，包含章节地图、主要角色、已识别 canon、open promises、style fingerprint、冲突/缺口、可信度和 evidence refs。
+   - 边界：第一轮只生成候选和报告，不自动写 Story Bible / Canon / Promise Ledger。
+   - UI：Explore / Inspect 显示完整报告；Companion 只显示“是否可开始协作、最危险的 3 个缺口、建议下一步”。
+   - 验收 eval：`writer_agent:project_intake_reports_sources`、`writer_agent:project_intake_does_not_auto_write_memory`、`writer_agent:project_intake_flags_open_promises`。
+2. 章节结算队列。（P1）
+   - 目标：把保存后自动分析变成作者可处理的结算工作流，吸收 `novel-pro-main` / `novelvel-master` 中“写后审查/结算”的公共需求，但保持 Forge 的 approval 边界。
+   - 输入：保存后的章节正文、Chapter Mission、Story Contract、Promise Ledger、Canon、post-write diagnostics、Story Impact Radius。
+   - 输出：`Chapter Settlement Queue`，按 Canon update、Promise progress、Mission status suggestion、Style drift、Continuity risk 分组。
+   - 边界：默认只生成 proposals；Canon/Promise/Mission 更新必须作者批准。
+   - UI：Companion 默认只显示最高风险 3 项；Inspect 可看完整 evidence / source refs / diagnostics。
+   - 验收 eval：`writer_agent:chapter_settlement_creates_reviewable_updates`、`writer_agent:chapter_settlement_requires_approval_for_ledger_writes`、`writer_agent:chapter_settlement_prioritizes_high_risk_promises`。
+3. 改写影响预览。（P1）
+   - 目标：作者接受改写前先看到“这次改动会影响哪些故事承诺和设定”。
+   - 复用：Story Impact Radius、Context Pack budget summary、post-write diagnostics、operation lifecycle。
+   - 输出：`Rewrite Impact Preview`，列出 impacted canon / promise / mission / style signals、风险等级、会被截断的证据、建议是否先 Planning Review。
+   - 边界：preview 只读；不能因为 impact preview 自动修改正文或 ledger。
+   - 验收 eval：`writer_agent:rewrite_impact_preview_is_read_only`、`writer_agent:rewrite_impact_preview_includes_bidirectional_story_edges`、`writer_agent:rewrite_impact_preview_warns_on_truncated_high_risk_sources`。
+4. 作者声音守护。（P2）
+   - 目标：把竞品常见“去 AI 味 / 风格检测”升级为 Forge 的 author voice guard，避免把风格变成通用模板。
+   - 输入：作者样章、已采纳正文、被作者拒绝/编辑的 proposals、style memory feedback。
+   - 输出：`AuthorVoiceSnapshot`，包含 rhythm、diction、pov、dialogue texture、sentence shape、taboo phrases、confidence、sample refs。
+   - 行动：生成/改写前作为 context source；保存后输出 style drift diagnostics；只提出建议，不把“AI 味检测”当作唯一质量真相。
+   - 验收 eval：`writer_agent:author_voice_guard_uses_author_samples`、`writer_agent:author_voice_guard_records_feedback_corrections`、`writer_agent:style_drift_diagnostic_links_evidence`。
+5. 受监督章节冲刺。（P2）
+   - 目标：允许作者批量推进章节，但每章都必须经过任务收据、预算预检、写后诊断和结算队列，避免传统 autopilot 失控。
+   - 流程：select chapters -> preflight -> generate draft proposal -> author review -> durable save -> settlement queue -> next chapter。
+   - 边界：默认不自动保存批量生成正文；没有作者批准不得进入下一章的 durable write。
+   - 验收 eval：`writer_agent:supervised_sprint_stops_before_unapproved_save`、`writer_agent:supervised_sprint_carries_forward_settlement_feedback`、`writer_agent:supervised_sprint_records_receipts_per_chapter`。
+
+不建议照搬：
+
+- 不做传统功能矩阵补课：outline、character、world、RAG、audit、autopilot 不应该各自长成孤岛功能。
+- 不把 chat box 重新变成主入口；任何新能力都应进入 Writer Kernel / Companion / Review / Inspect 的协作闭环。
+- 不把自动抽取事实直接写入 Canon / Promise / Memory；旧稿接管和章节结算都先产出候选和证据。
+- 不默认后台整本生成。批量生成只能是受监督章节冲刺，且必须保留 receipt、budget、approval、diagnostics、settlement。
+- 不把“AI 味”当作单一审美裁判。风格守护必须以作者样章和作者反馈为来源，输出可解释证据。
 
 ### 11.5 目标与信念：自主性的灵魂
 

@@ -23,6 +23,10 @@ pub struct WriterRunPreflightReport {
     pub tool_allowed_count: usize,
     pub tool_blocked_count: usize,
     pub estimated_input_tokens: u64,
+    pub estimated_output_tokens: u64,
+    pub provider_budget_decision: String,
+    pub task_packet_objective: String,
+    pub source_refs: Vec<String>,
     pub next_actions: Vec<String>,
 }
 
@@ -31,4 +35,14 @@ pub struct WriterRunPreflightReport {
 pub struct PreflightItem {
     pub code: String,
     pub reason: String,
+}
+
+/// Frontend-safe summary of the preflight report for Companion display.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreflightCompanionSummary {
+    pub readiness: String,
+    pub top_warning: Option<String>,
+    pub top_block: Option<String>,
+    pub next_action: Option<String>,
 }

@@ -33,6 +33,12 @@ pub enum AgentLoopEvent {
         before_tokens: u64,
         after_tokens: u64,
         compacted_count: usize,
+        #[serde(default)]
+        compaction_kind: String,
+        #[serde(default)]
+        tokens_saved_by_truncation: u64,
+        #[serde(default)]
+        boundary_summary: String,
     },
     #[serde(rename = "error")]
     Error { message: String },
@@ -373,6 +379,9 @@ impl<P: Provider, H: ToolHandler> AgentLoop<P, H> {
                             before_tokens: before,
                             after_tokens: report.tokens_after,
                             compacted_count: report.compacted_count,
+                            compaction_kind: format!("{:?}", report.kind),
+                            tokens_saved_by_truncation: report.tokens_saved_by_tool_truncation,
+                            boundary_summary: report.boundary_summary.clone(),
                         });
                     }
                     Err(e) => {
