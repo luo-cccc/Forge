@@ -43,6 +43,7 @@ P1 is in progress:
 
 - Rust workspace is rooted at `C:\Users\Msi\Desktop\Forge`; the authoritative lockfile is the root `Cargo.lock`.
 - `agent-harness-core` contains reusable agent runtime pieces: provider abstraction, tool registry, tool executor, compaction, permissions, prompt/cache helpers, vector DB, run trace, task packets, and ambient loop primitives.
+- `agent-harness-core` VectorDB hybrid search now precomputes query terms, per-search document frequency, and document token lengths once per search instead of recomputing BM25 corpus statistics for every chunk; lexical ranking behavior is covered by a focused harness test.
 - `src-tauri/src/writer_agent` contains the product-specific Writer Agent Kernel:
   - observations
   - intent
@@ -103,7 +104,7 @@ P1 is in progress:
 The expected local baseline is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
 <!-- verification-baseline:start -->
-- `cargo test -p agent-harness-core`: 80 tests passing
+- `cargo test -p agent-harness-core`: 81 tests passing
 - `cargo test -p agent-writer`: 197 tests passing
 - `cargo run -p agent-evals`: 179/179 evals passing
 - `npm run check:p2`: 18/18 checks passing

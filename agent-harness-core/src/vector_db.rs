@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 fn jieba() -> &'static jieba_rs::Jieba {
@@ -137,24 +138,13 @@ impl VectorDB {
     }
 
     // ── BM25 lexical scoring ────────────────────────────────────────
-    fn bm25_score(&self, query: &str, chunk: &Chunk, include_archived: bool) -> f32 {
-        let query_terms = tokenize(query);
-        let doc_terms = tokenize(&chunk.text);
-        let corpus = self
-            .chunks
-            .iter()
-            .filter(|c| include_archived || !c.archived)
-            .collect::<Vec<_>>();
-        let doc_count = corpus.len().max(1);
-        let avg_text_len = if corpus.is_empty() {
-            1.0
-        } else {
-            corpus
-                .iter()
-                .map(|c| tokenize(&c.text).len() as f32)
-                .sum::<f32>()
-                / corpus.len() as f32
-        };
+    fn bm25_score_precomputed(
+        query_terms: &[String],
+        doc_terms: &[String],
+        document_frequency: &HashMap<String, usize>,
+        doc_count: usize,
+        avg_text_len: f32,
+    ) -> f32 {
         let doc_len = doc_terms.len() as f32;
         let k1 = 1.5;
         let b = 0.75;
@@ -166,11 +156,7 @@ impl VectorDB {
                 if tf == 0.0 {
                     return 0.0;
                 }
-                let df = corpus
-                    .iter()
-                    .filter(|c| tokenize(&c.text).iter().any(|t| t == term))
-                    .count()
-                    .max(1) as f32;
+                let df = document_frequency.get(term).copied().unwrap_or(0).max(1) as f32;
                 let idf = ((doc_count as f32 - df + 0.5) / (df + 0.5)).ln().max(0.0);
                 idf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * doc_len / avg_text_len))
             })
@@ -229,23 +215,62 @@ impl VectorDB {
         top_k: usize,
         include_archived: bool,
     ) -> Vec<(f32, &Chunk)> {
-        let mut scored: Vec<(f32, &Chunk)> = self
+        let query_terms = tokenize(query);
+        let query_term_set: HashSet<&str> = query_terms.iter().map(String::as_str).collect();
+        let query_lower = query.to_lowercase();
+        let mut document_frequency: HashMap<String, usize> =
+            query_terms.iter().map(|term| (term.clone(), 0)).collect();
+        let mut tokenized_docs: Vec<(&Chunk, Vec<String>)> = Vec::new();
+
+        for chunk in self
             .chunks
             .iter()
             .filter(|c| include_archived || !c.archived)
-            .map(|c| {
-                let sem = cosine_similarity(query_embedding, &c.embedding);
-                let lex = self.bm25_score(query, c, include_archived) * 0.3; // BM25 权重 0.3
-                let sym = if c
+        {
+            let doc_terms = tokenize(&chunk.text);
+            let mut seen_terms = HashSet::new();
+            for term in &doc_terms {
+                if query_term_set.contains(term.as_str()) && seen_terms.insert(term.as_str()) {
+                    if let Some(count) = document_frequency.get_mut(term) {
+                        *count += 1;
+                    }
+                }
+            }
+            tokenized_docs.push((chunk, doc_terms));
+        }
+
+        let doc_count = tokenized_docs.len().max(1);
+        let avg_text_len = if tokenized_docs.is_empty() {
+            1.0
+        } else {
+            tokenized_docs
+                .iter()
+                .map(|(_, terms)| terms.len() as f32)
+                .sum::<f32>()
+                / tokenized_docs.len() as f32
+        };
+
+        let mut scored: Vec<(f32, &Chunk)> = tokenized_docs
+            .iter()
+            .map(|(chunk, doc_terms)| {
+                let sem = cosine_similarity(query_embedding, &chunk.embedding);
+                let lex = Self::bm25_score_precomputed(
+                    &query_terms,
+                    doc_terms,
+                    &document_frequency,
+                    doc_count,
+                    avg_text_len,
+                ) * 0.3; // BM25 权重 0.3
+                let sym = if chunk
                     .keywords
                     .iter()
-                    .any(|kw| query.to_lowercase().contains(&kw.to_lowercase()))
+                    .any(|kw| query_lower.contains(&kw.to_lowercase()))
                 {
                     0.5
                 } else {
                     0.0
                 };
-                (sem + lex + sym, c)
+                (sem + lex + sym, *chunk)
             })
             .collect();
 
@@ -325,4 +350,50 @@ pub fn chunk_text(text: &str, max_chars: usize) -> Vec<(String, Vec<String>, Opt
     }
 
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_chunk(id: &str, text: &str, embedding: Vec<f32>) -> Chunk {
+        Chunk {
+            id: id.to_string(),
+            chapter: "Chapter-1".to_string(),
+            text: text.to_string(),
+            embedding,
+            keywords: Vec::new(),
+            topic: None,
+            source_ref: None,
+            source_revision: None,
+            source_kind: None,
+            chunk_index: None,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn hybrid_search_preserves_bm25_lexical_ranking() {
+        let mut db = VectorDB::new();
+        db.upsert(test_chunk(
+            "unrelated",
+            "old door rumor wind repeats in the tavern without the target clue",
+            vec![],
+        ));
+        db.upsert(test_chunk(
+            "lexical-target",
+            "jade ring payoff jade ring payoff jade ring payoff north sect clue",
+            vec![],
+        ));
+        db.upsert(test_chunk(
+            "background",
+            "market road lantern quiet scene with no matching promise terms",
+            vec![],
+        ));
+
+        let results = db.search_hybrid("jade ring payoff", &[], 3);
+        let first_id = results.first().map(|(_, chunk)| chunk.id.as_str());
+
+        assert_eq!(first_id, Some("lexical-target"));
+    }
 }
