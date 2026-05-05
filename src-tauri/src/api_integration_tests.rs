@@ -1,4 +1,5 @@
 use crate::llm_runtime;
+use crate::writer_agent::anchor_carry;
 
 const REAL_API_TESTS_FLAG: &str = "FORGE_REAL_API_TESTS";
 
@@ -61,98 +62,6 @@ fn preview_text(text: &str, max_chars: usize) -> String {
 
 fn elapsed_ms(started: std::time::Instant) -> u128 {
     started.elapsed().as_millis()
-}
-
-fn score_anchor_carry(text: &str, anchors: &[&str]) -> f64 {
-    let sentences = text
-        .split(['。', '！', '？', '!', '?', '；', ';', '\n'])
-        .map(str::trim)
-        .filter(|sentence| !sentence.is_empty())
-        .collect::<Vec<_>>();
-    let action_terms = [
-        "拔",
-        "握",
-        "递",
-        "交",
-        "救",
-        "追",
-        "挡",
-        "打开",
-        "藏",
-        "拿",
-        "看",
-        "盯",
-        "亮出",
-        "压",
-        "斩",
-        "换",
-        "插",
-        "转",
-        "抢",
-        "护",
-        "逼问",
-        "承认",
-        "选择",
-        "摊",
-        "展开",
-        "翻",
-        "读",
-        "放回",
-        "递出去",
-        "逼",
-        "追问",
-    ];
-    let dialogue_terms = [
-        "\"", "“", "”", "说", "问", "喊", "答", "承认", "道", "低声", "开口", "接话",
-    ];
-    let consequence_terms = [
-        "因此",
-        "于是",
-        "导致",
-        "逼得",
-        "只好",
-        "选择",
-        "决定",
-        "代价",
-        "后果",
-        "失去",
-        "换来",
-        "发现",
-        "意识到",
-        "确认",
-        "暴露",
-        "牵出",
-        "重新",
-        "不敢",
-        "被迫",
-    ];
-    let payoff_terms = [
-        "要还", "还债", "偿还", "清算", "兑现", "伏笔", "真相", "账册", "代价", "承诺", "线索",
-        "缺页", "入口", "交易", "选择", "信任", "背叛", "道歉", "秘密", "谜底", "追债",
-    ];
-
-    let carried = anchors
-        .iter()
-        .filter(|anchor| {
-            sentences.iter().any(|sentence| {
-                sentence.contains(**anchor)
-                    && [
-                        &action_terms[..],
-                        &dialogue_terms[..],
-                        &consequence_terms[..],
-                        &payoff_terms[..],
-                    ]
-                    .iter()
-                    .any(|terms| terms.iter().any(|term| sentence.contains(term)))
-            })
-        })
-        .count();
-
-    if anchors.is_empty() {
-        1.0
-    } else {
-        carried as f64 / anchors.len() as f64
-    }
 }
 
 async fn run_text_profile_smoke(
@@ -514,7 +423,14 @@ async fn real_author_session_three_chapter_smoke() {
             "chapter draft dropped too many anchors: hit_count={hit_count} draft={draft}"
         );
 
-        let carry_rate = score_anchor_carry(&draft, &anchors);
+        let carry_rate = anchor_carry::score_anchor_carry(
+            &draft,
+            &anchors
+                .iter()
+                .map(|anchor| anchor.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .carry_rate;
         carry_rates.push(carry_rate);
         drafts.push(draft.clone());
         assert!(

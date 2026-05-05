@@ -28,70 +28,26 @@ pub struct AnchorCarryItem {
     pub supporting_terms: Vec<String>,
 }
 
-const ACTION_TERMS: &[&str] = &[
-    "拔",
-    "握",
-    "递",
-    "交",
-    "救",
-    "追",
-    "挡",
-    "打开",
-    "藏",
-    "拿",
-    "看",
-    "盯",
-    "亮出",
-    "压",
-    "斩",
-    "换",
-    "插",
-    "转",
-    "抢",
-    "护",
-    "逼问",
-    "承认",
-    "选择",
-    "摊",
-    "展开",
-    "翻",
-    "读",
-    "放回",
-    "递出去",
-    "逼",
-    "追问",
-];
+#[derive(Debug, Deserialize)]
+struct AnchorCarryHeuristicConfig {
+    #[serde(rename = "sentenceDelimiters")]
+    sentence_delimiters: Vec<String>,
+    modes: Vec<AnchorCarryHeuristicMode>,
+}
 
-const DIALOGUE_TERMS: &[&str] = &[
-    "\"", "“", "”", "说", "问", "喊", "答", "承认", "道", "低声", "开口", "接话",
-];
+#[derive(Debug, Deserialize)]
+struct AnchorCarryHeuristicMode {
+    id: String,
+    terms: Vec<String>,
+}
 
-const CONSEQUENCE_TERMS: &[&str] = &[
-    "因此",
-    "于是",
-    "导致",
-    "逼得",
-    "只好",
-    "选择",
-    "决定",
-    "代价",
-    "后果",
-    "失去",
-    "换来",
-    "发现",
-    "意识到",
-    "确认",
-    "暴露",
-    "牵出",
-    "重新",
-    "不敢",
-    "被迫",
-];
-
-const PAYOFF_PRESSURE_TERMS: &[&str] = &[
-    "要还", "还债", "偿还", "清算", "兑现", "伏笔", "真相", "账册", "代价", "承诺", "线索", "缺页",
-    "入口", "交易", "选择", "信任", "背叛", "道歉", "秘密", "谜底", "追债",
-];
+fn heuristic_config() -> &'static AnchorCarryHeuristicConfig {
+    static CONFIG: std::sync::OnceLock<AnchorCarryHeuristicConfig> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../config/anchor-carry-heuristics.json"))
+            .expect("anchor-carry-heuristics.json must be valid")
+    })
+}
 
 pub fn score_anchor_carry(text: &str, anchors: &[String]) -> AnchorCarryReport {
     let sentences = split_sentences(text);
@@ -121,6 +77,7 @@ pub fn score_anchor_carry(text: &str, anchors: &[String]) -> AnchorCarryReport {
 }
 
 fn score_anchor(anchor: &str, sentences: &[String]) -> AnchorCarryItem {
+    let config = heuristic_config();
     let mut carry_modes = Vec::new();
     let mut supporting_terms = Vec::new();
     let mut mentioned = false;
@@ -130,34 +87,15 @@ fn score_anchor(anchor: &str, sentences: &[String]) -> AnchorCarryItem {
         .filter(|sentence| sentence.contains(anchor))
     {
         mentioned = true;
-        collect_mode(
-            sentence,
-            "action",
-            ACTION_TERMS,
-            &mut carry_modes,
-            &mut supporting_terms,
-        );
-        collect_mode(
-            sentence,
-            "dialogue",
-            DIALOGUE_TERMS,
-            &mut carry_modes,
-            &mut supporting_terms,
-        );
-        collect_mode(
-            sentence,
-            "consequence",
-            CONSEQUENCE_TERMS,
-            &mut carry_modes,
-            &mut supporting_terms,
-        );
-        collect_mode(
-            sentence,
-            "payoff_pressure",
-            PAYOFF_PRESSURE_TERMS,
-            &mut carry_modes,
-            &mut supporting_terms,
-        );
+        for mode in &config.modes {
+            collect_mode(
+                sentence,
+                &mode.id,
+                &mode.terms,
+                &mut carry_modes,
+                &mut supporting_terms,
+            );
+        }
     }
 
     carry_modes.sort();
@@ -177,29 +115,34 @@ fn score_anchor(anchor: &str, sentences: &[String]) -> AnchorCarryItem {
 fn collect_mode(
     sentence: &str,
     mode: &str,
-    terms: &[&str],
+    terms: &[String],
     carry_modes: &mut Vec<String>,
     supporting_terms: &mut Vec<String>,
 ) {
     let matched = terms
         .iter()
-        .filter(|term| sentence.contains(**term))
+        .filter(|term| sentence.contains(term.as_str()))
         .take(3)
-        .copied()
+        .cloned()
         .collect::<Vec<_>>();
     if matched.is_empty() {
         return;
     }
     carry_modes.push(mode.to_string());
-    supporting_terms.extend(matched.into_iter().map(str::to_string));
+    supporting_terms.extend(matched);
 }
 
 fn split_sentences(text: &str) -> Vec<String> {
+    let delimiters = heuristic_config()
+        .sentence_delimiters
+        .iter()
+        .flat_map(|delimiter| delimiter.chars())
+        .collect::<Vec<_>>();
     let mut sentences = Vec::new();
     let mut current = String::new();
     for ch in text.chars() {
         current.push(ch);
-        if matches!(ch, '。' | '！' | '？' | '!' | '?' | ';' | '；' | '\n') {
+        if delimiters.contains(&ch) {
             push_sentence(&mut sentences, &mut current);
         }
     }
