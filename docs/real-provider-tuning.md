@@ -18,6 +18,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - Disable provider-scoped reasoning by default for chapter draft on OpenRouter as the current latency-first default.
 - Keep the setting overridable with `OPENAI_CHAPTER_DRAFT_DISABLE_REASONING` because the A/B result shows an anchor-recall tradeoff, not an absolute quality win.
 - Strengthen the chapter prompt so active anchors must be carried through scene action, dialogue, consequence, or payoff pressure, not mentioned only as labels.
+- Keep `analysis` and `parallel_draft` as explicit on-demand commands; tune their token budgets first before introducing extra trigger gates.
 
 ## Sanitized Runs
 
@@ -40,6 +41,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - The long-session runner now lives at `scripts/real-author-session-runner.cjs` and reads shared anchor-carry heuristics from `config/anchor-carry-heuristics.json`, so Node calibration and Rust scoring no longer drift from two separate rule lists.
 - The long-session runner and Rust runtime now also share profile defaults from `config/llm-request-profiles.json`, so chapter/ghost/analysis/parallel/manual profile baselines no longer diverge between local calibration and product code.
 - The current best measured chapter-draft profile is `maxTokens=640` with the stronger anchor-participation prompt. In the latest 5-chapter run it reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8`, with no findings raised by the runner.
+- Targeted real-provider probes for on-demand tools showed `analysis.maxTokens=384` and `parallel_draft.maxTokens=512` are the best current tradeoff. `analysis` kept useful output around `avgChars=282` while lowering repeated-run `p95` versus the older 768-token setting in end-to-end runs, and `parallel_draft=512` outperformed both `768` and `384` in focused latency probes without hurting the A/B/C output format.
 
 ## Next Calibration Targets
 

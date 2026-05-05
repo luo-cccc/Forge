@@ -79,9 +79,9 @@ OPENAI_CHAPTER_DRAFT_MAX_TOKENS=6000
 OPENAI_GHOST_PREVIEW_TEMPERATURE=0.55
 OPENAI_GHOST_PREVIEW_MAX_TOKENS=160
 OPENAI_ANALYSIS_TEMPERATURE=0.2
-OPENAI_ANALYSIS_MAX_TOKENS=768
+OPENAI_ANALYSIS_MAX_TOKENS=384
 OPENAI_PARALLEL_DRAFT_TEMPERATURE=0.85
-OPENAI_PARALLEL_DRAFT_MAX_TOKENS=768
+OPENAI_PARALLEL_DRAFT_MAX_TOKENS=512
 OPENAI_MANUAL_REWRITE_TEMPERATURE=0.6
 OPENAI_MANUAL_REWRITE_MAX_TOKENS=512
 OPENAI_TOOL_CONTINUATION_TEMPERATURE=0.7
@@ -115,7 +115,7 @@ cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -
 
 These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
 
-Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. The current best measured chapter profile uses `maxTokens=640` plus the stronger anchor-participation prompt and reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8` in the latest 5-chapter run. There is now an opt-in real `api_integration_tests::real_author_session_three_chapter_smoke` gate in Rust in addition to the versioned `npm run real:author-session` long-session runner. Both the runner and the Rust runtime now read the same profile baseline and anchor-carry heuristics from `config/`. See `docs/real-provider-tuning.md` for the sanitized evidence log.
+Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. The current best measured chapter profile uses `maxTokens=640` plus the stronger anchor-participation prompt and reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8` in the latest 5-chapter run. `analysis` and `parallel_draft` were also re-tuned as explicit on-demand tools rather than new gated flows: the current shared defaults are `analysis.maxTokens=384` and `parallel_draft.maxTokens=512`. There is now an opt-in real `api_integration_tests::real_author_session_three_chapter_smoke` gate in Rust in addition to the versioned `npm run real:author-session` long-session runner. Both the runner and the Rust runtime now read the same profile baseline and anchor-carry heuristics from `config/`. See `docs/real-provider-tuning.md` for the sanitized evidence log.
 
 ## Development
 
