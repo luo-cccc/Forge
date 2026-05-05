@@ -4,7 +4,7 @@ const { spawnSync } = require("child_process");
 
 const baselineItems = [
   ["cargo test -p agent-harness-core", "88 tests passing"],
-  ["cargo test -p agent-writer", "227 tests passing"],
+  ["cargo test -p agent-writer", "228 tests passing"],
   ["cargo run -p agent-evals", "246/246 evals passing"],
   ["npm run check:p2", "18/18 checks passing"],
   ["npm run check:p2-render", "write-mode DOM guard passing"],

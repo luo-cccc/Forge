@@ -21,11 +21,12 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 
 ## Sanitized Runs
 
-| Run | Chapter reasoning | Avg chat latency | P95 chat latency | Avg draft chars | Min anchor hit rate | JSON valid | A/B/C valid | Hook rate | Provider failures |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 2026-05-05T11:56Z | Disabled | 5.1s | 17.5s | 662 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
-| 2026-05-05T12:14Z | Enabled | 6.9s | 25.0s | 571 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
-| 2026-05-05T12:18Z | Disabled | 5.2s | 19.9s | 564 | 0.6 | 1.0 | 1.0 | 1.0 | 0 |
+| Run | Chapter reasoning | Avg chat latency | P95 chat latency | Avg draft chars | Min anchor hit rate | Min anchor carry rate | JSON valid | A/B/C valid | Hook rate | Provider failures |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-05-05T11:56Z | Disabled | 5.1s | 17.5s | 662 | 0.8 | n/a | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T12:14Z | Enabled | 6.9s | 25.0s | 571 | 0.8 | n/a | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T12:18Z | Disabled | 5.2s | 19.9s | 564 | 0.6 | n/a | 1.0 | 1.0 | 1.0 | 0 |
+| 2026-05-05T12:54Z | Disabled | 5.1s | 13.4s | 591 | 0.8 | 0.8 | 1.0 | 1.0 | 1.0 | 0 |
 
 ## Evidence-Based Findings
 
@@ -34,6 +35,7 @@ This log records sanitized evidence from local real-provider runs. It deliberate
 - Chapter reasoning disabled lowered average latency in both disabled-vs-enabled comparisons, but the latest disabled run had lower minimum anchor hit rate. The project should not claim a final optimum yet.
 - The remaining bottleneck is latency tail. Even with reasoning disabled, one JSON call reached about 31.7s in the latest run, so provider/network variance and profile-specific retries still need observation.
 - First-pass anchor carry scoring is now covered by `writer_agent:anchor_carry_metric`. It catches the concrete failure mode exposed by real testing: a draft can mention every anchor while carrying none of them through action, dialogue, consequence, or payoff pressure.
+- The real-provider calibration chain now has two levels: a Rust `api_integration_tests::real_author_session_three_chapter_smoke` gate for repeatable opt-in regression checks, and the ignored local 5-chapter runner for richer tuning metrics. The latest 5-chapter run with chapter reasoning disabled and carry scoring enabled reached `minAnchorCarryRate=0.8` with `p95ChatLatencyMs=13398`.
 
 ## Next Calibration Targets
 

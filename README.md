@@ -115,7 +115,7 @@ cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -
 
 These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
 
-Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. Chapter reasoning A/B showed a latency/anchor tradeoff, so Forge defaults chapter drafts to provider-scoped reasoning disabled while strengthening the chapter prompt to carry active anchors through scene action, dialogue, consequence, or payoff pressure. See `docs/real-provider-tuning.md` for the sanitized evidence log.
+Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. The current low-latency chapter profile also reached `minAnchorCarryRate=0.8` and `p95ChatLatencyMs=13398` in the latest 5-chapter run, and there is now an opt-in real `api_integration_tests::real_author_session_three_chapter_smoke` gate in Rust in addition to the ignored local long-session runner. See `docs/real-provider-tuning.md` for the sanitized evidence log.
 
 ## Development
 
@@ -191,7 +191,7 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 227 tests passing
+- `cargo test -p agent-writer`: 228 tests passing
 - `cargo run -p agent-evals`: 246/246 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing

@@ -63,6 +63,98 @@ fn elapsed_ms(started: std::time::Instant) -> u128 {
     started.elapsed().as_millis()
 }
 
+fn score_anchor_carry(text: &str, anchors: &[&str]) -> f64 {
+    let sentences = text
+        .split(['。', '！', '？', '!', '?', '；', ';', '\n'])
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect::<Vec<_>>();
+    let action_terms = [
+        "拔",
+        "握",
+        "递",
+        "交",
+        "救",
+        "追",
+        "挡",
+        "打开",
+        "藏",
+        "拿",
+        "看",
+        "盯",
+        "亮出",
+        "压",
+        "斩",
+        "换",
+        "插",
+        "转",
+        "抢",
+        "护",
+        "逼问",
+        "承认",
+        "选择",
+        "摊",
+        "展开",
+        "翻",
+        "读",
+        "放回",
+        "递出去",
+        "逼",
+        "追问",
+    ];
+    let dialogue_terms = [
+        "\"", "“", "”", "说", "问", "喊", "答", "承认", "道", "低声", "开口", "接话",
+    ];
+    let consequence_terms = [
+        "因此",
+        "于是",
+        "导致",
+        "逼得",
+        "只好",
+        "选择",
+        "决定",
+        "代价",
+        "后果",
+        "失去",
+        "换来",
+        "发现",
+        "意识到",
+        "确认",
+        "暴露",
+        "牵出",
+        "重新",
+        "不敢",
+        "被迫",
+    ];
+    let payoff_terms = [
+        "要还", "还债", "偿还", "清算", "兑现", "伏笔", "真相", "账册", "代价", "承诺", "线索",
+        "缺页", "入口", "交易", "选择", "信任", "背叛", "道歉", "秘密", "谜底", "追债",
+    ];
+
+    let carried = anchors
+        .iter()
+        .filter(|anchor| {
+            sentences.iter().any(|sentence| {
+                sentence.contains(**anchor)
+                    && [
+                        &action_terms[..],
+                        &dialogue_terms[..],
+                        &consequence_terms[..],
+                        &payoff_terms[..],
+                    ]
+                    .iter()
+                    .any(|terms| terms.iter().any(|term| sentence.contains(term)))
+            })
+        })
+        .count();
+
+    if anchors.is_empty() {
+        1.0
+    } else {
+        carried as f64 / anchors.len() as f64
+    }
+}
+
 async fn run_text_profile_smoke(
     settings: &llm_runtime::LlmSettings,
     test_name: &str,
@@ -368,6 +460,81 @@ async fn chat_text_handles_long_chinese_context() {
         }
         Err(e) => panic!("long_context failed: {e}"),
     }
+}
+
+#[tokio::test]
+async fn real_author_session_three_chapter_smoke() {
+    let Some(settings) = test_settings("real_author_session_three_chapter_smoke") else {
+        return;
+    };
+
+    let anchors = ["寒影刀", "张三", "镜中墟", "霜铃塔", "旧债"];
+    let chapter_plans = [
+        "第一章：林墨在雨夜茶馆逼问张三，亮出寒影刀，旧债被重新点燃。",
+        "第二章：张三交出半页霜铃塔账册，但隐瞒镜中墟入口代价。",
+        "第三章：林墨进入镜中墟，看见旧友的倒影，意识到寒影刀曾被用来封门。",
+    ];
+    let mut rolling_summary = String::new();
+    let mut drafts = Vec::new();
+    let mut carry_rates = Vec::new();
+
+    for plan in chapter_plans {
+        let context = [
+            "项目: 镜中墟".to_string(),
+            "Story Contract: 都市玄幻长篇。主角林墨追查寒影刀旧债，张三掌握镜中墟入口，霜铃塔账册牵出北境宗门。章节要持续制造情绪债务并逐步兑现，不能自动抹平旧伏笔。".to_string(),
+            format!("当前计划: {plan}"),
+            if rolling_summary.is_empty() {
+                "前文摘要: 无".to_string()
+            } else {
+                format!("前文摘要: {rolling_summary}")
+            },
+            "硬约束锚点: 寒影刀、张三、镜中墟、霜铃塔、旧债。正文必须保留至少 3 个锚点，并让相关锚点通过行动、对话、后果或债务压力参与当前场景。".to_string(),
+            "要求: 写 320-500 字中文正文；保留商业网文节奏；制造或兑现情绪债务；不要解释，不要 Markdown。".to_string(),
+        ]
+        .join("\n");
+
+        let draft = run_text_profile_smoke(
+            &settings,
+            "real_author_session_three_chapter_smoke.chapter",
+            llm_runtime::LlmRequestProfile::ChapterDraft,
+            vec![
+                serde_json::json!({"role": "system", "content": "你是中文长篇小说作者。只输出正文。重视人物关系、伏笔、情绪债务、兑现节奏和章节钩子。不得静默丢失当前上下文中的命名锚点和未偿债务。"}),
+                serde_json::json!({"role": "user", "content": context}),
+            ],
+            90,
+        )
+        .await;
+
+        let hit_count = anchors
+            .iter()
+            .filter(|anchor| draft.contains(**anchor))
+            .count();
+        assert!(
+            hit_count >= 3,
+            "chapter draft dropped too many anchors: hit_count={hit_count} draft={draft}"
+        );
+
+        let carry_rate = score_anchor_carry(&draft, &anchors);
+        carry_rates.push(carry_rate);
+        drafts.push(draft.clone());
+        assert!(
+            carry_rate >= 0.6,
+            "chapter draft anchor carry too weak: carry_rate={carry_rate:.2} draft={draft}"
+        );
+
+        rolling_summary = preview_text(&draft, 220);
+    }
+
+    eprintln!(
+        "real_author_session_three_chapter_smoke ok chapters={} min_carry_rate={:.2} avg_chars={}",
+        drafts.len(),
+        carry_rates.iter().fold(1.0_f64, |min, rate| min.min(*rate)),
+        drafts
+            .iter()
+            .map(|draft| draft.chars().count())
+            .sum::<usize>()
+            / drafts.len().max(1)
+    );
 }
 
 #[tokio::test]
