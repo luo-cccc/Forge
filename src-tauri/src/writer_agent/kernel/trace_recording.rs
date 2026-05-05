@@ -121,6 +121,7 @@ impl WriterAgentKernel {
         self.task_packets.push(trace);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn push_operation_lifecycle(
         &mut self,
         proposal_id: Option<String>,
@@ -489,6 +490,7 @@ impl WriterAgentKernel {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn record_save_completed_run_event(
         &mut self,
         observation_id: impl Into<String>,
@@ -569,6 +571,7 @@ impl WriterAgentKernel {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_model_started_run_event(
         &mut self,
         task_id: impl Into<String>,
@@ -604,6 +607,7 @@ impl WriterAgentKernel {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_tool_called_run_event(
         &mut self,
         task_id: impl Into<String>,

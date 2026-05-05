@@ -270,10 +270,12 @@ pub async fn batch_generate_chapter(
         let model_app = app_clone.clone();
 
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
-            app_clone.clone(),
-            settings,
-            payload,
-            user_profile_entries,
+            crate::chapter_generation::ChapterGenerationConfig {
+                app: app_clone.clone(),
+                settings,
+                payload,
+                user_profile_entries,
+            },
             |event| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
@@ -407,10 +409,12 @@ pub async fn generate_chapter_autonomous(
         let budget_app = app_clone.clone();
         let model_app = app_clone.clone();
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
-            app_clone.clone(),
-            settings,
-            payload,
-            user_profile_entries,
+            crate::chapter_generation::ChapterGenerationConfig {
+                app: app_clone.clone(),
+                settings,
+                payload,
+                user_profile_entries,
+            },
             |event: ChapterGenerationEvent| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },

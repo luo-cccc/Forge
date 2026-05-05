@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::diagnostics::{DiagnosticCategory, DiagnosticSeverity};
 use super::memory::WriterMemory;
+use super::post_write_diagnostics::WriterPostWriteDiagnosticReport;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +38,14 @@ pub struct SettlementItem {
     pub suggested_action: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ChapterSettlementEvidence<'a> {
+    pub saved_chapter_text: Option<&'a str>,
+    pub post_write_diagnostics: Option<&'a WriterPostWriteDiagnosticReport>,
+    pub story_impact_risk: Option<&'a str>,
+    pub story_impact_sources: &'a [String],
+}
+
 /// Build a settlement queue from post-save memory state.
 /// All items are proposals — nothing is written automatically.
 pub fn build_chapter_settlement_queue(
@@ -44,11 +54,119 @@ pub fn build_chapter_settlement_queue(
     memory: &WriterMemory,
     project_id: &str,
 ) -> ChapterSettlementQueue {
+    build_chapter_settlement_queue_with_evidence(
+        chapter_title,
+        chapter_revision,
+        memory,
+        project_id,
+        ChapterSettlementEvidence::default(),
+    )
+}
+
+/// Build a settlement queue from real post-save evidence.
+/// All items are proposals — nothing is written automatically.
+pub fn build_chapter_settlement_queue_with_evidence(
+    chapter_title: &str,
+    chapter_revision: &str,
+    memory: &WriterMemory,
+    project_id: &str,
+    evidence: ChapterSettlementEvidence<'_>,
+) -> ChapterSettlementQueue {
     let mut canon_updates = Vec::new();
     let mut promise_updates = Vec::new();
     let mut mission_suggestions = Vec::new();
+    let mut style_notes = Vec::new();
     let mut continuity_risks = Vec::new();
     let mut evidence_refs = Vec::new();
+
+    evidence_refs.push(format!("chapter:{}", chapter_title));
+    evidence_refs.push(format!("revision:{}", chapter_revision));
+    if let Some(report) = evidence.post_write_diagnostics {
+        evidence_refs.extend(report.source_refs.iter().cloned());
+        for diagnostic in &report.diagnostics {
+            let priority = priority_for_diagnostic(&diagnostic.severity);
+            let item = SettlementItem {
+                id: format!("diagnostic:{}", diagnostic.diagnostic_id),
+                category: settlement_category_for_diagnostic(&diagnostic.category).to_string(),
+                title: diagnostic.message.clone(),
+                description: diagnostic.fix_suggestion.clone().unwrap_or_else(|| {
+                    "Review this post-write diagnostic before continuing.".to_string()
+                }),
+                priority: priority.to_string(),
+                requires_approval: requires_approval_for_diagnostic(&diagnostic.category),
+                evidence_source: diagnostic
+                    .evidence_refs
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| format!("post_write_diagnostics:{}", report.observation_id)),
+                suggested_action: suggested_action_for_diagnostic(&diagnostic.category).to_string(),
+            };
+            match diagnostic.category {
+                DiagnosticCategory::CanonConflict => canon_updates.push(item),
+                DiagnosticCategory::UnresolvedPromise => promise_updates.push(item),
+                DiagnosticCategory::StoryContractViolation
+                | DiagnosticCategory::ChapterMissionViolation => mission_suggestions.push(item),
+                DiagnosticCategory::CharacterVoiceInconsistency
+                | DiagnosticCategory::PacingNote => style_notes.push(item),
+                DiagnosticCategory::TimelineIssue => continuity_risks.push(item),
+            }
+        }
+        if report.error_count > 0 {
+            continuity_risks.push(SettlementItem {
+                id: format!("post_write_blockers:{}", report.observation_id),
+                category: "continuity".to_string(),
+                title: format!("保存后诊断发现 {} 个阻断错误", report.error_count),
+                description: report.remediation.join(" "),
+                priority: "high".to_string(),
+                requires_approval: false,
+                evidence_source: format!("post_write_diagnostics:{}", report.observation_id),
+                suggested_action: "先处理阻断诊断，再继续下一次写入".to_string(),
+            });
+        }
+    }
+
+    if let Some(text) = evidence.saved_chapter_text {
+        if text.trim().is_empty() {
+            continuity_risks.push(SettlementItem {
+                id: format!("empty_save:{}", chapter_revision),
+                category: "continuity".to_string(),
+                title: "保存正文为空".to_string(),
+                description: "Saved chapter text is empty for this revision.".to_string(),
+                priority: "high".to_string(),
+                requires_approval: false,
+                evidence_source: format!("revision:{}", chapter_revision),
+                suggested_action: "确认保存状态或恢复上一版正文".to_string(),
+            });
+        }
+        evidence_refs.push(format!(
+            "chapter_text:{}:chars={}",
+            chapter_revision,
+            text.chars().count()
+        ));
+    }
+
+    if let Some(risk) = evidence.story_impact_risk {
+        evidence_refs.extend(evidence.story_impact_sources.iter().cloned());
+        if risk.eq_ignore_ascii_case("high") || risk.eq_ignore_ascii_case("blocked") {
+            continuity_risks.push(SettlementItem {
+                id: format!("story_impact:{}", chapter_revision),
+                category: "continuity".to_string(),
+                title: format!("Story Impact 风险: {}", risk),
+                description: format!(
+                    "This saved revision touches {} story impact sources.",
+                    evidence.story_impact_sources.len()
+                ),
+                priority: "high".to_string(),
+                requires_approval: false,
+                evidence_source: evidence
+                    .story_impact_sources
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| format!("story_impact:{}", chapter_revision)),
+                suggested_action: "在继续写作前审查受影响的 canon / promise / mission".to_string(),
+            });
+        }
+    }
 
     // Canon: flag entities with low confidence.
     if let Ok(entities) = memory.list_canon_entities() {
@@ -118,9 +236,9 @@ pub fn build_chapter_settlement_queue(
     if let Ok(feedback_entries) = memory.list_memory_feedback(5) {
         for entry in &feedback_entries {
             if entry.action == "correction" {
-                continuity_risks.push(SettlementItem {
+                style_notes.push(SettlementItem {
                     id: format!("style:{}", entry.slot),
-                    category: "continuity".to_string(),
+                    category: "style".to_string(),
                     title: format!("风格纠错: {}", entry.slot),
                     description: entry.reason.clone().unwrap_or_default(),
                     priority: "medium".to_string(),
@@ -139,6 +257,15 @@ pub fn build_chapter_settlement_queue(
         + promise_updates
             .iter()
             .filter(|i| i.priority == "high")
+            .count()
+        + mission_suggestions
+            .iter()
+            .filter(|i| i.priority == "high")
+            .count()
+        + style_notes.iter().filter(|i| i.priority == "high").count()
+        + continuity_risks
+            .iter()
+            .filter(|i| i.priority == "high")
             .count();
 
     ChapterSettlementQueue {
@@ -147,12 +274,62 @@ pub fn build_chapter_settlement_queue(
         canon_updates,
         promise_updates,
         mission_suggestions,
-        style_notes: Vec::new(),
+        style_notes,
         continuity_risks,
         high_priority_count: high_priority,
         requires_author_approval: high_priority > 0,
-        evidence_refs,
+        evidence_refs: normalize_refs(evidence_refs),
     }
+}
+
+fn priority_for_diagnostic(severity: &DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "high",
+        DiagnosticSeverity::Warning => "medium",
+        DiagnosticSeverity::Info => "low",
+    }
+}
+
+fn settlement_category_for_diagnostic(category: &DiagnosticCategory) -> &'static str {
+    match category {
+        DiagnosticCategory::CanonConflict => "canon",
+        DiagnosticCategory::UnresolvedPromise => "promise",
+        DiagnosticCategory::StoryContractViolation
+        | DiagnosticCategory::ChapterMissionViolation => "mission",
+        DiagnosticCategory::CharacterVoiceInconsistency | DiagnosticCategory::PacingNote => "style",
+        DiagnosticCategory::TimelineIssue => "continuity",
+    }
+}
+
+fn requires_approval_for_diagnostic(category: &DiagnosticCategory) -> bool {
+    matches!(
+        category,
+        DiagnosticCategory::CanonConflict
+            | DiagnosticCategory::UnresolvedPromise
+            | DiagnosticCategory::StoryContractViolation
+            | DiagnosticCategory::ChapterMissionViolation
+    )
+}
+
+fn suggested_action_for_diagnostic(category: &DiagnosticCategory) -> &'static str {
+    match category {
+        DiagnosticCategory::CanonConflict => "审查并确认是否更新 Canon",
+        DiagnosticCategory::UnresolvedPromise => "审查伏笔状态，确认兑现、延期或放弃",
+        DiagnosticCategory::StoryContractViolation => "审查 Story Contract 偏离",
+        DiagnosticCategory::ChapterMissionViolation => "审查 Chapter Mission 状态",
+        DiagnosticCategory::TimelineIssue => "审查时间线连续性风险",
+        DiagnosticCategory::CharacterVoiceInconsistency | DiagnosticCategory::PacingNote => {
+            "审查作者声音或节奏漂移"
+        }
+    }
+}
+
+fn normalize_refs(refs: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    refs.into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
 }
 
 #[cfg(test)]

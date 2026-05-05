@@ -164,7 +164,7 @@ pub fn build_author_voice_snapshot(
 /// Compute style drift diagnostics comparing a chapter against the voice snapshot.
 pub fn compute_style_drift(
     voice: &AuthorVoiceSnapshot,
-    _chapter_content: &str,
+    chapter_content: &str,
     chapter_title: &str,
 ) -> StyleDriftDiagnostic {
     let mut drift_signals = Vec::new();
@@ -175,6 +175,67 @@ pub fn compute_style_drift(
             aspect: "diction".to_string(),
             expected_pattern: "established voice register".to_string(),
             observed_pattern: "insufficient samples for comparison".to_string(),
+            severity: "medium".to_string(),
+        });
+    }
+
+    let observed_sentence_length = average_sentence_length(chapter_content);
+    if observed_sentence_length > 0.0 {
+        let expected = voice.rhythm.avg_sentence_length.max(1.0);
+        let ratio = (observed_sentence_length - expected).abs() / expected;
+        if ratio >= 0.5 {
+            drift_signals.push(DriftSignal {
+                aspect: "rhythm".to_string(),
+                expected_pattern: format!("average sentence length around {:.1}", expected),
+                observed_pattern: format!(
+                    "average sentence length {:.1}",
+                    observed_sentence_length
+                ),
+                severity: if ratio >= 1.0 { "high" } else { "medium" }.to_string(),
+            });
+        }
+    }
+
+    let observed_dialogue_ratio = dialogue_ratio(chapter_content);
+    if !voice.dialogue_texture.trim().is_empty() {
+        let expected_dialogue_floor = if voice.dialogue_texture.contains("subtext")
+            || voice.dialogue_texture.contains("dialogue")
+        {
+            0.08
+        } else {
+            0.0
+        };
+        if expected_dialogue_floor > 0.0 && observed_dialogue_ratio < expected_dialogue_floor {
+            drift_signals.push(DriftSignal {
+                aspect: "dialogue".to_string(),
+                expected_pattern: "dialogue/subtext presence".to_string(),
+                observed_pattern: format!("dialogue ratio {:.2}", observed_dialogue_ratio),
+                severity: "medium".to_string(),
+            });
+        }
+    }
+
+    for taboo in &voice.taboo_phrases {
+        let normalized = taboo.trim();
+        if normalized.is_empty() || normalized.starts_with("[correction]") {
+            continue;
+        }
+        if chapter_content.contains(normalized) {
+            drift_signals.push(DriftSignal {
+                aspect: "diction".to_string(),
+                expected_pattern: format!("avoid phrase '{}'", normalized),
+                observed_pattern: format!("found taboo phrase '{}'", normalized),
+                severity: "high".to_string(),
+            });
+        }
+    }
+
+    let punctuation_density = punctuation_density(chapter_content);
+    if voice.diction.register == "literary" && punctuation_density > 0.18 {
+        drift_signals.push(DriftSignal {
+            aspect: "sentence_shape".to_string(),
+            expected_pattern: "controlled punctuation density for literary prose".to_string(),
+            observed_pattern: format!("punctuation density {:.2}", punctuation_density),
             severity: "medium".to_string(),
         });
     }
@@ -193,6 +254,51 @@ pub fn compute_style_drift(
         overall_severity: overall.to_string(),
         evidence_links: voice.sample_refs.clone(),
     }
+}
+
+fn average_sentence_length(content: &str) -> f64 {
+    let sentences = content
+        .split(['。', '！', '？', '.', '!', '?'])
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect::<Vec<_>>();
+    if sentences.is_empty() {
+        return 0.0;
+    }
+    let total_chars = sentences
+        .iter()
+        .map(|sentence| sentence.chars().filter(|c| !c.is_whitespace()).count())
+        .sum::<usize>();
+    total_chars as f64 / sentences.len() as f64
+}
+
+fn dialogue_ratio(content: &str) -> f64 {
+    let total = content.chars().filter(|c| !c.is_whitespace()).count();
+    if total == 0 {
+        return 0.0;
+    }
+    let dialogue_marks = content
+        .chars()
+        .filter(|c| matches!(c, '“' | '”' | '"' | '「' | '」'))
+        .count();
+    (dialogue_marks as f64 / 2.0).min(total as f64) / total as f64
+}
+
+fn punctuation_density(content: &str) -> f64 {
+    let total = content.chars().filter(|c| !c.is_whitespace()).count();
+    if total == 0 {
+        return 0.0;
+    }
+    let punctuation = content
+        .chars()
+        .filter(|c| {
+            matches!(
+                c,
+                '，' | '。' | '、' | '；' | '：' | '！' | '？' | ',' | '.' | ';' | ':' | '!' | '?'
+            )
+        })
+        .count();
+    punctuation as f64 / total as f64
 }
 
 #[cfg(test)]
@@ -228,8 +334,16 @@ mod tests {
             .upsert_style_preference("literary_prose", "文学表达", false)
             .ok();
         let voice = build_author_voice_snapshot(&memory, &["Ch1".to_string()], 100);
-        let drift = compute_style_drift(&voice, "sample text", "Chapter-2");
+        let drift = compute_style_drift(
+            &voice,
+            "这是一个极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长的句子。",
+            "Chapter-2",
+        );
         assert!(!drift.evidence_links.is_empty());
         assert!(!drift.overall_severity.is_empty());
+        assert!(drift
+            .drift_signals
+            .iter()
+            .any(|signal| signal.aspect == "rhythm"));
     }
 }

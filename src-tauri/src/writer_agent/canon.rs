@@ -17,6 +17,12 @@ pub struct CanonCheck {
     pub confidence: f64,
 }
 
+impl Default for CanonEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CanonEngine {
     pub fn new() -> Self {
         Self

@@ -64,10 +64,8 @@ impl WriterAgentKernel {
             }
         }
 
-        // Observe → context pack → Story Impact
-        let _proposals = self
-            .observe(request.observation.clone())
-            .unwrap_or_default();
+        // Context pack → Story Impact. Keep preflight read-only: do not call
+        // observe(), which records observations, proposals, and save diagnostics.
         let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
         let (impact_radius, impact_budget) =
             crate::writer_agent::story_impact::compute_story_impact(
@@ -124,8 +122,8 @@ impl WriterAgentKernel {
 
         // Story Contract quality
         let (contract_quality, _gaps) = self.contract_quality_with_gaps();
-        if task_requires_story_grounding(&request.task) {
-            if contract_quality <= StoryContractQuality::Vague {
+        if task_requires_story_grounding(&request.task)
+            && contract_quality <= StoryContractQuality::Vague {
                 warnings.push(crate::writer_agent::run_preflight::PreflightItem {
                     code: "story_contract_weak".to_string(),
                     reason: format!(
@@ -136,7 +134,6 @@ impl WriterAgentKernel {
                 next_actions
                     .push("Strengthen the Story Contract in Settings before running".to_string());
             }
-        }
 
         // Tool inventory
         let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);

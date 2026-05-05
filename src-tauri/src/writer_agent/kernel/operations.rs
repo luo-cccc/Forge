@@ -264,14 +264,9 @@ impl WriterAgentKernel {
         chapter_revision: Option<String>,
         created_at: u64,
     ) -> Option<crate::writer_agent::post_write_diagnostics::WriterPostWriteDiagnosticReport> {
-        let Some(saved_text) = saved_text.map(str::trim).filter(|text| !text.is_empty()) else {
-            return None;
-        };
-        let Some((paragraph, paragraph_offset, cursor)) =
-            operation_post_write_diagnostic_window(saved_text, operation)
-        else {
-            return None;
-        };
+        let saved_text = saved_text.map(str::trim).filter(|text| !text.is_empty())?;
+        let (paragraph, paragraph_offset, cursor) =
+            operation_post_write_diagnostic_window(saved_text, operation)?;
         let chapter = chapter_title
             .or_else(|| operation_chapter(operation))
             .or_else(|| self.active_chapter.clone())

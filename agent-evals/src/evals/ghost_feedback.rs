@@ -15,7 +15,7 @@ pub fn run_multi_ghost_eval() -> EvalResult {
     if ghost.is_none() {
         errors.push("missing ghost proposal".to_string());
     }
-    if !ghost.is_some_and(|proposal| proposal.alternatives.len() == 3) {
+    if ghost.is_none_or(|proposal| proposal.alternatives.len() != 3) {
         errors.push("ghost proposal should contain exactly three branches".to_string());
     }
     if !ghost.is_some_and(|proposal| {
@@ -1117,7 +1117,7 @@ pub fn run_ghost_quality_confidence_eval() -> EvalResult {
         .unwrap();
     let conf_usable =
         agent_writer_lib::writer_agent::kernel::ghost_confidence(0.8, &usable_mem, "test");
-    if conf_usable < 0.75 || conf_usable > 0.91 {
+    if !(0.75..=0.91).contains(&conf_usable) {
         errors.push(format!(
             "usable contract ghost confidence {} should be near 0.8",
             conf_usable

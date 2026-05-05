@@ -188,12 +188,14 @@ pub fn run_story_contract_negated_guard_eval() -> EvalResult {
 
 pub fn run_story_contract_quality_nominal_eval() -> EvalResult {
     let empty = StoryContractSummary::default();
-    let mut vague = StoryContractSummary::default();
-    vague.project_id = "eval".to_string();
-    vague.title = "测试".to_string();
-    vague.genre = "玄幻".to_string();
-    vague.reader_promise = "一个故事".to_string();
-    vague.main_conflict = "冲突".to_string();
+    let vague = StoryContractSummary {
+        project_id: "eval".to_string(),
+        title: "测试".to_string(),
+        genre: "玄幻".to_string(),
+        reader_promise: "一个故事".to_string(),
+        main_conflict: "冲突".to_string(),
+        ..Default::default()
+    };
     let mut usable = vague.clone();
     usable.reader_promise = "刀客追查玉佩真相，在复仇与守护之间做出最终选择。".to_string();
     usable.main_conflict = "林墨必须在复仇和守护之间做艰难选择。".to_string();
@@ -225,7 +227,7 @@ pub fn run_story_contract_quality_nominal_eval() -> EvalResult {
     if vague.quality_gaps().len() < 3 {
         errors.push("vague contract should report specific gaps".to_string());
     }
-    if strong.quality_gaps().len() != 0 {
+    if !strong.quality_gaps().is_empty() {
         errors.push("strong contract should have zero gaps".to_string());
     }
 

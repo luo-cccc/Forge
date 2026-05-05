@@ -39,7 +39,7 @@ pub fn run_chapter_mission_result_feedback_eval() -> EvalResult {
     let ledger = kernel.ledger_snapshot();
     let mut errors = Vec::new();
     let mission = ledger.active_chapter_mission.as_ref();
-    if !mission.is_some_and(|mission| mission.status == "completed") {
+    if mission.is_none_or(|mission| mission.status != "completed") {
         errors.push(format!(
             "mission was not completed: {:?}",
             mission.map(|mission| mission.status.as_str())
@@ -95,7 +95,7 @@ pub fn run_chapter_mission_partial_progress_eval() -> EvalResult {
 
     let mut errors = Vec::new();
     let mission = ledger.active_chapter_mission.as_ref();
-    if !mission.is_some_and(|mission| mission.status == "completed") {
+    if mission.is_none_or(|mission| mission.status != "completed") {
         errors.push(format!(
             "expected mission completed from must_include + ending, got {:?}",
             mission.map(|mission| mission.status.as_str())
@@ -304,7 +304,7 @@ pub fn run_chapter_mission_drifted_no_duplicate_save_gap_eval() -> EvalResult {
 
     let mut errors = Vec::new();
     let mission = kernel.ledger_snapshot().active_chapter_mission;
-    if !mission.is_some_and(|mission| mission.status == "drifted") {
+    if mission.is_none_or(|mission| mission.status != "drifted") {
         errors.push("mission did not calibrate to drifted".to_string());
     }
     let calibration = proposals.iter().any(|p| {
@@ -441,7 +441,7 @@ pub fn run_mission_blocked_retired_not_auto_calibrated_eval() -> EvalResult {
         .count();
 
     let mut errors = Vec::new();
-    if !mission.is_some_and(|mission| mission.status == "blocked") {
+    if mission.is_none_or(|mission| mission.status != "blocked") {
         errors.push(format!(
             "blocked mission was auto-calibrated: {:?}",
             mission.map(|mission| mission.status.as_str())
@@ -506,12 +506,15 @@ pub fn run_mission_drift_flag_eval() -> EvalResult {
     let mut errors = Vec::new();
 
     let mission = ledger.active_chapter_mission.as_ref();
-    if mission.is_none() {
+    if let Some(mission) = mission {
+        if mission.status == "completed" {
+            errors.push(
+                "mission should not be completed when text ignores mission requirements"
+                    .to_string(),
+            );
+        }
+    } else {
         errors.push("chapter mission not found".to_string());
-    } else if mission.unwrap().status == "completed" {
-        errors.push(
-            "mission should not be completed when text ignores mission requirements".to_string(),
-        );
     }
     if debt.mission_count == 0 {
         errors.push("mission drift should produce mission story debt".to_string());

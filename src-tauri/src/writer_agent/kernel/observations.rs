@@ -275,7 +275,7 @@ impl WriterAgentKernel {
                 &format!("mission_status:{}", status),
                 &[],
                 &mission.render_for_context(),
-                &[result.source_ref.clone()],
+                std::slice::from_ref(&result.source_ref),
             )
             .ok();
 

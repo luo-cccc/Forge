@@ -97,19 +97,19 @@ pub(crate) fn validate_story_contract_summary(contract: &StoryContractSummary) -
     let quality = contract.quality();
     match quality {
         StoryContractQuality::Missing => {
-            return Some(
+            Some(
                 "Story Contract is empty: fill in at minimum the genre, reader promise, main conflict, and tone contract.".to_string(),
-            );
+            )
         }
         StoryContractQuality::Vague => {
             let gaps = contract.quality_gaps();
-            return Some(format!(
+            Some(format!(
                 "Story Contract is too vague to guide the writing agent. Key gaps:\n{}",
                 gaps.iter()
                     .map(|gap| format!("  - {}", gap))
                     .collect::<Vec<_>>()
                     .join("\n")
-            ));
+            ))
         }
         StoryContractQuality::Usable | StoryContractQuality::Strong => None,
     }

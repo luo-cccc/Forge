@@ -813,13 +813,13 @@ pub fn run_story_impact_budget_counts_only_reached_drops_eval() -> EvalResult {
             budget.truncated_node_count
         ));
     }
-    if !dropped_ids.iter().any(|id| *id == "canon:寒玉戒指") {
+    if !dropped_ids.contains(&"canon:寒玉戒指") {
         errors.push(format!(
             "reachable canon node should be the only budget drop: {:?}",
             dropped_ids
         ));
     }
-    if dropped_ids.iter().any(|id| *id == "canon:无关旧井") {
+    if dropped_ids.contains(&"canon:无关旧井") {
         errors.push(format!(
             "disconnected canon node should not be counted as a budget drop: {:?}",
             dropped_ids

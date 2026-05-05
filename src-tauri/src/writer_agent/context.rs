@@ -473,7 +473,7 @@ pub fn assemble_context_pack(
             });
         }
     }
-    sources.sort_by(|left, right| right.priority.cmp(&left.priority));
+    sources.sort_by_key(|right| std::cmp::Reverse(right.priority));
 
     WritingContextPack {
         task,
@@ -536,7 +536,7 @@ pub fn append_context_source_with_budget(
         evidence_ref,
     });
     pack.sources
-        .sort_by(|left, right| right.priority.cmp(&left.priority));
+        .sort_by_key(|right| std::cmp::Reverse(right.priority));
     pack.budget_report.source_reports.push(SourceReport {
         source: format!("{:?}", source),
         requested,

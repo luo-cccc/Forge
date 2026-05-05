@@ -259,7 +259,7 @@ pub fn run_metacognitive_gate_allows_recovery_operation_eval() -> EvalResult {
             result.error.as_ref().map(|error| error.message.as_str())
         ));
     }
-    if !mission.is_some_and(|mission| mission.status == "drifted") {
+    if mission.is_none_or(|mission| mission.status != "drifted") {
         errors.push("recovery calibration did not update chapter mission".to_string());
     }
     if trace

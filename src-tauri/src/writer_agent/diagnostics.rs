@@ -320,11 +320,10 @@ fn extract_entities(paragraph: &str, memory: &WriterMemory) -> Vec<String> {
             // Check if followed by action verb or particle
             if i + 2 < chars.len() {
                 let next = chars[i + 2];
-                if matches!(next, '拔' | '握' | '拿' | '举' | '的' | '说' | '走' | '看') {
-                    if !entities.contains(&slice) {
+                if matches!(next, '拔' | '握' | '拿' | '举' | '的' | '说' | '走' | '看')
+                    && !entities.contains(&slice) {
                         entities.push(slice);
                     }
-                }
             }
         }
         i += 1;

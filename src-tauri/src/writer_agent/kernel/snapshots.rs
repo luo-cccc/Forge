@@ -383,7 +383,7 @@ impl WriterAgentKernel {
             .memory
             .list_project_run_events(&self.project_id, event_limit)
             .unwrap_or_default();
-        product_metrics_trend_from_run_events(&events, limit.min(12).max(3))
+        product_metrics_trend_from_run_events(&events, limit.clamp(3, 12))
     }
 }
 

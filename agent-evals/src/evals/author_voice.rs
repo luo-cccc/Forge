@@ -82,9 +82,20 @@ pub fn run_style_drift_diagnostic_links_evidence_eval() -> EvalResult {
         .upsert_style_preference("literary_prose", "文学表达", false)
         .ok();
     let voice = build_author_voice_snapshot(&memory, &["Chapter-1".to_string()], 100);
-    let drift = compute_style_drift(&voice, "sample chapter text", "Chapter-2");
+    let drift = compute_style_drift(
+        &voice,
+        "这是一个极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长极长的句子。",
+        "Chapter-2",
+    );
     if drift.evidence_links.is_empty() {
         errors.push("drift diagnostic should link evidence".to_string());
+    }
+    if !drift
+        .drift_signals
+        .iter()
+        .any(|signal| signal.aspect == "rhythm")
+    {
+        errors.push("drift diagnostic should compare chapter text rhythm".to_string());
     }
     eval_result(
         "writer_agent:style_drift_diagnostic_links_evidence",

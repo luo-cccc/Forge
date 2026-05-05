@@ -332,8 +332,7 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
     let mut kernel = WriterAgentKernel::new("eval", memory);
     kernel.active_chapter = Some("Chapter-4".to_string());
     let focus = ProjectBrainFocus::from_kernel("旧门风声有什么含义？", &kernel);
-    let chunks = vec![
-        agent_harness_core::Chunk {
+    let chunks = [agent_harness_core::Chunk {
             id: "old-door".to_string(),
             chapter: "Chapter-1".to_string(),
             text: "旧门外的风声像传闻中的哭声，林墨反复听见旧门、风声和旧门。".to_string(),
@@ -358,8 +357,7 @@ pub fn run_project_brain_uses_writer_memory_focus_eval() -> EvalResult {
             source_kind: None,
             chunk_index: None,
             archived: false,
-        },
-    ];
+        }];
     let raw_results = vec![(50.0, &chunks[0]), (1.0, &chunks[1])];
     let reranked = rerank_project_brain_results_with_focus(raw_results, &focus);
     let first_id = reranked
@@ -764,8 +762,7 @@ pub fn run_project_brain_chapter_proximity_rerank_eval() -> EvalResult {
     let mut kernel = WriterAgentKernel::new("eval", memory);
     kernel.active_chapter = Some("Chapter-12".to_string());
     let focus = ProjectBrainFocus::from_kernel("寒玉戒指下落下一步怎么写？", &kernel);
-    let chunks = vec![
-        Chunk {
+    let chunks = [Chunk {
             id: "distant-ring-archive".to_string(),
             chapter: "Chapter-2".to_string(),
             text: "林墨第一次听说寒玉戒指下落与北境宗门有关，这个旧线索需要以后回收。".to_string(),
@@ -790,8 +787,7 @@ pub fn run_project_brain_chapter_proximity_rerank_eval() -> EvalResult {
             source_kind: None,
             chunk_index: None,
             archived: false,
-        },
-    ];
+        }];
     let raw_results = vec![(90.0, &chunks[0]), (90.0, &chunks[1])];
     let reranked = rerank_project_brain_results_with_focus(raw_results, &focus);
     let first_id = reranked

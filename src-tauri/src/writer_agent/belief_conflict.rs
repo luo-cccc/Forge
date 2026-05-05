@@ -233,7 +233,7 @@ fn canon_evidence(entities: &[CanonEntitySummary]) -> Vec<BeliefEvidence> {
 fn promise_evidence(promises: &[PlotPromiseSummary]) -> Vec<BeliefEvidence> {
     let mut evidence = Vec::new();
     for promise in promises {
-        let confidence = (0.64 + (promise.priority.max(0).min(10) as f64 * 0.025)).min(0.9);
+        let confidence = (0.64 + (promise.priority.clamp(0, 10) as f64 * 0.025)).min(0.9);
         push_evidence(
             &mut evidence,
             BeliefSource::PromiseLedger,
@@ -622,13 +622,13 @@ fn has_reveal_signal(text: &str) -> bool {
 
 fn is_reveal_claim(evidence: &BeliefEvidence) -> bool {
     let text = evidence.snippet.as_str();
-    has_reveal_signal(text)
-        && !has_forbid_signal(text)
-        && !(evidence.source == BeliefSource::PromiseLedger && has_deferred_payoff_signal(text))
-        && !text_contains_any(
+    !(!has_reveal_signal(text)
+        || has_forbid_signal(text)
+        || (evidence.source == BeliefSource::PromiseLedger && has_deferred_payoff_signal(text))
+        || text_contains_any(
             text,
             &["未知", "不明", "未揭示", "仍是悬念", "保持悬念", "保留"],
-        )
+        ))
 }
 
 fn guard_terms(text: &str) -> Vec<String> {

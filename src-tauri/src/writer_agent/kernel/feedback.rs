@@ -110,7 +110,7 @@ impl WriterAgentKernel {
         }
 
         if let Some(prop) = proposal.as_ref() {
-            self.suppress_slot_after_feedback(&prop, &feedback);
+            self.suppress_slot_after_feedback(prop, &feedback);
         }
 
         self.memory

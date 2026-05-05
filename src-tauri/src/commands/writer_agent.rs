@@ -169,10 +169,10 @@ pub fn approve_writer_operation(
                 &current_revision,
                 approval.as_ref(),
             )?;
-            if !preflight
+            if preflight
                 .error
                 .as_ref()
-                .is_some_and(|error| error.code == "invalid")
+                .is_none_or(|error| error.code != "invalid")
             {
                 return Ok(preflight);
             }

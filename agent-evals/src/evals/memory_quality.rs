@@ -89,7 +89,7 @@ pub fn run_memory_candidate_quality_validation_eval() -> EvalResult {
 
     eval_result(
         "writer_agent:memory_candidate_quality_validation",
-        format!("6 candidates validated"),
+        "6 candidates validated".to_string(),
         errors,
     )
 }

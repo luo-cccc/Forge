@@ -178,6 +178,7 @@ pub(crate) fn promise_candidate_proposal(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn canon_conflict_candidate_proposal(
     observation: &WriterObservation,
     observation_id: &str,
@@ -232,6 +233,7 @@ pub(crate) fn canon_conflict_candidate_proposal(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn canon_attribute_merge_candidate_proposal(
     observation: &WriterObservation,
     observation_id: &str,

@@ -64,6 +64,7 @@ fn switch_observation(
     obs
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_result(
     memory: &WriterMemory,
     chapter_title: &str,
@@ -1161,13 +1162,11 @@ fn seed_real_author_project_memory(memory: &WriterMemory) {
 }
 
 fn simulate_real_author_writing_session(kernel: &mut WriterAgentKernel, feedback_delay_ms: u64) {
-    let chapters = vec![
-        ("第一章", "苏晚把铜镜翻过来，背面刻的不是她记忆中的名字。镜墟在黄昏时分最安静，她把沈砚的画展开——画里少了一座塔。"),
+    let chapters = [("第一章", "苏晚把铜镜翻过来，背面刻的不是她记忆中的名字。镜墟在黄昏时分最安静，她把沈砚的画展开——画里少了一座塔。"),
         ("第二章", "沈砚不愿意看铜镜。\"那东西会记住看它的人。\"苏晚把画摊在他面前，塔的位置是一团墨，像被刻意涂掉的。"),
         ("第三章", "父亲的遗信藏在铜镜夹层。苏晚读到一半发现笔迹变了——后半段不是父亲写的。\"第七面是假的\"——但没有说为什么。"),
         ("第四章", "沈砚终于说：\"我不是逃出镜墟的——我是被赶出来的。\"苏晚没有接话。铜镜在他说话时微微发亮。"),
-        ("第五章", "云娘把交易摆上桌：\"用一段你不想要的记忆，换第四面铜镜的位置。\"苏晚把五岁生日的画面递出去，发现云娘不敢看那面铜镜。"),
-    ];
+        ("第五章", "云娘把交易摆上桌：\"用一段你不想要的记忆，换第四面铜镜的位置。\"苏晚把五岁生日的画面递出去，发现云娘不敢看那面铜镜。")];
 
     for (chapter_idx, (chapter, paragraph)) in chapters.iter().enumerate() {
         kernel.active_chapter = Some(chapter.to_string());

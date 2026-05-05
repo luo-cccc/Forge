@@ -159,7 +159,7 @@ pub fn run_provider_budget_requires_approval_eval() -> EvalResult {
     if approved_report.approval_required {
         errors.push("approved over-budget request still requires approval".to_string());
     }
-    if estimate_provider_cost_micros("gpt-4o", 1_000_000, 1_000_000) <= 0 {
+    if estimate_provider_cost_micros("gpt-4o", 1_000_000, 1_000_000) == 0 {
         errors.push("provider cost estimator returned zero for known model".to_string());
     }
 

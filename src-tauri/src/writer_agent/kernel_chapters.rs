@@ -416,7 +416,7 @@ pub(crate) fn mission_keywords(text: &str) -> Vec<String> {
 
 pub(crate) fn push_mission_keyword(keywords: &mut Vec<String>, raw: &str, stopwords: &[&str]) {
     let raw = raw.trim();
-    if raw.chars().count() < 2 || stopwords.iter().any(|word| raw == *word) {
+    if raw.chars().count() < 2 || stopwords.contains(&raw) {
         return;
     }
     if raw.chars().count() <= 6 {

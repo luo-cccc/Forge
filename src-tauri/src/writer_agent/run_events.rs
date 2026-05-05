@@ -22,6 +22,7 @@ pub struct WriterRunEventStore {
 }
 
 impl WriterRunEventStore {
+    #[allow(clippy::too_many_arguments)]
     pub fn append(
         &mut self,
         project_id: &str,

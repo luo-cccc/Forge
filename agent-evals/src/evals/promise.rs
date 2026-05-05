@@ -506,7 +506,7 @@ pub fn run_promise_last_seen_context_eval() -> EvalResult {
     let debt = kernel.story_debt_snapshot();
 
     let mut errors = Vec::new();
-    if !promise.is_some_and(|promise| promise.last_seen_chapter == "Chapter-2") {
+    if promise.is_none_or(|promise| promise.last_seen_chapter != "Chapter-2") {
         errors.push(format!(
             "promise last seen not updated: {:?}",
             promise.map(|promise| promise.last_seen_chapter.as_str())
@@ -851,7 +851,7 @@ pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
 
     eval_result(
         "writer_agent:promise_dedup_against_existing",
-        format!("duplicate detected correctly"),
+        "duplicate detected correctly".to_string(),
         errors,
     )
 }

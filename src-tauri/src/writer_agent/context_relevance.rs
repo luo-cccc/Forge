@@ -100,7 +100,7 @@ impl WritingRelevance {
     }
 }
 
-pub fn rerank_text_chunks<'a, T, F>(
+pub fn rerank_text_chunks<T, F>(
     chunks: Vec<(f32, T)>,
     writing_focus: &str,
     text_for_chunk: F,
@@ -686,7 +686,7 @@ fn is_blocked_by_negative_terms(term: &str, negative_terms: &[String]) -> bool {
 fn negative_relevance_terms(text: &str) -> Vec<String> {
     let mut terms = Vec::new();
     let mut seen = HashSet::new();
-    for segment in text.split(|ch| matches!(ch, '\n' | '。' | '；' | ';' | '.')) {
+    for segment in text.split(['\n', '。', '；', ';', '.']) {
         for cue in NEGATIVE_CUES {
             if let Some(cue_start) = segment.find(cue) {
                 let cue_tail = &segment[cue_start + cue.len()..];
@@ -714,7 +714,7 @@ fn negative_phrase_terms(text: &str) -> Vec<String> {
         .map(|idx| &text[..idx])
         .unwrap_or(text);
     before_boundary
-        .split(|ch| matches!(ch, '或' | '和' | '、' | '，' | ',' | '/' | '／'))
+        .split(['或', '和', '、', '，', ',', '/', '／'])
         .filter_map(|part| {
             let term = strip_negative_phrase_filler(part);
             let count = term.chars().count();

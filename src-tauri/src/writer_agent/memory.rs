@@ -317,7 +317,9 @@ pub struct StylePreferenceSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PromiseKind {
+    #[default]
     PlotPromise,
     EmotionalDebt,
     ObjectWhereabouts,
@@ -328,11 +330,6 @@ pub enum PromiseKind {
     Other,
 }
 
-impl Default for PromiseKind {
-    fn default() -> Self {
-        PromiseKind::PlotPromise
-    }
-}
 
 impl PromiseKind {
     pub fn from_kind_str(kind: &str) -> Self {
@@ -1051,6 +1048,7 @@ impl WriterMemory {
         Ok(self.conn.last_insert_rowid())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_promise_with_entities(
         &self,
         kind: &str,
@@ -1391,6 +1389,7 @@ impl WriterMemory {
         rows.collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn ensure_chapter_mission_seed(
         &self,
         project_id: &str,

@@ -270,7 +270,7 @@ pub(crate) fn product_metrics_trend_from_run_events(
                 .average_save_to_feedback_ms
                 .map(|average| (average, trend.save_feedback_sample_count))
         })
-        .flat_map(|(average, count)| std::iter::repeat(average).take(count as usize))
+        .flat_map(|(average, count)| std::iter::repeat_n(average, count as usize))
         .collect::<Vec<_>>();
     let overall_average_save_to_feedback_ms = average_u64(&all_save_feedback_samples);
     let recent_average_save_to_feedback_ms = session_trends

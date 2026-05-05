@@ -684,7 +684,7 @@ pub fn list_file_backups(
         .filter(|entry| entry.path().is_file())
         .filter_map(|entry| backup_info(entry).ok())
         .collect::<Vec<_>>();
-    backups.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.modified_at));
     Ok(backups)
 }
 
@@ -1108,7 +1108,7 @@ fn prune_backups(dir: &std::path::Path, keep: usize) -> Result<(), String> {
             Some((modified, entry.path()))
         })
         .collect::<Vec<_>>();
-    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.0));
     for (_, path) in entries.into_iter().skip(keep) {
         std::fs::remove_file(&path)
             .map_err(|e| format!("Failed to prune backup '{}': {}", path.display(), e))?;

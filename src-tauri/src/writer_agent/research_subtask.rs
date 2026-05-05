@@ -360,6 +360,7 @@ pub fn failure_bundle_from_subtask_provider_budget(
     )))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_evidence_only_subtask_result(
     kind: WriterSubtaskKind,
     subtask_id: &str,

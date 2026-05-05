@@ -261,7 +261,7 @@ pub struct ChapterGenerationError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub evidence: Option<WriterFailureEvidenceBundle>,
+    pub evidence: Option<Box<WriterFailureEvidenceBundle>>,
 }
 
 impl ChapterGenerationError {
@@ -290,7 +290,7 @@ impl ChapterGenerationError {
         }
     }
 
-    pub fn with_evidence(mut self, evidence: WriterFailureEvidenceBundle) -> Self {
+    pub fn with_evidence(mut self, evidence: Box<WriterFailureEvidenceBundle>) -> Self {
         self.evidence = Some(evidence);
         self
     }
@@ -1177,7 +1177,7 @@ pub fn provider_budget_error(
         "Chapter generation provider budget requires explicit approval before calling the model.",
         true,
     )
-    .with_evidence(WriterFailureEvidenceBundle::new(
+    .with_evidence(Box::new(WriterFailureEvidenceBundle::new(
         WriterFailureCategory::ProviderFailed,
         "PROVIDER_BUDGET_APPROVAL_REQUIRED",
         "Chapter generation provider budget requires explicit approval before calling the model.",
@@ -1199,7 +1199,7 @@ pub fn provider_budget_error(
                 .to_string(),
         ],
         crate::agent_runtime::now_ms(),
-    ))
+    )))
 }
 
 pub fn provider_budget_report_from_error(
@@ -1311,11 +1311,11 @@ pub fn save_generated_chapter(
             message: format!("Save blocked by {}.", conflict.reason),
             recoverable: true,
             details: serde_json::to_string(&conflict).ok(),
-            evidence: Some(failure_bundle_from_save_conflict(
+            evidence: Some(Box::new(failure_bundle_from_save_conflict(
                 &input.receipt,
                 &conflict,
                 crate::agent_runtime::now_ms(),
-            )),
+            ))),
         }),
     }
 }
@@ -1370,7 +1370,7 @@ fn validate_receipt_for_save(input: &SaveGeneratedChapterInput) -> Option<Chapte
             "Generated chapter save was blocked because the task receipt no longer matches the write attempt.",
             true,
         )
-        .with_evidence(evidence),
+        .with_evidence(Box::new(evidence)),
     )
 }
 
@@ -1390,7 +1390,7 @@ pub fn failure_bundle_from_chapter_error(
     created_at_ms: u64,
 ) -> WriterFailureEvidenceBundle {
     if let Some(bundle) = error.evidence.clone() {
-        return bundle;
+        return *bundle;
     }
     let category = failure_category_for_error_code(&error.code);
     let mut evidence_refs = vec![format!("error:{}", error.code)];
@@ -1553,17 +1553,21 @@ pub fn update_outline_after_generation(
     })
 }
 
+pub struct ChapterGenerationConfig {
+    pub app: tauri::AppHandle,
+    pub settings: llm_runtime::LlmSettings,
+    pub payload: GenerateChapterAutonomousPayload,
+    pub user_profile_entries: Vec<String>,
+}
+
 pub async fn run_chapter_generation_pipeline(
-    app: tauri::AppHandle,
-    settings: llm_runtime::LlmSettings,
-    payload: GenerateChapterAutonomousPayload,
-    user_profile_entries: Vec<String>,
+    config: ChapterGenerationConfig,
     mut emit: impl FnMut(ChapterGenerationEvent) + Send,
     mut record_task_packet: impl FnMut(&BuiltChapterContext) + Send,
     mut record_provider_budget: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
     mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> PipelineTerminal {
-    let request_id = payload
+    let request_id = config.payload
         .request_id
         .clone()
         .unwrap_or_else(|| make_request_id("chapter"));
@@ -1579,15 +1583,15 @@ pub async fn run_chapter_generation_pipeline(
 
     let build_input = BuildChapterContextInput {
         request_id: request_id.clone(),
-        target_chapter_title: payload.target_chapter_title.clone(),
-        target_chapter_number: payload.target_chapter_number,
-        user_instruction: payload.user_instruction.clone(),
-        budget: payload.budget.clone().unwrap_or_default(),
-        chapter_summary_override: payload.chapter_summary_override.clone(),
-        user_profile_entries,
+        target_chapter_title: config.payload.target_chapter_title.clone(),
+        target_chapter_number: config.payload.target_chapter_number,
+        user_instruction: config.payload.user_instruction.clone(),
+        budget: config.payload.budget.clone().unwrap_or_default(),
+        chapter_summary_override: config.payload.chapter_summary_override.clone(),
+        user_profile_entries: config.user_profile_entries,
     };
 
-    let context = match build_chapter_context(&app, build_input) {
+    let context = match build_chapter_context(&config.app, build_input) {
         Ok(context) => context,
         Err(error) => {
             emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
@@ -1627,9 +1631,9 @@ pub async fn run_chapter_generation_pipeline(
     ));
 
     let draft = match generate_chapter_draft(
-        &settings,
+        &config.settings,
         &context,
-        payload.provider_budget_approval.as_ref(),
+        config.payload.provider_budget_approval.as_ref(),
         |context, report| record_model_started(context, report),
     )
     .await
@@ -1661,11 +1665,11 @@ pub async fn run_chapter_generation_pipeline(
         target: context.target.clone(),
         generated_content: draft.content.clone(),
         base_revision: context.base_revision.clone(),
-        save_mode: payload.save_mode,
-        frontend_state: payload.frontend_state.clone(),
+        save_mode: config.payload.save_mode,
+        frontend_state: config.payload.frontend_state.clone(),
         receipt: context.receipt.clone(),
     };
-    let saved = match save_generated_chapter(&app, save_input) {
+    let saved = match save_generated_chapter(&config.app, save_input) {
         Ok(saved) => saved,
         Err(error) => {
             if let Some(conflict) = save_conflict_from_error(&error) {
@@ -1690,7 +1694,7 @@ pub async fn run_chapter_generation_pipeline(
     ));
 
     let mut warnings = Vec::new();
-    if let Err(error) = update_outline_after_generation(&app, &context.target, &saved) {
+    if let Err(error) = update_outline_after_generation(&config.app, &context.target, &saved) {
         warnings.push(format!("Outline update skipped: {}", error.message));
     }
 
