@@ -36,6 +36,7 @@ pub fn build_chapter_context(
         )
     })?;
 
+    let chapter_contract = input.chapter_contract.validate()?;
     let query = format!("{}\n{}\n{}", instruction, target.title, target.summary);
     let mut composer = ContextComposer::new(input.budget.total_chars);
     composer.add_source(
@@ -211,6 +212,7 @@ pub fn build_chapter_context(
         request_id,
         target,
         base_revision,
+        chapter_contract,
         prompt_context,
         sources,
         budget: budget_report,
@@ -254,11 +256,19 @@ pub fn build_chapter_generation_task_packet(
             .to_string(),
         "Generate chapter prose only; no analysis, markdown fences, or meta commentary."
             .to_string(),
+        format!(
+            "Target chapter length is {} chars, acceptable model-output range is {}-{} chars, and save floor/ceiling is {}-{} chars.",
+            context.chapter_contract.target_chars,
+            context.chapter_contract.min_chars,
+            context.chapter_contract.max_chars,
+            context.chapter_contract.save_hard_floor_chars,
+            context.chapter_contract.save_hard_ceiling_chars
+        ),
         "Saving generated content must pass revision/conflict checks before overwriting chapters."
             .to_string(),
     ];
     packet.success_criteria = vec![
-        "Generated prose passes non-empty and output-size validation.".to_string(),
+        "Generated prose passes non-empty, size, and chapter contract validation.".to_string(),
         "Context sources include the instruction plus chapter/continuity memory before drafting."
             .to_string(),
         "Save completes, or a concrete save conflict is surfaced to the author.".to_string(),

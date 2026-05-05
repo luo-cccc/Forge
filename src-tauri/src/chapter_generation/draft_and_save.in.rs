@@ -22,8 +22,12 @@ If the context names active anchors, carry the relevant anchors into the scene t
 do not merely mention them in passing. \
 Unless the chapter plan explicitly narrows scope, at least three active anchors from the context must materially participate in the scene, \
 and at least one of them must change the immediate choice, pressure, or consequence of the chapter. \
-Aim for up to {} Chinese characters unless the beat clearly requires less.",
-        DEFAULT_OUTPUT_SOFT_CAP_CHARS
+Aim for {} Chinese characters, keep the output within {}-{} Chinese characters, and treat {}-{} as the hard save bounds unless the author explicitly overrides them.",
+        context.chapter_contract.target_chars,
+        context.chapter_contract.min_chars,
+        context.chapter_contract.max_chars,
+        context.chapter_contract.save_hard_floor_chars,
+        context.chapter_contract.save_hard_ceiling_chars
     );
     let user_prompt = format!(
         "Task: {}\n\nTarget chapter: {}\n\nProject context:\n{}",
@@ -63,7 +67,11 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
     .map_err(map_provider_error)?;
 
     let content = content.trim().to_string();
-    validate_generated_content(&content)?;
+    validate_generated_content(
+        &content,
+        &context.chapter_contract,
+        ChapterContractPhase::ModelOutput,
+    )?;
 
     Ok(GenerateChapterDraftOutput {
         output_chars: char_count(&content),
@@ -71,6 +79,7 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
         finish_reason: "complete".to_string(),
         model: settings.model.clone(),
         provider: "openai-compatible".to_string(),
+        chapter_contract: context.chapter_contract.clone(),
         base_revision: context.base_revision.clone(),
         provider_budget: budget_report,
     })
@@ -180,6 +189,11 @@ pub fn save_generated_chapter(
             true,
         ));
     }
+    validate_generated_content(
+        &input.generated_content,
+        &input.chapter_contract,
+        ChapterContractPhase::Save,
+    )?;
 
     let current_revision = storage::chapter_revision(app, &input.target.title).map_err(|e| {
         ChapterGenerationError::with_details(
@@ -400,10 +414,14 @@ fn failure_category_for_error_code(code: &str) -> WriterFailureCategory {
         | "PROVIDER_CALL_FAILED"
         | "PROVIDER_BUDGET_APPROVAL_REQUIRED"
         | "MODEL_OUTPUT_EMPTY"
-        | "MODEL_OUTPUT_TOO_LARGE" => WriterFailureCategory::ProviderFailed,
+        | "MODEL_OUTPUT_TOO_LARGE"
+        | "MODEL_OUTPUT_UNDER_MIN_CHARS"
+        | "MODEL_OUTPUT_OVER_MAX_CHARS" => WriterFailureCategory::ProviderFailed,
         "SAVE_CONFLICT"
         | "CONTENT_EMPTY"
         | "CONTENT_TOO_LARGE"
+        | "CONTENT_UNDER_SAVE_FLOOR"
+        | "CONTENT_OVER_SAVE_CEILING"
         | "STORAGE_READ_FAILED"
         | "STORAGE_WRITE_FAILED"
         | "OUTLINE_LOAD_FAILED"
@@ -431,8 +449,16 @@ fn remediation_for_error_code(code: &str) -> Vec<String> {
         "PROVIDER_TIMEOUT" | "PROVIDER_RATE_LIMITED" | "PROVIDER_CALL_FAILED" => vec![
             "Retry after provider recovery or switch to another configured provider.".to_string(),
         ],
-        "MODEL_OUTPUT_EMPTY" | "MODEL_OUTPUT_TOO_LARGE" => vec![
+        "MODEL_OUTPUT_EMPTY"
+        | "MODEL_OUTPUT_TOO_LARGE"
+        | "MODEL_OUTPUT_UNDER_MIN_CHARS"
+        | "MODEL_OUTPUT_OVER_MAX_CHARS" => vec![
             "Regenerate with a narrower chapter objective or smaller output budget.".to_string(),
+        ],
+        "CONTENT_UNDER_SAVE_FLOOR" | "CONTENT_OVER_SAVE_CEILING" => vec![
+            "Review the chapter contract before saving generated content.".to_string(),
+            "Regenerate, continue, or trim the chapter so it fits the save bounds."
+                .to_string(),
         ],
         "RECEIPT_MISMATCH" => {
             vec!["Rebuild the task receipt from the latest context before saving.".to_string()]

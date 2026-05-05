@@ -25,6 +25,7 @@ pub async fn run_chapter_generation_pipeline(
         target_chapter_number: config.payload.target_chapter_number,
         user_instruction: config.payload.user_instruction.clone(),
         budget: config.payload.budget.clone().unwrap_or_default(),
+        chapter_contract: config.payload.chapter_contract.clone().unwrap_or_default(),
         chapter_summary_override: config.payload.chapter_summary_override.clone(),
         user_profile_entries: config.user_profile_entries,
     };
@@ -102,6 +103,7 @@ pub async fn run_chapter_generation_pipeline(
         request_id: request_id.clone(),
         target: context.target.clone(),
         generated_content: draft.content.clone(),
+        chapter_contract: context.chapter_contract.clone(),
         base_revision: context.base_revision.clone(),
         save_mode: config.payload.save_mode,
         frontend_state: config.payload.frontend_state.clone(),

@@ -265,6 +265,7 @@ pub async fn batch_generate_chapter(
             frontend_state,
             save_mode: SaveMode::ReplaceIfClean,
             chapter_summary_override: Some(summary),
+            chapter_contract: None,
             provider_budget_approval: None,
         };
         let user_instruction = payload.user_instruction.clone();

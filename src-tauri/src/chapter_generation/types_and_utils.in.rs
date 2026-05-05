@@ -37,7 +37,11 @@ const DEFAULT_NEXT_CHAPTER_COUNT: usize = 1;
 const DEFAULT_LOREBOOK_ENTRY_COUNT: usize = 4;
 const DEFAULT_USER_PROFILE_ENTRY_COUNT: usize = 6;
 const DEFAULT_RAG_CHUNK_COUNT: usize = 5;
-const DEFAULT_OUTPUT_SOFT_CAP_CHARS: usize = 12_000;
+const DEFAULT_TARGET_CHARS: usize = 3_500;
+const DEFAULT_MIN_CHARS: usize = 3_000;
+const DEFAULT_MAX_CHARS: usize = 4_000;
+const DEFAULT_SAVE_HARD_FLOOR_CHARS: usize = 2_800;
+const DEFAULT_SAVE_HARD_CEILING_CHARS: usize = 4_300;
 const DEFAULT_OUTPUT_HARD_CAP_CHARS: usize = 30_000;
 const PROVIDER_TIMEOUT_SECS: u64 = 120;
 
@@ -60,6 +64,8 @@ pub struct GenerateChapterAutonomousPayload {
     #[serde(default)]
     pub chapter_summary_override: Option<String>,
     #[serde(default)]
+    pub chapter_contract: Option<ChapterContract>,
+    #[serde(default)]
     pub provider_budget_approval: Option<WriterProviderBudgetApproval>,
 }
 
@@ -81,6 +87,62 @@ pub enum SaveMode {
     #[default]
     ReplaceIfClean,
     SaveAsDraft,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterContract {
+    #[serde(default = "default_target_chars")]
+    pub target_chars: usize,
+    #[serde(default = "default_min_chars")]
+    pub min_chars: usize,
+    #[serde(default = "default_max_chars")]
+    pub max_chars: usize,
+    #[serde(default = "default_save_hard_floor_chars")]
+    pub save_hard_floor_chars: usize,
+    #[serde(default = "default_save_hard_ceiling_chars")]
+    pub save_hard_ceiling_chars: usize,
+}
+
+impl Default for ChapterContract {
+    fn default() -> Self {
+        Self {
+            target_chars: DEFAULT_TARGET_CHARS,
+            min_chars: DEFAULT_MIN_CHARS,
+            max_chars: DEFAULT_MAX_CHARS,
+            save_hard_floor_chars: DEFAULT_SAVE_HARD_FLOOR_CHARS,
+            save_hard_ceiling_chars: DEFAULT_SAVE_HARD_CEILING_CHARS,
+        }
+    }
+}
+
+impl ChapterContract {
+    pub fn validate(self) -> Result<Self, ChapterGenerationError> {
+        if self.target_chars == 0
+            || self.min_chars == 0
+            || self.max_chars == 0
+            || self.save_hard_floor_chars == 0
+            || self.save_hard_ceiling_chars == 0
+        {
+            return Err(ChapterGenerationError::new(
+                "CHAPTER_CONTRACT_INVALID",
+                "Chapter contract character limits must be positive.",
+                true,
+            ));
+        }
+        if self.min_chars > self.target_chars
+            || self.target_chars > self.max_chars
+            || self.save_hard_floor_chars > self.min_chars
+            || self.max_chars > self.save_hard_ceiling_chars
+        {
+            return Err(ChapterGenerationError::new(
+                "CHAPTER_CONTRACT_INVALID",
+                "Chapter contract bounds are inconsistent.",
+                true,
+            ));
+        }
+        Ok(self)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +255,26 @@ fn default_rag_chunk_count() -> usize {
     DEFAULT_RAG_CHUNK_COUNT
 }
 
+fn default_target_chars() -> usize {
+    DEFAULT_TARGET_CHARS
+}
+
+fn default_min_chars() -> usize {
+    DEFAULT_MIN_CHARS
+}
+
+fn default_max_chars() -> usize {
+    DEFAULT_MAX_CHARS
+}
+
+fn default_save_hard_floor_chars() -> usize {
+    DEFAULT_SAVE_HARD_FLOOR_CHARS
+}
+
+fn default_save_hard_ceiling_chars() -> usize {
+    DEFAULT_SAVE_HARD_CEILING_CHARS
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChapterTarget {
@@ -233,6 +315,7 @@ pub struct BuiltChapterContext {
     pub request_id: String,
     pub target: ChapterTarget,
     pub base_revision: String,
+    pub chapter_contract: ChapterContract,
     pub prompt_context: String,
     pub sources: Vec<ChapterContextSource>,
     pub budget: ChapterContextBudgetReport,
@@ -247,6 +330,7 @@ pub struct BuildChapterContextInput {
     pub target_chapter_number: Option<usize>,
     pub user_instruction: String,
     pub budget: ChapterContextBudget,
+    pub chapter_contract: ChapterContract,
     pub chapter_summary_override: Option<String>,
     pub user_profile_entries: Vec<String>,
 }
@@ -304,6 +388,7 @@ pub struct GenerateChapterDraftOutput {
     pub model: String,
     pub provider: String,
     pub output_chars: usize,
+    pub chapter_contract: ChapterContract,
     pub base_revision: String,
     pub provider_budget: WriterProviderBudgetReport,
 }
@@ -334,6 +419,7 @@ pub struct SaveGeneratedChapterInput {
     pub request_id: String,
     pub target: ChapterTarget,
     pub generated_content: String,
+    pub chapter_contract: ChapterContract,
     pub base_revision: String,
     pub save_mode: SaveMode,
     pub frontend_state: Option<FrontendChapterStateSnapshot>,
@@ -391,6 +477,12 @@ pub enum SaveDecision {
         conflict: SaveConflict,
     },
     Conflict(SaveConflict),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChapterContractPhase {
+    ModelOutput,
+    Save,
 }
 
 pub fn char_count(text: &str) -> usize {
@@ -587,7 +679,11 @@ pub fn decide_save_action(
     }
 }
 
-pub fn validate_generated_content(content: &str) -> Result<(), ChapterGenerationError> {
+pub fn validate_generated_content(
+    content: &str,
+    contract: &ChapterContract,
+    phase: ChapterContractPhase,
+) -> Result<(), ChapterGenerationError> {
     if content.trim().is_empty() {
         return Err(ChapterGenerationError::new(
             "MODEL_OUTPUT_EMPTY",
@@ -603,6 +699,43 @@ pub fn validate_generated_content(content: &str) -> Result<(), ChapterGeneration
             format!(
                 "The model returned {} characters, above the hard cap of {}.",
                 output_chars, DEFAULT_OUTPUT_HARD_CAP_CHARS
+            ),
+            true,
+        ));
+    }
+
+    let (min_chars, max_chars, under_code, over_code) = match phase {
+        ChapterContractPhase::ModelOutput => (
+            contract.min_chars,
+            contract.max_chars,
+            "MODEL_OUTPUT_UNDER_MIN_CHARS",
+            "MODEL_OUTPUT_OVER_MAX_CHARS",
+        ),
+        ChapterContractPhase::Save => (
+            contract.save_hard_floor_chars,
+            contract.save_hard_ceiling_chars,
+            "CONTENT_UNDER_SAVE_FLOOR",
+            "CONTENT_OVER_SAVE_CEILING",
+        ),
+    };
+
+    if output_chars < min_chars {
+        return Err(ChapterGenerationError::new(
+            under_code,
+            format!(
+                "Generated chapter content has {} chars, below the required minimum of {}.",
+                output_chars, min_chars
+            ),
+            true,
+        ));
+    }
+
+    if output_chars > max_chars {
+        return Err(ChapterGenerationError::new(
+            over_code,
+            format!(
+                "Generated chapter content has {} chars, above the allowed maximum of {}.",
+                output_chars, max_chars
             ),
             true,
         ));

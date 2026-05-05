@@ -159,8 +159,76 @@ mod tests {
 
     #[test]
     fn rejects_empty_generated_content_with_content_empty() {
-        let err = validate_generated_content("  ").unwrap_err();
+        let err = validate_generated_content(
+            "  ",
+            &ChapterContract::default(),
+            ChapterContractPhase::ModelOutput,
+        )
+        .unwrap_err();
         assert_eq!(err.code, "MODEL_OUTPUT_EMPTY");
+    }
+
+    #[test]
+    fn chapter_contract_rejects_inconsistent_bounds() {
+        let err = ChapterContract {
+            target_chars: 3_500,
+            min_chars: 3_600,
+            max_chars: 4_000,
+            save_hard_floor_chars: 2_800,
+            save_hard_ceiling_chars: 4_300,
+        }
+        .validate()
+        .unwrap_err();
+        assert_eq!(err.code, "CHAPTER_CONTRACT_INVALID");
+    }
+
+    #[test]
+    fn rejects_model_output_below_contract_min_chars() {
+        let err = validate_generated_content(
+            &"甲".repeat(2_999),
+            &ChapterContract::default(),
+            ChapterContractPhase::ModelOutput,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "MODEL_OUTPUT_UNDER_MIN_CHARS");
+    }
+
+    #[test]
+    fn rejects_model_output_above_contract_max_chars() {
+        let err = validate_generated_content(
+            &"甲".repeat(4_001),
+            &ChapterContract::default(),
+            ChapterContractPhase::ModelOutput,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "MODEL_OUTPUT_OVER_MAX_CHARS");
+    }
+
+    #[test]
+    fn rejects_save_content_below_save_floor() {
+        let err = validate_generated_content(
+            &"甲".repeat(2_799),
+            &ChapterContract::default(),
+            ChapterContractPhase::Save,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "CONTENT_UNDER_SAVE_FLOOR");
+    }
+
+    #[test]
+    fn accepts_output_within_contract_bounds() {
+        validate_generated_content(
+            &"甲".repeat(3_500),
+            &ChapterContract::default(),
+            ChapterContractPhase::ModelOutput,
+        )
+        .unwrap();
+        validate_generated_content(
+            &"甲".repeat(3_500),
+            &ChapterContract::default(),
+            ChapterContractPhase::Save,
+        )
+        .unwrap();
     }
 
     #[test]
