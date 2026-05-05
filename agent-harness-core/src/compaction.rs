@@ -24,6 +24,15 @@ impl Default for CompactionConfig {
     }
 }
 
+/// Kind of compaction applied.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub enum CompactionKind {
+    #[default]
+    Full,
+    Microcompact,
+    OverflowRecovery,
+}
+
 /// Result of a compaction operation.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CompactionResult {
@@ -37,6 +46,30 @@ pub struct CompactionResult {
     pub tokens_before: u64,
     /// Estimated tokens after compaction.
     pub tokens_after: u64,
+    /// Which compaction kind was applied.
+    #[serde(default)]
+    pub kind: CompactionKind,
+    /// Structured checkpoints recorded during compaction.
+    #[serde(default)]
+    pub checkpoints: Vec<CompactionCheckpoint>,
+    /// Tokens saved by truncating old tool results (microcompact).
+    #[serde(default)]
+    pub tokens_saved_by_tool_truncation: u64,
+    /// Human-readable summary of the compaction boundary.
+    #[serde(default)]
+    pub boundary_summary: String,
+    /// Recovery level applied (overflow scenarios).
+    #[serde(default)]
+    pub recovery_level: Option<String>,
+}
+
+/// A checkpoint recorded during compaction.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CompactionCheckpoint {
+    pub name: String,
+    pub message_count: usize,
+    pub token_count: u64,
+    pub metadata: Option<String>,
 }
 
 /// Structured summary template — mirrors Claw Code's SUMMARY_TEMPLATE.
@@ -180,6 +213,11 @@ pub async fn compact_messages<P: Provider>(
                 preserved_count: total,
                 tokens_before: estimate_message_tokens(messages),
                 tokens_after: estimate_message_tokens(messages),
+                kind: CompactionKind::Microcompact,
+                checkpoints: Vec::new(),
+                tokens_saved_by_tool_truncation: 0,
+                boundary_summary: String::new(),
+                recovery_level: None,
             },
         ));
     }
@@ -244,6 +282,20 @@ pub async fn compact_messages<P: Provider>(
             preserved_count: preserved.len(),
             tokens_before,
             tokens_after,
+            kind: CompactionKind::Full,
+            checkpoints: vec![CompactionCheckpoint {
+                name: "compacted".to_string(),
+                message_count: to_compact.len(),
+                token_count: tokens_before.saturating_sub(tokens_after),
+                metadata: Some(format!("cut at message {}", safe_cut)),
+            }],
+            tokens_saved_by_tool_truncation: 0,
+            boundary_summary: format!(
+                "compacted {} messages, preserved {} messages",
+                to_compact.len(),
+                preserved.len()
+            ),
+            recovery_level: None,
         },
     ))
 }

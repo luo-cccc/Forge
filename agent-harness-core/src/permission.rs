@@ -22,9 +22,47 @@ pub struct PermissionRule {
     pub action: PermissionDecision,
 }
 
+/// Context for a single tool invocation — used for path/command-level checks.
+#[derive(Debug, Clone)]
+pub struct ToolInvocationContext {
+    pub tool_name: String,
+    pub side_effect: crate::tool_registry::ToolSideEffectLevel,
+    pub requires_approval: bool,
+    pub resolved_path: Option<String>,
+    pub command_preview: Option<String>,
+    pub source_refs: Vec<String>,
+    pub task_id: Option<String>,
+}
+
+/// Sensitive path patterns that are always denied regardless of mode.
+/// Ported from OpenHarness permission checker SENSITIVE_PATH_PATTERNS.
+pub const SENSITIVE_PATH_PATTERNS: &[&str] = &[
+    "*/.ssh/*",
+    "*/.aws/credentials",
+    "*/.aws/config",
+    "*/.config/gcloud/*",
+    "*/.azure/*",
+    "*/.gnupg/*",
+    "*/.docker/config.json",
+    "*/.kube/config",
+    "*/.openharness/credentials.json",
+    "*.pem",
+    "*.key",
+    "*.pfx",
+];
+
+/// Dangerous command patterns that are denied even in FullAccess.
+pub const DANGEROUS_COMMAND_PATTERNS: &[&str] = &[
+    "rm -rf /*",
+    "rm -rf /",
+    "dd if=*",
+    "mkfs.*",
+    ">: *",
+    "chmod 777 /*",
+];
+
 /// Permission policy — evaluates rules against tool invocations.
-/// Pipeline: deny rules → mode escalation → approval → allow rules.
-/// Ported from Claw Code `PermissionPolicy::authorize_with_context()`.
+/// Pipeline: sensitive path deny → deny rules → mode escalation → approval → allow rules.
 pub struct PermissionPolicy {
     pub mode: PermissionMode,
     pub rules: Vec<PermissionRule>,
@@ -103,6 +141,76 @@ impl PermissionPolicy {
 
         PermissionDecision::Allow
     }
+
+    /// Authorize with full invocation context — checks sensitive paths and
+    /// dangerous commands in addition to the base policy.
+    pub fn authorize_with_context(&self, ctx: &ToolInvocationContext) -> PermissionDecision {
+        // 0. Built-in sensitive path protection (always active).
+        if let Some(ref path) = ctx.resolved_path {
+            for pattern in SENSITIVE_PATH_PATTERNS {
+                if simple_fnmatch(path, pattern) {
+                    return PermissionDecision::Deny {
+                        reason: format!(
+                            "Access denied: {} is a sensitive credential path (matched pattern '{}')",
+                            path, pattern
+                        ),
+                    };
+                }
+            }
+        }
+
+        // 0b. Dangerous command patterns.
+        if let Some(ref cmd) = ctx.command_preview {
+            for pattern in DANGEROUS_COMMAND_PATTERNS {
+                if simple_fnmatch(cmd, pattern) {
+                    return PermissionDecision::Deny {
+                        reason: format!(
+                            "Command denied: '{}' matches dangerous pattern '{}'",
+                            cmd, pattern
+                        ),
+                    };
+                }
+            }
+        }
+
+        // Delegate to base authorize.
+        self.authorize(&ctx.tool_name, ctx.side_effect, ctx.requires_approval)
+    }
+}
+
+/// Simple fnmatch-style matching for path/command patterns.
+fn simple_fnmatch(text: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    // Convert glob pattern to prefix/suffix checks
+    let text_lower = text.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+    if pattern_lower == text_lower {
+        return true;
+    }
+    if let Some(suffix) = pattern_lower.strip_prefix('*') {
+        if text_lower.ends_with(suffix) {
+            return true;
+        }
+    }
+    if let Some(prefix) = pattern_lower.strip_suffix('*') {
+        if text_lower.starts_with(prefix) {
+            return true;
+        }
+    }
+    // Handle *middle* patterns like "*/.ssh/*"
+    if pattern_lower.contains('*') {
+        let parts: Vec<&str> = pattern_lower.split('*').collect();
+        if parts.len() >= 3 {
+            let start = parts[0];
+            let middle = parts[1];
+            if text_lower.starts_with(start) && text_lower.contains(middle) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn tool_matches(tool_name: &str, pattern: &str) -> bool {

@@ -175,6 +175,9 @@ fn main() {
     results.push(run_story_impact_radius_small_change_stays_minimal_eval());
     results.push(run_story_impact_radius_prioritizes_high_value_nodes_eval());
     results.push(run_story_impact_budget_counts_only_reached_drops_eval());
+    results.push(run_preflight_ready_for_safe_planning_eval());
+    results.push(run_preflight_warns_provider_budget_approval_eval());
+    results.push(run_preflight_reports_story_impact_truncation_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

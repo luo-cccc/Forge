@@ -35,6 +35,172 @@ impl WriterAgentKernel {
         Ok(())
     }
 
+    /// Run preflight checks without executing provider or tools.
+    /// Returns a structured readiness report (ready / warning / blocked).
+    /// Mirrors the first half of prepare_task_run — same gates, no AgentLoop.
+    pub fn preflight(
+        &mut self,
+        request: &WriterAgentRunRequest,
+    ) -> crate::writer_agent::run_preflight::WriterRunPreflightReport {
+        use crate::writer_agent::run_preflight::WriterRunPreflightReport;
+        let task = request.task.as_agent_task();
+        let observation = &request.observation;
+        let mut blocks: Vec<crate::writer_agent::run_preflight::PreflightItem> = Vec::new();
+        let mut warnings: Vec<crate::writer_agent::run_preflight::PreflightItem> = Vec::new();
+        let mut next_actions: Vec<String> = Vec::new();
+
+        // Metacognitive gate
+        if crate::writer_agent::metacognition::metacognitive_task_is_write_sensitive(&request.task)
+        {
+            let meta = self.trace_snapshot(40).metacognitive_snapshot;
+            if let Some(reason) =
+                crate::writer_agent::metacognition::metacognitive_write_gate_reason(&meta)
+            {
+                blocks.push(crate::writer_agent::run_preflight::PreflightItem {
+                    code: "metacognitive_blocked".to_string(),
+                    reason,
+                });
+                next_actions.push("Review metacognitive snapshot; run ContinuityDiagnostic or PlanningReview recovery".to_string());
+            }
+        }
+
+        // Observe → context pack → Story Impact
+        let _proposals = self
+            .observe(request.observation.clone())
+            .unwrap_or_default();
+        let context_pack = self.context_pack_for_default(task.clone(), &request.observation);
+        let (impact_radius, impact_budget) =
+            crate::writer_agent::story_impact::compute_story_impact(
+                &request.observation,
+                &context_pack,
+                &self.memory,
+                None,
+            );
+
+        if context_pack.total_chars > context_pack.budget_limit && context_pack.budget_limit > 0 {
+            warnings.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "context_over_budget".to_string(),
+                reason: format!(
+                    "Context pack {} chars exceeds budget {} chars",
+                    context_pack.total_chars, context_pack.budget_limit
+                ),
+            });
+        }
+
+        if impact_radius.truncated {
+            warnings.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "story_impact_truncated".to_string(),
+                reason: format!(
+                    "Story Impact truncated {} nodes; {} high-risk dropped",
+                    impact_budget.truncated_node_count,
+                    impact_budget.dropped_high_risk_sources.len()
+                ),
+            });
+            if !impact_budget.dropped_high_risk_sources.is_empty() {
+                next_actions.push(
+                    "Review dropped high-risk story sources; consider expanding context budget"
+                        .to_string(),
+                );
+            }
+        }
+
+        // Task packet validation
+        let task_packet = build_task_packet_for_observation(
+            &self.project_id,
+            &self.session_id,
+            task.clone(),
+            &request.observation,
+            &context_pack,
+            &objective_for_run_task(&request.task),
+            success_criteria_for_run_task(&request.task),
+        );
+        if let Err(err) = task_packet.validate() {
+            blocks.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "task_packet_invalid".to_string(),
+                reason: format!("TaskPacket validation failed: {}", err),
+            });
+            next_actions.push("Fix task configuration before retrying".to_string());
+        }
+
+        // Story Contract quality
+        let (contract_quality, _gaps) = self.contract_quality_with_gaps();
+        if task_requires_story_grounding(&request.task) {
+            if contract_quality <= StoryContractQuality::Vague {
+                warnings.push(crate::writer_agent::run_preflight::PreflightItem {
+                    code: "story_contract_weak".to_string(),
+                    reason: format!(
+                        "Story Contract quality is {:?}: task may lack story-level grounding",
+                        contract_quality
+                    ),
+                });
+                next_actions
+                    .push("Strengthen the Story Contract in Settings before running".to_string());
+            }
+        }
+
+        // Tool inventory
+        let tool_filter = tool_filter_for_run_request(task.clone(), &request.approval_mode);
+        let registry = default_writing_tool_registry();
+        let inventory = registry.effective_inventory(
+            &tool_filter,
+            &PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+        );
+
+        // Token estimate
+        let estimated_input = (context_pack.total_chars as u64).saturating_div(3) + 100;
+        let estimated_total = estimated_input + 2_048;
+        if estimated_total > 64_000 {
+            blocks.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "provider_budget_blocked".to_string(),
+                reason: format!("Estimated {} tokens exceeds hard limit", estimated_total),
+            });
+            next_actions.push("Reduce scope or increase budget before running".to_string());
+        } else if estimated_total > 32_000 {
+            warnings.push(crate::writer_agent::run_preflight::PreflightItem {
+                code: "provider_budget_approval".to_string(),
+                reason: format!(
+                    "Estimated {} tokens requires author approval",
+                    estimated_total
+                ),
+            });
+            next_actions.push("Approve provider budget in Explore before running".to_string());
+        }
+
+        // Readiness verdict
+        let readiness = if !blocks.is_empty() {
+            "blocked"
+        } else if !warnings.is_empty() {
+            "warning"
+        } else {
+            "ready"
+        };
+        if readiness == "ready" {
+            next_actions.push("Task is ready to run.".to_string());
+        } else if readiness == "blocked" {
+            next_actions.push("Resolve blocks before this task can run.".to_string());
+        } else {
+            next_actions.push("Review warnings; task can still proceed.".to_string());
+        }
+
+        WriterRunPreflightReport {
+            task: format!("{:?}", request.task),
+            observation_id: observation.id.clone(),
+            readiness: readiness.to_string(),
+            blocks,
+            warnings,
+            context_source_count: context_pack.sources.len(),
+            context_total_chars: context_pack.total_chars,
+            context_budget_limit: context_pack.budget_limit,
+            story_impact_truncated: impact_radius.truncated,
+            story_impact_risk: format!("{:?}", impact_radius.risk),
+            story_contract_quality: format!("{:?}", contract_quality),
+            tool_allowed_count: inventory.allowed.len(),
+            tool_blocked_count: inventory.blocked.len(),
+            estimated_input_tokens: estimated_input,
+            next_actions,
+        }
+    }
+
     pub fn prepare_task_run<P, H>(
         &mut self,
         request: WriterAgentRunRequest,
