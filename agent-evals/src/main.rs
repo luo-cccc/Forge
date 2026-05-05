@@ -179,6 +179,21 @@ fn main() {
     results.push(run_preflight_warns_provider_budget_approval_eval());
     results.push(run_preflight_reports_story_impact_truncation_eval());
     results.push(run_preflight_blocks_metacognitive_write_eval());
+    results.push(run_project_intake_reports_sources_eval());
+    results.push(run_project_intake_does_not_auto_write_memory_eval());
+    results.push(run_project_intake_flags_open_promises_eval());
+    results.push(run_chapter_settlement_creates_reviewable_updates_eval());
+    results.push(run_chapter_settlement_requires_approval_for_ledger_writes_eval());
+    results.push(run_chapter_settlement_prioritizes_high_risk_promises_eval());
+    results.push(run_rewrite_impact_preview_is_read_only_eval());
+    results.push(run_rewrite_impact_preview_includes_bidirectional_story_edges_eval());
+    results.push(run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval());
+    results.push(run_author_voice_guard_uses_author_samples_eval());
+    results.push(run_author_voice_guard_records_feedback_corrections_eval());
+    results.push(run_style_drift_diagnostic_links_evidence_eval());
+    results.push(run_supervised_sprint_stops_before_unapproved_save_eval());
+    results.push(run_supervised_sprint_carries_forward_settlement_feedback_eval());
+    results.push(run_supervised_sprint_records_receipts_per_chapter_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {

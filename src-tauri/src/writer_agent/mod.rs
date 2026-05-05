@@ -1,5 +1,7 @@
+pub mod author_voice;
 pub mod belief_conflict;
 pub mod canon;
+pub mod chapter_settlement;
 pub mod context;
 pub mod context_relevance;
 pub mod diagnostics;
@@ -24,13 +26,16 @@ pub mod metacognition;
 pub mod observation;
 pub mod operation;
 pub mod post_write_diagnostics;
+pub mod project_intake;
 pub mod promise_planner;
 pub mod proposal;
 pub mod provider_budget;
 pub mod research_subtask;
+pub mod rewrite_impact;
 pub mod run_events;
 pub mod run_preflight;
 pub mod story_impact;
+pub mod supervised_sprint;
 pub mod task_receipt;
 pub mod trajectory;
 
