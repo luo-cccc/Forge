@@ -6,6 +6,7 @@ const reportsDir = path.join(repoRoot, "reports");
 const fixturePath = path.join(reportsDir, "thousand_chapter_fixture.json");
 const reportPath = path.join(reportsDir, "scale_benchmark.json");
 const chartPath = path.join(reportsDir, "scale_benchmark_chart.png");
+const requestProfilesPath = path.join(repoRoot, "config", "llm-request-profiles.json");
 
 function nowMs() {
   return Number(process.hrtime.bigint() / 1000000n);
@@ -26,6 +27,10 @@ function loadFixture() {
     throw new Error(`missing fixture: ${fixturePath}. Run generate-thousand-chapter-fixture.cjs first.`);
   }
   return JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+}
+
+function loadProfiles() {
+  return JSON.parse(fs.readFileSync(requestProfilesPath, "utf8"));
 }
 
 function benchmarkPoint(chapters, take) {
@@ -66,11 +71,24 @@ function writePlaceholderChart(points) {
 
 fs.mkdirSync(reportsDir, { recursive: true });
 const fixture = loadFixture();
+const profiles = loadProfiles();
 const samplePoints = [10, 50, 100, 200, 500, 1000].filter((count) => count <= fixture.chapters.length);
 const points = samplePoints.map((count) => benchmarkPoint(fixture.chapters, count));
 const report = {
   generatedAt: new Date().toISOString(),
   sourceFixture: fixturePath,
+  chapterContract: {
+    targetChars: 3500,
+    minChars: 3000,
+    maxChars: 4000,
+    saveHardFloorChars: 2800,
+    saveHardCeilingChars: 4300,
+  },
+  chapterProfiles: {
+    chapterDraft: profiles.chapter_draft,
+    chapterContinuation: profiles.chapter_continuation,
+    chapterCompress: profiles.chapter_compress,
+  },
   points,
 };
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));

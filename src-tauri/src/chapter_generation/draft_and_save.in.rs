@@ -302,6 +302,7 @@ pub fn save_generated_chapter(
                 } else {
                     "replaced".to_string()
                 },
+                output_chars: char_count(&input.generated_content),
             })
         }
         SaveDecision::WriteDraft {
@@ -329,6 +330,7 @@ pub fn save_generated_chapter(
                 chapter_title: draft_title,
                 new_revision,
                 saved_mode: "draft_copy".to_string(),
+                output_chars: char_count(&input.generated_content),
             })
         }
         SaveDecision::Conflict(conflict) => Err(ChapterGenerationError {

@@ -55,10 +55,21 @@ pub async fn run_chapter_generation_pipeline(
         budget: Some(context.budget.clone()),
         receipt: Some(context.receipt.clone()),
         saved: None,
+        chapter_contract: Some(context.chapter_contract.clone()),
+        output_chars: None,
         conflict: None,
         error: None,
         warnings: context.warnings.clone(),
     });
+
+    emit(ChapterGenerationEvent::progress(
+        &request_id,
+        PHASE_SCENE_PLAN,
+        "running",
+        "正在规划本章场景与长度目标...",
+        35,
+        Some(context.target.title.clone()),
+    ));
 
     emit(ChapterGenerationEvent::progress(
         &request_id,
@@ -158,6 +169,15 @@ pub async fn run_chapter_generation_pipeline(
         | ChapterContractOutcome::OverSaveCeiling => {}
     }
 
+    emit(ChapterGenerationEvent::progress(
+        &request_id,
+        PHASE_LENGTH_VALIDATE,
+        "running",
+        "正在校验章节长度约束...",
+        63,
+        Some(context.target.title.clone()),
+    ));
+
     if let Err(error) = validate_generated_content(
         &draft.content,
         &context.chapter_contract,
@@ -226,6 +246,8 @@ pub async fn run_chapter_generation_pipeline(
         budget: None,
         receipt: None,
         saved: Some(saved.clone()),
+        chapter_contract: Some(context.chapter_contract.clone()),
+        output_chars: Some(saved.output_chars),
         conflict: None,
         error: None,
         warnings,
@@ -257,6 +279,8 @@ impl ChapterGenerationEvent {
             budget: None,
             receipt: None,
             saved: None,
+            chapter_contract: None,
+            output_chars: None,
             conflict: None,
             error: None,
             warnings: vec![],
@@ -275,6 +299,8 @@ impl ChapterGenerationEvent {
             budget: None,
             receipt: None,
             saved: None,
+            chapter_contract: None,
+            output_chars: None,
             conflict: None,
             error: Some(error),
             warnings: vec![],
@@ -293,6 +319,8 @@ impl ChapterGenerationEvent {
             budget: None,
             receipt: None,
             saved: None,
+            chapter_contract: None,
+            output_chars: None,
             conflict: Some(conflict),
             error: None,
             warnings: vec![],

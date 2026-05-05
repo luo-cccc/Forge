@@ -589,15 +589,28 @@ export interface SavedGeneratedChapter {
   chapterTitle: string;
   newRevision: string;
   savedMode: "created" | "replaced" | "draft_copy" | string;
+  outputChars: number;
 }
 
 export type ChapterGenerationPhase =
   | "chapter_generation_started"
   | "chapter_generation_context_built"
+  | "chapter_generation_scene_plan"
+  | "chapter_generation_continuation"
+  | "chapter_generation_compress"
+  | "chapter_generation_length_validate"
   | "chapter_generation_progress"
   | "chapter_generation_conflict"
   | "chapter_generation_completed"
   | "chapter_generation_failed";
+
+export interface ChapterContract {
+  targetChars: number;
+  minChars: number;
+  maxChars: number;
+  saveHardFloorChars: number;
+  saveHardCeilingChars: number;
+}
 
 export interface ChapterGenerationEvent {
   requestId: string;
@@ -609,6 +622,8 @@ export interface ChapterGenerationEvent {
   sources?: ChapterContextSource[];
   budget?: ChapterContextBudgetReport;
   saved?: SavedGeneratedChapter;
+  chapterContract?: ChapterContract;
+  outputChars?: number;
   conflict?: ChapterGenerationConflict;
   error?: ChapterGenerationError;
   warnings: string[];

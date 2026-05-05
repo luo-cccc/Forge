@@ -18,8 +18,10 @@ use crate::{llm_runtime, storage};
 
 pub const PHASE_STARTED: &str = "chapter_generation_started";
 pub const PHASE_CONTEXT_BUILT: &str = "chapter_generation_context_built";
+pub const PHASE_SCENE_PLAN: &str = "chapter_generation_scene_plan";
 pub const PHASE_CONTINUATION: &str = "chapter_generation_continuation";
 pub const PHASE_COMPRESS: &str = "chapter_generation_compress";
+pub const PHASE_LENGTH_VALIDATE: &str = "chapter_generation_length_validate";
 pub const PHASE_PROGRESS: &str = "chapter_generation_progress";
 pub const PHASE_CONFLICT: &str = "chapter_generation_conflict";
 pub const PHASE_COMPLETED: &str = "chapter_generation_completed";
@@ -414,6 +416,7 @@ pub struct SaveGeneratedChapterOutput {
     pub chapter_title: String,
     pub new_revision: String,
     pub saved_mode: String,
+    pub output_chars: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -454,6 +457,10 @@ pub struct ChapterGenerationEvent {
     pub receipt: Option<WriterTaskReceipt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved: Option<SaveGeneratedChapterOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_contract: Option<ChapterContract>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_chars: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conflict: Option<SaveConflict>,
     #[serde(skip_serializing_if = "Option::is_none")]
