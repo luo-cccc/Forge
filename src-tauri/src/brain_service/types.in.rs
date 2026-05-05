@@ -6,7 +6,6 @@ const MIN_CHUNK_CHARS: usize = 20;
 const TOP_K: usize = 5;
 const RERANK_CANDIDATE_MULTIPLIER: usize = 6;
 const KNOWLEDGE_INDEX_FILENAME: &str = "knowledge_index.json";
-const PROJECT_BRAIN_QUERY_OUTPUT_TOKENS: u64 = 4_096;
 const DEFAULT_EMBEDDING_DIMENSIONS: usize = 1536;
 const DEFAULT_EMBEDDING_INPUT_LIMIT_CHARS: usize = 8_000;
 
@@ -310,4 +309,3 @@ impl ProjectBrainFocus {
             .join("\n")
     }
 }
-

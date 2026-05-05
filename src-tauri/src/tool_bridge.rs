@@ -147,9 +147,14 @@ impl ToolHandler for TauriToolBridge {
                     crate::resolve_api_key().ok_or_else(|| "No API key configured".to_string())?;
                 let settings = crate::llm_runtime::settings(api_key);
                 let messages = vec![serde_json::json!({"role": "user", "content": prompt})];
-                let result = crate::llm_runtime::chat_text(&settings, messages, false, 120)
-                    .await
-                    .map_err(|e| format!("generate_bounded_continuation: {}", e))?;
+                let result = crate::llm_runtime::chat_text_profile(
+                    &settings,
+                    messages,
+                    crate::llm_runtime::LlmRequestProfile::ToolContinuation,
+                    120,
+                )
+                .await
+                .map_err(|e| format!("generate_bounded_continuation: {}", e))?;
                 Ok(serde_json::json!({"text": result}))
             }
             "generate_chapter_draft" => {

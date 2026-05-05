@@ -70,7 +70,39 @@ Optional provider environment variables:
 OPENAI_API_KEY=...
 OPENAI_API_BASE=https://openrouter.ai/api/v1
 OPENAI_MODEL=deepseek/deepseek-v4-flash
+OPENAI_CHAT_TEMPERATURE=0.7
+OPENAI_JSON_TEMPERATURE=0.2
+OPENAI_CHAT_MAX_TOKENS=4096
+OPENAI_JSON_MAX_TOKENS=1024
+OPENAI_CHAPTER_DRAFT_TEMPERATURE=0.75
+OPENAI_CHAPTER_DRAFT_MAX_TOKENS=6000
+OPENAI_GHOST_PREVIEW_TEMPERATURE=0.55
+OPENAI_GHOST_PREVIEW_MAX_TOKENS=512
+OPENAI_ANALYSIS_TEMPERATURE=0.2
+OPENAI_ANALYSIS_MAX_TOKENS=2048
+OPENAI_PARALLEL_DRAFT_TEMPERATURE=0.85
+OPENAI_PARALLEL_DRAFT_MAX_TOKENS=1200
+OPENAI_MANUAL_REWRITE_TEMPERATURE=0.6
+OPENAI_MANUAL_REWRITE_MAX_TOKENS=1200
+OPENAI_TOOL_CONTINUATION_TEMPERATURE=0.7
+OPENAI_TOOL_CONTINUATION_MAX_TOKENS=2048
+OPENAI_PROJECT_BRAIN_TEMPERATURE=0.3
+OPENAI_PROJECT_BRAIN_MAX_TOKENS=4096
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_INPUT_LIMIT_CHARS=8000
 ```
+
+Real provider integration tests are opt-in so normal verification stays offline and deterministic:
+
+```powershell
+$env:FORGE_REAL_API_TESTS="1"
+$env:OPENAI_CHAT_MAX_TOKENS="256"
+$env:OPENAI_JSON_MAX_TOKENS="256"
+$env:OPENAI_PROJECT_BRAIN_MAX_TOKENS="96"
+cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -- --nocapture
+```
+
+These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
 
 ## Development
 
@@ -146,7 +178,7 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 209 tests passing
+- `cargo test -p agent-writer`: 223 tests passing
 - `cargo run -p agent-evals`: 245/245 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing

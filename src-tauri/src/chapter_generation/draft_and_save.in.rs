@@ -47,9 +47,14 @@ Aim for up to {} Chinese characters unless the beat clearly requires less.",
     }
     record_model_started(context, &budget_report);
 
-    let content = llm_runtime::chat_text(settings, messages, false, PROVIDER_TIMEOUT_SECS)
-        .await
-        .map_err(map_provider_error)?;
+    let content = llm_runtime::chat_text_profile(
+        settings,
+        messages,
+        llm_runtime::LlmRequestProfile::ChapterDraft,
+        PROVIDER_TIMEOUT_SECS,
+    )
+    .await
+    .map_err(map_provider_error)?;
 
     let content = content.trim().to_string();
     validate_generated_content(&content)?;
@@ -92,7 +97,10 @@ pub fn chapter_generation_provider_budget(
         WriterProviderBudgetTask::ChapterGeneration,
         settings.model.clone(),
         estimated_input_tokens,
-        CHAPTER_GENERATION_OUTPUT_TOKENS,
+        u64::from(
+            llm_runtime::request_options(settings, llm_runtime::LlmRequestProfile::ChapterDraft)
+                .max_tokens,
+        ),
     ))
 }
 
@@ -488,4 +496,3 @@ pub struct ChapterGenerationConfig {
     pub payload: GenerateChapterAutonomousPayload,
     pub user_profile_entries: Vec<String>,
 }
-

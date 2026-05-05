@@ -98,6 +98,7 @@ P1 is in progress:
 - Metacognitive run-health is now derived from trace data and emitted in trajectory JSONL as `writer.metacognition`; the first hard-gate slice blocks risky write runs and direct text writes without blocking read-only or recovery workflows.
 - Writer run events now have a persisted replay path via `writer_run_events`, with `writer_agent:append_only_run_event_store` covering monotonic seq replay and trajectory export; failure bundles are recorded as `writer.error` run events, durable saves as `writer.save_completed`, reviewable memory candidates as `writer.memory_candidate_created`, WriterOperation approval/rejection decisions as `writer.approval_decided`, real writer/chapter-generation context assembly as `writer.context_pack_built` without storing raw manuscript context text, provider-call starts as `writer.model_started` without storing prompts or model output, and manual AgentLoop plus audited direct `ToolExecutor` calls as `writer.tool_called` without storing raw args or tool output.
 - Inspector timeline views now separate debug/internal replay from the default companion summary. The frontend Inspect mode reads `get_writer_agent_inspector_timeline` and `get_writer_agent_trace`, with filters for failure, save_completed, run event, task packet, lifecycle, context recall, product metrics, and metacognition, plus side summaries for provider budget, latest failure/save, save-to-feedback latency, proposal context budgets, post-write diagnostics, current context-source pressure, persisted per-session context pressure trend, and metacognitive risk/action. Failure cards and the latest-failure summary provide recovery navigation chips; the metacognition card now provides both navigation chips and real read-only recovery runs for Planning Review / Continuity Diagnostic. Trajectory export warns about manuscript/project-memory/feedback leakage before any sharing and now has both native Forge JSONL, `writer.metacognition`, and Trace Viewer compatible local export options.
+- Real provider smoke tests now live behind `FORGE_REAL_API_TESTS=1` and require a real `OPENAI_API_KEY`, so ordinary `cargo test` / `npm run verify` remains offline. `llm_runtime` has separate bounded env controls for general chat, JSON, chapter draft, ghost preview, analysis, parallel draft, manual rewrite, tool continuation, and Project Brain stream temperature / output tokens, allowing cost-controlled tuning without hardcoding one parameter set across all features.
 
 ## Current Verification Baseline
 
@@ -105,7 +106,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 209 tests passing
+- `cargo test -p agent-writer`: 223 tests passing
 - `cargo run -p agent-evals`: 245/245 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing

@@ -9,11 +9,53 @@ pub struct LlmSettings {
     pub model: String,
     pub embedding_model: String,
     pub embedding_input_limit_chars: usize,
+    pub chat_temperature: f64,
+    pub json_temperature: f64,
+    pub chat_max_tokens: u32,
+    pub json_max_tokens: u32,
 }
 
 pub enum StreamControl {
     Continue,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LlmRequestProfile {
+    GeneralChat,
+    Json,
+    ChapterDraft,
+    GhostPreview,
+    Analysis,
+    ParallelDraft,
+    ManualRewrite,
+    ToolContinuation,
+    ProjectBrainStream,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LlmRequestOptions {
+    pub temperature: f64,
+    pub max_tokens: u32,
+}
+
+const DEFAULT_CHAT_TEMPERATURE: f64 = 0.7;
+const DEFAULT_JSON_TEMPERATURE: f64 = 0.2;
+const DEFAULT_CHAT_MAX_TOKENS: u32 = 4_096;
+const DEFAULT_JSON_MAX_TOKENS: u32 = 1_024;
+const DEFAULT_CHAPTER_DRAFT_TEMPERATURE: f64 = 0.75;
+const DEFAULT_GHOST_PREVIEW_TEMPERATURE: f64 = 0.55;
+const DEFAULT_ANALYSIS_TEMPERATURE: f64 = 0.2;
+const DEFAULT_PARALLEL_DRAFT_TEMPERATURE: f64 = 0.85;
+const DEFAULT_MANUAL_REWRITE_TEMPERATURE: f64 = 0.6;
+const DEFAULT_TOOL_CONTINUATION_TEMPERATURE: f64 = 0.7;
+const DEFAULT_PROJECT_BRAIN_TEMPERATURE: f64 = 0.3;
+const DEFAULT_CHAPTER_DRAFT_MAX_TOKENS: u32 = 6_000;
+const DEFAULT_GHOST_PREVIEW_MAX_TOKENS: u32 = 512;
+const DEFAULT_ANALYSIS_MAX_TOKENS: u32 = 2_048;
+const DEFAULT_PARALLEL_DRAFT_MAX_TOKENS: u32 = 1_200;
+const DEFAULT_MANUAL_REWRITE_MAX_TOKENS: u32 = 1_200;
+const DEFAULT_TOOL_CONTINUATION_MAX_TOKENS: u32 = 2_048;
+const DEFAULT_PROJECT_BRAIN_MAX_TOKENS: u32 = 4_096;
 
 pub fn settings(api_key: String) -> LlmSettings {
     LlmSettings {
@@ -29,6 +71,134 @@ pub fn settings(api_key: String) -> LlmSettings {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value >= 128)
             .unwrap_or(8_000),
+        chat_temperature: parse_bounded_f64_env(
+            "OPENAI_CHAT_TEMPERATURE",
+            DEFAULT_CHAT_TEMPERATURE,
+            0.0,
+            2.0,
+        ),
+        json_temperature: parse_bounded_f64_env(
+            "OPENAI_JSON_TEMPERATURE",
+            DEFAULT_JSON_TEMPERATURE,
+            0.0,
+            2.0,
+        ),
+        chat_max_tokens: parse_bounded_u32_env(
+            "OPENAI_CHAT_MAX_TOKENS",
+            DEFAULT_CHAT_MAX_TOKENS,
+            16,
+            65_536,
+        ),
+        json_max_tokens: parse_bounded_u32_env(
+            "OPENAI_JSON_MAX_TOKENS",
+            DEFAULT_JSON_MAX_TOKENS,
+            16,
+            65_536,
+        ),
+    }
+}
+
+fn parse_bounded_f64_env(name: &str, default: f64, min: f64, max: f64) -> f64 {
+    parse_bounded_f64(std::env::var(name).ok().as_deref(), default, min, max)
+}
+
+fn parse_bounded_f64(raw: Option<&str>, default: f64, min: f64, max: f64) -> f64 {
+    raw.and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= min && *value <= max)
+        .unwrap_or(default)
+}
+
+fn parse_bounded_u32_env(name: &str, default: u32, min: u32, max: u32) -> u32 {
+    parse_bounded_u32(std::env::var(name).ok().as_deref(), default, min, max)
+}
+
+fn parse_bounded_u32(raw: Option<&str>, default: u32, min: u32, max: u32) -> u32 {
+    raw.and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value >= min && *value <= max)
+        .unwrap_or(default)
+}
+
+fn profile_temperature_env(profile: LlmRequestProfile) -> Option<&'static str> {
+    match profile {
+        LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_TEMPERATURE"),
+        LlmRequestProfile::Json => Some("OPENAI_JSON_TEMPERATURE"),
+        LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_TEMPERATURE"),
+        LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_TEMPERATURE"),
+        LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_TEMPERATURE"),
+        LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_TEMPERATURE"),
+        LlmRequestProfile::ManualRewrite => Some("OPENAI_MANUAL_REWRITE_TEMPERATURE"),
+        LlmRequestProfile::ToolContinuation => Some("OPENAI_TOOL_CONTINUATION_TEMPERATURE"),
+        LlmRequestProfile::ProjectBrainStream => Some("OPENAI_PROJECT_BRAIN_TEMPERATURE"),
+    }
+}
+
+fn profile_max_tokens_env(profile: LlmRequestProfile) -> Option<&'static str> {
+    match profile {
+        LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_MAX_TOKENS"),
+        LlmRequestProfile::Json => Some("OPENAI_JSON_MAX_TOKENS"),
+        LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_MAX_TOKENS"),
+        LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_MAX_TOKENS"),
+        LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_MAX_TOKENS"),
+        LlmRequestProfile::ParallelDraft => Some("OPENAI_PARALLEL_DRAFT_MAX_TOKENS"),
+        LlmRequestProfile::ManualRewrite => Some("OPENAI_MANUAL_REWRITE_MAX_TOKENS"),
+        LlmRequestProfile::ToolContinuation => Some("OPENAI_TOOL_CONTINUATION_MAX_TOKENS"),
+        LlmRequestProfile::ProjectBrainStream => Some("OPENAI_PROJECT_BRAIN_MAX_TOKENS"),
+    }
+}
+
+fn default_profile_options(
+    settings: &LlmSettings,
+    profile: LlmRequestProfile,
+) -> LlmRequestOptions {
+    match profile {
+        LlmRequestProfile::GeneralChat => LlmRequestOptions {
+            temperature: settings.chat_temperature,
+            max_tokens: settings.chat_max_tokens,
+        },
+        LlmRequestProfile::Json => LlmRequestOptions {
+            temperature: settings.json_temperature,
+            max_tokens: settings.json_max_tokens,
+        },
+        LlmRequestProfile::ChapterDraft => LlmRequestOptions {
+            temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
+            max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS,
+        },
+        LlmRequestProfile::GhostPreview => LlmRequestOptions {
+            temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
+            max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS,
+        },
+        LlmRequestProfile::Analysis => LlmRequestOptions {
+            temperature: DEFAULT_ANALYSIS_TEMPERATURE,
+            max_tokens: DEFAULT_ANALYSIS_MAX_TOKENS,
+        },
+        LlmRequestProfile::ParallelDraft => LlmRequestOptions {
+            temperature: DEFAULT_PARALLEL_DRAFT_TEMPERATURE,
+            max_tokens: DEFAULT_PARALLEL_DRAFT_MAX_TOKENS,
+        },
+        LlmRequestProfile::ManualRewrite => LlmRequestOptions {
+            temperature: DEFAULT_MANUAL_REWRITE_TEMPERATURE,
+            max_tokens: DEFAULT_MANUAL_REWRITE_MAX_TOKENS,
+        },
+        LlmRequestProfile::ToolContinuation => LlmRequestOptions {
+            temperature: DEFAULT_TOOL_CONTINUATION_TEMPERATURE,
+            max_tokens: DEFAULT_TOOL_CONTINUATION_MAX_TOKENS,
+        },
+        LlmRequestProfile::ProjectBrainStream => LlmRequestOptions {
+            temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
+            max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS,
+        },
+    }
+}
+
+pub fn request_options(settings: &LlmSettings, profile: LlmRequestProfile) -> LlmRequestOptions {
+    let defaults = default_profile_options(settings, profile);
+    LlmRequestOptions {
+        temperature: profile_temperature_env(profile)
+            .map(|name| parse_bounded_f64_env(name, defaults.temperature, 0.0, 2.0))
+            .unwrap_or(defaults.temperature),
+        max_tokens: profile_max_tokens_env(profile)
+            .map(|name| parse_bounded_u32_env(name, defaults.max_tokens, 16, 65_536))
+            .unwrap_or(defaults.max_tokens),
     }
 }
 
@@ -102,18 +272,70 @@ fn guard_chat_request_with_info(
     }
 }
 
+fn redact_api_error_body(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for marker in ["sk-", "Bearer "] {
+        while let Some(start) = redacted.find(marker) {
+            let token_end = redacted[start..]
+                .find(|ch: char| ch.is_whitespace() || ch == '"' || ch == '\'' || ch == ',')
+                .map(|offset| start + offset)
+                .unwrap_or(redacted.len());
+            redacted.replace_range(start..token_end, "[REDACTED]");
+        }
+    }
+    redacted
+}
+
+fn chat_request_options(settings: &LlmSettings, json_mode: bool) -> LlmRequestOptions {
+    if json_mode {
+        request_options(settings, LlmRequestProfile::Json)
+    } else {
+        request_options(settings, LlmRequestProfile::GeneralChat)
+    }
+}
+
 pub async fn chat_text(
     settings: &LlmSettings,
     messages: Vec<serde_json::Value>,
     json_mode: bool,
     timeout_secs: u64,
 ) -> Result<String, String> {
-    guard_chat_request(settings, &messages, 4_096)?;
+    let options = chat_request_options(settings, json_mode);
+    chat_text_with_options(settings, messages, json_mode, timeout_secs, options).await
+}
+
+pub async fn chat_text_profile(
+    settings: &LlmSettings,
+    messages: Vec<serde_json::Value>,
+    profile: LlmRequestProfile,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let json_mode = profile == LlmRequestProfile::Json;
+    chat_text_with_options(
+        settings,
+        messages,
+        json_mode,
+        timeout_secs,
+        request_options(settings, profile),
+    )
+    .await
+}
+
+async fn chat_text_with_options(
+    settings: &LlmSettings,
+    messages: Vec<serde_json::Value>,
+    json_mode: bool,
+    timeout_secs: u64,
+    options: LlmRequestOptions,
+) -> Result<String, String> {
+    guard_chat_request(settings, &messages, u64::from(options.max_tokens))?;
     let client = client(timeout_secs)?;
     let mut payload = serde_json::json!({
         "model": settings.model,
         "messages": messages,
-        "stream": false
+        "stream": false,
+        "temperature": options.temperature,
+        "max_tokens": options.max_tokens
     });
 
     if json_mode {
@@ -132,7 +354,11 @@ pub async fn chat_text(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status.as_u16(), text));
+        return Err(format!(
+            "API error {}: {}",
+            status.as_u16(),
+            redact_api_error_body(&text)
+        ));
     }
 
     let body: serde_json::Value = resp
@@ -176,7 +402,11 @@ pub async fn embed(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Embed API error {}: {}", status.as_u16(), text));
+        return Err(format!(
+            "Embed API error {}: {}",
+            status.as_u16(),
+            redact_api_error_body(&text)
+        ));
     }
 
     let body: EmbeddingResponse = resp
@@ -201,13 +431,15 @@ pub async fn chat_json(
     serde_json::from_str(&text).map_err(|e| format!("Failed to parse JSON response: {}", e))
 }
 
-pub async fn stream_chat(
+pub async fn stream_chat_profile(
     settings: &LlmSettings,
     messages: Vec<serde_json::Value>,
+    profile: LlmRequestProfile,
     timeout_secs: u64,
     mut on_delta: impl FnMut(String) -> Result<StreamControl, String>,
 ) -> Result<String, String> {
-    guard_chat_request(settings, &messages, 4_096)?;
+    let options = request_options(settings, profile);
+    guard_chat_request(settings, &messages, u64::from(options.max_tokens))?;
     let client = client(timeout_secs)?;
     let resp = client
         .post(endpoint(&settings.api_base, "chat/completions"))
@@ -216,7 +448,9 @@ pub async fn stream_chat(
         .json(&serde_json::json!({
             "model": settings.model,
             "messages": messages,
-            "stream": true
+            "stream": true,
+            "temperature": options.temperature,
+            "max_tokens": options.max_tokens
         }))
         .send()
         .await
@@ -225,7 +459,11 @@ pub async fn stream_chat(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status.as_u16(), text));
+        return Err(format!(
+            "API error {}: {}",
+            status.as_u16(),
+            redact_api_error_body(&text)
+        ));
     }
 
     let mut stream = resp.bytes_stream();
@@ -280,6 +518,10 @@ mod tests {
             model: "deepseek/deepseek-v4-flash".to_string(),
             embedding_model: "text-embedding-3-small".to_string(),
             embedding_input_limit_chars: 8_000,
+            chat_temperature: DEFAULT_CHAT_TEMPERATURE,
+            json_temperature: DEFAULT_JSON_TEMPERATURE,
+            chat_max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+            json_max_tokens: DEFAULT_JSON_MAX_TOKENS,
         }
     }
 
@@ -314,5 +556,77 @@ mod tests {
             .err()
             .as_deref()
             .is_some_and(|message| message.contains("too small")));
+    }
+
+    #[test]
+    fn bounded_float_env_parser_rejects_invalid_values() {
+        assert_eq!(parse_bounded_f64(Some("0.3"), 0.7, 0.0, 2.0), 0.3);
+        assert_eq!(parse_bounded_f64(Some("2.5"), 0.7, 0.0, 2.0), 0.7);
+        assert_eq!(parse_bounded_f64(Some("NaN"), 0.7, 0.0, 2.0), 0.7);
+        assert_eq!(parse_bounded_f64(Some("bad"), 0.7, 0.0, 2.0), 0.7);
+    }
+
+    #[test]
+    fn bounded_token_env_parser_rejects_invalid_values() {
+        assert_eq!(parse_bounded_u32(Some("2048"), 4096, 16, 65_536), 2048);
+        assert_eq!(parse_bounded_u32(Some("4"), 4096, 16, 65_536), 4096);
+        assert_eq!(parse_bounded_u32(Some("100000"), 4096, 16, 65_536), 4096);
+        assert_eq!(parse_bounded_u32(Some("bad"), 4096, 16, 65_536), 4096);
+    }
+
+    #[test]
+    fn chat_request_options_use_json_specific_defaults() {
+        let settings = test_settings();
+
+        assert_eq!(
+            chat_request_options(&settings, false),
+            LlmRequestOptions {
+                temperature: DEFAULT_CHAT_TEMPERATURE,
+                max_tokens: DEFAULT_CHAT_MAX_TOKENS
+            }
+        );
+        assert_eq!(
+            chat_request_options(&settings, true),
+            LlmRequestOptions {
+                temperature: DEFAULT_JSON_TEMPERATURE,
+                max_tokens: DEFAULT_JSON_MAX_TOKENS
+            }
+        );
+    }
+
+    #[test]
+    fn profile_request_options_use_feature_specific_defaults() {
+        let settings = test_settings();
+
+        assert_eq!(
+            request_options(&settings, LlmRequestProfile::ChapterDraft),
+            LlmRequestOptions {
+                temperature: DEFAULT_CHAPTER_DRAFT_TEMPERATURE,
+                max_tokens: DEFAULT_CHAPTER_DRAFT_MAX_TOKENS
+            }
+        );
+        assert_eq!(
+            request_options(&settings, LlmRequestProfile::GhostPreview),
+            LlmRequestOptions {
+                temperature: DEFAULT_GHOST_PREVIEW_TEMPERATURE,
+                max_tokens: DEFAULT_GHOST_PREVIEW_MAX_TOKENS
+            }
+        );
+        assert_eq!(
+            request_options(&settings, LlmRequestProfile::ProjectBrainStream),
+            LlmRequestOptions {
+                temperature: DEFAULT_PROJECT_BRAIN_TEMPERATURE,
+                max_tokens: DEFAULT_PROJECT_BRAIN_MAX_TOKENS
+            }
+        );
+    }
+
+    #[test]
+    fn redacts_likely_api_keys_from_error_text() {
+        let text = redact_api_error_body("invalid key sk-live-secret and Bearer sk-other");
+
+        assert!(!text.contains("sk-live-secret"));
+        assert!(!text.contains("sk-other"));
+        assert!(text.contains("[REDACTED]"));
     }
 }

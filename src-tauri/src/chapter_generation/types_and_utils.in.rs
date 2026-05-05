@@ -40,7 +40,6 @@ const DEFAULT_RAG_CHUNK_COUNT: usize = 5;
 const DEFAULT_OUTPUT_SOFT_CAP_CHARS: usize = 12_000;
 const DEFAULT_OUTPUT_HARD_CAP_CHARS: usize = 30_000;
 const PROVIDER_TIMEOUT_SECS: u64 = 120;
-const CHAPTER_GENERATION_OUTPUT_TOKENS: u64 = DEFAULT_OUTPUT_SOFT_CAP_CHARS as u64 / 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -611,4 +610,3 @@ pub fn validate_generated_content(content: &str) -> Result<(), ChapterGeneration
 
     Ok(())
 }
-

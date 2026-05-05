@@ -323,7 +323,14 @@ pub(crate) fn spawn_llm_ghost_proposal(
 
     tokio::spawn(async move {
         let target_for_error = render_target.clone();
-        let text = match llm_runtime::chat_text(&settings, messages, false, 12).await {
+        let text = match llm_runtime::chat_text_profile(
+            &settings,
+            messages,
+            llm_runtime::LlmRequestProfile::GhostPreview,
+            12,
+        )
+        .await
+        {
             Ok(text) => text,
             Err(e) => {
                 tracing::warn!("Writer Agent LLM ghost proposal failed: {}", e);

@@ -1,6 +1,8 @@
 mod agent_runtime;
 mod agent_status;
 mod ambient_agents;
+#[cfg(test)]
+mod api_integration_tests;
 mod api_key;
 mod app_paths;
 mod app_state;

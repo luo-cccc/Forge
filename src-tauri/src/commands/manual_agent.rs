@@ -513,7 +513,13 @@ async fn run_inline_writer_operation(
     };
 
     let messages = writer_agent_inline_operation_messages(&message, &observation, &context_pack);
-    let draft = crate::llm_runtime::chat_text(&settings, messages, false, 30).await?;
+    let draft = crate::llm_runtime::chat_text_profile(
+        &settings,
+        messages,
+        crate::llm_runtime::LlmRequestProfile::ManualRewrite,
+        30,
+    )
+    .await?;
 
     let (proposal, operation) = {
         let state = app.state::<AppState>();

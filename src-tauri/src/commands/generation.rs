@@ -626,10 +626,10 @@ pub async fn generate_parallel_drafts(
         focus,
     );
 
-    let text = llm_runtime::chat_text(
+    let text = llm_runtime::chat_text_profile(
         &settings,
         vec![serde_json::json!({"role": "user", "content": prompt})],
-        false,
+        llm_runtime::LlmRequestProfile::ParallelDraft,
         45,
     )
     .await?;
@@ -652,13 +652,13 @@ pub async fn generate_parallel_drafts(
 pub async fn analyze_pacing(summaries: String) -> Result<String, String> {
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
-    let text = llm_runtime::chat_text(
+    let text = llm_runtime::chat_text_profile(
         &settings,
         vec![
             serde_json::json!({"role": "system", "content": "You are a structural editor. Analyze the chapter sequence for pacing issues, slow sections, abrupt transitions, and unresolved arcs. Be specific and concise."}),
             serde_json::json!({"role": "user", "content": format!("Chapter summaries:\n{}", summaries)}),
         ],
-        false,
+        llm_runtime::LlmRequestProfile::Analysis,
         60,
     )
     .await?;

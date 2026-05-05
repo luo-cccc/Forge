@@ -187,7 +187,14 @@ pub async fn answer_query_with_focus(
         crate::agent_runtime::now_ms(),
     );
 
-    llm_runtime::stream_chat(settings, messages, 60, on_delta).await?;
+    llm_runtime::stream_chat_profile(
+        settings,
+        messages,
+        llm_runtime::LlmRequestProfile::ProjectBrainStream,
+        60,
+        on_delta,
+    )
+    .await?;
 
     Ok(())
 }
@@ -196,12 +203,27 @@ pub fn project_brain_query_provider_budget(
     settings: &llm_runtime::LlmSettings,
     messages: &[serde_json::Value],
 ) -> WriterProviderBudgetReport {
-    project_brain_query_provider_budget_for_model(settings.model.clone(), messages)
+    project_brain_query_provider_budget_for_model_and_output_tokens(
+        settings.model.clone(),
+        messages,
+        u64::from(
+            llm_runtime::request_options(settings, llm_runtime::LlmRequestProfile::ProjectBrainStream)
+                .max_tokens,
+        ),
+    )
 }
 
 pub fn project_brain_query_provider_budget_for_model(
     model: impl Into<String>,
     messages: &[serde_json::Value],
+) -> WriterProviderBudgetReport {
+    project_brain_query_provider_budget_for_model_and_output_tokens(model, messages, 4_096)
+}
+
+fn project_brain_query_provider_budget_for_model_and_output_tokens(
+    model: impl Into<String>,
+    messages: &[serde_json::Value],
+    requested_output_tokens: u64,
 ) -> WriterProviderBudgetReport {
     let converted = messages
         .iter()
@@ -226,7 +248,7 @@ pub fn project_brain_query_provider_budget_for_model(
         WriterProviderBudgetTask::ProjectBrainQuery,
         model.into(),
         estimated_input_tokens,
-        PROJECT_BRAIN_QUERY_OUTPUT_TOKENS,
+        requested_output_tokens,
     ))
 }
 
