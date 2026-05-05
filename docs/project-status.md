@@ -12,14 +12,14 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only behind `WriterAgentKernel.prepare_task_run()` / `WriterAgentPreparedRun.run()`. `ask_agent` in lib.rs calls the kernel path, with no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are re-exported through `writer_agent::kernel` and implemented in `writer_agent/kernel_run_loop.rs`.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 54 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 56 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
 P1 is in progress:
 
 - Story Contract quality now has explicit Missing / Vague / Usable / Strong states and vague contracts are excluded from context packs.
-- Chapter Mission save calibration can mark completed, drifted, or needs_review states based on save observations.
+- Chapter Mission save calibration can mark completed, drifted, or needs_review states based on save observations; author-set blocked missions now require a concrete blocked reason, and retired missions require a preserved history note before saving.
 - Promise Ledger now classifies promise kinds including plot promise, emotional debt, object whereabouts, character commitment, mystery clue, and relationship tension.
 - Writer Agent trajectory now exports derived product metrics such as proposal acceptance rate, ignored suggestion rate, promise recall hit rate, canon false-positive rate, chapter mission completion rate, durable save success rate, and save-to-feedback latency. It also exports a first multi-session `writer.product_metrics_trend` event derived from persisted run events.
 - Manual ask converted-to-operation rate is now visible in Inspect Run Health and per-session trend, covered by `writer_agent:product_metrics_manual_ask_conversion` and `writer_agent:product_metrics_manual_ask_conversion_trend`.
@@ -105,7 +105,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 81 tests passing
-- `cargo test -p agent-writer`: 197 tests passing
+- `cargo test -p agent-writer`: 198 tests passing
 - `cargo run -p agent-evals`: 179/179 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing

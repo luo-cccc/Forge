@@ -157,6 +157,18 @@ pub(crate) fn validate_chapter_mission_summary(mission: &ChapterMissionSummary) 
         ));
     }
 
+    match normalize_chapter_mission_status(&mission.status).as_str() {
+        "blocked" if mission.blocked_reason.trim().chars().count() < 8 => {
+            return Some("Blocked Chapter Mission requires a concrete blocked_reason.".to_string());
+        }
+        "retired" if mission.retired_history.trim().chars().count() < 8 => {
+            return Some(
+                "Retired Chapter Mission requires a concrete retired_history.".to_string(),
+            );
+        }
+        _ => {}
+    }
+
     None
 }
 

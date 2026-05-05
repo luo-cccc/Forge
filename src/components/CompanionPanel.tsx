@@ -27,6 +27,7 @@ import {
   hasChapterMissionContent,
   hasStoryContractContent,
   storyContractDraftFromSummary,
+  validateChapterMissionStatusExplanation,
   type ChapterMissionDraft,
   type StoryContractDraft,
 } from "./CompanionPanel.contract";
@@ -429,6 +430,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     }
 
     if (currentChapter && hasChapterMissionContent(missionDraft)) {
+      const statusExplanationError = validateChapterMissionStatusExplanation(missionDraft);
+      if (statusExplanationError) {
+        setFoundationSaveState("error");
+        setOperationError(statusExplanationError);
+        return;
+      }
+
       operations.push({
         kind: "chapter_mission.upsert",
         mission: {

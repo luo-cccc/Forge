@@ -1407,8 +1407,16 @@ fn chapter_mission_status_machine_accepts_new_statuses_and_legacy_alias() {
                         expected_ending: "以新的疑问收束。".to_string(),
                         status: raw.to_string(),
                         source_ref: "test".to_string(),
-                        blocked_reason: String::new(),
-                        retired_history: String::new(),
+                        blocked_reason: if raw == "blocked" {
+                            "等待作者确认张三是否已经离场。".to_string()
+                        } else {
+                            String::new()
+                        },
+                        retired_history: if raw == "retired" {
+                            "作者已改用第二章任务承接这条线。".to_string()
+                        } else {
+                            String::new()
+                        },
                     },
                 },
                 "",
@@ -1423,6 +1431,48 @@ fn chapter_mission_status_machine_accepts_new_statuses_and_legacy_alias() {
                 .unwrap()
                 .status,
             normalized
+        );
+    }
+}
+
+#[test]
+fn chapter_mission_blocked_and_retired_require_explanations() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("novel-a", memory);
+    kernel.active_chapter = Some("第一章".to_string());
+
+    for (status, expected) in [
+        ("blocked", "blocked_reason"),
+        ("retired", "retired_history"),
+    ] {
+        let result = kernel
+            .approve_editor_operation_with_approval(
+                WriterOperation::ChapterMissionUpsert {
+                    mission: crate::writer_agent::operation::ChapterMissionOp {
+                        project_id: "novel-a".to_string(),
+                        chapter_title: "第一章".to_string(),
+                        mission: "林墨发现玉佩线索。".to_string(),
+                        must_include: "推进玉佩线索".to_string(),
+                        must_not: "不要提前揭开真相".to_string(),
+                        expected_ending: "以新的疑问收束。".to_string(),
+                        status: status.to_string(),
+                        source_ref: "test".to_string(),
+                        blocked_reason: String::new(),
+                        retired_history: String::new(),
+                    },
+                },
+                "",
+                Some(&test_approval("mission_status_explanation")),
+            )
+            .unwrap();
+
+        assert!(!result.success, "{status} should require explanation");
+        let error = result.error.expect("invalid mission should return error");
+        assert_eq!(error.code, "invalid");
+        assert!(
+            error.message.contains(expected),
+            "{status} error should mention {expected}: {}",
+            error.message
         );
     }
 }

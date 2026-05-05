@@ -95,3 +95,15 @@ export function hasChapterMissionContent(draft: ChapterMissionDraft): boolean {
     draft.expectedEnding,
   ].some((value) => value.trim().length > 0);
 }
+
+export function validateChapterMissionStatusExplanation(
+  draft: ChapterMissionDraft,
+): string | null {
+  if (draft.status === "blocked" && draft.blockedReason.trim().length < 8) {
+    return "Blocked Chapter Mission needs a concrete reason before saving.";
+  }
+  if (draft.status === "retired" && draft.retiredHistory.trim().length < 8) {
+    return "Retired Chapter Mission needs a short history note before saving.";
+  }
+  return null;
+}

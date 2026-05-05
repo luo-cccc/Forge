@@ -1028,9 +1028,9 @@ Forge 当前不是空白 agent 框架。现有事实基线已经包括 `agent-ha
 1. Chapter Mission 状态机升级。
    - 第一阶段已完成：状态机已支持 draft、active、completed、drifted、blocked、needs_review、retired；旧 `in_progress` 会兼容归一为 `active`。
    - 保存章节后会基于 Result Feedback 将 draft/active/needs_review 迁移为 completed、active、drifted 或 needs_review，并把 `source_ref` 指向对应 `chapter_save` 结果；迁移会写入 creative decision 作为证据记录。
-   - blocked / retired 是作者显式状态，不会被保存观察自动覆盖，也不会继续生成普通 mission save-gap proposal。
+   - blocked / retired 是作者显式状态，不会被保存观察自动覆盖，也不会继续生成普通 mission save-gap proposal；写入 blocked 必须提供具体 `blocked_reason`，写入 retired 必须提供 `retired_history`，Companion 保存前也会前置校验。
    - Companion Chapter Mission 下拉已暴露 draft / active / review / done / drift / blocked / retired。
-   - 剩余：把自动迁移改成可审查 suggestion/approval UI，而不是当前后端直接校准；补充 blocked 的具体原因字段和 retired 的历史解释。
+   - 剩余：把自动迁移改成可审查 suggestion/approval UI，而不是当前后端直接校准。
 2. Belief conflict explanation。
    - 当 Story Contract、Mission、Canon、Promise、Project Brain 互相冲突时，必须说明冲突来源和置信度。
    - 不能静默选择一个来源覆盖另一个来源。
