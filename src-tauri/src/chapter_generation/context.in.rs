@@ -78,7 +78,7 @@ pub fn build_chapter_context(
         "target_beat",
         &target.title,
         "Current chapter beat",
-        &target.summary,
+        &build_target_beat_context(&target.summary),
         input.budget.outline_chars.min(2_000),
         None,
     );
@@ -292,6 +292,67 @@ pub fn build_chapter_generation_task_packet(
     packet
 }
 
+fn build_target_beat_context(summary: &str) -> String {
+    let primary = infer_primary_objective(summary);
+    let hold_back = infer_hold_back_reveal(summary);
+    let pressure = infer_scene_pressure(summary);
+    let payoff = infer_required_payoff(summary);
+
+    let mut lines = vec![format!("Beat summary: {}", compact_line(summary, 180))];
+    lines.push(format!("Primary objective: {}", primary));
+    if let Some(pressure) = pressure {
+        lines.push(format!("Immediate pressure: {}", pressure));
+    }
+    if let Some(payoff) = payoff {
+        lines.push(format!("Required payoff or partial payoff: {}", payoff));
+    }
+    if let Some(hold_back) = hold_back {
+        lines.push(format!("Hold-back reveal: {}", hold_back));
+    }
+    lines.join("\n")
+}
+
+fn infer_primary_objective(summary: &str) -> String {
+    if contains_any(summary, &["进入", "潜入", "抵达"]) {
+        "complete the immediate entry/action step before widening into lore exposition".to_string()
+    } else if contains_any(summary, &["对峙", "逼问", "抢"]) {
+        "force a concrete confrontation and decision in-scene".to_string()
+    } else if contains_any(summary, &["交易", "交换", "选择"]) {
+        "make the scene hinge on a costly choice, not explanation only".to_string()
+    } else {
+        "advance one concrete scene objective before expanding world explanation".to_string()
+    }
+}
+
+fn infer_hold_back_reveal(summary: &str) -> Option<String> {
+    if contains_any(summary, &["真相", "身份", "封门", "原因", "意识到"]) {
+        Some(
+            "move the truth closer through evidence or image, but do not fully explain the full sealing truth in the same chapter"
+                .to_string(),
+        )
+    } else {
+        None
+    }
+}
+
+fn infer_scene_pressure(summary: &str) -> Option<String> {
+    if contains_any(summary, &["倒影", "镜中墟", "入口"]) {
+        Some("keep the scene anchored in the unstable threshold / mirror encounter, not wide retrospective exposition".to_string())
+    } else if contains_any(summary, &["宗门", "抢", "追兵"]) {
+        Some("external arrival should force action quickly".to_string())
+    } else {
+        None
+    }
+}
+
+fn infer_required_payoff(summary: &str) -> Option<String> {
+    if contains_any(summary, &["旧债", "背叛", "交易", "承认"]) {
+        Some("pay at least one slice of emotional debt or trust pressure inside the scene".to_string())
+    } else {
+        None
+    }
+}
+
 pub fn build_chapter_generation_receipt(
     request_id: &str,
     target: &ChapterTarget,
@@ -454,4 +515,3 @@ fn chapter_source_confidence(source_type: &str) -> f32 {
 fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
-

@@ -125,17 +125,38 @@ fn build_adjacent_chapter_context(
         .iter()
         .map(|node| {
             let text = storage::load_chapter(app, node.chapter_title.clone()).unwrap_or_default();
-            if text.trim().is_empty() {
-                format!("[{}]\nSummary: {}", node.chapter_title, node.summary)
-            } else {
-                format!(
-                    "[{}]\nSummary: {}\nExisting text:\n{}",
-                    node.chapter_title, node.summary, text
-                )
-            }
+            build_previous_chapter_structured_context(node.chapter_title.as_str(), &node.summary, &text)
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn build_previous_chapter_structured_context(
+    chapter_title: &str,
+    summary: &str,
+    text: &str,
+) -> String {
+    let summary_line = compact_line(summary, 140);
+    let carryovers = infer_carryovers(summary, text);
+    let consequences = infer_consequences(summary, text);
+    let unresolved = infer_unresolved_threads(summary, text);
+    let closing_image = extract_closing_image(text);
+
+    let mut lines = vec![format!("[{}]", chapter_title)];
+    lines.push(format!("Summary: {}", summary_line));
+    if !carryovers.is_empty() {
+        lines.push(format!("Carryovers: {}", carryovers.join(" / ")));
+    }
+    if !consequences.is_empty() {
+        lines.push(format!("Consequences: {}", consequences.join(" / ")));
+    }
+    if !unresolved.is_empty() {
+        lines.push(format!("Unresolved: {}", unresolved.join(" / ")));
+    }
+    if let Some(image) = closing_image {
+        lines.push(format!("Closing image: {}", image));
+    }
+    lines.join("\n")
 }
 
 fn build_next_chapter_context(nodes: Vec<&storage::OutlineNode>) -> String {
@@ -148,6 +169,66 @@ fn build_next_chapter_context(nodes: Vec<&storage::OutlineNode>) -> String {
         .map(|node| format!("[{}]\n{}", node.chapter_title, node.summary))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn infer_carryovers(summary: &str, text: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    if contains_any(summary, &["账册", "半页", "密信", "钥匙", "入口"]) {
+        items.push("critical object/entry clue remains active".to_string());
+    }
+    if contains_any(summary, &["张三", "背叛", "隐瞒", "试探", "误会"]) {
+        items.push("trust pressure with Zhang San remains unresolved".to_string());
+    }
+    if contains_any(text, &["寒影刀", "发烫", "震", "冰凉", "刀鞘"]) {
+        items.push("Han Ying blade is actively reacting".to_string());
+    }
+    items
+}
+
+fn infer_consequences(summary: &str, text: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    if contains_any(summary, &["代价", "只能", "一次", "时限"]) {
+        items.push("entry conditions impose a real cost or time limit".to_string());
+    }
+    if contains_any(summary, &["宗门", "追兵", "找来", "来人"]) || contains_any(text, &["北境宗门"]) {
+        items.push("external faction pressure is already closing in".to_string());
+    }
+    items
+}
+
+fn infer_unresolved_threads(summary: &str, text: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    if contains_any(summary, &["真相", "秘密", "身份", "封门"]) || contains_any(text, &["封门"]) {
+        items.push("the sealing truth should move closer but not fully detonate yet".to_string());
+    }
+    if contains_any(summary, &["旧债", "还债"]) || contains_any(text, &["旧债"]) {
+        items.push("the old debt needs pressure or partial payoff, not another empty reminder".to_string());
+    }
+    items
+}
+
+fn extract_closing_image(text: &str) -> Option<String> {
+    let last = text
+        .split(['。', '！', '？', '!', '?', '\n'])
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()?;
+    Some(compact_line(last, 90))
+}
+
+fn compact_line(text: &str, max_chars: usize) -> String {
+    let mut result = String::new();
+    for ch in text.chars().take(max_chars) {
+        result.push(ch);
+    }
+    if text.chars().count() > max_chars {
+        result.push_str("...");
+    }
+    result
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
 }
 
 fn select_lore_entries<'a>(
