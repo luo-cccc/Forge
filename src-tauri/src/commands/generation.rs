@@ -93,6 +93,8 @@ pub struct RepairChapterStateResult {
     pub settlement_delta: crate::chapter_generation::ChapterSettlementDelta,
     pub settlement_apply: crate::chapter_generation::ChapterSettlementApplyResult,
     pub artifact_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement_replay_matches: Option<bool>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1262,6 +1264,21 @@ pub fn repair_chapter_state(
         &project_id,
         &delta,
     )?;
+
+    // Verify settlement is replayable
+    let replay = crate::chapter_generation::replay_settlement_extraction(
+        &delta,
+        &content,
+        &memory,
+    );
+    if !replay.matches_original {
+        tracing::warn!(
+            chapter = chapter_title,
+            mismatches = replay.mismatches.join("; "),
+            "Settlement replay produced different results"
+        );
+    }
+
     let telemetry = crate::chapter_generation::ChapterLengthTelemetry {
         target_chars: context.chapter_contract.target_chars,
         min_chars: context.chapter_contract.min_chars,
@@ -1281,6 +1298,7 @@ pub fn repair_chapter_state(
         &context,
         &delta,
         &telemetry,
+        &content,
     )?;
     crate::audit_project_file_write(
         &app,
@@ -1300,5 +1318,6 @@ pub fn repair_chapter_state(
         settlement_delta: delta,
         settlement_apply,
         artifact_refs: artifacts.artifact_refs,
+        settlement_replay_matches: Some(replay.matches_original),
     })
 }
