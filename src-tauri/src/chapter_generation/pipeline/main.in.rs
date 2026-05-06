@@ -381,6 +381,7 @@ pub async fn run_chapter_generation_pipeline(
             &context,
             &settlement_delta,
             &length_telemetry,
+            &draft.content,
         ) {
             Ok(artifacts) => Some(artifacts.artifact_refs),
             Err(error) => {

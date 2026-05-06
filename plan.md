@@ -252,6 +252,700 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 > 把 Forge 从“功能已经很多的长篇系统”，收成“语义闭合、真相统一、恢复可靠、默认行为稳定的长篇生产内核”。
 
+#### 3.3.7 实体状态内核封顶
+
+在 `3.3` 封顶冲刺内部，还必须单独补上“实体状态内核”这条主线。否则 Forge 仍然只能停留在“章节级生产内核”，无法真正封顶成“实体级长篇状态系统”。
+
+当前已知硬缺口：
+
+- `Character` 不是一等业务实体，只是通用 `canon_entities`
+- 没有 `CharacterState` 这种“章节区间有效”的版本化状态层
+- 关系没有作为权威实体存在
+- `Promise` 没有 `subject`
+- `settlement` 仍然主要是章节级 typed，而不是实体级 typed
+- `TodayFiveSummary` 虽然已经 schema 化，但还不是实体状态驱动的控制面
+
+##### 3.3.7.1 本阶段的唯一目标
+
+> 把 Forge 从“章节级 typed state 系统”推进到“实体级 typed state 系统”。
+
+##### 3.3.7.2 必补的 4 组权威结构
+
+1. `characters`
+   - 唯一 `CharacterID`
+   - `name`
+   - `aliases`
+   - `role_type`：主角 / 配角 / 功能角色
+   - `current_state_summary`
+   - `updated_at`
+
+2. `character_state_versions`
+   - `character_id`
+   - `valid_from_chapter`
+   - `valid_to_chapter`
+   - `core_commitments_json`
+   - `goal_state_json`
+   - `identity_state_json`
+   - `relationship_refs_json`
+   - `source_ref`
+   - `created_at`
+
+3. `character_relationships`
+   - 唯一 `RelationshipID`
+   - `character_a_id`
+   - `character_b_id`
+   - `relation_type`：盟友 / 敌对 / 隐藏 / 复杂
+   - `visibility`
+   - `valid_from_chapter`
+   - `valid_to_chapter`
+   - `source_ref`
+
+4. `plot_promises.subject`
+   - `subject_ids_json`
+   - `subject_type`
+   - 后续预留：
+     - `governing_state_version_id`
+     - `governing_relationship_id`
+
+##### 3.3.7.3 为什么这不是“可选增强”
+
+如果不补这一层，Forge 将继续存在这些上限：
+
+- 角色 OOC 无法被严肃建模，只能做文本碰撞
+- 关系线无法作为长期债务管理
+- Promise 无法稳定归属到角色 / 关系 / 物件主体
+- `settlement` 只能章节级收敛，不能实体级 apply
+- `TodayFiveSummary` 很难成为真正可靠的作者当天控制面
+
+也就是说，长篇最关键的三类稳定性问题：
+
+- 设定漂移
+- 角色承诺漂移
+- 关系演化漂移
+
+都还没有真正的权威源。
+
+##### 3.3.7.4 本阶段只做 5 件事
+
+1. 实体主表落地
+   - 新增 `characters`
+   - 现有 `canon_entities` 退为投影/补充设定层，不再承担全部角色权威语义
+
+2. 角色状态版本层落地
+   - 新增 `character_state_versions`
+   - 明确“哪个章节区间内，这个角色的核心承诺 / 目标 / 身份是什么”
+
+3. 关系实体层落地
+   - 新增 `character_relationships`
+   - 明确关系何时成立、何时变更、何时失效
+
+4. Promise 主体化
+   - `plot_promises` 增加 `subject`
+   - 让 promise 从“全局浮动事项”变成“归属某个角色/关系/状态的债务对象”
+
+5. entity-scoped settlement / planning / debt
+   - `ChapterSettlementDelta` 的 `promise_updates / book_state_updates / chapter_result`
+     必须能映射到实体
+   - `StoryDebtSnapshot` 与 `TodayFiveSummary` 要能消费实体级状态，而不只是章节级摘要
+
+##### 3.3.7.5 本阶段明确不做
+
+- 不先做复杂关系图 UI
+- 不先做角色百科前端
+- 不先做可视化时间轴
+- 不先做“角色卡片大面板”
+
+这些都属于表达层，不是封顶层。
+
+##### 3.3.7.6 本阶段完成定义
+
+只有同时满足下面条件，才算“实体状态内核封顶完成”：
+
+- `Character` 拥有稳定业务 ID，而不是只靠名字
+- 同一角色可拥有多个按章节区间生效的状态版本
+- 同一对角色可拥有按章节区间生效的关系版本
+- Promise 能显式绑定主体，而不是只保留字符串 `related_entities`
+- `settlement apply` 能把章节结算映射到实体级状态变化
+- `TodayFiveSummary` 至少有一半内容来自实体级状态，而不是章节级 helper 拼装
+- `npm run verify` 全绿
+- `cargo run -p agent-evals` 全绿
+- 新增 4 个专项 gate：
+  - `character_state_versioning_consistency`
+  - `relationship_validity_window_consistency`
+  - `promise_subject_binding_consistency`
+  - `entity_scoped_settlement_apply_consistency`
+
+##### 3.3.7.7 最后的判断
+
+这不是“后续有空再做”的增强项，而是长篇内核封顶前必须补齐的一层。
+
+如果 `3.3` 的目标是让 Forge 成为“稳定生产内核”，那么 `3.3.7` 的目标就是：
+
+> 让 Forge 不再只懂章节，而是真的开始懂“谁、在什么时候、对谁、背着什么承诺、处在什么关系里”。 
+
+##### 3.3.7.8 执行版：负责文件 / 迁移顺序 / 影响面
+
+本阶段按以下顺序实施，不允许跳步：
+
+1. schema 迁移
+   - `src-tauri/src/writer_agent/memory/schema.in.rs`
+   - `src-tauri/src/writer_agent/memory/tracing_migrate.in.rs`
+   - 新增：
+     - `characters`
+     - `character_state_versions`
+     - `character_relationships`
+   - 扩展：
+     - `plot_promises.subject_ids_json`
+     - `plot_promises.subject_type`
+
+2. memory methods
+   - `src-tauri/src/writer_agent/memory.rs`
+   - `src-tauri/src/writer_agent/memory/canon_methods.in.rs`
+   - 新增：
+     - `character_methods.in.rs`
+     - `character_state_methods.in.rs`
+     - `relationship_methods.in.rs`
+
+3. typed ops
+   - `src-tauri/src/writer_agent/operation.rs`
+   - 新增：
+     - `character.upsert`
+     - `character_state.upsert`
+     - `relationship.upsert`
+     - `promise.bind_subject`
+
+4. settlement / planning / debt 接入
+   - `src-tauri/src/chapter_generation/settlement.in.rs`
+   - `src-tauri/src/writer_agent/settlement_apply.rs`
+   - `src-tauri/src/writer_agent/kernel/review.rs`
+   - `src-tauri/src/writer_agent/promise_planner.rs`
+   - `src-tauri/src/writer_agent/kernel/snapshots/today_five.in.rs`
+
+##### 3.3.7.9 现有功能需要补足和增强的点
+
+- `canon_entities`
+  - 退为投影，不再承担角色权威源
+- `Promise Ledger`
+  - 所有 open/stale/blocked/promoted/core 判断都要开始吃 subject，而不是只吃 title/description
+- `StoryDebtSnapshot`
+  - 需要能区分“这是主角债 / 配角债 / 关系债”
+- `TodayFiveSummary`
+  - 至少有 2 项必须直接来自角色或关系状态，而不是章节摘要
+
+##### 3.3.7.10 新增 gate
+
+- `character_state_versioning_consistency`
+- `relationship_validity_window_consistency`
+- `promise_subject_binding_consistency`
+- `entity_scoped_settlement_apply_consistency`
+
+#### 3.3.8 知识与身份状态封顶
+
+在实体状态内核之后，必须立刻补“知识 / 秘密 / 身份层”。否则 Forge 仍然只能记录“发生了什么”，却不能稳定表达“谁知道什么、谁误以为什么、什么还不能揭露”。
+
+##### 3.3.8.1 本阶段的唯一目标
+
+> 让 Forge 开始区分“客观真相”、“角色已知信息”、“角色误判信息”、“对外可见身份”。
+
+##### 3.3.8.2 必补的权威结构
+
+1. `knowledge_items`
+   - 唯一 `KnowledgeID`
+   - `topic`
+   - `truth_state`
+   - `source_ref`
+   - `created_at`
+
+2. `knowledge_ownership`
+   - `knowledge_id`
+   - `holder_type`：角色 / 关系 / 阵营 / 公众
+   - `holder_id`
+   - `knowledge_mode`：真实知情 / 误判 / 怀疑 / 隐瞒
+   - `valid_from_chapter`
+   - `valid_to_chapter`
+
+3. `identity_layers`
+   - `character_id`
+   - `public_identity`
+   - `private_identity`
+   - `revealed_to_json`
+   - `valid_from_chapter`
+   - `valid_to_chapter`
+
+4. `reveal_events`
+   - `subject_id`
+   - `reveal_type`
+   - `revealed_to`
+   - `chapter`
+   - `source_ref`
+
+##### 3.3.8.3 本阶段只做 4 件事
+
+1. 知识条目主表落地
+2. 知识归属与误判状态落地
+3. 身份层与 reveal 状态落地
+4. settlement / diagnostics / planning 可消费知识与身份状态
+
+##### 3.3.8.4 本阶段完成定义
+
+- 同一秘密可以区分：
+  - 客观真相
+  - 某角色知情
+  - 某角色误判
+  - 公众未知
+- 某角色的公开身份与真实身份可在不同章节区间共存
+- reveal 事件可以改变知识归属，而不是只改 prose
+- `bad payoff / canon drift / OOC` 的至少一部分检查开始基于知识层而不是纯文本
+- 新增 3 个专项 gate：
+  - `knowledge_visibility_consistency`
+  - `identity_reveal_consistency`
+  - `false_belief_preservation_consistency`
+
+##### 3.3.8.5 明确不做
+
+- 不先做知识图谱可视化
+- 不先做“秘密管理面板”
+- 不先做复杂阵营 UI
+
+##### 3.3.8.6 执行版：负责文件 / 迁移顺序 / 影响面
+
+1. schema 迁移
+   - `src-tauri/src/writer_agent/memory/schema.in.rs`
+   - `src-tauri/src/writer_agent/memory/tracing_migrate.in.rs`
+   - 新增：
+     - `knowledge_items`
+     - `knowledge_ownership`
+     - `identity_layers`
+     - `reveal_events`
+
+2. memory methods
+   - 新增：
+     - `knowledge_methods.in.rs`
+     - `identity_methods.in.rs`
+     - `reveal_methods.in.rs`
+
+3. settlement / diagnostics / belief conflict 接入
+   - `src-tauri/src/chapter_generation/settlement.in.rs`
+   - `src-tauri/src/writer_agent/belief_conflict.rs`
+   - `src-tauri/src/writer_agent/diagnostics.rs`
+   - `src-tauri/src/writer_agent/kernel/chapters.rs`
+
+4. planning / context / Companion 接入
+   - `src-tauri/src/writer_agent/context/assembly.in.rs`
+   - `src-tauri/src/writer_agent/kernel/prompts.rs`
+   - `src-tauri/src/writer_agent/kernel/snapshots/today_five.in.rs`
+
+##### 3.3.8.7 现有功能需要补足和增强的点
+
+- `bad payoff`
+  - 不能只看 payoff 早晚，还要看 reveal_to / knowledge_mode 是否成立
+- `canon drift`
+  - 不能只看事实矛盾，还要看公开身份 / 私下身份是否混线
+- `OOC`
+  - 需要开始吃“角色知道什么、误以为什么”
+- `TodayFiveSummary`
+  - 需要能明确告诉作者“当前哪条秘密还不能揭、谁已经知道、谁还误判”
+
+##### 3.3.8.8 新增 gate
+
+- `knowledge_visibility_consistency`
+- `identity_reveal_consistency`
+- `false_belief_preservation_consistency`
+
+#### 3.3.9 场景编排内核封顶
+
+Forge 当前已经有 staged generation，但还没有真正的一等场景对象层。没有 scene object，就很难稳定表达一章内“哪个场景承担哪个任务、哪个场景兑现哪个债、哪个场景推进哪段关系”。
+
+##### 3.3.9.1 本阶段的唯一目标
+
+> 让 Forge 开始按 Scene 组织章节，而不是只按整章文本组织章节。
+
+##### 3.3.9.2 必补的权威结构
+
+1. `scenes`
+   - `scene_id`
+   - `chapter_title`
+   - `sequence`
+   - `scene_type`
+   - `summary`
+
+2. `scene_state`
+   - `scene_id`
+   - `objective`
+   - `participants_json`
+   - `location_ref`
+   - `time_slice_ref`
+   - `entry_state_json`
+   - `exit_state_json`
+
+3. `scene_obligations`
+   - `scene_id`
+   - `promise_ids_json`
+   - `mission_refs_json`
+   - `payoff_targets_json`
+
+4. `scene_results`
+   - `scene_id`
+   - `outcome`
+   - `consequence`
+   - `source_ref`
+
+##### 3.3.9.3 本阶段只做 5 件事
+
+1. scene object 主表落地
+2. 章节内 scene sequence 落地
+3. scene 与 mission / promise / payoff 的绑定落地
+4. settlement 支持最小 scene 级结果投影
+5. generation pipeline 开始消费 scene schema，而不是只保留 phase 名字
+
+##### 3.3.9.4 本阶段完成定义
+
+- 一章可以拆成多个 scene object
+- 每个 scene 至少有：
+  - objective
+  - participants
+  - entry / exit state
+- 至少一部分 promise / mission / payoff 可以绑定到 scene
+- `scene_plan` 不再只是事件名，而有可审查结构工件
+- 新增 3 个专项 gate：
+  - `scene_sequence_consistency`
+  - `scene_obligation_binding_consistency`
+  - `scene_result_projection_consistency`
+
+##### 3.3.9.5 明确不做
+
+- 不先做复杂分镜 UI
+- 不先做 scene 拖拽板
+- 不先做电影式 storyboard 前端
+
+##### 3.3.9.6 执行版：负责文件 / 迁移顺序 / 影响面
+
+1. scene schema
+   - `src-tauri/src/writer_agent/memory/schema.in.rs`
+   - 新增：
+     - `scenes`
+     - `scene_state`
+     - `scene_obligations`
+     - `scene_results`
+
+2. generation pipeline 接入
+   - `src-tauri/src/chapter_generation/types_and_utils.in.rs`
+   - `src-tauri/src/chapter_generation/context.in.rs`
+   - `src-tauri/src/chapter_generation/pipeline/main.in.rs`
+   - `src-tauri/src/chapter_generation/runtime_artifacts.in.rs`
+
+3. settlement / next beat / debt 接入
+   - `src-tauri/src/chapter_generation/settlement.in.rs`
+   - `src-tauri/src/writer_agent/kernel/chapters.rs`
+   - `src-tauri/src/writer_agent/kernel/review.rs`
+   - `src-tauri/src/writer_agent/kernel/snapshots.rs`
+
+4. TodayFiveSummary 接入
+   - `src-tauri/src/writer_agent/kernel/snapshots/today_five.in.rs`
+   - 至少一项要能显示“当前章最关键 scene 目标”
+
+##### 3.3.9.7 现有功能需要补足和增强的点
+
+- staged generation
+  - `scene_plan` 必须从 phase 名字变成结构化工件
+- settlement
+  - `chapter_result` 需要能投影最小 scene 结果
+- debt / planning
+  - promise、mission、payoff 不再只绑定 chapter，而要能绑定 scene
+- Companion
+  - `Next Move` 不能只给章级目标，要能给 scene 级目标
+
+##### 3.3.9.8 新增 gate
+
+- `scene_sequence_consistency`
+- `scene_obligation_binding_consistency`
+- `scene_result_projection_consistency`
+
+#### 3.3.10 时间轴内核封顶
+
+如果没有故事时间轴，Forge 最终只能稳定处理“线性按章节前进”的小说。长篇一旦出现倒叙、插叙、平行线、延迟揭露，就会迅速失去稳定性。
+
+##### 3.3.10.1 本阶段的唯一目标
+
+> 让 Forge 能区分“章节顺序”和“故事时间顺序”。
+
+##### 3.3.10.2 必补的权威结构
+
+1. `story_time_slices`
+   - `time_slice_id`
+   - `label`
+   - `start_ref`
+   - `end_ref`
+   - `relative_order`
+
+2. `chapter_time_mapping`
+   - `chapter_title`
+   - `scene_id`
+   - `time_slice_id`
+   - `narrative_mode`：当前时 / 倒叙 / 插叙 / 平行
+
+3. `timeline_events`
+   - `event_id`
+   - `subject_ids_json`
+   - `event_type`
+   - `time_slice_id`
+   - `source_ref`
+
+##### 3.3.10.3 本阶段只做 4 件事
+
+1. 故事时间片结构落地
+2. scene / chapter 到故事时间的映射落地
+3. 关键事件进入 timeline event 层
+4. diagnostics / debt / save feedback 开始使用 story-time，而不是只看 chapter number
+
+##### 3.3.10.4 本阶段完成定义
+
+- 章节顺序与故事顺序可以分离
+- 同一章可以映射到多个故事时间片
+- `TimelineIssue` 诊断不再只靠章节号推断
+- `relationship / identity / state version` 可以绑定故事时间片，而不是只绑定章节
+- 新增 3 个专项 gate：
+  - `story_time_mapping_consistency`
+  - `flashback_identity_consistency`
+  - `timeline_event_order_consistency`
+
+##### 3.3.10.5 明确不做
+
+- 不先做可视化时间轴 UI
+- 不先做日历/世界年表前端
+- 不先做复杂编辑器时间线插件
+
+##### 3.3.10.6 执行版：负责文件 / 迁移顺序 / 影响面
+
+1. timeline schema
+   - `src-tauri/src/writer_agent/memory/schema.in.rs`
+   - 新增：
+     - `story_time_slices`
+     - `chapter_time_mapping`
+     - `timeline_events`
+
+2. timeline helpers
+   - `src-tauri/src/writer_agent/kernel/snapshots/helpers.in.rs`
+   - `src-tauri/src/writer_agent/kernel/chapters.rs`
+   - `src-tauri/src/writer_agent/diagnostics.rs`
+
+3. settlement / state version 绑定
+   - `src-tauri/src/chapter_generation/settlement.in.rs`
+   - `src-tauri/src/writer_agent/settlement_apply.rs`
+   - `character_state_versions`
+   - `character_relationships`
+   - `identity_layers`
+
+4. Companion / Inspector 接入
+   - `src-tauri/src/writer_agent/kernel/snapshots/today_five.in.rs`
+   - `src-tauri/src/writer_agent/inspector.rs`
+
+##### 3.3.10.7 现有功能需要补足和增强的点
+
+- `TimelineIssue`
+  - 不能再主要靠 `chapter_number_from_title`
+- `repair-state`
+  - 需要保住 story-time 映射，不只是 chapter chronology
+- `reveal / identity / relationship`
+  - 都要能挂到 story time slice，而不是只挂 chapter
+- `TodayFiveSummary`
+  - 需要能在倒叙/插叙时告诉作者“当前写的是哪段故事时间”
+
+##### 3.3.10.8 新增 gate
+
+- `story_time_mapping_consistency`
+- `flashback_identity_consistency`
+- `timeline_event_order_consistency`
+
+#### 3.3.12 开发顺序约束
+
+这四段不能并行乱做，必须按下面顺序推进：
+
+1. `3.3.7` 人物 / 关系 / Promise.subject
+2. `3.3.8` 知识 / 身份 / reveal
+3. `3.3.9` 场景对象层
+4. `3.3.10` 时间轴
+
+原因很简单：
+
+- 没有人物和关系，就没有稳定 subject
+- 没有 subject，就没有稳定知识归属
+- 没有知识和身份层，就无法正确做 scene obligation
+- 没有 scene object，就无法稳定做时间轴映射
+
+如果顺序打乱，后面每一层都会返工。 
+
+#### 3.3.13 集中冲刺开发顺序表
+
+把 `3.3.7` 到 `3.3.10` 压成一个集中冲刺表，默认按 4 个 Sprint 执行。
+
+| Sprint | 主题 | 目标 | Day 1-2 | Day 3-4 | Day 5-6 | Day 7 | 交付 artifact | Gate |
+|------|------|------|------|------|------|------|------|------|
+| Sprint A | `3.3.7` 实体状态内核 | 让人物 / 关系 / Promise.subject 成为权威层 | schema 迁移：`characters` / `character_state_versions` / `character_relationships` / `plot_promises.subject_*` | memory methods + typed ops | settlement / debt / planning / TodayFive 接实体 subject | 补 eval 与 verify | schema 变更文档、entity apply trace、subject 绑定样例 | `character_state_versioning_consistency` / `relationship_validity_window_consistency` / `promise_subject_binding_consistency` / `entity_scoped_settlement_apply_consistency` |
+| Sprint B | `3.3.8` 知识与身份 | 让系统区分真相 / 已知 / 误判 / 可见身份 | schema 迁移：`knowledge_items` / `knowledge_ownership` / `identity_layers` / `reveal_events` | memory methods + reveal apply | settlement / diagnostics / belief conflict / TodayFive 接知识状态 | 补 eval 与 verify | knowledge/reveal state trace、identity visibility 样例 | `knowledge_visibility_consistency` / `identity_reveal_consistency` / `false_belief_preservation_consistency` |
+| Sprint C | `3.3.9` 场景编排内核 | 让章节按 Scene 而不是整章组织 | schema 迁移：`scenes` / `scene_state` / `scene_obligations` / `scene_results` | generation pipeline 接 scene schema | settlement / next beat / planning / TodayFive 接 scene | 补 eval 与 verify | `scene_plan` 结构工件、scene result 投影样例 | `scene_sequence_consistency` / `scene_obligation_binding_consistency` / `scene_result_projection_consistency` |
+| Sprint D | `3.3.10` 时间轴内核 | 区分章节顺序与故事时间顺序 | schema 迁移：`story_time_slices` / `chapter_time_mapping` / `timeline_events` | state version / reveal / relationship 绑定时间片 | diagnostics / debt / save feedback / TodayFive 接 story-time | 补 eval 与 verify | story-time mapping trace、timeline consistency 样例 | `story_time_mapping_consistency` / `flashback_identity_consistency` / `timeline_event_order_consistency` |
+
+##### 3.3.13.1 每个 Sprint 的共通规则
+
+每个 Sprint 都必须按同一节奏执行：
+
+1. Day 1-2：只做 schema / protocol / typed op，不碰大 UI
+2. Day 3-4：只做 memory methods / apply path / settlement 接入
+3. Day 5-6：只做 planning / debt / diagnostics / TodayFive 接入
+4. Day 7：只做 tests / evals / verify / artifact 固化
+
+##### 3.3.13.2 每个 Sprint 现有功能要补足的点
+
+Sprint A 必须补：
+
+- `canon_entities` 退为投影
+- `Promise Ledger` 接 subject
+- `StoryDebtSnapshot` 可区分角色债 / 关系债
+- `TodayFiveSummary` 至少两项来自实体状态
+
+Sprint B 必须补：
+
+- `bad payoff` 基于知识可见性
+- `canon drift` 基于身份层
+- `OOC` 基于“角色知道什么 / 误判什么”
+- `TodayFiveSummary` 能告诉作者“谁知道了什么、什么还不能揭”
+
+Sprint C 必须补：
+
+- `scene_plan` 从 phase 名变成结构工件
+- settlement 增加最小 scene 结果投影
+- promise / mission / payoff 支持 scene 绑定
+- `Next Move` 默认能给出 scene 级目标
+
+Sprint D 必须补：
+
+- `TimelineIssue` 不再主要靠 chapter number
+- `repair-state` 保住 story-time 映射
+- reveal / identity / relationship 能绑定 story-time
+- `TodayFiveSummary` 能明确当前写的是哪段故事时间
+
+##### 3.3.13.3 集中冲刺结束定义
+
+只有当 Sprint A-D 全部完成，并且以下条件同时成立，才算“底层封顶冲刺真正闭合”：
+
+- 人物 / 关系 / 知识 / 场景 / 时间轴五层都有权威结构
+- settlement extraction 可从章节级推进到实体级 / 场景级 / 时间轴级投影
+- save / settlement / planning / debt / TodayFive 使用同一套真相源
+- `npm run verify` 全绿
+- `cargo run -p agent-evals` 全绿
+- 不为补底层而引入新的 write-mode 调试噪声
+
+##### 3.3.13.4 底层算法适配原则
+
+这轮不是“为了新结构把整套 agent 推倒重写”，而是“在现有 typed 内核上补语义层，并保证热路径不被拖垮”。
+
+唯一原则：
+
+> 不用“禁止变化”控制长篇，而用“版本化状态 + 章节有效区间 + subject 绑定”控制长篇。
+
+这意味着新增的 `Character / CharacterState / Relationship / Knowledge / Scene / StoryTime` 不应逼迫主流程全量重算，而应作为增量约束层接入现有：
+
+- `TaskPacket`
+- `context assembly`
+- `ChapterSettlementDelta`
+- `Promise Ledger`
+- `StoryDebtSnapshot`
+- `TodayFiveSummary`
+
+##### 3.3.13.5 必须适配的算法面
+
+1. 检索与上下文组装
+   - 从“词命中 + 章节邻近”升级为“typed filter + 小集合 rerank”
+   - 先按角色 / 关系 / 知识 / 场景 / 时间片做 cheap filter，再做文本重排
+   - 禁止为了拿到新语义，每次生成扫描全书所有状态版本
+
+2. settlement / apply
+   - 从“章节级结果推断”升级为“本章触达对象的 typed delta apply”
+   - 除 `chapter_result / promise_updates / book_state_updates` 外，逐步增加：
+     - `character_state_deltas`
+     - `relationship_deltas`
+     - `knowledge_deltas`
+     - `scene_deltas`
+     - `story_time_deltas`
+   - 只 apply 本章新增或被命中的对象，不做全量重建
+
+3. promise planner / debt ranking
+   - 从“title / description / chapter number”主导，升级为“subject / state pressure / relationship pressure / knowledge readiness / timeline due”主导
+   - 旧的词命中和章节邻近先保留为 fallback，不允许一次性打掉现有稳定行为
+
+4. diagnostics / belief conflict
+   - 从“文本冲突解释”升级为“实体状态 / 知识可见性 / 身份层 / story-time”联合诊断
+   - `OOC / canon drift / bad payoff / state conflict / reveal timing` 都必须开始吃 typed state
+
+5. story impact / Companion
+   - story impact 节点要补：
+     - 角色状态节点
+     - 关系节点
+     - 知识节点
+     - scene 节点
+     - story-time 节点
+   - Companion 只消费压缩后的控制信号，不直接暴露底层调试细节
+
+##### 3.3.13.6 性能红线
+
+新增语义层之后，以下实现方式禁止进入主写作热路径：
+
+- 禁止每次生成前全量扫描全部章节状态历史
+- 禁止每次保存后重建整本书的实体 / 关系 / 知识索引
+- 禁止每次 settlement 重新刷新全量 embedding / VectorDB
+- 禁止把复杂图推理、离线修复、全量回填塞进 save path
+
+必须坚持的 4 条实现约束：
+
+1. 写入只做本章 delta apply
+2. 查询只读 active snapshot + recent window
+3. 召回一律走“粗召回 -> typed filter -> 小集合 rerank”
+4. backfill / repair / reindex 只走离线路径，不进入默认写作主链
+
+##### 3.3.13.7 可开发的适配顺序
+
+按落地顺序，所有算法适配只允许按下面顺序推进：
+
+1. 先补 schema 与 typed ops
+   - `characters`
+   - `character_state_versions`
+   - `character_relationships`
+   - `knowledge_items`
+   - `identity_layers`
+   - `scenes`
+   - `story_time_slices`
+   - `plot_promises.subject_*`
+
+2. 再补 settlement delta 与 authoritative apply
+   - 保证新增结构先能被可靠写入、回放、修复
+
+3. 再改 retrieval / planner / diagnostics 的评分因子
+   - 让算法开始消费新语义，但不破坏旧 fallback
+
+4. 最后再收 Companion / TodayFive / 默认行为
+   - 只给作者当天真正要看的 5 件事，不把系统重新做成调试台
+
+##### 3.3.13.8 本轮新增验收门
+
+在原有 gate 之外，再补 4 个约束 gate，防止“语义增强成功、性能却退化”：
+
+- `typed_context_filter_under_large_state_fixture`
+- `entity_scoped_settlement_apply_without_global_rebuild`
+- `planner_subject_scoring_fallback_consistency`
+- `save_path_without_full_state_rescan`
+
+#### 3.3.11 最后一句话
+
+如果 `3.3` 是底层封顶冲刺，那么 `3.3.7` 到 `3.3.10` 就是底层封顶真正的四根梁：
+
+- 人物
+- 知识与身份
+- 场景
+- 时间轴
+
+补齐这四层之后，Forge 才能真正从“会写长章”升级成“理解整本长篇小说结构并持续稳定共创”的系统。
+
 ### 3.1 当前完成度
 
 按 4 周主线看，代码完成度是：

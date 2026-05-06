@@ -9,6 +9,7 @@ pub fn persist_chapter_runtime_artifacts(
     context: &BuiltChapterContext,
     settlement_delta: &ChapterSettlementDelta,
     length_telemetry: &ChapterLengthTelemetry,
+    generated_content: &str,
 ) -> Result<PersistedChapterRuntimeArtifacts, String> {
     let project_dir = crate::storage::active_project_data_dir(app)?;
     let runtime_dir = project_dir.join("chapter_runtime");
@@ -38,6 +39,26 @@ pub fn persist_chapter_runtime_artifacts(
     write_json_file(&settlement_path, settlement_delta)?;
     write_json_file(&length_path, length_telemetry)?;
 
+    let replay = SettlementReplay {
+        input_content_hash: {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(generated_content.as_bytes());
+            format!("{:x}", hasher.finalize())
+        },
+        memory_snapshot_id: format!("{}", context.target.number.map_or(0, |n| n as i64)),
+        output_delta_hash: {
+            let json = serde_json::to_string(settlement_delta).unwrap_or_default();
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(json.as_bytes());
+            format!("{:x}", hasher.finalize())
+        },
+        created_at_ms: crate::agent_runtime::now_ms(),
+    };
+    let replay_path = runtime_dir.join(format!("{}.replay.json", stem));
+    write_json_file(&replay_path, &replay)?;
+
     Ok(PersistedChapterRuntimeArtifacts {
         artifact_refs: vec![
             path_ref(&project_dir, &intent_path),
@@ -46,6 +67,7 @@ pub fn persist_chapter_runtime_artifacts(
             path_ref(&project_dir, &trace_path),
             path_ref(&project_dir, &settlement_path),
             path_ref(&project_dir, &length_path),
+            path_ref(&project_dir, &replay_path),
         ],
     })
 }

@@ -422,3 +422,67 @@ fn next_chapter_label(chapter: &str) -> String {
         .map(|number| format!("Chapter-{}", number + 1))
         .unwrap_or_else(|| "later chapter".to_string())
 }
+
+fn hash_str(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+pub fn replay_settlement_extraction(
+    original: &ChapterSettlementDelta,
+    generated_content: &str,
+    memory: &WriterMemory,
+) -> SettlementReplayResult {
+    let replayed = build_basic_chapter_settlement_delta(
+        &String::new(),
+        &original.chapter_title,
+        &original.chapter_revision,
+        generated_content,
+        0,
+        memory,
+        original.continuity_issues.clone(),
+    );
+
+    let mut mismatches = Vec::new();
+
+    if original.summary != replayed.summary {
+        mismatches.push("summary differs".to_string());
+    }
+
+    if original.promise_updates.len() != replayed.promise_updates.len() {
+        mismatches.push(format!(
+            "promise_updates count differs: {} vs {}",
+            original.promise_updates.len(),
+            replayed.promise_updates.len()
+        ));
+    }
+
+    if original.chapter_fact_delta.len() != replayed.chapter_fact_delta.len() {
+        mismatches.push(format!(
+            "chapter_fact_delta count differs: {} vs {}",
+            original.chapter_fact_delta.len(),
+            replayed.chapter_fact_delta.len()
+        ));
+    }
+
+    if original.book_state_updates.len() != replayed.book_state_updates.len() {
+        mismatches.push(format!(
+            "book_state_updates count differs: {} vs {}",
+            original.book_state_updates.len(),
+            replayed.book_state_updates.len()
+        ));
+    }
+
+    let original_json = serde_json::to_string(original).unwrap_or_default();
+    let replayed_json = serde_json::to_string(&replayed).unwrap_or_default();
+
+    SettlementReplayResult {
+        replayed: true,
+        matches_original: mismatches.is_empty(),
+        mismatches,
+        original_hash: hash_str(&original_json),
+        replayed_hash: hash_str(&replayed_json),
+    }
+}

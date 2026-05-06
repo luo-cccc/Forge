@@ -500,6 +500,25 @@ pub struct ChapterSettlementDelta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct SettlementReplay {
+    pub input_content_hash: String,
+    pub memory_snapshot_id: String,
+    pub output_delta_hash: String,
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementReplayResult {
+    pub replayed: bool,
+    pub matches_original: bool,
+    pub mismatches: Vec<String>,
+    pub original_hash: String,
+    pub replayed_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChapterSettlementApplyResult {
     pub applied: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
