@@ -618,6 +618,24 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column(
         conn,
         "plot_promises",
+        "blocked_reason",
+        "blocked_reason TEXT DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "promoted",
+        "promoted INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "core",
+        "core INTEGER DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
         "related_entities_json",
         "related_entities_json TEXT DEFAULT '[]'",
     )?;

@@ -1,56 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-fn chapter_number_from_title(chapter: &str) -> Option<i64> {
-    let digits = chapter
-        .chars()
-        .filter(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    if !digits.is_empty() {
-        return digits.parse::<i64>().ok();
-    }
-    let start = chapter.find('第')?;
-    let rest = &chapter[start + '第'.len_utf8()..];
-    let end = rest.find('章').unwrap_or(rest.len());
-    let raw = rest[..end].trim();
-    parse_chinese_number(raw)
-}
-
-fn parse_chinese_number(raw: &str) -> Option<i64> {
-    let digit = |ch: char| match ch {
-        '零' => Some(0),
-        '一' => Some(1),
-        '二' | '两' => Some(2),
-        '三' => Some(3),
-        '四' => Some(4),
-        '五' => Some(5),
-        '六' => Some(6),
-        '七' => Some(7),
-        '八' => Some(8),
-        '九' => Some(9),
-        _ => None,
-    };
-    if raw.is_empty() {
-        return None;
-    }
-    if raw == "十" {
-        return Some(10);
-    }
-    if let Some(idx) = raw.find('十') {
-        let left = raw[..idx].chars().next().and_then(digit).unwrap_or(1);
-        let right = raw[idx + '十'.len_utf8()..]
-            .chars()
-            .next()
-            .and_then(digit)
-            .unwrap_or(0);
-        return Some((left * 10 + right) as i64);
-    }
-    let mut value = 0i64;
-    for ch in raw.chars() {
-        value = value * 10 + i64::from(digit(ch)?);
-    }
-    Some(value)
-}
+include!("snapshots/helpers.in.rs");
 
 impl WriterAgentKernel {
     pub fn status(&self) -> WriterAgentStatus {
@@ -177,7 +128,15 @@ impl WriterAgentKernel {
 
         let open_count = entries
             .iter()
-            .filter(|entry| entry.status == StoryDebtStatus::Open)
+            .filter(|entry| {
+                matches!(
+                    entry.status,
+                    StoryDebtStatus::Open
+                        | StoryDebtStatus::Blocked
+                        | StoryDebtStatus::Promoted
+                        | StoryDebtStatus::Core
+                )
+            })
             .count();
         let contract_count = entries
             .iter()
@@ -545,171 +504,9 @@ impl WriterAgentKernel {
     }
 }
 
-#[derive(Default)]
-struct MemoryReliabilityAccumulator {
-    slot: String,
-    category: String,
-    reinforcement_count: u64,
-    correction_count: u64,
-    net_confidence_delta: f64,
-    last_action: String,
-    last_source_error: Option<String>,
-    last_reason: Option<String>,
-    last_proposal_id: String,
-    updated_at: u64,
-}
+include!("snapshots/memory_reliability.in.rs");
 
-fn memory_reliability_summary(
-    feedback: Vec<super::memory::MemoryFeedbackSummary>,
-) -> Vec<WriterMemoryReliabilitySummary> {
-    let mut slots = BTreeMap::<String, MemoryReliabilityAccumulator>::new();
-    for event in feedback {
-        let entry =
-            slots
-                .entry(event.slot.clone())
-                .or_insert_with(|| MemoryReliabilityAccumulator {
-                    slot: event.slot.clone(),
-                    category: event.category.clone(),
-                    ..Default::default()
-                });
-        if entry.category.trim().is_empty() || entry.category == "unknown" {
-            entry.category = event.category.clone();
-        }
-        match event.action.as_str() {
-            "reinforcement" => {
-                entry.reinforcement_count = entry.reinforcement_count.saturating_add(1)
-            }
-            "correction" => entry.correction_count = entry.correction_count.saturating_add(1),
-            _ => {}
-        }
-        entry.net_confidence_delta += event.confidence_delta;
-        if event.created_at >= entry.updated_at {
-            entry.updated_at = event.created_at;
-            entry.last_action = event.action.clone();
-            entry.last_source_error = event.source_error.clone();
-            entry.last_reason = event.reason.clone();
-            entry.last_proposal_id = event.proposal_id.clone();
-        }
-    }
+include!("snapshots/context_trends.in.rs");
 
-    let mut summaries = slots
-        .into_values()
-        .map(|entry| {
-            let reliability = (0.5 + entry.net_confidence_delta).clamp(0.0, 1.0);
-            let status = if entry.correction_count > 0
-                && entry.correction_count >= entry.reinforcement_count
-            {
-                "needs_review"
-            } else if reliability >= 0.55 && entry.reinforcement_count > 0 {
-                "trusted"
-            } else {
-                "unproven"
-            };
-            WriterMemoryReliabilitySummary {
-                slot: entry.slot,
-                category: entry.category,
-                status: status.to_string(),
-                reliability,
-                reinforcement_count: entry.reinforcement_count,
-                correction_count: entry.correction_count,
-                net_confidence_delta: entry.net_confidence_delta,
-                last_action: entry.last_action,
-                last_source_error: entry.last_source_error,
-                last_reason: entry.last_reason,
-                last_proposal_id: entry.last_proposal_id,
-                updated_at: entry.updated_at,
-            }
-        })
-        .collect::<Vec<_>>();
-    summaries.sort_by(|left, right| {
-        reliability_status_weight(&right.status)
-            .cmp(&reliability_status_weight(&left.status))
-            .then_with(|| right.updated_at.cmp(&left.updated_at))
-            .then_with(|| left.slot.cmp(&right.slot))
-    });
-    summaries
-}
-
-fn reliability_status_weight(status: &str) -> u8 {
-    match status {
-        "needs_review" => 3,
-        "unproven" => 2,
-        "trusted" => 1,
-        _ => 0,
-    }
-}
-
-#[derive(Default)]
-struct ContextSourceTrendAccumulator {
-    appearances: usize,
-    provided_count: usize,
-    truncated_count: usize,
-    dropped_count: usize,
-    total_requested: usize,
-    total_provided: usize,
-    last_reason: Option<String>,
-    last_truncation_reason: Option<String>,
-}
-
-fn context_source_trends(proposals: &[WriterProposalTrace]) -> Vec<WriterContextSourceTrend> {
-    let mut trends = BTreeMap::<String, ContextSourceTrendAccumulator>::new();
-    for report in proposals
-        .iter()
-        .filter_map(|proposal| proposal.context_budget.as_ref())
-        .flat_map(|budget| budget.source_reports.iter())
-    {
-        let trend = trends.entry(report.source.clone()).or_default();
-        trend.appearances += 1;
-        trend.total_requested += report.requested;
-        trend.total_provided += report.provided;
-        if report.provided > 0 {
-            trend.provided_count += 1;
-        } else {
-            trend.dropped_count += 1;
-        }
-        if report.truncated {
-            trend.truncated_count += 1;
-        }
-        if !report.reason.trim().is_empty() {
-            trend.last_reason = Some(report.reason.clone());
-        }
-        if let Some(reason) = report
-            .truncation_reason
-            .as_ref()
-            .filter(|reason| !reason.trim().is_empty())
-        {
-            trend.last_truncation_reason = Some(reason.clone());
-        }
-    }
-
-    let mut trends = trends
-        .into_iter()
-        .map(|(source, trend)| WriterContextSourceTrend {
-            source,
-            appearances: trend.appearances,
-            provided_count: trend.provided_count,
-            truncated_count: trend.truncated_count,
-            dropped_count: trend.dropped_count,
-            total_requested: trend.total_requested,
-            total_provided: trend.total_provided,
-            average_provided: if trend.appearances == 0 {
-                0.0
-            } else {
-                trend.total_provided as f64 / trend.appearances as f64
-            },
-            last_reason: trend.last_reason,
-            last_truncation_reason: trend.last_truncation_reason,
-        })
-        .collect::<Vec<_>>();
-    trends.sort_by(|left, right| {
-        right
-            .truncated_count
-            .cmp(&left.truncated_count)
-            .then_with(|| right.dropped_count.cmp(&left.dropped_count))
-            .then_with(|| right.appearances.cmp(&left.appearances))
-            .then_with(|| left.source.cmp(&right.source))
-    });
-    trends
-}
 include!("reader_compensation_review.in.rs");
 include!("cache_metrics.in.rs");

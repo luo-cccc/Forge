@@ -16,6 +16,7 @@
     "probe:scale": "node scripts/generate-thousand-chapter-fixture.cjs && node scripts/benchmark-story-os.cjs",
     "clean:reports": "node scripts/clean-eval-reports.cjs",
     "real:author-session": "node scripts/real-author-session-runner.cjs",
+    "real:long-chapter": "node scripts/real-long-chapter-contract-probe.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",

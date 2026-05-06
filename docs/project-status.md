@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-05
+Last updated: 2026-05-06
 
 ## Positioning
 
@@ -12,7 +12,7 @@ P0 is complete:
 
 - **P0.1 (Unified Run Loop)**: `AgentLoop::new` now lives only behind `WriterAgentKernel.prepare_task_run()` / `WriterAgentPreparedRun.run()`. `ask_agent` in lib.rs calls the kernel path, with no direct agent-loop construction in the command layer. `WriterAgentRunRequest` / `WriterAgentRunResult` types are re-exported through `writer_agent::kernel` and implemented in `writer_agent/kernel/run_loop_ext.rs`.
 - **P0.2 (Unified Action Lifecycle)**: `WriterOperationLifecycleState` (Proposed → Approved → Applied → DurablySaved → FeedbackRecorded) and `WriterOperationLifecycleTrace` track full lifecycle. `apply_feedback()` enforces durable-save-before-feedback for positive feedback. All write-capable operations push lifecycle entries.
-- **P0.3 (Command Boundary Audit)**: 57 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
+- **P0.3 (Command Boundary Audit)**: 72 `#[tauri::command]` functions classified by risk level (destructive/manuscript-write/memory-write/provider-call/credential/read-only). Static audit check at `scripts/check-command-audit.cjs` runs as part of `npm run verify` and covers command handlers. All legacy direct-save commands reference `audit_project_file_write`.
 
 ## P1 Status (May 2026): Trust Contract And Product Validation
 
@@ -79,6 +79,8 @@ P1 is in progress:
 - Trace recording now uses normal Rust submodules under `src-tauri/src/writer_agent/kernel/trace_recording/`; `npm run check:architecture` rejects reintroducing `include!` in the trace recording facade and rejects wildcard facade exports from `writer_agent/kernel.rs`.
 - `agent-evals/src/evals.rs` is now a small module facade; eval implementations live under focused modules in `agent-evals/src/evals/`, including legacy-root coverage now archived into promise, canon, context, memory_quality, story_debt, trajectory, task_packet, and product_scenarios modules. `main.rs` no longer mounts root-level eval implementation files directly.
 - Chapter generation records task packets and feeds successful generated chapters into the Result Feedback Loop.
+- Long-form production gates now cover `ChapterContract` default bounds (`3500 +/- 500` with hard save floor/ceiling), synthetic 50-chapter length compliance, Chapter 500 context assembly, 50k-chunk hybrid search, 1000-chapter ledger snapshot latency, and SQLite-backed Sprint v2 plan/checkpoint persistence. `npm run probe:scale` runs the authoritative Rust gates, writes `reports/eval_report.json`, and produces a scale benchmark JSON/PNG under ignored local `reports/`.
+- Supervised Sprint v2 state is restored on app startup, persisted on pause/resume/cancel/checkpoint/budget updates, and checked against estimated provider cost before chapter draft/continuation/compress model calls. The generation path records cumulative estimated provider spend after successful calls and stops before the next call when the sprint ceiling would be exceeded.
 - Story Contract, Chapter Mission, Result Feedback Loop, Promise Ledger, and Companion Panel quiet mode are implemented enough to be active product foundations.
 - Production CSP is no longer null and no longer allows localhost or `unsafe-eval`.
 - Frontend API-key handling does not expose the stored raw key.
@@ -92,13 +94,13 @@ P1 is in progress:
 - Manual `ask_agent` requests now run through WriterAgentKernel.prepare_task_run() with ManualRequest tool boundary: project context tools only, no approval-required writes, no chapter-generation write tools.
 - Story Contract and Chapter Mission writes now have kernel-level quality gates, so vague or incomplete foundation memory is rejected before it can pollute context packs; weak Story Contract grounding is also preserved as an explicit TaskPacket risk signal instead of disappearing from trace.
 - Operation lifecycle is tracked end-to-end: proposed → approved → applied → durably_saved → feedback_recorded, with durable-save-before-feedback enforcement.
-- A static command boundary audit classifies all 57 Tauri commands by risk level and verifies audit coverage for write paths.
+- A static command boundary audit classifies all 72 Tauri commands by risk level and verifies audit coverage for write paths.
 - P2 UI guardrails now include both static AST checks and a React server-render write-mode DOM guard. `npm run check:p2` verifies that default Companion code paths keep raw trace/task-packet/operation internals and metacognitive recovery action chips in Inspect mode; `npm run check:p2-render` renders write mode with internal trace fixtures and fails if Inspector-only strings or raw lifecycle/task-packet/run-event sentinels reach the author-facing DOM.
 - Product metrics are derived from trace data and emitted in trajectory JSONL as `writer.product_metrics`.
 - Metacognitive run-health is now derived from trace data and emitted in trajectory JSONL as `writer.metacognition`; the first hard-gate slice blocks risky write runs and direct text writes without blocking read-only or recovery workflows.
 - Writer run events now have a persisted replay path via `writer_run_events`, with `writer_agent:append_only_run_event_store` covering monotonic seq replay and trajectory export; failure bundles are recorded as `writer.error` run events, durable saves as `writer.save_completed`, reviewable memory candidates as `writer.memory_candidate_created`, WriterOperation approval/rejection decisions as `writer.approval_decided`, real writer/chapter-generation context assembly as `writer.context_pack_built` without storing raw manuscript context text, provider-call starts as `writer.model_started` without storing prompts or model output, and manual AgentLoop plus audited direct `ToolExecutor` calls as `writer.tool_called` without storing raw args or tool output.
 - Inspector timeline views now separate debug/internal replay from the default companion summary. The frontend Inspect mode reads `get_writer_agent_inspector_timeline` and `get_writer_agent_trace`, with filters for failure, save_completed, run event, task packet, lifecycle, context recall, product metrics, and metacognition, plus side summaries for provider budget, latest failure/save, save-to-feedback latency, proposal context budgets, post-write diagnostics, current context-source pressure, persisted per-session context pressure trend, and metacognitive risk/action. Failure cards and the latest-failure summary provide recovery navigation chips; the metacognition card now provides both navigation chips and real read-only recovery runs for Planning Review / Continuity Diagnostic. Trajectory export warns about manuscript/project-memory/feedback leakage before any sharing and now has both native Forge JSONL, `writer.metacognition`, and Trace Viewer compatible local export options.
-- Real provider smoke tests now live behind `FORGE_REAL_API_TESTS=1` and require a real `OPENAI_API_KEY`, so ordinary `cargo test` / `npm run verify` remains offline. `llm_runtime` has separate bounded env controls for general chat, JSON, chapter draft, ghost preview, analysis, parallel draft, manual rewrite, tool continuation, and Project Brain stream temperature / output tokens, plus provider-scoped `*_DISABLE_REASONING` toggles. OpenRouter reasoning controls are only injected when `OPENAI_API_BASE` contains `openrouter.ai`, keeping other OpenAI-compatible providers on the standard payload.
+- Real provider smoke tests now live behind `FORGE_REAL_API_TESTS=1` and require a real `OPENAI_API_KEY`, so ordinary `cargo test` / `npm run verify` remains offline. `llm_runtime` has separate bounded env controls for general chat, JSON, chapter draft, chapter continuation, chapter compress, ghost preview, analysis, parallel draft, manual rewrite, tool continuation, and Project Brain stream temperature / output tokens, plus provider-scoped `*_DISABLE_REASONING` toggles. OpenRouter reasoning controls are only injected when `OPENAI_API_BASE` contains `openrouter.ai`, keeping other OpenAI-compatible providers on the standard payload.
 - Local real-provider 5-chapter "镜中墟" author-session simulations on 2026-05-05 produced 35 operations with 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings after disabling reasoning for short/structured profiles. Chapter reasoning A/B showed the tradeoff clearly: leaving chapter reasoning enabled produced about 6.9s average chat latency, 25.0s p95, and 0.8 minimum anchor hit rate; the current disabled-reasoning chapter profile later reached about 5.1s average chat latency, 13.4s p95, 0.8 minimum anchor hit rate, and 0.8 minimum anchor carry rate when measured with the updated long-session runner. Forge now defaults chapter drafts to provider-scoped reasoning disabled for lower latency, while strengthening the chapter prompt to preserve named anchors through scene action, dialogue, consequence, or payoff pressure. The real-provider path now also includes an opt-in Rust `api_integration_tests::real_author_session_three_chapter_smoke` gate so long-session regression checks are not limited to ignored local scripts. Treat this as the current measured profile, not a final optimum.
 
 ## Current Verification Baseline
@@ -106,12 +108,12 @@ P1 is in progress:
 The expected local baseline is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
 <!-- verification-baseline:start -->
-- `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 228 tests passing
-- `cargo run -p agent-evals`: 246/246 evals passing
+- `cargo test -p agent-harness-core`: 89 tests passing
+- `cargo test -p agent-writer`: 244 tests passing
+- `cargo run -p agent-evals`: 265/265 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
-- `npm run check:audit`: 57 commands, 0 issues
+- `npm run check:audit`: 73 commands, 0 issues
 - `npm run check:architecture`: 14/14 files within budget, eval root guard passing
 - `npm run lint`: passing
 - `npm run build`: passing

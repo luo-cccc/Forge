@@ -43,6 +43,12 @@ fn main() {
     results.push(run_memory_reliability_snapshot_eval());
     results.push(run_task_packet_foundation_eval());
     results.push(run_chapter_generation_task_packet_eval());
+    results.push(run_chapter_contract_outcome_valid_eval());
+    results.push(run_chapter_contract_outcome_under_min_eval());
+    results.push(run_chapter_contract_outcome_over_max_eval());
+    results.push(run_chapter_contract_save_floor_rejects_eval());
+    results.push(run_chapter_contract_save_ceiling_rejects_eval());
+    results.push(run_chapter_contract_length_compliance_over_50_chapters_eval());
     results.push(run_result_feedback_tight_budget_eval());
     results.push(run_context_decision_slice_eval());
     results.push(run_story_contract_context_eval());
@@ -125,6 +131,7 @@ fn main() {
     results.push(run_duplicate_memory_candidate_deduped_eval());
     results.push(run_conflicting_memory_candidate_requires_review_eval());
     results.push(run_context_pack_explainability_eval());
+    results.push(run_thousand_chapter_context_assembly_under_500ms_eval());
     results.push(run_current_plot_relevance_prioritizes_same_name_entity_eval());
     results.push(run_promise_relevance_beats_plain_similarity_eval());
     results.push(run_project_brain_writing_relevance_rerank_eval());
@@ -135,6 +142,7 @@ fn main() {
     results.push(run_project_brain_must_not_boundary_eval());
     results.push(run_project_brain_author_fixture_rerank_eval());
     results.push(run_project_brain_chapter_proximity_rerank_eval());
+    results.push(run_search_hybrid_50k_chunks_under_100ms_eval());
     results.push(run_project_brain_knowledge_index_graph_eval());
     results.push(run_project_brain_knowledge_index_path_guard_eval());
     results.push(run_project_brain_chunk_source_version_eval());
@@ -204,6 +212,7 @@ fn main() {
     results.push(run_supervised_sprint_resume_from_checkpoint_eval());
     results.push(run_supervised_sprint_budget_ceiling_blocks_advance_eval());
     results.push(run_supervised_sprint_recovery_preserves_receipts_eval());
+    results.push(run_supervised_sprint_persists_plan_and_checkpoint_eval());
     // 11.4C Reader Compensation Model evals
     results.push(run_reader_compensation_profile_extracts_lack_eval());
     results.push(run_reader_compensation_profile_requires_author_approval_eval());

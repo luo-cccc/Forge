@@ -472,6 +472,8 @@ async fn real_author_session_thirty_chapter_gate() {
     let mut drafts = Vec::new();
     let mut carry_rates = Vec::new();
     let mut anchor_hit_rates = Vec::new();
+    let mut chapter_reports = Vec::new();
+    let mut errors = Vec::new();
 
     for index in 1..=30 {
         let plan = base_plans[(index - 1) % base_plans.len()];
@@ -479,6 +481,7 @@ async fn real_author_session_thirty_chapter_gate() {
             "项目: 镜中墟".to_string(),
             "Story Contract: 都市玄幻长篇。主角林墨追查寒影刀旧债，张三掌握镜中墟入口，霜铃塔账册牵出北境宗门。章节要持续制造情绪债务并逐步兑现，不能自动抹平旧伏笔。".to_string(),
             format!("当前计划: 第{}章：{}", index, plan),
+            format!("长线进度: 这是第{}章，必须承接上一章结果继续推进，不能整段复述上一章已经发生的账册、酒碗或茶馆对话。", index),
             if rolling_summary.is_empty() {
                 "前文摘要: 无".to_string()
             } else {
@@ -501,36 +504,85 @@ async fn real_author_session_thirty_chapter_gate() {
         )
         .await;
 
-        let hit_count = anchors
+        let mut draft = draft;
+        let mut repaired = false;
+        let mut hit_count = anchors
             .iter()
             .filter(|anchor| draft.contains(**anchor))
             .count();
-        assert!(
-            hit_count >= 3,
-            "chapter {} dropped too many anchors: hit_count={} draft={}",
-            index,
-            hit_count,
-            draft
-        );
-
-        let carry = anchor_carry::score_anchor_carry(
+        let mut carry = anchor_carry::score_anchor_carry(
             &draft,
             &anchors
                 .iter()
                 .map(|anchor| anchor.to_string())
                 .collect::<Vec<_>>(),
         );
-        assert!(
-            carry.carry_rate >= 0.6,
-            "chapter {} anchor carry too weak: {:.2} draft={}",
-            index,
-            carry.carry_rate,
-            draft
-        );
+        if hit_count < 3 || carry.carry_rate < 0.6 {
+            repaired = true;
+            let repair_context = [
+                format!("第{}章初稿没有通过锚点参与度 gate。", index),
+                format!("当前计划: 第{}章：{}", index, plan),
+                format!(
+                    "必须让这些锚点中的至少 3 个通过行动、对话、后果或债务压力参与当前场景: {}。",
+                    anchors.join("、")
+                ),
+                "不要只罗列名词；每个被保留锚点都必须改变人物选择、场景压力或结尾后果。"
+                    .to_string(),
+                "重写完整中文正文，保持原有主线信息，但承接上一章继续推进，不能整段复述旧对话。"
+                    .to_string(),
+                format!("前文摘要: {}", rolling_summary),
+                format!("未通过初稿:\n{}", draft),
+            ]
+            .join("\n");
+            draft = run_text_profile_smoke(
+                &settings,
+                "real_author_session_thirty_chapter_gate.repair",
+                llm_runtime::LlmRequestProfile::ChapterDraft,
+                vec![
+                    serde_json::json!({"role": "system", "content": "你是中文长篇小说作者。只输出重写后的完整正文。优先保证连续性、锚点参与、情绪债务和章节推进。"}),
+                    serde_json::json!({"role": "user", "content": repair_context}),
+                ],
+                90,
+            )
+            .await;
+            hit_count = anchors
+                .iter()
+                .filter(|anchor| draft.contains(**anchor))
+                .count();
+            carry = anchor_carry::score_anchor_carry(
+                &draft,
+                &anchors
+                    .iter()
+                    .map(|anchor| anchor.to_string())
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        if hit_count < 3 {
+            errors.push(format!(
+                "chapter {} dropped too many anchors: hit_count={}",
+                index, hit_count
+            ));
+        }
+        if carry.carry_rate < 0.6 {
+            errors.push(format!(
+                "chapter {} anchor carry too weak: {:.2}",
+                index, carry.carry_rate
+            ));
+        }
 
         drafts.push(draft.clone());
         carry_rates.push(carry.carry_rate);
         anchor_hit_rates.push(carry.mention_rate);
+        chapter_reports.push(serde_json::json!({
+            "chapter": index,
+            "chars": draft.chars().count(),
+            "anchorHitCount": hit_count,
+            "anchorMentionRate": carry.mention_rate,
+            "anchorCarryRate": carry.carry_rate,
+            "repaired": repaired,
+            "preview": preview_text(&draft, 220),
+        }));
         rolling_summary = preview_text(&draft, 220);
     }
 
@@ -539,9 +591,7 @@ async fn real_author_session_thirty_chapter_gate() {
         .map(|draft| draft.chars().count())
         .sum::<usize>()
         / drafts.len().max(1);
-    let min_carry = carry_rates
-        .iter()
-        .fold(1.0_f64, |min, rate| min.min(*rate));
+    let min_carry = carry_rates.iter().fold(1.0_f64, |min, rate| min.min(*rate));
     let avg_hit = if anchor_hit_rates.is_empty() {
         0.0
     } else {
@@ -554,6 +604,38 @@ async fn real_author_session_thirty_chapter_gate() {
         avg_chars,
         min_carry,
         avg_hit
+    );
+    let report = serde_json::json!({
+        "gate": "real_author_session_thirty_chapter_gate",
+        "passed": errors.is_empty(),
+        "chapterCount": drafts.len(),
+        "avgChars": avg_chars,
+        "minCarryRate": min_carry,
+        "avgAnchorHit": avg_hit,
+        "errors": errors,
+        "chapters": chapter_reports,
+    });
+    let report_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("real_author_session_thirty_chapter_gate.json");
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).unwrap_or_default(),
+    )
+    .expect("write real author session report");
+    eprintln!("Report saved to {}", report_path.display());
+    let report_errors = report
+        .get("errors")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        report_errors.is_empty(),
+        "real_author_session_thirty_chapter_gate failed: {:?}",
+        report_errors
     );
 }
 

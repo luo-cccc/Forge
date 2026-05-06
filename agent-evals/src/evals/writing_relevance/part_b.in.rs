@@ -424,3 +424,97 @@ pub fn run_project_brain_chapter_proximity_rerank_eval() -> EvalResult {
         errors,
     )
 }
+
+/// VectorDB search_hybrid latency gate at 50,000 chunks.
+/// Directly populates `db.chunks` to avoid per-upsert index rebuild,
+/// then measures hybrid search latency with a realistic query.
+pub fn run_search_hybrid_50k_chunks_under_100ms_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let mut db = VectorDB::new();
+
+    // Deterministic seed for reproducible fixture.
+    let mut seed: u64 = 42;
+    let mut next_u64 = || {
+        seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        seed
+    };
+
+    const CHUNK_COUNT: usize = 50_000;
+    const EMB_DIM: usize = 128;
+    const CLUSTER_COUNT: usize = 50;
+    db.chunks.reserve(CHUNK_COUNT);
+
+    // Build clustered embeddings so LSH candidate retrieval is effective.
+    let mut centers: Vec<Vec<f32>> = Vec::with_capacity(CLUSTER_COUNT);
+    for _ in 0..CLUSTER_COUNT {
+        let mut center = Vec::with_capacity(EMB_DIM);
+        for _ in 0..EMB_DIM {
+            center.push(((next_u64() % 1000) as f32) / 1000.0);
+        }
+        // Normalise centre vector for stable cosine similarity.
+        let mag = center.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if mag > 0.0 {
+            for v in &mut center {
+                *v /= mag;
+            }
+        }
+        centers.push(center);
+    }
+
+    for i in 0..CHUNK_COUNT {
+        let chapter_num = (i % 500) + 1;
+        let cluster = i % CLUSTER_COUNT;
+        let center = &centers[cluster];
+        let mut embedding = Vec::with_capacity(EMB_DIM);
+        for dim in 0..EMB_DIM {
+            let noise = (((next_u64() % 100) as f32) / 1000.0) - 0.05;
+            embedding.push((center[dim] + noise).clamp(0.0, 1.0));
+        }
+        db.chunks.push(Chunk {
+            id: format!("chunk-{i}"),
+            chapter: format!("Chapter-{chapter_num}"),
+            text: format!(
+                "第 {chapter_num} 章的文本片段 {i}，涉及寒玉戒指、黑衣人、北境宗门和林墨的追查线索。"
+            ),
+            embedding,
+            keywords: vec!["寒玉戒指".to_string(), "北境宗门".to_string()],
+            topic: Some("追查线索".to_string()),
+            source_ref: None,
+            source_revision: None,
+            source_kind: None,
+            chunk_index: Some(i),
+            archived: false,
+        });
+    }
+
+    db.rebuild_index();
+
+    let query = "寒玉戒指下落与北境宗门线索";
+    // Query matches cluster 0 to ensure strong LSH collisions.
+    let query_embedding = centers[0].clone();
+
+    let started = std::time::Instant::now();
+    let results = db.search_hybrid(query, &query_embedding, 20);
+    let latency_ms = started.elapsed().as_millis();
+
+    if latency_ms > 100 {
+        errors.push(format!(
+            "search_hybrid latency {}ms exceeds 100ms threshold at {} chunks",
+            latency_ms, CHUNK_COUNT
+        ));
+    }
+    if results.is_empty() {
+        errors.push("search_hybrid returned no results".to_string());
+    }
+
+    eval_result(
+        "writer_agent:search_hybrid_50k_chunks_under_100ms",
+        format!(
+            "latencyMs={} chunks={} results={}",
+            latency_ms,
+            db.chunks.len(),
+            results.len()
+        ),
+        errors,
+    )
+}

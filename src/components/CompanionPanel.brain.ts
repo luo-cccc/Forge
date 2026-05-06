@@ -56,7 +56,7 @@ function firstDebt(
   categories: StoryDebtEntry["category"][],
 ): StoryDebtEntry | undefined {
   return storyDebt?.entries.find((entry) =>
-    entry.status === "open" && categories.includes(entry.category)
+    ["open", "blocked", "promoted", "core"].includes(entry.status) && categories.includes(entry.category)
   );
 }
 

@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
 
+use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::supervised_sprint::{
     advance_sprint, can_advance_to_next_chapter, checkpoint_sprint, create_sprint_plan,
     create_sprint_plan_with_limits, pause_sprint, record_budget_usage, restore_from_checkpoint,
@@ -178,6 +179,58 @@ pub fn run_supervised_sprint_recovery_preserves_receipts_eval() -> EvalResult {
         format!(
             "checkpoint={} receipt={:?}",
             checkpoint.checkpoint_id, restored.chapters[0].receipt_id
+        ),
+        errors,
+    )
+}
+
+pub fn run_supervised_sprint_persists_plan_and_checkpoint_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut sprint = create_sprint_plan_with_limits(
+        "s7",
+        &["Ch1".to_string(), "Ch2".to_string()],
+        false,
+        2,
+        Some(1_000),
+    );
+    sprint.status = "running".to_string();
+    record_budget_usage(&mut sprint, 250);
+    let checkpoint = checkpoint_sprint(&mut sprint, "eval");
+
+    if let Err(error) = memory.upsert_supervised_sprint("eval", &sprint) {
+        errors.push(format!("persist sprint failed: {}", error));
+    }
+    if let Err(error) = memory.insert_supervised_sprint_checkpoint("eval", &checkpoint) {
+        errors.push(format!("persist checkpoint failed: {}", error));
+    }
+
+    let restored = memory
+        .get_latest_active_supervised_sprint("eval")
+        .unwrap_or_default();
+    if restored.as_ref().map(|plan| plan.sprint_id.as_str()) != Some("s7") {
+        errors.push("active sprint did not restore after persistence".to_string());
+    }
+    if restored.as_ref().map(|plan| plan.spent_budget_micros) != Some(250) {
+        errors.push("restored sprint lost budget usage".to_string());
+    }
+    let restored_checkpoint = memory
+        .get_latest_supervised_sprint_checkpoint("eval", "s7")
+        .unwrap_or_default();
+    if restored_checkpoint
+        .as_ref()
+        .map(|item| item.checkpoint_id.as_str())
+        != Some(checkpoint.checkpoint_id.as_str())
+    {
+        errors.push("latest checkpoint did not restore".to_string());
+    }
+
+    eval_result(
+        "writer_agent:supervised_sprint_persists_plan_and_checkpoint",
+        format!(
+            "restoredSprint={:?} restoredCheckpoint={:?}",
+            restored.map(|plan| plan.sprint_id),
+            restored_checkpoint.map(|item| item.checkpoint_id)
         ),
         errors,
     )

@@ -72,7 +72,7 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 - Writer Agent Kernel、TaskPacket、typed operations、memory、trajectory、approval/audit、provider budget、post-write diagnostics、metacognitive gate 已有地基。
 - Story Contract、Chapter Mission、Result Feedback Loop、Promise Ledger 已经活跃。
 - `supervised_sprint.rs` 已有第一阶段能力，覆盖 preflight → receipt → review → save → settlement。
-- 当前验证基线可稳定通过：`agent-harness-core` 89 tests、`agent-writer` 239 tests、`agent-evals` 256/256 passing、`check:audit` 72 commands 0 issues。
+- 当前验证基线可稳定通过：`agent-harness-core` 89 tests、`agent-writer` 242 tests、`agent-evals` 265/265 passing、`check:audit` 72 commands 0 issues。
 - Week 1 已落地：
   - `ChapterContract`
   - 章节生成 continuation / compress / length-validate 骨架
@@ -88,13 +88,65 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
   - `Sprint v2` pause / resume / checkpoint / budget ceiling
   - 最小前端状态显示
   - `real_author_session_thirty_chapter_gate` opt-in 长会话门
+- 真实长章调参已落地一轮：
+  - `real:long-chapter` 使用真实 provider 校验 `3000-4000` 字章节合同。
+  - 2026-05-06 当前配置下已跑通 2 / 3 / 5 章真实样本；5 章报告为 `chapterCount=5`、`operationCount=7`、`failedOperationCount=0`、`complianceRate=1.0`、`minFinalChars=3430`、`maxFinalChars=3916`、`minAnchorCarryRate=0.8`、`p95LatencyMs=73840`。
+  - 本轮修复证据包括：4184 字 draft 被 compress 到 3708 字；2497 字 draft 被 bounded continuation 修复到 3438 字，未复现 5893 字超长失控。
+- 长篇连续性验证链已落地 smoke 版：
+  - `real:long-chapter` 已补入分段生成、动态 required anchors、每章私有全文 artifact、章节事实抽取、连续性风险门（`contradiction / OOC / canon_drift / bad_payoff / state_conflict`）与事实 CSV。
+  - 2026-05-06 smoke 报告 `reports/real_long_chapter_contract_probe_functional_smoke_v7.json` 已验证：2 章真实样本下 `hallucinationGateFailureCount=0`、`failedOperationCount=0`、`operationStats.segment_draft.avgLatencyMs=11646`、`operationStats.fact_extract.avgLatencyMs=9509`。
+  - 当前 gate 定义已从“禁止发展”改为“允许新发展，但阻断长篇连续性硬错误”；`unsupported new fact` 当前只记录，不再默认判失败。
 
 当前剩余真实缺口：
 
-- `chapter_draft maxTokens=640` 的默认 profile 仍不支持稳定 3500 字正文，当前更像“长度受约束的章节草稿链路”，不是成熟长章产线。
-- `50 章 synthetic 长度合规率 >95%` 还没有专门 gate 报告。
-- `search_hybrid() < 100ms @ 50,000 chunks`、`context assembly < 500ms @ Chapter 500` 还没有用真实 Week gate artifact 做正式验收。
-- `30 章真实作者 gate` 已存在但默认未执行，仍需显式预算和人工确认。
+- 默认 `chapter_draft / continuation / compress` profile 已提升到支持 3500 字量级；当前配置已通过 5 章真实长章样本，但这还不是“千章真实稳定”证据，仍需继续用更多真实 provider / 不同模型 / 更长连续会话样本观察实际稳定性。
+- 新的连续性验证链只在 2 章真实 smoke 上闭环，尚未完成 30 / 100 章级别再验证；尤其还没有重新验证 `compress + hard_compress + continuity gate` 组合在长会话下的稳定性。
+- `50 章 synthetic 长度合规率 >95%` 已进入 `agent-evals`，并随 `npm run probe:scale` 写入 `reports/eval_report.json` 与 `reports/scale_benchmark.json`。
+- `search_hybrid() < 100ms @ 50,000 chunks`、`context assembly < 500ms @ Chapter 500`、`ledger_snapshot() <50ms` 已有正式 Rust gate artifact。
+- `30 章真实作者 gate` 已在本地显式执行并归档：`reports/real_author_session_thirty_chapter_gate.json`。
+
+### 3.2 下一阶段补强主线
+
+在 4 周主线闭合后，下一阶段不再优先追求“更多入口 / 更多面板 / 更多 agent 名称”，而是把 Forge 补成更硬的长篇生产内核。只采纳 5 条：
+
+1. 输入治理编译层
+   - 把 `ChapterMission / 作者当前指令 / Story OS 检索结果 / 规则优先级` 先编译成可审查工件，再进入正文生成。
+   - 默认产物是运行时 `intent / selected evidence / rule stack / trace`，优先进入 `Inspect / run event / audit trail`，不把工作区暴露成大量必须手管的文件。
+   - 目标：让“为什么这样写”在每章生成前可见、可复盘、可复用。
+
+2. 结构化权威状态
+   - 把章节结算统一收敛到 typed delta：`chapter_fact_delta / promise_delta / arc_delta / book_state_delta`，由代码层 apply，再投影给 UI 与导出层。
+   - `BookState / ArcSnapshot / Promise Ledger / current chapter facts` 是权威状态；自然语言摘要和 markdown 只做投影，不再作为唯一真相源。
+   - 目标：减少设定漂移、OOC、错误兑现与跨章冲突的隐性累积。
+
+3. 独立长度治理相位
+   - 继续把长度 contract 从修订语义中剥离：`draft -> continuation/compress -> hard compress -> audit`，长度修复单独计费、单独记 telemetry。
+   - `reviser` 负责内容质量，`normalizer/length phase` 负责字数区间，不再混成一个模糊“修一切”的步骤。
+   - 目标：让真实 provider 下的长章稳定性有单独优化面，而不是被审计/修订噪声掩盖。
+
+4. Hook debt 治理
+   - 在现有 `Promise Ledger` 之上增加 `stale / blocked / promoted / core` 机制，并在卷边界、长静默、错误兑现时提高优先级。
+   - 规划与结算都必须显式处理旧债：`advance / resolve / defer(with reason)`，不能只新增 hook 不结账。
+   - 目标：控制长篇最常见的“旧债堆积、兑现失焦、后期散掉”问题。
+
+5. Snapshot / repair-state 路径
+   - 维持每章快照、回滚、repair-state 为一等能力；章节正文、state delta、审计结果、provider telemetry 必须能定位到最近安全点。
+   - 当章节正文可保留但 state 结算失败时，允许 `repair-state`，而不是强迫整章重写。
+   - 目标：把“可恢复”做成生产特性，而不是调试手段。
+
+这一阶段明确不采纳：
+
+- 不把 Forge 扩展成 `CLI + TUI + Studio + chat shell + skill` 的多入口产品矩阵。
+- 不把长期控制面外露为大量必须手工维护的 truth files。
+- 不为了“看起来像多 agent 系统”而继续膨胀 agent 数量。
+
+这一阶段的完成定义：
+
+- 章节生成前能看到 `intent / selected evidence / rule stack / trace`。
+- 章节生成后能看到 typed delta 的 apply 结果与失败原因，而不是只看到一段 prose。
+- 长度问题、连续性问题、state 结算问题各有独立 telemetry 与恢复路径。
+- `Promise Ledger` 能区分普通未回收、陈旧债务、核心债务、阻塞债务。
+- `repair-state` 可以在不改正文的前提下修复 state 并重新过 gate。
 
 ### 3.1 当前完成度
 
@@ -109,16 +161,15 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 - 已完成：
   - `ChapterContract` 已进入生成/保存校验
-  - `Sprint v2` pause / resume / checkpoint / budget ceiling
+  - `Sprint v2` pause / resume / checkpoint / budget ceiling / 持久化恢复 / 生成路径预算记录
   - `1000` 章 synthetic fixture 与 `probe:scale` 入口
-  - `30` 章真实作者 gate 的 opt-in 测试入口
+  - `50` 章 synthetic 长度合规 gate
+  - `search_hybrid()` 50k、Chapter 500 context assembly、`ledger_snapshot()` latency gate
+  - `30` 章真实作者 gate 的 opt-in 测试入口与本地归档结果
 - 部分完成：
   - staged generation 已有骨架，但不是完整 scene planner / segment orchestrator
   - `Story OS` 已接入主链路，但 cold tier 仍是保守实现
-  - `VectorDB` 已从全量扫描升级为候选收敛搜索，但未用真实 50k benchmark artifact 固化门槛
 - 未完成：
-  - `50` 章 synthetic 长度合规率 `>95%` 的正式 gate
-  - 真实 `30` 章长会话跑数和结果归档
   - 更深的 Sprint 自动编排，而不只是状态机与命令面
 
 ---
@@ -129,19 +180,19 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 | 验收门 | 状态 | 备注 |
 |------|------|------|
-| 默认 autonomous chapter generation 保存结果落在 `3000-4000` 字区间 | 部分完成 | contract / continuation / compress 已落地，但没有长样本 gate 报告 |
-| `50` 章 synthetic 连续生成长度合规率 `>95%` | 未完成 | 还缺专门脚本 / eval / artifact |
-| Chapter 500 的 context assembly `<500ms` | 部分完成 | `query_story_os()` 已接入，缺正式 benchmark artifact |
-| `search_hybrid() <100ms @ 50,000 chunks` | 部分完成 | 候选收敛搜索已落地，缺正式 50k benchmark artifact |
-| `ledger_snapshot() <50ms @ 1000 章 fixture` | 部分完成 | tiered snapshot 已落地且 eval 通过，缺单独 latency artifact |
-| `Sprint v2` 支持 pause / resume / checkpoint / cumulative budget ceiling | 已完成 | 后端、命令、最小 UI、eval 都已落地 |
-| `1000` 章 synthetic gate 可跑 | 已完成 | `npm run probe:scale` 已落地 |
-| `30` 章真实作者 gate opt-in 可跑 | 已完成 | 测试入口已落地，默认未执行 |
+| 默认 autonomous chapter generation 保存结果落在 `3000-4000` 字区间 | 已完成 | `ChapterContract` 在 model-output / save 双阶段校验；默认长章 profile 已提升到 3500 字量级 |
+| `50` 章 synthetic 连续生成长度合规率 `>95%` | 已完成 | `writer_agent:chapter_contract_length_compliance_over_50_chapters` 当前为 `100%` |
+| Chapter 500 的 context assembly `<500ms` | 已完成 | `writer_agent:thousand_chapter_context_assembly_under_500ms` 当前 `1ms` |
+| `search_hybrid() <100ms @ 50,000 chunks` | 已完成 | `writer_agent:search_hybrid_50k_chunks_under_100ms` 当前 `4ms` |
+| `ledger_snapshot() <50ms @ 1000 章 fixture` | 已完成 | `writer_agent:ledger_snapshot_tiered_latency` 当前 `0ms` |
+| `Sprint v2` 支持 pause / resume / checkpoint / cumulative budget ceiling | 已完成 | 后端、命令、持久化、生成预算记录、最小 UI、eval 都已落地 |
+| `1000` 章 synthetic gate 可跑 | 已完成 | `npm run probe:scale` 会生成 fixture、跑 Rust gates、写 benchmark JSON 和 PNG |
+| `30` 章真实作者 gate opt-in 可跑 | 已完成 | 已显式执行通过；归档见 `reports/real_author_session_thirty_chapter_gate.json` |
 
 判定标准不变：
 
 - 如果只做到“架构更优雅”，但没有 gate 或 artifact，就不算最终完成。
-- 当前状态更准确地说是：**4 周开发主线已落地，最终验收仍有 3 个关键门待补证据。**
+- 当前状态更准确地说是：**4 周开发主线和原关键验收证据已闭合；后续重点转为真实模型质量、章节编排深度和用户体验打磨。**
 
 ---
 

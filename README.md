@@ -115,7 +115,7 @@ cargo test -p agent-writer api_integration_tests::chat_text_chinese_capability -
 
 These tests require a real `OPENAI_API_KEY`; do not use them in CI without an explicit budget and secret policy.
 
-Latest local real-provider tuning note, recorded on 2026-05-05 with 5-chapter "镜中墟" author-session simulations against OpenRouter `deepseek/deepseek-v4-flash`: short/structured profiles with reasoning disabled produced 35 operations per run, 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings. The current best measured chapter profile uses `maxTokens=640` plus the stronger anchor-participation prompt and reached `avgChatLatencyMs=4498`, `p95ChatLatencyMs=12499`, `minAnchorHitRate=0.8`, and `minAnchorCarryRate=0.8` in the latest 5-chapter run. `analysis` and `parallel_draft` were also re-tuned as explicit on-demand tools rather than new gated flows: the current shared defaults are `analysis.maxTokens=384` and `parallel_draft.maxTokens=512`. There is now an opt-in real `api_integration_tests::real_author_session_three_chapter_smoke` gate in Rust in addition to the versioned `npm run real:author-session` long-session runner. Both the runner and the Rust runtime now read the same profile baseline and anchor-carry heuristics from `config/`. See `docs/real-provider-tuning.md` for the sanitized evidence log.
+Latest local real-provider tuning note, recorded on 2026-05-06 against OpenRouter `deepseek/deepseek-v4-flash`: the default long-chapter profiles now use `chapter_draft.maxTokens=5200`, `chapter_continuation.maxTokens=2200`, and `chapter_compress.maxTokens=5200` so `ChapterContract` can target `3500 +/- 500` Chinese characters. The latest explicit 30-chapter opt-in gate passed with `chapterCount=30`, `avgAnchorHit=0.8733`, `minAnchorCarryRate=0.60`, and `avgChars=1096`; that gate uses a shorter regression prompt, so treat it as continuity/anchor evidence, not proof of 3500-character real-model chapter stability. The earlier 2026-05-05 5-chapter "镜中墟" runs remain in `docs/real-provider-tuning.md` as latency/profile history. Both the runner and the Rust runtime read the same profile baseline and anchor-carry heuristics from `config/`.
 
 For chapter stability debugging there is also a dedicated repeated-runs probe: `npm run probe:chapter-stability`. It freezes the chapter 3/4 inputs and repeats the same provider call so provider jitter and prompt instability can be measured separately.
 
@@ -192,12 +192,12 @@ npm run verify
 Expected current baseline. This block is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
 <!-- verification-baseline:start -->
-- `cargo test -p agent-harness-core`: 88 tests passing
-- `cargo test -p agent-writer`: 228 tests passing
-- `cargo run -p agent-evals`: 246/246 evals passing
+- `cargo test -p agent-harness-core`: 89 tests passing
+- `cargo test -p agent-writer`: 244 tests passing
+- `cargo run -p agent-evals`: 265/265 evals passing
 - `npm run check:p2`: 18/18 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
-- `npm run check:audit`: 57 commands, 0 issues
+- `npm run check:audit`: 73 commands, 0 issues
 - `npm run check:architecture`: 14/14 files within budget, eval root guard passing
 - `npm run lint`: passing
 - `npm run build`: passing

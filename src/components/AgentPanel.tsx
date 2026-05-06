@@ -843,6 +843,32 @@ export default function AgentPanel({
                       {event.budget.sourceCount} sources · {event.budget.includedChars}/{event.budget.maxChars} chars
                     </span>
                   )}
+                  {event.intentArtifact?.goal && (
+                    <span className="block text-[10px] text-text-muted">
+                      Goal · {event.intentArtifact.goal}
+                    </span>
+                  )}
+                  {event.lengthTelemetry && (
+                    <span className="block text-[10px] text-text-muted">
+                      Length · draft {event.lengthTelemetry.draftChars ?? "-"} → final {event.lengthTelemetry.finalChars ?? "-"}
+                      {event.lengthTelemetry.continuationApplied ? " · cont" : ""}
+                      {event.lengthTelemetry.compressApplied ? " · compress" : ""}
+                      {event.lengthTelemetry.hardCompressApplied ? " · hard" : ""}
+                    </span>
+                  )}
+                  {event.settlementApply && (
+                    <span className="block text-[10px] text-text-muted">
+                      Settlement · result {event.settlementApply.chapterResultSnapshotId ?? "-"}
+                      {event.settlementApply.promiseCreated ? ` · +${event.settlementApply.promiseCreated} promise` : ""}
+                      {event.settlementApply.promiseResolved ? ` · ${event.settlementApply.promiseResolved} resolved` : ""}
+                      {event.settlementApply.bookStateUpdated ? " · book state" : ""}
+                    </span>
+                  )}
+                  {event.artifactRefs?.length ? (
+                    <span className="block text-[10px] text-text-muted">
+                      Artifacts · {event.artifactRefs.length}
+                    </span>
+                  ) : null}
                 </span>
               </div>
             ))}

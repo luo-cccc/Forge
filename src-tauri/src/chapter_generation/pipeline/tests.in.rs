@@ -205,6 +205,12 @@ mod tests {
     }
 
     #[test]
+    fn basic_output_validation_allows_repairable_length_variance() {
+        validate_generated_content_basics(&"甲".repeat(2_999)).unwrap();
+        validate_generated_content_basics(&"甲".repeat(4_001)).unwrap();
+    }
+
+    #[test]
     fn rejects_save_content_below_save_floor() {
         let err = validate_generated_content(
             &"甲".repeat(2_799),
@@ -296,5 +302,34 @@ mod tests {
         assert_eq!(evidence.category, WriterFailureCategory::ProviderFailed);
         assert!(evidence.details.get("providerBudget").is_some());
         assert!(!evidence.remediation.is_empty());
+    }
+
+    #[test]
+    fn chapter_repair_budget_uses_repair_profile_output_tokens() {
+        let settings = crate::llm_runtime::LlmSettings {
+            api_key: "test".to_string(),
+            api_base: "https://example.invalid".to_string(),
+            model: "gpt-4o".to_string(),
+            embedding_model: "text-embedding-3-small".to_string(),
+            embedding_input_limit_chars: 8_000,
+            chat_temperature: 0.7,
+            json_temperature: 0.0,
+            chat_max_tokens: 4_096,
+            json_max_tokens: 1_024,
+        };
+        let messages = vec![serde_json::json!({"role": "user", "content": "续写"})];
+        let continuation = chapter_generation_provider_budget_for_profile(
+            &settings,
+            &messages,
+            crate::llm_runtime::LlmRequestProfile::ChapterContinuation,
+        );
+        let compress = chapter_generation_provider_budget_for_profile(
+            &settings,
+            &messages,
+            crate::llm_runtime::LlmRequestProfile::ChapterCompress,
+        );
+
+        assert_eq!(continuation.requested_output_tokens, 900);
+        assert_eq!(compress.requested_output_tokens, 2_400);
     }
 }

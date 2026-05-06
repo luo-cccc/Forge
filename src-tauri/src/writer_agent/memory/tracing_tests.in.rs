@@ -512,6 +512,9 @@ mod tests {
         assert!(table_has_column(&conn, "canon_entities", "attributes_json").unwrap());
         assert!(table_has_column(&conn, "plot_promises", "expected_payoff").unwrap());
         assert!(table_has_column(&conn, "plot_promises", "last_seen_chapter").unwrap());
+        assert!(table_has_column(&conn, "plot_promises", "blocked_reason").unwrap());
+        assert!(table_has_column(&conn, "plot_promises", "promoted").unwrap());
+        assert!(table_has_column(&conn, "plot_promises", "core").unwrap());
         assert!(table_has_column(&conn, "writer_proposal_trace", "evidence_json").unwrap());
         assert!(table_has_column(&conn, "writer_proposal_trace", "expires_at").unwrap());
         assert!(table_exists(&conn, "manual_agent_turns").unwrap());

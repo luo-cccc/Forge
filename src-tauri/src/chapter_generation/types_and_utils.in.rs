@@ -313,6 +313,176 @@ pub struct ChapterContextBudgetReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterIntentArtifact {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_number: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_title: Option<String>,
+    pub goal: String,
+    pub must_keep: Vec<String>,
+    pub must_avoid: Vec<String>,
+    pub style_emphasis: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSelectedEvidenceArtifact {
+    pub source: String,
+    pub reason: String,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterRuleStackArtifact {
+    pub hard: Vec<String>,
+    pub soft: Vec<String>,
+    pub diagnostic: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterTraceArtifact {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_number: Option<usize>,
+    pub planner_inputs: Vec<String>,
+    pub selected_evidence_count: usize,
+    pub active_override_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterResultDelta {
+    pub summary: String,
+    pub state_changes: Vec<String>,
+    pub character_progress: Vec<String>,
+    pub new_conflicts: Vec<String>,
+    pub new_clues: Vec<String>,
+    pub promise_updates: Vec<String>,
+    pub canon_updates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChapterPromiseDeltaAction {
+    #[default]
+    Introduced,
+    Advanced,
+    Resolved,
+    Deferred,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterPromiseDeltaEntry {
+    #[serde(default)]
+    pub action: ChapterPromiseDeltaAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promise_id: Option<i64>,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    pub chapter: String,
+    pub source_ref: String,
+    pub expected_payoff: String,
+    pub priority: i32,
+    pub related_entities: Vec<String>,
+    #[serde(default)]
+    pub core: bool,
+    #[serde(default)]
+    pub promoted: bool,
+    #[serde(default)]
+    pub blocked_reason: String,
+    #[serde(default)]
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChapterBookStateDeltaBucket {
+    LongTermConstraint,
+    MegaPromise,
+    #[default]
+    IrreversibleChange,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterBookStateDeltaEntry {
+    #[serde(default)]
+    pub bucket: ChapterBookStateDeltaBucket,
+    pub value: String,
+    pub source_ref: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterArcDeltaEntry {
+    pub scope: String,
+    pub value: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSettlementDelta {
+    pub chapter_title: String,
+    pub chapter_revision: String,
+    pub summary: String,
+    #[serde(default)]
+    pub chapter_result: ChapterResultDelta,
+    #[serde(default)]
+    pub promise_updates: Vec<ChapterPromiseDeltaEntry>,
+    #[serde(default)]
+    pub arc_updates: Vec<ChapterArcDeltaEntry>,
+    #[serde(default)]
+    pub book_state_updates: Vec<ChapterBookStateDeltaEntry>,
+    pub chapter_fact_delta: Vec<String>,
+    pub promise_delta: Vec<String>,
+    pub arc_delta: Vec<String>,
+    pub book_state_delta: Vec<String>,
+    pub continuity_issues: Vec<String>,
+    pub repairable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSettlementApplyResult {
+    pub applied: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_result_snapshot_id: Option<i64>,
+    pub promise_created: usize,
+    pub promise_advanced: usize,
+    pub promise_resolved: usize,
+    pub promise_deferred: usize,
+    pub promise_abandoned: usize,
+    pub book_state_updated: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterLengthTelemetry {
+    pub target_chars: usize,
+    pub min_chars: usize,
+    pub max_chars: usize,
+    pub save_hard_floor_chars: usize,
+    pub save_hard_ceiling_chars: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft_chars: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_chars: Option<usize>,
+    pub continuation_applied: bool,
+    pub compress_applied: bool,
+    pub hard_compress_applied: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltChapterContext {
@@ -325,6 +495,10 @@ pub struct BuiltChapterContext {
     pub budget: ChapterContextBudgetReport,
     pub warnings: Vec<String>,
     pub receipt: WriterTaskReceipt,
+    pub intent_artifact: ChapterIntentArtifact,
+    pub selected_evidence: Vec<ChapterSelectedEvidenceArtifact>,
+    pub rule_stack: ChapterRuleStackArtifact,
+    pub trace_artifact: ChapterTraceArtifact,
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +573,15 @@ pub struct GenerateChapterDraftOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChapterDraftRepairOutput {
+    #[serde(skip_serializing)]
+    pub content: String,
+    pub output_chars: usize,
+    pub provider_budget: WriterProviderBudgetReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveConflict {
     pub reason: String,
     pub base_revision: String,
@@ -455,6 +638,22 @@ pub struct ChapterGenerationEvent {
     pub budget: Option<ChapterContextBudgetReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt: Option<WriterTaskReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent_artifact: Option<ChapterIntentArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_evidence: Option<Vec<ChapterSelectedEvidenceArtifact>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_stack: Option<ChapterRuleStackArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_artifact: Option<ChapterTraceArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settlement_delta: Option<ChapterSettlementDelta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settlement_apply: Option<ChapterSettlementApplyResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length_telemetry: Option<ChapterLengthTelemetry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_refs: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved: Option<SaveGeneratedChapterOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -702,26 +901,9 @@ pub fn validate_generated_content(
     contract: &ChapterContract,
     phase: ChapterContractPhase,
 ) -> Result<(), ChapterGenerationError> {
-    if content.trim().is_empty() {
-        return Err(ChapterGenerationError::new(
-            "MODEL_OUTPUT_EMPTY",
-            "The model returned empty chapter content.",
-            true,
-        ));
-    }
+    validate_generated_content_basics(content)?;
 
     let output_chars = char_count(content);
-    if output_chars > DEFAULT_OUTPUT_HARD_CAP_CHARS {
-        return Err(ChapterGenerationError::new(
-            "MODEL_OUTPUT_TOO_LARGE",
-            format!(
-                "The model returned {} characters, above the hard cap of {}.",
-                output_chars, DEFAULT_OUTPUT_HARD_CAP_CHARS
-            ),
-            true,
-        ));
-    }
-
     let (min_chars, max_chars, under_code, over_code) = match phase {
         ChapterContractPhase::ModelOutput => (
             contract.min_chars,
@@ -754,6 +936,30 @@ pub fn validate_generated_content(
             format!(
                 "Generated chapter content has {} chars, above the allowed maximum of {}.",
                 output_chars, max_chars
+            ),
+            true,
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn validate_generated_content_basics(content: &str) -> Result<(), ChapterGenerationError> {
+    if content.trim().is_empty() {
+        return Err(ChapterGenerationError::new(
+            "MODEL_OUTPUT_EMPTY",
+            "The model returned empty chapter content.",
+            true,
+        ));
+    }
+
+    let output_chars = char_count(content);
+    if output_chars > DEFAULT_OUTPUT_HARD_CAP_CHARS {
+        return Err(ChapterGenerationError::new(
+            "MODEL_OUTPUT_TOO_LARGE",
+            format!(
+                "The model returned {} characters, above the hard cap of {}.",
+                output_chars, DEFAULT_OUTPUT_HARD_CAP_CHARS
             ),
             true,
         ));

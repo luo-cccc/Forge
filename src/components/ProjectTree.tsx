@@ -98,6 +98,20 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
     }
   };
 
+  const activeVolume = activeVolumeId
+    ? volumeList.find((volume) => volume.id === activeVolumeId)
+    : null;
+  const visibleChapters = chapters.filter((chapter) => {
+    if (!activeVolume) return true;
+    const digits = chapter.title.replace(/\D+/g, "");
+    const chapterNumber = digits ? Number(digits) : NaN;
+    if (!Number.isFinite(chapterNumber)) return true;
+    return (
+      chapterNumber >= activeVolume.startChapter &&
+      chapterNumber <= activeVolume.endChapter
+    );
+  });
+
   return (
     <div className="flex flex-col h-full border-r border-border-subtle bg-bg-surface">
       <div className="flex border-b border-border-subtle">
@@ -187,7 +201,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
       {tab === "chapters" ? (
         <>
           <div className="flex-1 overflow-y-auto">
-            {chapters.map((ch) => (
+            {visibleChapters.map((ch) => (
               <button
                 key={ch.filename}
                 onClick={() => onSelectChapter(ch.title)}

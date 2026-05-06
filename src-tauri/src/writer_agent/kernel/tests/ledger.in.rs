@@ -395,3 +395,146 @@ fn chapter_mission_operation_rejects_vague_foundation() {
     assert!(kernel.ledger_snapshot().active_chapter_mission.is_none());
 }
 
+#[test]
+fn settlement_delta_apply_updates_memory_ledgers() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    memory.ensure_default_book_state("novel-a", "寒影录").unwrap();
+    let delta = crate::chapter_generation::ChapterSettlementDelta {
+        chapter_title: "Chapter-12".to_string(),
+        chapter_revision: "rev-1".to_string(),
+        summary: "林墨归还玉佩，并确认旧门后的血契未断。".to_string(),
+        chapter_result: crate::chapter_generation::ChapterResultDelta {
+            summary: "林墨归还玉佩，并确认旧门后的血契未断。".to_string(),
+            state_changes: vec!["林墨归还玉佩。".to_string()],
+            character_progress: vec!["林墨决定继续追查旧门。".to_string()],
+            new_conflicts: vec!["旧门后的血契仍在逼近。".to_string()],
+            new_clues: vec!["血契未断".to_string()],
+            promise_updates: vec!["玉佩: 已归还".to_string()],
+            canon_updates: vec![],
+        },
+        promise_updates: vec![crate::chapter_generation::ChapterPromiseDeltaEntry {
+            action: crate::chapter_generation::ChapterPromiseDeltaAction::Introduced,
+            promise_id: None,
+            kind: "mystery_clue".to_string(),
+            title: "旧门血契".to_string(),
+            description: "旧门后的血契仍未解释。".to_string(),
+            chapter: "Chapter-12".to_string(),
+            source_ref: "chapter_settlement:Chapter-12:rev-1".to_string(),
+            expected_payoff: "Chapter-14".to_string(),
+            priority: 7,
+            related_entities: vec!["林墨".to_string(), "旧门".to_string()],
+            core: true,
+            promoted: true,
+            blocked_reason: String::new(),
+            evidence: "旧门后的血契仍未解释。".to_string(),
+        }],
+        arc_updates: vec![],
+        book_state_updates: vec![crate::chapter_generation::ChapterBookStateDeltaEntry {
+            bucket: crate::chapter_generation::ChapterBookStateDeltaBucket::MegaPromise,
+            value: "旧门血契 -> Chapter-14".to_string(),
+            source_ref: "chapter_settlement:Chapter-12:rev-1".to_string(),
+            reason: "core promise".to_string(),
+        }],
+        chapter_fact_delta: vec!["林墨归还玉佩。".to_string()],
+        promise_delta: vec!["introduced: 旧门血契 -> Chapter-14".to_string()],
+        arc_delta: vec![],
+        book_state_delta: vec!["mega_promise: 旧门血契 -> Chapter-14".to_string()],
+        continuity_issues: vec![],
+        repairable: true,
+    };
+
+    let applied =
+        crate::chapter_generation::apply_chapter_settlement_delta(&memory, "novel-a", &delta)
+            .unwrap();
+
+    assert!(applied.applied);
+    assert_eq!(applied.promise_created, 1);
+    let results = memory.list_recent_chapter_results("novel-a", 5).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].chapter_title, "Chapter-12");
+    let promises = memory.get_open_promise_summaries().unwrap();
+    assert_eq!(promises.len(), 1);
+    assert_eq!(promises[0].title, "旧门血契");
+    assert!(promises[0].core);
+    assert!(promises[0].promoted);
+    let book_state = memory.get_book_state("novel-a").unwrap().unwrap();
+    assert!(book_state
+        .mega_promises
+        .iter()
+        .any(|item| item.contains("旧门血契")));
+}
+
+#[test]
+fn story_debt_snapshot_uses_five_state_promise_ordering() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let open_id = memory
+        .add_promise("plot_promise", "普通伏笔", "普通未回收伏笔。", "Chapter-1", "Chapter-3", 3)
+        .unwrap();
+    let core_id = memory
+        .add_promise_with_status_flags(
+            "plot_promise",
+            "核心伏笔",
+            "核心线必须尽快处理。",
+            "Chapter-1",
+            "seed",
+            "Chapter-5",
+            8,
+            &[],
+            "",
+            true,
+            true,
+        )
+        .unwrap();
+    let promoted_id = memory
+        .add_promise_with_status_flags(
+            "plot_promise",
+            "升级伏笔",
+            "已经升级到近程计划。",
+            "Chapter-2",
+            "seed",
+            "Chapter-6",
+            5,
+            &[],
+            "",
+            true,
+            false,
+        )
+        .unwrap();
+    let blocked_id = memory
+        .add_promise_with_status_flags(
+            "plot_promise",
+            "阻塞伏笔",
+            "需要先解除阻塞。",
+            "Chapter-2",
+            "seed",
+            "Chapter-7",
+            6,
+            &[],
+            "等待作者确认角色去向。",
+            false,
+            false,
+        )
+        .unwrap();
+    memory.touch_promise_last_seen(open_id, "Chapter-2", "seed").unwrap();
+    memory.touch_promise_last_seen(core_id, "Chapter-4", "seed").unwrap();
+    memory.touch_promise_last_seen(promoted_id, "Chapter-4", "seed").unwrap();
+    memory.touch_promise_last_seen(blocked_id, "Chapter-4", "seed").unwrap();
+    let mut kernel = WriterAgentKernel::new("novel-a", memory);
+    kernel.active_chapter = Some("Chapter-10".to_string());
+
+    let story_debt = kernel.story_debt_snapshot();
+    let promise_entries = story_debt
+        .entries
+        .iter()
+        .filter(|entry| entry.category == crate::writer_agent::kernel::StoryDebtCategory::Promise)
+        .collect::<Vec<_>>();
+
+    assert!(promise_entries.len() >= 4);
+    assert_eq!(promise_entries[0].status, crate::writer_agent::kernel::StoryDebtStatus::Core);
+    assert_eq!(promise_entries[1].status, crate::writer_agent::kernel::StoryDebtStatus::Blocked);
+    assert_eq!(
+        promise_entries[2].status,
+        crate::writer_agent::kernel::StoryDebtStatus::Promoted
+    );
+    assert!(story_debt.open_count >= 3);
+}

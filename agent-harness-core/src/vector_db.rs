@@ -56,6 +56,11 @@ pub struct VectorDB {
     pub chunks: Vec<Chunk>,
     avg_text_len: f32,
     approx_tables: Vec<HashMap<u64, Vec<usize>>>,
+    /// Pre-tokenized texts aligned with `chunks` to avoid repeated
+    /// jieba segmentation during search.
+    tokenized_texts: Vec<Vec<String>>,
+    /// Pre-computed embedding magnitudes to speed up cosine similarity.
+    embedding_magnitudes: Vec<f32>,
 }
 
 impl Default for VectorDB {
@@ -70,6 +75,8 @@ impl VectorDB {
             chunks: vec![],
             avg_text_len: 1.0,
             approx_tables: vec![HashMap::new(); APPROX_TABLE_COUNT],
+            tokenized_texts: vec![],
+            embedding_magnitudes: vec![],
         }
     }
 
@@ -92,6 +99,8 @@ impl VectorDB {
             chunks,
             avg_text_len,
             approx_tables: vec![HashMap::new(); APPROX_TABLE_COUNT],
+            tokenized_texts: vec![],
+            embedding_magnitudes: vec![],
         };
         db.rebuild_index();
         Ok(db)
@@ -105,19 +114,34 @@ impl VectorDB {
     }
 
     pub fn upsert(&mut self, chunk: Chunk) {
+        let tokenized = tokenize(&chunk.text);
+        let mag = chunk.embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         if let Some(idx) = self.chunks.iter().position(|c| c.id == chunk.id) {
             self.chunks[idx] = chunk;
+            self.tokenized_texts[idx] = tokenized;
+            self.embedding_magnitudes[idx] = mag;
         } else {
             self.chunks.push(chunk);
+            self.tokenized_texts.push(tokenized);
+            self.embedding_magnitudes.push(mag);
         }
         self.refresh_avg_text_len();
         self.rebuild_index();
     }
 
     pub fn archive_chapter_revision(&mut self, chapter: &str, active_revision: &str) {
-        self.chunks.retain(|chunk| {
-            !(chunk.chapter == chapter && chunk.source_revision.as_deref() == Some(active_revision))
-        });
+        let mut to_remove = Vec::new();
+        for (i, chunk) in self.chunks.iter().enumerate() {
+            if chunk.chapter == chapter && chunk.source_revision.as_deref() == Some(active_revision)
+            {
+                to_remove.push(i);
+            }
+        }
+        for &i in to_remove.iter().rev() {
+            self.chunks.remove(i);
+            self.tokenized_texts.remove(i);
+            self.embedding_magnitudes.remove(i);
+        }
         for chunk in &mut self.chunks {
             if chunk.chapter == chapter && chunk.source_revision.as_deref() != Some(active_revision)
             {
@@ -130,27 +154,41 @@ impl VectorDB {
 
     pub fn remove_chapter(&mut self, chapter: &str) {
         let chapter_source_ref = format!("chapter:{}", chapter);
-        self.chunks.retain(|c| {
-            c.chapter != chapter && c.source_ref.as_deref() != Some(&chapter_source_ref)
-        });
+        let mut to_remove = Vec::new();
+        for (i, c) in self.chunks.iter().enumerate() {
+            if c.chapter == chapter || c.source_ref.as_deref() == Some(&chapter_source_ref) {
+                to_remove.push(i);
+            }
+        }
+        for &i in to_remove.iter().rev() {
+            self.chunks.remove(i);
+            self.tokenized_texts.remove(i);
+            self.embedding_magnitudes.remove(i);
+        }
         self.refresh_avg_text_len();
         self.rebuild_index();
     }
 
     fn refresh_avg_text_len(&mut self) {
-        self.avg_text_len = if self.chunks.is_empty() {
+        self.avg_text_len = if self.tokenized_texts.is_empty() {
             1.0
         } else {
-            self.chunks
+            self.tokenized_texts
                 .iter()
-                .map(|c| tokenize(&c.text).len() as f32)
+                .map(|t| t.len() as f32)
                 .sum::<f32>()
-                / self.chunks.len() as f32
+                / self.tokenized_texts.len() as f32
         };
     }
 
     pub fn rebuild_index(&mut self) {
         self.approx_tables = vec![HashMap::new(); APPROX_TABLE_COUNT];
+        self.tokenized_texts = self.chunks.iter().map(|c| tokenize(&c.text)).collect();
+        self.embedding_magnitudes = self
+            .chunks
+            .iter()
+            .map(|c| c.embedding.iter().map(|x| x * x).sum::<f32>().sqrt())
+            .collect();
         for (idx, chunk) in self.chunks.iter().enumerate() {
             if chunk.embedding.is_empty() {
                 continue;
@@ -205,11 +243,27 @@ impl VectorDB {
     ) -> Vec<(f32, &Chunk)> {
         let candidate_ids =
             self.approximate_candidate_ids(query_embedding, top_k, include_archived);
+        let query_mag: f32 = query_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         let mut scored: Vec<(f32, &Chunk)> = candidate_ids
             .into_iter()
-            .filter_map(|idx| self.chunks.get(idx))
-            .filter(|c| include_archived || !c.archived)
-            .map(|c| (cosine_similarity(query_embedding, &c.embedding), c))
+            .filter_map(|idx| {
+                let chunk = self.chunks.get(idx)?;
+                if !include_archived && chunk.archived {
+                    return None;
+                }
+                let dot: f32 = query_embedding
+                    .iter()
+                    .zip(chunk.embedding.iter())
+                    .map(|(x, y)| x * y)
+                    .sum();
+                let mag_b = *self.embedding_magnitudes.get(idx)?;
+                let sim = if query_mag == 0.0 || mag_b == 0.0 {
+                    0.0
+                } else {
+                    dot / (query_mag * mag_b)
+                };
+                Some((sim, chunk))
+            })
             .collect();
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         scored.truncate(top_k);
@@ -247,7 +301,7 @@ impl VectorDB {
         let query_lower = query.to_lowercase();
         let mut document_frequency: HashMap<String, usize> =
             query_terms.iter().map(|term| (term.clone(), 0)).collect();
-        let mut tokenized_docs: Vec<(&Chunk, Vec<String>)> = Vec::new();
+        let mut tokenized_docs: Vec<(usize, &Chunk, &Vec<String>)> = Vec::new();
         let candidate_ids =
             self.approximate_candidate_ids(query_embedding, top_k, include_archived);
 
@@ -255,36 +309,41 @@ impl VectorDB {
             let Some(chunk) = self.chunks.get(idx) else {
                 continue;
             };
+            let Some(doc_terms) = self.tokenized_texts.get(idx) else {
+                continue;
+            };
             if !include_archived && chunk.archived {
                 continue;
             }
-            let doc_terms = tokenize(&chunk.text);
             let mut seen_terms = HashSet::new();
-            for term in &doc_terms {
+            for term in doc_terms {
                 if query_term_set.contains(term.as_str()) && seen_terms.insert(term.as_str()) {
                     if let Some(count) = document_frequency.get_mut(term) {
                         *count += 1;
                     }
                 }
             }
-            tokenized_docs.push((chunk, doc_terms));
+            tokenized_docs.push((idx, chunk, doc_terms));
         }
 
         let doc_count = tokenized_docs.len().max(1);
-        let avg_text_len = if tokenized_docs.is_empty() {
-            1.0
-        } else {
-            tokenized_docs
-                .iter()
-                .map(|(_, terms)| terms.len() as f32)
-                .sum::<f32>()
-                / tokenized_docs.len() as f32
-        };
+        let avg_text_len = self.avg_text_len.max(1.0);
 
+        let query_mag: f32 = query_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         let mut scored: Vec<(f32, &Chunk)> = tokenized_docs
             .iter()
-            .map(|(chunk, doc_terms)| {
-                let sem = cosine_similarity(query_embedding, &chunk.embedding);
+            .map(|(idx, chunk, doc_terms)| {
+                let dot: f32 = query_embedding
+                    .iter()
+                    .zip(chunk.embedding.iter())
+                    .map(|(x, y)| x * y)
+                    .sum();
+                let mag_b = self.embedding_magnitudes.get(*idx).copied().unwrap_or(0.0);
+                let sem = if query_mag == 0.0 || mag_b == 0.0 {
+                    0.0
+                } else {
+                    dot / (query_mag * mag_b)
+                };
                 let lex = Self::bm25_score_precomputed(
                     &query_terms,
                     doc_terms,
@@ -339,19 +398,36 @@ impl VectorDB {
         }
 
         if candidate_ids.len() < top_k.saturating_mul(APPROX_MIN_CANDIDATES_MULTIPLIER) {
+            let threshold = top_k
+                .saturating_mul(APPROX_MIN_CANDIDATES_MULTIPLIER)
+                .max(top_k);
+            let query_mag: f32 = query_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
             let mut fallback: Vec<(f32, usize)> = self
                 .chunks
                 .iter()
                 .enumerate()
                 .filter(|(_, chunk)| include_archived || !chunk.archived)
-                .map(|(idx, chunk)| (cosine_similarity(query_embedding, &chunk.embedding), idx))
+                .map(|(idx, chunk)| {
+                    let dot: f32 = query_embedding
+                        .iter()
+                        .zip(chunk.embedding.iter())
+                        .map(|(x, y)| x * y)
+                        .sum();
+                    let mag_b = self.embedding_magnitudes.get(idx).copied().unwrap_or(0.0);
+                    let sim = if query_mag == 0.0 || mag_b == 0.0 {
+                        0.0
+                    } else {
+                        dot / (query_mag * mag_b)
+                    };
+                    (sim, idx)
+                })
                 .collect();
-            fallback.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-            fallback.truncate(
-                top_k
-                    .saturating_mul(APPROX_MIN_CANDIDATES_MULTIPLIER)
-                    .max(top_k),
-            );
+            if fallback.len() > threshold {
+                fallback.select_nth_unstable_by(threshold - 1, |a, b| {
+                    b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            fallback.truncate(threshold);
             candidate_ids.extend(fallback.into_iter().map(|(_, idx)| idx));
         }
 
@@ -392,10 +468,12 @@ fn approx_hash(embedding: &[f32], table: usize) -> u64 {
 }
 
 fn pseudo_sign(table: usize, bit: usize, dim: usize) -> bool {
-    let mut value = (table as u64).wrapping_mul(0x9E37_79B1_85EB_CA87);
-    value ^= (bit as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    value ^= (dim as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-    ((value ^ (value >> 29)) & 1) == 0
+    let key = ((table as u64) << 48) | ((bit as u64) << 32) | (dim as u64);
+    let mut v = key.wrapping_mul(0x9E37_79B1_85EB_CA87);
+    v ^= v >> 33;
+    v = v.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    v ^= v >> 29;
+    (v & 1) == 0
 }
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

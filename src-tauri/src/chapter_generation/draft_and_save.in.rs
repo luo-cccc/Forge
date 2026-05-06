@@ -2,6 +2,11 @@ pub async fn generate_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
     provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    mut ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
     mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> Result<GenerateChapterDraftOutput, ChapterGenerationError> {
     if context.prompt_context.trim().is_empty() {
@@ -55,6 +60,7 @@ Aim for {} Chinese characters, keep the output within {}-{} Chinese characters, 
             budget_report,
         ));
     }
+    ensure_provider_budget_allowed(context, &budget_report)?;
     record_model_started(context, &budget_report);
 
     let content = llm_runtime::chat_text_profile(
@@ -67,11 +73,7 @@ Aim for {} Chinese characters, keep the output within {}-{} Chinese characters, 
     .map_err(map_provider_error)?;
 
     let content = content.trim().to_string();
-    validate_generated_content(
-        &content,
-        &context.chapter_contract,
-        ChapterContractPhase::ModelOutput,
-    )?;
+    validate_generated_content_basics(&content)?;
 
     Ok(GenerateChapterDraftOutput {
         output_chars: char_count(&content),
@@ -89,19 +91,50 @@ pub async fn continue_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
     existing_content: &str,
-) -> Result<String, ChapterGenerationError> {
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    mut ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
+    mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+) -> Result<ChapterDraftRepairOutput, ChapterGenerationError> {
+    let existing_chars = char_count(existing_content);
+    let deficit_to_min = context
+        .chapter_contract
+        .min_chars
+        .saturating_sub(existing_chars);
+    let room_to_max = context
+        .chapter_contract
+        .max_chars
+        .saturating_sub(existing_chars);
+    let add_min_chars = room_to_max.min((deficit_to_min + 80).max(260));
+    let add_max_chars = room_to_max.min((deficit_to_min + 420).max(520));
+    let target_floor = existing_chars + add_min_chars;
+    let target_ceiling = existing_chars + add_max_chars;
     let system_prompt = format!(
         "You are a professional Chinese novelist continuing a chapter draft. \
 Write only additional chapter prose that follows seamlessly from the existing draft. \
+This is a bounded length repair, not a second chapter and not a new branch. \
 Do not repeat earlier sentences, do not include analysis, and keep continuity stable. \
-The finished chapter should move toward {} Chinese characters and remain within {}-{} Chinese characters.",
+Add only {}-{} Chinese characters, stop as soon as the current action has a saveable consequence or hook, \
+and keep the finished chapter within {}-{} Chinese characters. \
+The finished chapter should move toward {} Chinese characters and must never exceed {} Chinese characters.",
+        add_min_chars,
+        add_max_chars,
+        target_floor,
+        target_ceiling,
         context.chapter_contract.target_chars,
-        context.chapter_contract.min_chars,
         context.chapter_contract.max_chars
     );
     let user_prompt = format!(
-        "Target chapter: {}\n\nExisting draft:\n{}\n\nProject context:\n{}\n\nContinue the chapter with new prose only.",
+        "Target chapter: {}\n\nExisting draft chars: {}\nRequired added chars: {}-{}\nFinal total target after this repair: {}-{}\n\nExisting draft:\n{}\n\nProject context:\n{}\n\nContinue with new prose only. Use 1-3 tight paragraphs to complete the unfinished action, consequence, or hook, then stop.",
         context.target.title,
+        existing_chars,
+        add_min_chars,
+        add_max_chars,
+        target_floor,
+        target_ceiling,
         existing_content,
         context.prompt_context
     );
@@ -109,7 +142,25 @@ The finished chapter should move toward {} Chinese characters and remain within 
         serde_json::json!({"role": "system", "content": system_prompt}),
         serde_json::json!({"role": "user", "content": user_prompt}),
     ];
-    llm_runtime::chat_text_profile(
+    let budget_report = apply_provider_budget_approval(
+        chapter_generation_provider_budget_for_profile(
+            settings,
+            &messages,
+            llm_runtime::LlmRequestProfile::ChapterContinuation,
+        ),
+        provider_budget_approval,
+    );
+    if budget_report.decision == WriterProviderBudgetDecision::ApprovalRequired {
+        return Err(provider_budget_error(
+            &context.request_id,
+            &context.receipt,
+            budget_report,
+        ));
+    }
+    ensure_provider_budget_allowed(context, &budget_report)?;
+    record_model_started(context, &budget_report);
+
+    let content = llm_runtime::chat_text_profile(
         settings,
         messages,
         llm_runtime::LlmRequestProfile::ChapterContinuation,
@@ -117,24 +168,128 @@ The finished chapter should move toward {} Chinese characters and remain within 
     )
     .await
     .map(|text| text.trim().to_string())
-    .map_err(map_provider_error)
+    .map_err(map_provider_error)?;
+    validate_generated_content_basics(&content)?;
+    Ok(ChapterDraftRepairOutput {
+        output_chars: char_count(&content),
+        content,
+        provider_budget: budget_report,
+    })
 }
 
 pub async fn compress_chapter_draft(
     settings: &llm_runtime::LlmSettings,
     context: &BuiltChapterContext,
     existing_content: &str,
-) -> Result<String, ChapterGenerationError> {
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
+    record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+) -> Result<ChapterDraftRepairOutput, ChapterGenerationError> {
+    compress_chapter_draft_with_mode(
+        settings,
+        context,
+        existing_content,
+        provider_budget_approval,
+        false,
+        ensure_provider_budget_allowed,
+        record_model_started,
+    )
+    .await
+}
+
+pub async fn compress_chapter_draft_hard(
+    settings: &llm_runtime::LlmSettings,
+    context: &BuiltChapterContext,
+    existing_content: &str,
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
+    record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+) -> Result<ChapterDraftRepairOutput, ChapterGenerationError> {
+    compress_chapter_draft_with_mode(
+        settings,
+        context,
+        existing_content,
+        provider_budget_approval,
+        true,
+        ensure_provider_budget_allowed,
+        record_model_started,
+    )
+    .await
+}
+
+async fn compress_chapter_draft_with_mode(
+    settings: &llm_runtime::LlmSettings,
+    context: &BuiltChapterContext,
+    existing_content: &str,
+    provider_budget_approval: Option<&WriterProviderBudgetApproval>,
+    hard_contract_repair: bool,
+    mut ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
+    mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+) -> Result<ChapterDraftRepairOutput, ChapterGenerationError> {
+    let existing_chars = char_count(existing_content);
+    let target_floor = if hard_contract_repair {
+        context
+            .chapter_contract
+            .min_chars
+            .max(context.chapter_contract.target_chars.saturating_sub(500))
+            .min(context.chapter_contract.max_chars)
+    } else {
+        context
+            .chapter_contract
+            .min_chars
+            .max(context.chapter_contract.target_chars.saturating_sub(300))
+            .min(context.chapter_contract.max_chars)
+    };
+    let target_ceiling = if hard_contract_repair {
+        context
+            .chapter_contract
+            .max_chars
+            .min(context.chapter_contract.target_chars.saturating_sub(100).max(target_floor))
+    } else {
+        context
+            .chapter_contract
+            .max_chars
+            .min((context.chapter_contract.target_chars + 300).max(target_floor))
+    };
+    let required_cut = existing_chars.saturating_sub(target_ceiling);
+    let repair_instruction = if hard_contract_repair {
+        "This is a hard contract repair after a previous compression failed. \
+Prioritize the character contract over preserving secondary detail. \
+If detail and length conflict, delete side actions, explanatory background, repeated dialogue, and low-value internal monologue; \
+preserve only the main causal chain, anchor participation, the character choice, and the ending hook."
+    } else {
+        "Preserve continuity, anchors, choices, consequences, and the ending hook while removing repeated description, side actions, filler dialogue, and redundant internal monologue."
+    };
     let system_prompt = format!(
         "You are a professional Chinese novelist compressing a chapter draft. \
-Preserve continuity, anchors, and scene consequences while tightening the prose. \
-Write only the full revised chapter prose. Keep the chapter within {}-{} Chinese characters.",
-        context.chapter_contract.min_chars,
+This is a deletion-and-tightening task, not a continuation. \
+{} \
+Write only the full revised chapter prose. Keep the chapter within {}-{} Chinese characters, and never exceed {} Chinese characters.",
+        repair_instruction,
+        target_floor,
+        target_ceiling,
         context.chapter_contract.max_chars
     );
     let user_prompt = format!(
-        "Target chapter: {}\n\nCurrent draft:\n{}\n\nProject context:\n{}\n\nRewrite the chapter more tightly without dropping important anchors.",
+        "Target chapter: {}\n\nCurrent draft chars: {}\nMinimum cut required: {} chars\nTarget compressed range: {}-{}\nHard maximum: {}\n\nCurrent draft:\n{}\n\nProject context:\n{}\n\nRewrite as one complete, tighter chapter. Preserve the important anchors through action or consequence, but delete lower-value beats until the chapter fits the target range.",
         context.target.title,
+        existing_chars,
+        required_cut,
+        target_floor,
+        target_ceiling,
+        context.chapter_contract.max_chars,
         existing_content,
         context.prompt_context
     );
@@ -142,7 +297,25 @@ Write only the full revised chapter prose. Keep the chapter within {}-{} Chinese
         serde_json::json!({"role": "system", "content": system_prompt}),
         serde_json::json!({"role": "user", "content": user_prompt}),
     ];
-    llm_runtime::chat_text_profile(
+    let budget_report = apply_provider_budget_approval(
+        chapter_generation_provider_budget_for_profile(
+            settings,
+            &messages,
+            llm_runtime::LlmRequestProfile::ChapterCompress,
+        ),
+        provider_budget_approval,
+    );
+    if budget_report.decision == WriterProviderBudgetDecision::ApprovalRequired {
+        return Err(provider_budget_error(
+            &context.request_id,
+            &context.receipt,
+            budget_report,
+        ));
+    }
+    ensure_provider_budget_allowed(context, &budget_report)?;
+    record_model_started(context, &budget_report);
+
+    let content = llm_runtime::chat_text_profile(
         settings,
         messages,
         llm_runtime::LlmRequestProfile::ChapterCompress,
@@ -150,12 +323,30 @@ Write only the full revised chapter prose. Keep the chapter within {}-{} Chinese
     )
     .await
     .map(|text| text.trim().to_string())
-    .map_err(map_provider_error)
+    .map_err(map_provider_error)?;
+    validate_generated_content_basics(&content)?;
+    Ok(ChapterDraftRepairOutput {
+        output_chars: char_count(&content),
+        content,
+        provider_budget: budget_report,
+    })
 }
 
 pub fn chapter_generation_provider_budget(
     settings: &llm_runtime::LlmSettings,
     messages: &[serde_json::Value],
+) -> WriterProviderBudgetReport {
+    chapter_generation_provider_budget_for_profile(
+        settings,
+        messages,
+        llm_runtime::LlmRequestProfile::ChapterDraft,
+    )
+}
+
+pub fn chapter_generation_provider_budget_for_profile(
+    settings: &llm_runtime::LlmSettings,
+    messages: &[serde_json::Value],
+    profile: llm_runtime::LlmRequestProfile,
 ) -> WriterProviderBudgetReport {
     let converted = messages
         .iter()
@@ -180,10 +371,7 @@ pub fn chapter_generation_provider_budget(
         WriterProviderBudgetTask::ChapterGeneration,
         settings.model.clone(),
         estimated_input_tokens,
-        u64::from(
-            llm_runtime::request_options(settings, llm_runtime::LlmRequestProfile::ChapterDraft)
-                .max_tokens,
-        ),
+        u64::from(llm_runtime::request_options(settings, profile).max_tokens),
     ))
 }
 
@@ -597,4 +785,6 @@ pub struct ChapterGenerationConfig {
     pub settings: llm_runtime::LlmSettings,
     pub payload: GenerateChapterAutonomousPayload,
     pub user_profile_entries: Vec<String>,
+    pub project_id: String,
+    pub memory_path: std::path::PathBuf,
 }

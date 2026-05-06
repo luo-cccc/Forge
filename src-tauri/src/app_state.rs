@@ -16,21 +16,24 @@ pub(crate) struct AppState {
     pub(crate) editor_prediction: Mutex<Option<EditorPredictionTask>>,
     pub(crate) writer_kernel: Mutex<writer_agent::WriterAgentKernel>,
     pub(crate) manual_agent_history: Mutex<ManualAgentHistory>,
-    pub(crate) current_sprint:
-        Mutex<Option<writer_agent::supervised_sprint::SupervisedSprintPlan>>,
+    pub(crate) current_sprint: Mutex<Option<writer_agent::supervised_sprint::SupervisedSprintPlan>>,
 }
 
 impl AppState {
     pub(crate) fn open(app: &tauri::AppHandle) -> Result<Self, String> {
         let hermes_db = open_app_hermes_db(app)?;
         let writer_kernel = open_app_writer_kernel(app)?;
+        let current_sprint = writer_kernel
+            .memory
+            .get_latest_active_supervised_sprint(&writer_kernel.project_id)
+            .map_err(|e| format!("Failed to restore supervised sprint: {}", e))?;
         Ok(Self {
             harness_state: Mutex::new(HarnessState::Idle),
             hermes_db: Mutex::new(hermes_db),
             editor_prediction: Mutex::new(None),
             writer_kernel: Mutex::new(writer_kernel),
             manual_agent_history: Mutex::new(ManualAgentHistory::default()),
-            current_sprint: Mutex::new(None),
+            current_sprint: Mutex::new(current_sprint),
         })
     }
 }

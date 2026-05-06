@@ -197,6 +197,26 @@ pub fn build_chapter_context(
 
     let (prompt_context, sources, budget_report) = composer.finish();
     let warnings = budget_report.warnings.clone();
+    let intent_artifact = build_chapter_intent_artifact(instruction, &target);
+    let selected_evidence = build_selected_evidence_artifact(&sources);
+    let rule_stack = build_chapter_rule_stack(&chapter_contract);
+    let trace_artifact = ChapterTraceArtifact {
+        chapter_number: target.number,
+        planner_inputs: vec![
+            "instruction".to_string(),
+            "outline".to_string(),
+            "target_beat".to_string(),
+            "previous_chapters".to_string(),
+            "lorebook".to_string(),
+            "project_brain".to_string(),
+        ],
+        selected_evidence_count: selected_evidence.len(),
+        active_override_count: if input.chapter_summary_override.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            1
+        } else {
+            0
+        },
+    };
 
     let request_id = input.request_id;
     let receipt = build_chapter_generation_receipt(
@@ -218,7 +238,82 @@ pub fn build_chapter_context(
         budget: budget_report,
         warnings,
         receipt,
+        intent_artifact,
+        selected_evidence,
+        rule_stack,
+        trace_artifact,
     })
+}
+
+fn build_chapter_intent_artifact(
+    instruction: &str,
+    target: &ChapterTarget,
+) -> ChapterIntentArtifact {
+    let goal = if instruction.trim().is_empty() {
+        format!("Draft '{}'", target.title)
+    } else {
+        snippet_text(instruction, 220)
+    };
+    ChapterIntentArtifact {
+        chapter_number: target.number,
+        chapter_title: Some(target.title.clone()),
+        goal,
+        must_keep: vec![
+            "Respect current outline beat".to_string(),
+            "Preserve active canon and promises".to_string(),
+        ],
+        must_avoid: vec![
+            "Do not overwrite dirty editor state".to_string(),
+            "Do not skip chapter contract validation".to_string(),
+        ],
+        style_emphasis: vec![
+            "Keep chapter prose only".to_string(),
+            "End with a concrete next-beat hook".to_string(),
+        ],
+    }
+}
+
+fn build_selected_evidence_artifact(
+    sources: &[ChapterContextSource],
+) -> Vec<ChapterSelectedEvidenceArtifact> {
+    sources
+        .iter()
+        .filter(|source| source.included_chars > 0)
+        .map(|source| ChapterSelectedEvidenceArtifact {
+            source: format!("{}:{}", source.source_type, source.id),
+            reason: chapter_source_purpose(&source.source_type).to_string(),
+            excerpt: format!(
+                "{} contributed {} chars{}",
+                source.label,
+                source.included_chars,
+                if source.truncated { " (truncated)" } else { "" }
+            ),
+        })
+        .collect()
+}
+
+fn build_chapter_rule_stack(contract: &ChapterContract) -> ChapterRuleStackArtifact {
+    ChapterRuleStackArtifact {
+        hard: vec![
+            format!(
+                "Model output must stay within {}-{} chars",
+                contract.min_chars, contract.max_chars
+            ),
+            format!(
+                "Save must stay within {}-{} chars",
+                contract.save_hard_floor_chars, contract.save_hard_ceiling_chars
+            ),
+            "Saving must pass revision/conflict checks".to_string(),
+        ],
+        soft: vec![
+            format!("Aim for {} chars", contract.target_chars),
+            "Preserve continuity from recent chapter outcomes".to_string(),
+        ],
+        diagnostic: vec![
+            "Record context budget trace".to_string(),
+            "Emit chapter generation run events".to_string(),
+        ],
+    }
 }
 
 pub fn build_chapter_generation_task_packet(
@@ -521,6 +616,8 @@ fn chapter_source_confidence(source_type: &str) -> f32 {
         _ => 0.60,
     }
 }
+
+include!("runtime_artifacts.in.rs");
 
 fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()

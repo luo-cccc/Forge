@@ -69,8 +69,8 @@ use commands::generation::{
     analyze_chapter, analyze_pacing, ask_project_brain, batch_generate_chapter,
     cancel_supervised_sprint, checkpoint_supervised_sprint, generate_chapter_autonomous,
     generate_parallel_drafts, get_supervised_sprint_plan, get_supervised_sprint_progress,
-    pause_supervised_sprint, record_supervised_sprint_budget_usage, resume_supervised_sprint,
-    start_supervised_sprint,
+    pause_supervised_sprint, record_supervised_sprint_budget_usage, repair_chapter_state,
+    resume_supervised_sprint, start_supervised_sprint,
 };
 use commands::graph::{
     compare_project_brain_source_revisions, cross_reference_brain_nodes,
@@ -192,6 +192,7 @@ pub fn run() {
             cancel_supervised_sprint,
             checkpoint_supervised_sprint,
             record_supervised_sprint_budget_usage,
+            repair_chapter_state,
             analyze_chapter,
             ask_project_brain,
             generate_parallel_drafts,

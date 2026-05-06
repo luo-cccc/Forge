@@ -3,6 +3,11 @@ pub async fn run_chapter_generation_pipeline(
     mut emit: impl FnMut(ChapterGenerationEvent) + Send,
     mut record_task_packet: impl FnMut(&BuiltChapterContext) + Send,
     mut record_provider_budget: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
+    mut ensure_provider_budget_allowed: impl FnMut(
+            &BuiltChapterContext,
+            &WriterProviderBudgetReport,
+        ) -> Result<(), ChapterGenerationError>
+        + Send,
     mut record_model_started: impl FnMut(&BuiltChapterContext, &WriterProviderBudgetReport) + Send,
 ) -> PipelineTerminal {
     let request_id = config.payload
@@ -27,7 +32,7 @@ pub async fn run_chapter_generation_pipeline(
         budget: config.payload.budget.clone().unwrap_or_default(),
         chapter_contract: config.payload.chapter_contract.clone().unwrap_or_default(),
         chapter_summary_override: config.payload.chapter_summary_override.clone(),
-        user_profile_entries: config.user_profile_entries,
+        user_profile_entries: config.user_profile_entries.clone(),
     };
 
     let context = match build_chapter_context(&config.app, build_input) {
@@ -54,6 +59,14 @@ pub async fn run_chapter_generation_pipeline(
         sources: Some(context.sources.clone()),
         budget: Some(context.budget.clone()),
         receipt: Some(context.receipt.clone()),
+        intent_artifact: Some(context.intent_artifact.clone()),
+        selected_evidence: Some(context.selected_evidence.clone()),
+        rule_stack: Some(context.rule_stack.clone()),
+        trace_artifact: Some(context.trace_artifact.clone()),
+        settlement_delta: None,
+        settlement_apply: None,
+        length_telemetry: None,
+        artifact_refs: None,
         saved: None,
         chapter_contract: Some(context.chapter_contract.clone()),
         output_chars: None,
@@ -84,6 +97,7 @@ pub async fn run_chapter_generation_pipeline(
         &config.settings,
         &context,
         config.payload.provider_budget_approval.as_ref(),
+        |context, report| ensure_provider_budget_allowed(context, report),
         |context, report| record_model_started(context, report),
     )
     .await
@@ -100,6 +114,10 @@ pub async fn run_chapter_generation_pipeline(
             return PipelineTerminal::Failed(error);
         }
     };
+    let draft_chars_before_repairs = draft.output_chars;
+    let mut continuation_applied = false;
+    let mut compress_applied = false;
+    let mut hard_compress_applied = false;
 
     match chapter_contract_outcome(
         &draft.content,
@@ -119,22 +137,32 @@ pub async fn run_chapter_generation_pipeline(
                 &config.settings,
                 &context,
                 &draft.content,
+                config.payload.provider_budget_approval.as_ref(),
+                |context, report| ensure_provider_budget_allowed(context, report),
+                |context, report| record_model_started(context, report),
             )
             .await
             {
-                Ok(text) => text,
+                Ok(output) => {
+                    record_provider_budget(&context, &output.provider_budget);
+                    output
+                }
                 Err(error) => {
+                    if let Some(report) = provider_budget_report_from_error(&error) {
+                        record_provider_budget(&context, &report);
+                    }
                     emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
                     return PipelineTerminal::Failed(error);
                 }
             };
-            if !continuation.is_empty() {
+            if !continuation.content.is_empty() {
                 if !draft.content.ends_with('\n') {
                     draft.content.push('\n');
                 }
-                draft.content.push_str(&continuation);
+                draft.content.push_str(&continuation.content);
                 draft.content = draft.content.trim().to_string();
                 draft.output_chars = char_count(&draft.content);
+                continuation_applied = true;
             }
         }
         ChapterContractOutcome::OverMaxChars => {
@@ -150,23 +178,76 @@ pub async fn run_chapter_generation_pipeline(
                 &config.settings,
                 &context,
                 &draft.content,
+                config.payload.provider_budget_approval.as_ref(),
+                |context, report| ensure_provider_budget_allowed(context, report),
+                |context, report| record_model_started(context, report),
             )
             .await
             {
-                Ok(text) => text,
+                Ok(output) => {
+                    record_provider_budget(&context, &output.provider_budget);
+                    output
+                }
                 Err(error) => {
+                    if let Some(report) = provider_budget_report_from_error(&error) {
+                        record_provider_budget(&context, &report);
+                    }
                     emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
                     return PipelineTerminal::Failed(error);
                 }
             };
-            if !compressed.is_empty() {
-                draft.content = compressed.trim().to_string();
+            if !compressed.content.is_empty() {
+                draft.content = compressed.content.trim().to_string();
                 draft.output_chars = char_count(&draft.content);
+                compress_applied = true;
             }
         }
         ChapterContractOutcome::Valid
         | ChapterContractOutcome::UnderSaveFloor
         | ChapterContractOutcome::OverSaveCeiling => {}
+    }
+
+    if chapter_contract_outcome(
+        &draft.content,
+        &context.chapter_contract,
+        ChapterContractPhase::ModelOutput,
+    ) == ChapterContractOutcome::OverMaxChars
+    {
+        emit(ChapterGenerationEvent::progress(
+            &request_id,
+            PHASE_COMPRESS,
+            "running",
+            "修复后字数仍超出目标区间，正在进行强压缩...",
+            60,
+            Some(context.target.title.clone()),
+        ));
+        let compressed = match compress_chapter_draft_hard(
+            &config.settings,
+            &context,
+            &draft.content,
+            config.payload.provider_budget_approval.as_ref(),
+            |context, report| ensure_provider_budget_allowed(context, report),
+            |context, report| record_model_started(context, report),
+        )
+        .await
+        {
+            Ok(output) => {
+                record_provider_budget(&context, &output.provider_budget);
+                output
+            }
+            Err(error) => {
+                if let Some(report) = provider_budget_report_from_error(&error) {
+                    record_provider_budget(&context, &report);
+                }
+                emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
+                return PipelineTerminal::Failed(error);
+            }
+        };
+        if !compressed.content.is_empty() {
+            draft.content = compressed.content.trim().to_string();
+            draft.output_chars = char_count(&draft.content);
+            hard_compress_applied = true;
+        }
     }
 
     emit(ChapterGenerationEvent::progress(
@@ -234,6 +315,58 @@ pub async fn run_chapter_generation_pipeline(
     if let Err(error) = update_outline_after_generation(&config.app, &context.target, &saved) {
         warnings.push(format!("Outline update skipped: {}", error.message));
     }
+    let settlement_delta = build_chapter_settlement_delta(&config, &context, &draft.content, &saved);
+    let settlement_apply =
+        match crate::writer_agent::memory::WriterMemory::open(&config.memory_path) {
+            Ok(memory) => match apply_chapter_settlement_delta(
+                &memory,
+                &config.project_id,
+                &settlement_delta,
+            ) {
+                Ok(result) => Some(result),
+                Err(error) => {
+                    warnings.push(format!("Settlement apply failed: {}", error));
+                    None
+                }
+            },
+            Err(error) => {
+                warnings.push(format!("Settlement memory open failed: {}", error));
+                None
+            }
+        };
+    let length_telemetry = ChapterLengthTelemetry {
+        target_chars: context.chapter_contract.target_chars,
+        min_chars: context.chapter_contract.min_chars,
+        max_chars: context.chapter_contract.max_chars,
+        save_hard_floor_chars: context.chapter_contract.save_hard_floor_chars,
+        save_hard_ceiling_chars: context.chapter_contract.save_hard_ceiling_chars,
+        draft_chars: Some(draft_chars_before_repairs),
+        final_chars: Some(saved.output_chars),
+        continuation_applied,
+        compress_applied,
+        hard_compress_applied,
+        warning: if saved.output_chars < context.chapter_contract.min_chars
+            || saved.output_chars > context.chapter_contract.max_chars
+        {
+            Some("saved output required hard-bound save success but remained outside preferred model-output band".to_string())
+        } else {
+            None
+        },
+    };
+    let artifact_refs =
+        match persist_chapter_runtime_artifacts(
+            &config.app,
+            &request_id,
+            &context,
+            &settlement_delta,
+            &length_telemetry,
+        ) {
+            Ok(artifacts) => Some(artifacts.artifact_refs),
+            Err(error) => {
+                warnings.push(format!("Runtime artifacts skipped: {}", error));
+                None
+            }
+        };
 
     emit(ChapterGenerationEvent {
         request_id,
@@ -245,6 +378,14 @@ pub async fn run_chapter_generation_pipeline(
         sources: None,
         budget: None,
         receipt: None,
+        intent_artifact: Some(context.intent_artifact.clone()),
+        selected_evidence: Some(context.selected_evidence.clone()),
+        rule_stack: Some(context.rule_stack.clone()),
+        trace_artifact: Some(context.trace_artifact.clone()),
+        settlement_delta: Some(settlement_delta),
+        settlement_apply,
+        length_telemetry: Some(length_telemetry),
+        artifact_refs,
         saved: Some(saved.clone()),
         chapter_contract: Some(context.chapter_contract.clone()),
         output_chars: Some(saved.output_chars),
@@ -257,6 +398,30 @@ pub async fn run_chapter_generation_pipeline(
         saved,
         generated_content: draft.content,
     }
+}
+
+fn build_chapter_settlement_delta(
+    config: &ChapterGenerationConfig,
+    context: &BuiltChapterContext,
+    generated_content: &str,
+    saved: &SaveGeneratedChapterOutput,
+) -> ChapterSettlementDelta {
+    let memory = crate::writer_agent::memory::WriterMemory::open(&config.memory_path)
+        .expect("writer memory must open for chapter settlement");
+    build_basic_chapter_settlement_delta(
+        &config.project_id,
+        &saved.chapter_title,
+        &saved.new_revision,
+        generated_content,
+        crate::agent_runtime::now_ms(),
+        &memory,
+        context
+            .warnings
+            .iter()
+            .filter(|warning| !warning.trim().is_empty())
+            .cloned()
+            .collect(),
+    )
 }
 
 impl ChapterGenerationEvent {
@@ -278,6 +443,14 @@ impl ChapterGenerationEvent {
             sources: None,
             budget: None,
             receipt: None,
+            intent_artifact: None,
+            selected_evidence: None,
+            rule_stack: None,
+            trace_artifact: None,
+            settlement_delta: None,
+            settlement_apply: None,
+            length_telemetry: None,
+            artifact_refs: None,
             saved: None,
             chapter_contract: None,
             output_chars: None,
@@ -298,6 +471,14 @@ impl ChapterGenerationEvent {
             sources: None,
             budget: None,
             receipt: None,
+            intent_artifact: None,
+            selected_evidence: None,
+            rule_stack: None,
+            trace_artifact: None,
+            settlement_delta: None,
+            settlement_apply: None,
+            length_telemetry: None,
+            artifact_refs: None,
             saved: None,
             chapter_contract: None,
             output_chars: None,
@@ -318,6 +499,14 @@ impl ChapterGenerationEvent {
             sources: None,
             budget: None,
             receipt: None,
+            intent_artifact: None,
+            selected_evidence: None,
+            rule_stack: None,
+            trace_artifact: None,
+            settlement_delta: None,
+            settlement_apply: None,
+            length_telemetry: None,
+            artifact_refs: None,
             saved: None,
             chapter_contract: None,
             output_chars: None,

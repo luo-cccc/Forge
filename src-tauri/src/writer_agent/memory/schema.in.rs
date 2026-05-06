@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 16;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS plot_promises (
     status TEXT DEFAULT 'open',
     priority INTEGER DEFAULT 0,
     risk_level TEXT DEFAULT 'medium',
+    blocked_reason TEXT DEFAULT '',
+    promoted INTEGER DEFAULT 0,
+    core INTEGER DEFAULT 0,
     related_entities_json TEXT DEFAULT '[]',
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -335,6 +338,27 @@ CREATE TABLE IF NOT EXISTS book_state (
     source_ref TEXT DEFAULT '',
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS supervised_sprints (
+    project_id TEXT NOT NULL,
+    sprint_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    last_checkpoint_id TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(project_id, sprint_id)
+);
+
+CREATE TABLE IF NOT EXISTS supervised_sprint_checkpoints (
+    project_id TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    sprint_id TEXT NOT NULL,
+    checkpoint_json TEXT NOT NULL,
+    source TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(project_id, checkpoint_id)
+);
 "#;
 
 const INDEX_SCHEMA: &str = r#"
@@ -373,4 +397,6 @@ CREATE INDEX IF NOT EXISTS idx_edlgr_introduced ON emotional_debt_ledger(introdu
 CREATE INDEX IF NOT EXISTS idx_volumes_project_range ON volumes(project_id, start_chapter, end_chapter);
 CREATE INDEX IF NOT EXISTS idx_volume_snapshots_project_volume ON volume_snapshots(project_id, volume_id);
 CREATE INDEX IF NOT EXISTS idx_arc_snapshots_project_volume ON arc_snapshots(project_id, volume_id);
+CREATE INDEX IF NOT EXISTS idx_supervised_sprints_project_status ON supervised_sprints(project_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_supervised_sprint_checkpoints_sprint ON supervised_sprint_checkpoints(project_id, sprint_id, created_at);
 "#;

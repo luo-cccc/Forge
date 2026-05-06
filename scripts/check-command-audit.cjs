@@ -111,6 +111,7 @@ const classification = {
   cancel_supervised_sprint: RISK.MEMORY_WRITE,
   checkpoint_supervised_sprint: RISK.MEMORY_WRITE,
   record_supervised_sprint_budget_usage: RISK.MEMORY_WRITE,
+  repair_chapter_state: RISK.MEMORY_WRITE,
 
   // Manuscript write
   create_chapter: RISK.MANUSCRIPT_WRITE,
@@ -192,6 +193,7 @@ const KERNEL_AUDIT_COMMANDS = [
   "cancel_supervised_sprint",
   "checkpoint_supervised_sprint",
   "record_supervised_sprint_budget_usage",
+  "repair_chapter_state",
 ];
 
 const issues = [];

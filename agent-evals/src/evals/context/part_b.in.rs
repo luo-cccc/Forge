@@ -365,3 +365,157 @@ pub fn run_context_pack_explainability_eval() -> EvalResult {
         errors,
     )
 }
+
+/// Synthetic Chapter-500 context assembly latency gate.
+/// Measures `query_story_os` latency with a memory fixture scaled to
+/// ~500 chapters, multiple volumes, and realistic entity/promise counts.
+pub fn run_thousand_chapter_context_assembly_under_500ms_eval() -> EvalResult {
+    let mut errors = Vec::new();
+    let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
+
+    // Volume spanning Chapter 500
+    memory
+        .upsert_volume(&agent_writer_lib::writer_agent::memory::VolumeSummary {
+            id: "volume-13".to_string(),
+            project_id: "eval".to_string(),
+            title: "第十三卷".to_string(),
+            start_chapter: 481,
+            end_chapter: 520,
+            contract: serde_json::json!({"focus": "climax"}),
+            mission: serde_json::json!({"goal": "resolve core debt"}),
+            status: "active".to_string(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        })
+        .unwrap();
+
+    // Book state
+    memory
+        .upsert_book_state(&agent_writer_lib::writer_agent::memory::BookStateSummary {
+            project_id: "eval".to_string(),
+            title: "镜中墟".to_string(),
+            long_term_constraints: vec!["寒影刀旧债不能被自动抹平".to_string()],
+            mega_promises: vec!["封门真相必须逐卷逼近".to_string()],
+            irreversible_changes: vec!["张三已暴露自己也是债务人".to_string()],
+            source_ref: "eval".to_string(),
+            updated_at: String::new(),
+        })
+        .unwrap();
+
+    // Arc snapshot
+    memory
+        .upsert_arc_snapshot(&agent_writer_lib::writer_agent::memory::ArcSnapshotSummary {
+            arc_id: "arc-13a".to_string(),
+            project_id: "eval".to_string(),
+            volume_id: "volume-13".to_string(),
+            title: "第十三卷前半弧".to_string(),
+            start_chapter: 481,
+            end_chapter: 500,
+            snapshot: serde_json::json!({"summary": "林墨必须在救张三和追账册之间做选择。"}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        })
+        .unwrap();
+
+    // Volume snapshot
+    memory
+        .upsert_volume_snapshot(&agent_writer_lib::writer_agent::memory::VolumeSnapshotSummary {
+            project_id: "eval".to_string(),
+            volume_id: "volume-13".to_string(),
+            snapshot: serde_json::json!({"summary": "第十三卷已确认林墨与寒影刀旧债相关。"}),
+            created_at: String::new(),
+        })
+        .unwrap();
+
+    // Chapter mission for Chapter-500
+    memory
+        .ensure_chapter_mission_seed(
+            "eval",
+            "Chapter-500",
+            "林墨必须追查寒玉戒指下落，并揭开黑衣人把戒指带往北境宗门的来源线索。",
+            "寒玉戒指下落",
+            "不要被旧门传闻或无关闲谈稀释主线",
+            "以戒指来源的新线索收束。",
+            "eval",
+        )
+        .unwrap();
+
+    // Promises (~60 open)
+    for i in 1..=60 {
+        memory
+            .add_promise(
+                "object_in_motion",
+                &format!("Promise-{i}"),
+                &format!("承诺 {i} 的描述文本，涉及寒玉戒指和黑衣人的线索。"),
+                &format!("Chapter-{}", 400 + i),
+                &format!("Chapter-{}", 500 + i),
+                2,
+            )
+            .unwrap();
+    }
+
+    // Canon entities (~30)
+    for i in 1..=30 {
+        memory
+            .upsert_canon_entity(
+                "character",
+                &format!("角色-{i}"),
+                &[],
+                &format!("角色 {i} 的设定摘要，与寒影刀旧债有关。"),
+                &serde_json::json!({}),
+                0.9,
+            )
+            .unwrap();
+    }
+
+    // Recent chapter results (last 10)
+    for i in 490..=499 {
+        memory
+            .record_chapter_result(
+                &agent_writer_lib::writer_agent::memory::ChapterResultSummary {
+                    id: 0,
+                    project_id: "eval".to_string(),
+                    chapter_title: format!("Chapter-{i}"),
+                    chapter_revision: format!("rev-{i}"),
+                    summary: format!("第 {i} 章结果摘要：林墨继续追查寒玉戒指下落，发现新的线索。"),
+                    state_changes: vec![],
+                    character_progress: vec![],
+                    new_conflicts: vec![],
+                    new_clues: vec![format!("线索-{i}")],
+                    promise_updates: vec![],
+                    canon_updates: vec![],
+                    source_ref: "eval".to_string(),
+                    created_at: now_ms(),
+                },
+            )
+            .unwrap();
+    }
+
+    let mut kernel = WriterAgentKernel::new("eval", memory);
+    kernel.active_chapter = Some("Chapter-500".to_string());
+
+    let obs = observation_in_chapter(
+        "林墨站在北境宗门外，寒风卷着雪片拍在脸上。他握紧寒影刀，想起寒玉戒指的线索。",
+        "Chapter-500",
+    );
+
+    let started = std::time::Instant::now();
+    let pack = kernel.context_pack_for(AgentTask::ChapterGeneration, &obs, 20_000);
+    let latency_ms = started.elapsed().as_millis();
+
+    if latency_ms > 500 {
+        errors.push(format!(
+            "context assembly latency {}ms exceeds 500ms threshold",
+            latency_ms
+        ));
+    }
+
+    eval_result(
+        "writer_agent:thousand_chapter_context_assembly_under_500ms",
+        format!(
+            "latencyMs={} sources={} used={} budget={}",
+            latency_ms, pack.sources.len(), pack.total_chars, pack.budget_limit
+        ),
+        errors,
+    )
+}

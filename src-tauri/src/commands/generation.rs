@@ -8,9 +8,10 @@ use crate::llm_runtime;
 use crate::writer_agent::kernel::ModelStartedEventContext;
 use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
 use crate::writer_agent::supervised_sprint::{
-    cancel_sprint, checkpoint_sprint, create_sprint_plan_with_limits, pause_sprint,
-    record_budget_usage, resume_sprint, sprint_progress, SupervisedSprintPlan, SprintCheckpoint,
-    SprintProgress,
+    advance_sprint, budget_ceiling_reached, cancel_sprint, checkpoint_sprint,
+    create_sprint_plan_with_limits, pause_sprint, record_budget_usage, resume_sprint,
+    sprint_progress, update_current_chapter_state, SprintCheckpoint, SprintProgress,
+    SupervisedSprintPlan,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -82,6 +83,16 @@ pub struct StartSupervisedSprintPayload {
     pub max_chapters_per_session: Option<usize>,
     #[serde(default)]
     pub budget_ceiling_micros: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairChapterStateResult {
+    pub chapter_title: String,
+    pub revision: String,
+    pub settlement_delta: crate::chapter_generation::ChapterSettlementDelta,
+    pub settlement_apply: crate::chapter_generation::ChapterSettlementApplyResult,
+    pub artifact_refs: Vec<String>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -189,6 +200,267 @@ fn record_chapter_provider_budget_report(
     );
 }
 
+fn sprint_current_chapter_title(plan: &SupervisedSprintPlan) -> Option<&str> {
+    plan.chapters
+        .get(plan.current_index)
+        .map(|chapter| chapter.chapter_title.as_str())
+}
+
+fn sprint_matches_target(plan: &SupervisedSprintPlan, target_title: &str) -> bool {
+    sprint_current_chapter_title(plan).is_some_and(|title| title == target_title)
+}
+
+fn sprint_block_message(plan: &SupervisedSprintPlan, target_title: &str) -> Option<String> {
+    if plan.status == "paused" {
+        return Some(format!(
+            "supervised sprint {} is paused before {}",
+            plan.sprint_id, target_title
+        ));
+    }
+    if plan.status == "cancelled" || plan.status == "completed" {
+        return Some(format!(
+            "supervised sprint {} is {}",
+            plan.sprint_id, plan.status
+        ));
+    }
+    if budget_ceiling_reached(plan) {
+        return Some(format!(
+            "supervised sprint {} reached budget ceiling before {}",
+            plan.sprint_id, target_title
+        ));
+    }
+    None
+}
+
+fn persist_sprint_plan(app: &tauri::AppHandle, plan: &SupervisedSprintPlan) -> Result<(), String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .upsert_supervised_sprint(&kernel.project_id, plan)
+        .map_err(|e| e.to_string())
+}
+
+fn persist_sprint_checkpoint(
+    app: &tauri::AppHandle,
+    checkpoint: &SprintCheckpoint,
+) -> Result<(), String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .insert_supervised_sprint_checkpoint(&kernel.project_id, checkpoint)
+        .map_err(|e| e.to_string())
+}
+
+fn ensure_sprint_allows_generation(
+    app: &tauri::AppHandle,
+    target_title: Option<&str>,
+) -> Result<(), String> {
+    let Some(target_title) = target_title else {
+        return Ok(());
+    };
+    let state = app.state::<crate::AppState>();
+    let sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint
+        .as_ref()
+        .filter(|plan| sprint_matches_target(plan, target_title))
+    else {
+        return Ok(());
+    };
+    if let Some(message) = sprint_block_message(plan, target_title) {
+        return Err(message);
+    }
+    Ok(())
+}
+
+fn sprint_blocked_error(message: String) -> crate::chapter_generation::ChapterGenerationError {
+    crate::chapter_generation::ChapterGenerationError::new(
+        "SUPERVISED_SPRINT_BLOCKED",
+        message,
+        true,
+    )
+}
+
+fn ensure_sprint_allows_provider_budget(
+    app: &tauri::AppHandle,
+    target_title: &str,
+    report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+) -> Result<(), String> {
+    let state = app.state::<crate::AppState>();
+    let sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint
+        .as_ref()
+        .filter(|plan| sprint_matches_target(plan, target_title))
+    else {
+        return Ok(());
+    };
+    if let Some(message) = sprint_block_message(plan, target_title) {
+        return Err(message);
+    }
+    if let Some(ceiling) = plan.budget_ceiling_micros {
+        let projected = plan
+            .spent_budget_micros
+            .saturating_add(report.estimated_cost_micros);
+        if projected > ceiling {
+            return Err(format!(
+                "supervised sprint {} would exceed budget ceiling before {} (spent {} + estimated {} > ceiling {})",
+                plan.sprint_id,
+                target_title,
+                plan.spent_budget_micros,
+                report.estimated_cost_micros,
+                ceiling
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn record_sprint_context_built(
+    app: &tauri::AppHandle,
+    context: &crate::chapter_generation::BuiltChapterContext,
+) {
+    let plan_to_persist = {
+        let state = app.state::<crate::AppState>();
+        let Ok(mut sprint) = state.current_sprint.lock() else {
+            return;
+        };
+        let Some(plan) = sprint
+            .as_mut()
+            .filter(|plan| sprint_matches_target(plan, &context.target.title))
+        else {
+            return;
+        };
+        if plan.status == "planned" {
+            plan.status = "running".to_string();
+        }
+        let readiness = if context.warnings.is_empty() {
+            "ready"
+        } else {
+            "warning"
+        };
+        update_current_chapter_state(
+            plan,
+            Some("drafting"),
+            Some(&context.receipt.task_id),
+            Some(readiness),
+            None,
+        );
+        plan.clone()
+    };
+    if let Err(error) = persist_sprint_plan(app, &plan_to_persist) {
+        tracing::warn!(
+            "Failed to persist supervised sprint context state: {}",
+            error
+        );
+    }
+}
+
+fn record_sprint_provider_budget(
+    app: &tauri::AppHandle,
+    context: &crate::chapter_generation::BuiltChapterContext,
+    report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
+) {
+    let plan_to_persist = {
+        let state = app.state::<crate::AppState>();
+        let Ok(mut sprint) = state.current_sprint.lock() else {
+            return;
+        };
+        let Some(plan) = sprint
+            .as_mut()
+            .filter(|plan| sprint_matches_target(plan, &context.target.title))
+        else {
+            return;
+        };
+        record_budget_usage(plan, report.estimated_cost_micros);
+        if budget_ceiling_reached(plan) {
+            plan.status = "paused".to_string();
+            update_current_chapter_state(
+                plan,
+                None,
+                None,
+                None,
+                Some("budget ceiling reached after provider estimate"),
+            );
+        }
+        plan.clone()
+    };
+    if let Err(error) = persist_sprint_plan(app, &plan_to_persist) {
+        tracing::warn!(
+            "Failed to persist supervised sprint budget state: {}",
+            error
+        );
+    }
+}
+
+fn record_sprint_generation_completed(
+    app: &tauri::AppHandle,
+    saved: &crate::chapter_generation::SaveGeneratedChapterOutput,
+) {
+    let plan_to_persist = {
+        let state = app.state::<crate::AppState>();
+        let Ok(mut sprint) = state.current_sprint.lock() else {
+            return;
+        };
+        let Some(plan) = sprint
+            .as_mut()
+            .filter(|plan| sprint_matches_target(plan, &saved.chapter_title))
+        else {
+            return;
+        };
+        update_current_chapter_state(plan, Some("saved"), None, Some("ready"), None);
+        if !plan.require_approval_per_chapter && !budget_ceiling_reached(plan) {
+            let _ = advance_sprint(plan);
+        }
+        plan.clone()
+    };
+    if let Err(error) = persist_sprint_plan(app, &plan_to_persist) {
+        tracing::warn!("Failed to persist supervised sprint completion: {}", error);
+    }
+}
+
+fn record_sprint_generation_failed(
+    app: &tauri::AppHandle,
+    target_title: &str,
+    error_message: &str,
+) {
+    let plan_to_persist = {
+        let state = app.state::<crate::AppState>();
+        let Ok(mut sprint) = state.current_sprint.lock() else {
+            return;
+        };
+        let Some(plan) = sprint
+            .as_mut()
+            .filter(|plan| sprint_matches_target(plan, target_title))
+        else {
+            return;
+        };
+        update_current_chapter_state(
+            plan,
+            Some("blocked"),
+            None,
+            Some("blocked"),
+            Some(error_message),
+        );
+        plan.clone()
+    };
+    if let Err(error) = persist_sprint_plan(app, &plan_to_persist) {
+        tracing::warn!("Failed to persist supervised sprint failure: {}", error);
+    }
+}
+
 fn chapter_model_source_refs(
     context: &crate::chapter_generation::BuiltChapterContext,
     report: &crate::writer_agent::provider_budget::WriterProviderBudgetReport,
@@ -254,6 +526,7 @@ pub async fn batch_generate_chapter(
     summary: String,
     frontend_state: Option<FrontendChapterStateSnapshot>,
 ) -> Result<(), String> {
+    ensure_sprint_allows_generation(&app, Some(&chapter_title))?;
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
     let user_profile_entries = crate::collect_user_profile_entries(&app).unwrap_or_default();
@@ -288,6 +561,7 @@ pub async fn batch_generate_chapter(
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
         let budget_app = app_clone.clone();
+        let guard_app = app_clone.clone();
         let model_app = app_clone.clone();
 
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
@@ -296,12 +570,20 @@ pub async fn batch_generate_chapter(
                 settings,
                 payload,
                 user_profile_entries,
+                project_id: crate::storage::active_project_id(&app_clone)
+                    .unwrap_or_else(|_| "default".to_string()),
+                memory_path: crate::storage::active_project_data_dir(&app_clone)
+                    .map(|dir| dir.join(crate::storage::WRITER_MEMORY_DB_FILENAME))
+                    .unwrap_or_else(|_| {
+                        std::path::PathBuf::from(crate::storage::WRITER_MEMORY_DB_FILENAME)
+                    }),
             },
             |event| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
             move |context| {
                 let created_at_ms = crate::agent_runtime::now_ms();
+                record_sprint_context_built(&trace_app, context);
                 record_chapter_context_pack_built(&trace_app, context, created_at_ms);
                 let state = trace_app.state::<crate::AppState>();
                 let Ok(mut kernel) = state.writer_kernel.lock() else {
@@ -326,7 +608,12 @@ pub async fn batch_generate_chapter(
                 }
             },
             move |context, report| {
+                record_sprint_provider_budget(&budget_app, context, report);
                 record_chapter_provider_budget_report(&budget_app, context, report);
+            },
+            move |context, report| {
+                ensure_sprint_allows_provider_budget(&guard_app, &context.target.title, report)
+                    .map_err(sprint_blocked_error)
             },
             move |context, report| {
                 record_chapter_model_started(&model_app, context, report);
@@ -339,6 +626,7 @@ pub async fn batch_generate_chapter(
                 saved,
                 generated_content,
             } => {
+                record_sprint_generation_completed(&app_clone, &saved);
                 crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
                 let embed_app = app_clone.clone();
                 let embed_title = title_clone.clone();
@@ -355,6 +643,11 @@ pub async fn batch_generate_chapter(
                 );
             }
             PipelineTerminal::Conflict(conflict) => {
+                record_sprint_generation_failed(
+                    &app_clone,
+                    &title_clone,
+                    &format!("save conflict: {}", conflict.reason),
+                );
                 let bundle = crate::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
                     crate::writer_agent::task_receipt::WriterFailureCategory::SaveFailed,
                     "SAVE_CONFLICT",
@@ -384,6 +677,7 @@ pub async fn batch_generate_chapter(
                 );
             }
             PipelineTerminal::Failed(error) => {
+                record_sprint_generation_failed(&app_clone, &title_clone, &error.message);
                 let bundle = crate::chapter_generation::failure_bundle_from_chapter_error(
                     &trace_request_id,
                     &error,
@@ -410,6 +704,7 @@ pub async fn generate_chapter_autonomous(
     app: tauri::AppHandle,
     payload: GenerateChapterAutonomousPayload,
 ) -> Result<ChapterGenerationStart, String> {
+    ensure_sprint_allows_generation(&app, payload.target_chapter_title.as_deref())?;
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
     let user_profile_entries = crate::collect_user_profile_entries(&app).unwrap_or_default();
@@ -423,11 +718,13 @@ pub async fn generate_chapter_autonomous(
     };
     let app_clone = app.clone();
     let trace_request_id = request_id.clone();
+    let requested_target_title = payload.target_chapter_title.clone();
 
     tokio::spawn(async move {
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
         let budget_app = app_clone.clone();
+        let guard_app = app_clone.clone();
         let model_app = app_clone.clone();
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
             crate::chapter_generation::ChapterGenerationConfig {
@@ -435,12 +732,20 @@ pub async fn generate_chapter_autonomous(
                 settings,
                 payload,
                 user_profile_entries,
+                project_id: crate::storage::active_project_id(&app_clone)
+                    .unwrap_or_else(|_| "default".to_string()),
+                memory_path: crate::storage::active_project_data_dir(&app_clone)
+                    .map(|dir| dir.join(crate::storage::WRITER_MEMORY_DB_FILENAME))
+                    .unwrap_or_else(|_| {
+                        std::path::PathBuf::from(crate::storage::WRITER_MEMORY_DB_FILENAME)
+                    }),
             },
             |event: ChapterGenerationEvent| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
             move |context| {
                 let created_at_ms = crate::agent_runtime::now_ms();
+                record_sprint_context_built(&trace_app, context);
                 record_chapter_context_pack_built(&trace_app, context, created_at_ms);
                 let state = trace_app.state::<crate::AppState>();
                 let Ok(mut kernel) = state.writer_kernel.lock() else {
@@ -465,7 +770,12 @@ pub async fn generate_chapter_autonomous(
                 }
             },
             move |context, report| {
+                record_sprint_provider_budget(&budget_app, context, report);
                 record_chapter_provider_budget_report(&budget_app, context, report);
+            },
+            move |context, report| {
+                ensure_sprint_allows_provider_budget(&guard_app, &context.target.title, report)
+                    .map_err(sprint_blocked_error)
             },
             move |context, report| {
                 record_chapter_model_started(&model_app, context, report);
@@ -478,6 +788,7 @@ pub async fn generate_chapter_autonomous(
                 saved,
                 generated_content,
             } => {
+                record_sprint_generation_completed(&app_clone, &saved);
                 crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
                 let embed_app = app_clone.clone();
                 tokio::spawn(async move {
@@ -486,6 +797,13 @@ pub async fn generate_chapter_autonomous(
                 });
             }
             PipelineTerminal::Conflict(conflict) => {
+                if let Some(target_title) = requested_target_title.as_deref() {
+                    record_sprint_generation_failed(
+                        &app_clone,
+                        target_title,
+                        &format!("save conflict: {}", conflict.reason),
+                    );
+                }
                 let bundle = crate::writer_agent::task_receipt::WriterFailureEvidenceBundle::new(
                     crate::writer_agent::task_receipt::WriterFailureCategory::SaveFailed,
                     "SAVE_CONFLICT",
@@ -507,6 +825,9 @@ pub async fn generate_chapter_autonomous(
                 record_writer_failure_bundle(&app_clone, &bundle);
             }
             PipelineTerminal::Failed(error) => {
+                if let Some(target_title) = requested_target_title.as_deref() {
+                    record_sprint_generation_failed(&app_clone, target_title, &error.message);
+                }
                 let bundle = crate::chapter_generation::failure_bundle_from_chapter_error(
                     &trace_request_id,
                     &error,
@@ -733,6 +1054,7 @@ pub fn start_supervised_sprint(
             .max(1),
         payload.budget_ceiling_micros,
     );
+    persist_sprint_plan(&app, &plan)?;
     let state = app.state::<crate::AppState>();
     let mut sprint = state
         .current_sprint
@@ -767,53 +1089,66 @@ pub fn get_supervised_sprint_progress(
 }
 
 #[tauri::command]
-pub fn pause_supervised_sprint(
-    app: tauri::AppHandle,
-) -> Result<Option<SprintProgress>, String> {
-    let state = app.state::<crate::AppState>();
-    let mut sprint = state
-        .current_sprint
-        .lock()
-        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
-    let Some(plan) = sprint.as_mut() else {
+pub fn pause_supervised_sprint(app: tauri::AppHandle) -> Result<Option<SprintProgress>, String> {
+    let output = {
+        let state = app.state::<crate::AppState>();
+        let mut sprint = state
+            .current_sprint
+            .lock()
+            .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+        let Some(plan) = sprint.as_mut() else {
+            return Ok(None);
+        };
+        pause_sprint(plan);
+        Some((sprint_progress(plan), plan.clone()))
+    };
+    let Some((progress, plan)) = output else {
         return Ok(None);
     };
-    pause_sprint(plan);
-    Ok(Some(sprint_progress(plan)))
+    persist_sprint_plan(&app, &plan)?;
+    Ok(Some(progress))
 }
 
 #[tauri::command]
-pub fn resume_supervised_sprint(
-    app: tauri::AppHandle,
-) -> Result<Option<SprintProgress>, String> {
-    let state = app.state::<crate::AppState>();
-    let mut sprint = state
-        .current_sprint
-        .lock()
-        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
-    let Some(plan) = sprint.as_mut() else {
+pub fn resume_supervised_sprint(app: tauri::AppHandle) -> Result<Option<SprintProgress>, String> {
+    let output = {
+        let state = app.state::<crate::AppState>();
+        let mut sprint = state
+            .current_sprint
+            .lock()
+            .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+        let Some(plan) = sprint.as_mut() else {
+            return Ok(None);
+        };
+        let _ = resume_sprint(plan);
+        Some((sprint_progress(plan), plan.clone()))
+    };
+    let Some((progress, plan)) = output else {
         return Ok(None);
     };
-    if !resume_sprint(plan) {
-        return Ok(Some(sprint_progress(plan)));
-    }
-    Ok(Some(sprint_progress(plan)))
+    persist_sprint_plan(&app, &plan)?;
+    Ok(Some(progress))
 }
 
 #[tauri::command]
-pub fn cancel_supervised_sprint(
-    app: tauri::AppHandle,
-) -> Result<Option<SprintProgress>, String> {
-    let state = app.state::<crate::AppState>();
-    let mut sprint = state
-        .current_sprint
-        .lock()
-        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
-    let Some(plan) = sprint.as_mut() else {
+pub fn cancel_supervised_sprint(app: tauri::AppHandle) -> Result<Option<SprintProgress>, String> {
+    let output = {
+        let state = app.state::<crate::AppState>();
+        let mut sprint = state
+            .current_sprint
+            .lock()
+            .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+        let Some(plan) = sprint.as_mut() else {
+            return Ok(None);
+        };
+        cancel_sprint(plan);
+        Some((sprint_progress(plan), plan.clone()))
+    };
+    let Some((progress, plan)) = output else {
         return Ok(None);
     };
-    cancel_sprint(plan);
-    Ok(Some(sprint_progress(plan)))
+    persist_sprint_plan(&app, &plan)?;
+    Ok(Some(progress))
 }
 
 #[tauri::command]
@@ -821,15 +1156,24 @@ pub fn checkpoint_supervised_sprint(
     app: tauri::AppHandle,
     source: String,
 ) -> Result<Option<SprintCheckpoint>, String> {
-    let state = app.state::<crate::AppState>();
-    let mut sprint = state
-        .current_sprint
-        .lock()
-        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
-    let Some(plan) = sprint.as_mut() else {
+    let output = {
+        let state = app.state::<crate::AppState>();
+        let mut sprint = state
+            .current_sprint
+            .lock()
+            .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+        let Some(plan) = sprint.as_mut() else {
+            return Ok(None);
+        };
+        let checkpoint = checkpoint_sprint(plan, &source);
+        Some((checkpoint, plan.clone()))
+    };
+    let Some((checkpoint, plan)) = output else {
         return Ok(None);
     };
-    Ok(Some(checkpoint_sprint(plan, &source)))
+    persist_sprint_checkpoint(&app, &checkpoint)?;
+    persist_sprint_plan(&app, &plan)?;
+    Ok(Some(checkpoint))
 }
 
 #[tauri::command]
@@ -837,14 +1181,111 @@ pub fn record_supervised_sprint_budget_usage(
     app: tauri::AppHandle,
     spent_micros: u64,
 ) -> Result<Option<SprintProgress>, String> {
-    let state = app.state::<crate::AppState>();
-    let mut sprint = state
-        .current_sprint
-        .lock()
-        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
-    let Some(plan) = sprint.as_mut() else {
+    let output = {
+        let state = app.state::<crate::AppState>();
+        let mut sprint = state
+            .current_sprint
+            .lock()
+            .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+        let Some(plan) = sprint.as_mut() else {
+            return Ok(None);
+        };
+        record_budget_usage(plan, spent_micros);
+        if budget_ceiling_reached(plan) {
+            plan.status = "paused".to_string();
+            update_current_chapter_state(plan, None, None, None, Some("budget ceiling reached"));
+        }
+        Some((sprint_progress(plan), plan.clone()))
+    };
+    let Some((progress, plan)) = output else {
         return Ok(None);
     };
-    record_budget_usage(plan, spent_micros);
-    Ok(Some(sprint_progress(plan)))
+    persist_sprint_plan(&app, &plan)?;
+    Ok(Some(progress))
+}
+
+#[tauri::command]
+pub fn repair_chapter_state(
+    app: tauri::AppHandle,
+    chapter_title: String,
+) -> Result<RepairChapterStateResult, String> {
+    let project_id = crate::storage::active_project_id(&app)?;
+    let content = crate::storage::load_chapter(&app, chapter_title.clone())?;
+    let revision = crate::storage::chapter_revision(&app, &chapter_title)?;
+    let memory_path = crate::storage::active_project_data_dir(&app)?
+        .join(crate::storage::WRITER_MEMORY_DB_FILENAME);
+    let memory =
+        crate::writer_agent::memory::WriterMemory::open(&memory_path).map_err(|e| e.to_string())?;
+    let context = crate::chapter_generation::build_chapter_context(
+        &app,
+        crate::chapter_generation::BuildChapterContextInput {
+            request_id: crate::chapter_generation::make_request_id("repair-state"),
+            target_chapter_title: Some(chapter_title.clone()),
+            target_chapter_number: None,
+            user_instruction: format!(
+                "Repair chapter settlement state for '{}' without rewriting the chapter.",
+                chapter_title
+            ),
+            budget: crate::chapter_generation::ChapterContextBudget::default(),
+            chapter_contract: crate::chapter_generation::ChapterContract::default(),
+            chapter_summary_override: None,
+            user_profile_entries: crate::collect_user_profile_entries(&app).unwrap_or_default(),
+        },
+    )
+    .map_err(|error| error.message.clone())?;
+    let saved = crate::chapter_generation::SaveGeneratedChapterOutput {
+        chapter_title: chapter_title.clone(),
+        new_revision: revision.clone(),
+        saved_mode: "repaired_state".to_string(),
+        output_chars: content.chars().count(),
+    };
+    let delta = crate::chapter_generation::build_basic_chapter_settlement_delta(
+        &project_id,
+        &chapter_title,
+        &revision,
+        &content,
+        crate::agent_runtime::now_ms(),
+        &memory,
+        Vec::new(),
+    );
+    let settlement_apply =
+        crate::chapter_generation::apply_chapter_settlement_delta(&memory, &project_id, &delta)?;
+    let telemetry = crate::chapter_generation::ChapterLengthTelemetry {
+        target_chars: context.chapter_contract.target_chars,
+        min_chars: context.chapter_contract.min_chars,
+        max_chars: context.chapter_contract.max_chars,
+        save_hard_floor_chars: context.chapter_contract.save_hard_floor_chars,
+        save_hard_ceiling_chars: context.chapter_contract.save_hard_ceiling_chars,
+        draft_chars: None,
+        final_chars: Some(saved.output_chars),
+        continuation_applied: false,
+        compress_applied: false,
+        hard_compress_applied: false,
+        warning: None,
+    };
+    let artifacts = crate::chapter_generation::persist_chapter_runtime_artifacts(
+        &app,
+        &context.request_id,
+        &context,
+        &delta,
+        &telemetry,
+    )?;
+    crate::audit_project_file_write(
+        &app,
+        &chapter_title,
+        &format!("Repair chapter state: {}", chapter_title),
+        "repair_chapter_state",
+        &format!(
+            "Rebuilt settlement/runtime artifacts for '{}' at revision {} without rewriting chapter text.",
+            chapter_title, revision
+        ),
+        &artifacts.artifact_refs,
+    );
+    Ok(RepairChapterStateResult {
+        chapter_title,
+        revision,
+        settlement_delta: delta,
+        settlement_apply,
+        artifact_refs: artifacts.artifact_refs,
+    })
 }

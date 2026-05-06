@@ -54,6 +54,7 @@ export const Commands = {
   readProjectDir: "read_project_dir",
   recordImplicitGhostRejection: "record_implicit_ghost_rejection",
   recordSupervisedSprintBudgetUsage: "record_supervised_sprint_budget_usage",
+  repairChapterState: "repair_chapter_state",
   reportEditorState: "report_editor_state",
   reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
@@ -528,6 +529,7 @@ export interface GenerateChapterAutonomousPayload {
   frontendState?: FrontendChapterStateSnapshot;
   saveMode?: "create_if_missing" | "replace_if_clean" | "save_as_draft";
   chapterSummaryOverride?: string;
+  chapterContract?: ChapterContract;
   providerBudgetApproval?: WriterProviderBudgetApproval;
 }
 
@@ -675,6 +677,108 @@ export interface ChapterContextSource {
   score?: number;
 }
 
+export interface ChapterIntentArtifact {
+  chapterNumber?: number;
+  chapterTitle?: string;
+  goal: string;
+  mustKeep: string[];
+  mustAvoid: string[];
+  styleEmphasis: string[];
+}
+
+export interface ChapterSelectedEvidenceArtifact {
+  source: string;
+  reason: string;
+  excerpt: string;
+}
+
+export interface ChapterRuleStackArtifact {
+  hard: string[];
+  soft: string[];
+  diagnostic: string[];
+}
+
+export interface ChapterTraceArtifact {
+  chapterNumber?: number;
+  plannerInputs: string[];
+  selectedEvidenceCount: number;
+  activeOverrideCount: number;
+}
+
+export interface ChapterSettlementDelta {
+  chapterTitle: string;
+  chapterRevision: string;
+  summary: string;
+  chapterResult: {
+    summary: string;
+    stateChanges: string[];
+    characterProgress: string[];
+    newConflicts: string[];
+    newClues: string[];
+    promiseUpdates: string[];
+    canonUpdates: string[];
+  };
+  promiseUpdates: Array<{
+    action: "introduced" | "advanced" | "resolved" | "deferred" | "abandoned";
+    promiseId?: number;
+    kind: string;
+    title: string;
+    description: string;
+    chapter: string;
+    sourceRef: string;
+    expectedPayoff: string;
+    priority: number;
+    relatedEntities: string[];
+    core: boolean;
+    promoted: boolean;
+    blockedReason: string;
+    evidence: string;
+  }>;
+  arcUpdates: Array<{
+    scope: string;
+    value: string;
+    reason: string;
+  }>;
+  bookStateUpdates: Array<{
+    bucket: "long_term_constraint" | "mega_promise" | "irreversible_change";
+    value: string;
+    sourceRef: string;
+    reason: string;
+  }>;
+  chapterFactDelta: string[];
+  promiseDelta: string[];
+  arcDelta: string[];
+  bookStateDelta: string[];
+  continuityIssues: string[];
+  repairable: boolean;
+}
+
+export interface ChapterSettlementApplyResult {
+  applied: boolean;
+  chapterResultSnapshotId?: number;
+  promiseCreated: number;
+  promiseAdvanced: number;
+  promiseResolved: number;
+  promiseDeferred: number;
+  promiseAbandoned: number;
+  bookStateUpdated: boolean;
+  warnings: string[];
+}
+
+export interface ChapterLengthTelemetry {
+  targetChars: number;
+  minChars: number;
+  maxChars: number;
+  saveHardFloorChars: number;
+  saveHardCeilingChars: number;
+  draftChars?: number;
+  finalChars?: number;
+  continuationApplied: boolean;
+  compressApplied: boolean;
+  hardCompressApplied: boolean;
+  warning?: string;
+}
+
 export interface ChapterContextBudgetReport {
   maxChars: number;
   includedChars: number;
@@ -736,6 +840,14 @@ export interface ChapterGenerationEvent {
   targetChapterTitle?: string;
   sources?: ChapterContextSource[];
   budget?: ChapterContextBudgetReport;
+  intentArtifact?: ChapterIntentArtifact;
+  selectedEvidence?: ChapterSelectedEvidenceArtifact[];
+  ruleStack?: ChapterRuleStackArtifact;
+  traceArtifact?: ChapterTraceArtifact;
+  settlementDelta?: ChapterSettlementDelta;
+  settlementApply?: ChapterSettlementApplyResult;
+  lengthTelemetry?: ChapterLengthTelemetry;
+  artifactRefs?: string[];
   saved?: SavedGeneratedChapter;
   chapterContract?: ChapterContract;
   outputChars?: number;
@@ -893,7 +1005,7 @@ export interface StoryDebtEntry {
   chapterTitle?: string;
   category: "story_contract" | "chapter_mission" | "canon_risk" | "timeline_risk" | "promise" | "pacing" | "memory" | "question";
   severity: "info" | "warning" | "error";
-  status: "open" | "snoozed" | "stale";
+  status: "open" | "snoozed" | "stale" | "blocked" | "promoted" | "core";
   title: string;
   message: string;
   evidence: EvidenceRef[];
@@ -1046,6 +1158,9 @@ export interface PlotPromiseSummary {
   expectedPayoff: string;
   priority: number;
   risk: string;
+  blockedReason: string;
+  promoted: boolean;
+  core: boolean;
 }
 
 export interface CreativeDecisionSummary {

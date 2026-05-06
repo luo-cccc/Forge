@@ -174,6 +174,53 @@ impl WriterMemory {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn upsert_chapter_result(&self, result: &ChapterResultSummary) -> rusqlite::Result<i64> {
+        if let Some(existing_id) = self
+            .conn
+            .query_row(
+                "SELECT id FROM chapter_result_snapshots
+                 WHERE project_id=?1 AND chapter_title=?2 AND chapter_revision=?3
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1",
+                rusqlite::params![
+                    result.project_id,
+                    result.chapter_title,
+                    result.chapter_revision
+                ],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            self.conn.execute(
+                "UPDATE chapter_result_snapshots
+                 SET summary=?1,
+                     state_changes_json=?2,
+                     character_progress_json=?3,
+                     new_conflicts_json=?4,
+                     new_clues_json=?5,
+                     promise_updates_json=?6,
+                     canon_updates_json=?7,
+                     source_ref=?8,
+                     created_at=?9
+                 WHERE id=?10",
+                rusqlite::params![
+                    result.summary,
+                    string_vec_json(&result.state_changes),
+                    string_vec_json(&result.character_progress),
+                    string_vec_json(&result.new_conflicts),
+                    string_vec_json(&result.new_clues),
+                    string_vec_json(&result.promise_updates),
+                    string_vec_json(&result.canon_updates),
+                    result.source_ref,
+                    result.created_at as i64,
+                    existing_id,
+                ],
+            )?;
+            return Ok(existing_id);
+        }
+        self.record_chapter_result(result)
+    }
+
     pub fn list_recent_chapter_results(
         &self,
         project_id: &str,

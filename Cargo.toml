@@ -8,3 +8,12 @@ resolver = "2"
 
 [workspace.lints.clippy]
 all = "deny"
+
+[profile.dev.package.agent-evals]
+opt-level = 2
+
+[profile.dev.package.agent-harness-core]
+opt-level = 2
+
+[profile.dev.package.agent-writer]
+opt-level = 2

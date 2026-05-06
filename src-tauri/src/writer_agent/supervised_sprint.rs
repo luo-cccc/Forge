@@ -70,7 +70,13 @@ pub fn create_sprint_plan(
     chapter_titles: &[String],
     require_approval: bool,
 ) -> SupervisedSprintPlan {
-    create_sprint_plan_with_limits(sprint_id, chapter_titles, require_approval, chapter_titles.len(), None)
+    create_sprint_plan_with_limits(
+        sprint_id,
+        chapter_titles,
+        require_approval,
+        chapter_titles.len(),
+        None,
+    )
 }
 
 pub fn create_sprint_plan_with_limits(

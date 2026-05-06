@@ -11,17 +11,17 @@
   },
   "chapter_draft": {
     "temperature": 0.75,
-    "maxTokens": 640,
+    "maxTokens": 2400,
     "disableReasoning": true
   },
   "chapter_continuation": {
     "temperature": 0.72,
-    "maxTokens": 640,
+    "maxTokens": 900,
     "disableReasoning": true
   },
   "chapter_compress": {
     "temperature": 0.35,
-    "maxTokens": 512,
+    "maxTokens": 2400,
     "disableReasoning": true
   },
   "ghost_preview": {

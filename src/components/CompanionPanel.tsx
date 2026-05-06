@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import { Commands, Events } from "../protocol";
+import { Commands, Events, type SprintProgress } from "../protocol";
 import {
   canonUpdateOperation,
   debtPrimaryOperation,
@@ -113,8 +113,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
         invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
       ]);
-      invoke(Commands.getSupervisedSprintProgress)
-        .then((progress) => setSprintProgress(progress as typeof sprintProgress))
+      invoke<SprintProgress | null>(Commands.getSupervisedSprintProgress)
+        .then((progress) => setSprintProgress(progress))
         .catch(() => setSprintProgress(null));
       invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
         .then(setStorageDiagnostics)
@@ -158,7 +158,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch {
       // kernel not initialized yet
     }
-  }, [currentChapter, foundationDirty, setSprintProgress, sprintProgress]);
+  }, [currentChapter, foundationDirty, setSprintProgress]);
 
   useEffect(() => {
     const initial = setTimeout(refreshStatus, 0);
@@ -530,8 +530,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       ? pendingProposals.filter((proposal) => proposal.priority === "urgent").slice(0, 3)
       : pendingProposals;
   const riskOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const promiseStatusBoost = (promise: { core: boolean; promoted: boolean; blockedReason: string }) =>
+    promise.core ? -3 : promise.blockedReason ? -2 : promise.promoted ? -1 : 0;
   const rankedPromises = [...(ledger?.openPromises ?? [])].sort(
-    (a, b) => (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3),
+    (a, b) =>
+      promiseStatusBoost(a) - promiseStatusBoost(b)
+      || (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3)
+      || b.priority - a.priority,
   );
   const secondBrainItems = buildSecondBrainItems(
     ledger,
@@ -1295,7 +1300,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 },
               ];
               const riskBadge =
-                promise.risk === "high"
+                promise.core
+                  ? "bg-danger/25 text-danger"
+                  : promise.promoted
+                    ? "bg-accent-subtle text-accent"
+                    : promise.risk === "high"
                   ? "bg-danger/20 text-danger"
                   : promise.risk === "medium"
                     ? "bg-warning/20 text-warning"
@@ -1304,12 +1313,19 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 <div key={promise.id} className="rounded bg-bg-raised border border-border-subtle p-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-text-primary">{promise.title}</span>
-                    <span className={`text-[10px] px-1 rounded ${riskBadge}`}>{promise.risk}</span>
+                    <span className={`text-[10px] px-1 rounded ${riskBadge}`}>
+                      {promise.core ? "core" : promise.promoted ? "promoted" : promise.blockedReason ? "blocked" : promise.risk}
+                    </span>
                   </div>
                   <p className="mt-1 text-text-secondary">{promise.description}</p>
                   <div className="mt-2 text-[10px] text-text-muted">
                     {promise.introducedChapter || "unknown"} {"->"} {promise.expectedPayoff || "unset"}
                   </div>
+                  {promise.blockedReason && (
+                    <div className="mt-1 text-[10px] text-warning">
+                      Blocked: {promise.blockedReason}
+                    </div>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {operations.map((operation) => (
                       <button

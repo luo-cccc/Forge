@@ -44,6 +44,12 @@ pub struct PlotPromiseSummary {
     pub priority: i32,
     #[serde(default)]
     pub risk: String,
+    #[serde(default)]
+    pub blocked_reason: String,
+    #[serde(default)]
+    pub promoted: bool,
+    #[serde(default)]
+    pub core: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -701,3 +707,4 @@ include!("memory/reader_compensation_methods.in.rs");
 include!("memory/emotional_debt_lifecycle_methods.in.rs");
 include!("memory/emotional_debt_ledger_methods.in.rs");
 include!("memory/volume_arc_book_methods.in.rs");
+include!("memory/sprint_methods.in.rs");

@@ -121,6 +121,18 @@ fn plan_promise_payoff(
         }
     }
 
+    if promise.core {
+        score += 72;
+        reasons.push("core hook".to_string());
+    } else if promise.promoted {
+        score += 36;
+        reasons.push("promoted hook".to_string());
+    }
+    if !promise.blocked_reason.trim().is_empty() {
+        score += 28;
+        reasons.push(format!("blocked by {}", promise.blocked_reason));
+    }
+
     let mission_overlap = overlap_terms(&promise_text, &mission_text, 4);
     if !mission_overlap.is_empty() {
         score += 36 + mission_overlap.len() as i32 * 4;
@@ -176,6 +188,19 @@ fn choose_action(
 ) -> PromisePlannerAction {
     if mission_must_not_overlaps(mission, promise) {
         return PromisePlannerAction::AvoidDisturbing;
+    }
+    if promise.core {
+        return PromisePlannerAction::PayoffNow;
+    }
+    if !promise.blocked_reason.trim().is_empty() {
+        return PromisePlannerAction::PreparePayoff;
+    }
+    if promise.promoted
+        && current_number
+            .zip(payoff_number)
+            .is_some_and(|(current, payoff)| payoff - current <= 2)
+    {
+        return PromisePlannerAction::PreparePayoff;
     }
     if current_number
         .zip(payoff_number)
@@ -356,6 +381,9 @@ mod tests {
             expected_payoff: payoff.to_string(),
             priority,
             risk: "high".to_string(),
+            blocked_reason: String::new(),
+            promoted: false,
+            core: false,
         }
     }
 

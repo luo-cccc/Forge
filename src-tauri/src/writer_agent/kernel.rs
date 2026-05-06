@@ -257,6 +257,9 @@ pub enum StoryDebtStatus {
     Open,
     Snoozed,
     Stale,
+    Blocked,
+    Promoted,
+    Core,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

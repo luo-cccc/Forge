@@ -131,25 +131,39 @@ pub(crate) fn story_debt_from_open_promise(
     promise: &PlotPromiseSummary,
     active_chapter: &Option<String>,
 ) -> StoryDebtEntry {
+    let current_number = active_chapter
+        .as_deref()
+        .and_then(chapter_number_from_title)
+        .or_else(|| chapter_number_from_title(&promise.last_seen_chapter))
+        .unwrap_or_default();
+    let introduced_number =
+        chapter_number_from_title(&promise.introduced_chapter).unwrap_or_default();
+    let age = current_number.saturating_sub(introduced_number);
+    let stale = age >= 8;
+    let blocked = !promise.blocked_reason.trim().is_empty();
+    let status = if promise.core {
+        StoryDebtStatus::Core
+    } else if blocked {
+        StoryDebtStatus::Blocked
+    } else if promise.promoted {
+        StoryDebtStatus::Promoted
+    } else if stale {
+        StoryDebtStatus::Stale
+    } else {
+        StoryDebtStatus::Open
+    };
     StoryDebtEntry {
         id: format!("debt_promise_{}", promise.id),
         chapter_title: active_chapter.clone(),
         category: StoryDebtCategory::Promise,
-        severity: if promise.priority >= 5 {
+        severity: if promise.core || blocked || stale || promise.priority >= 5 {
             crate::writer_agent::kernel::StoryReviewSeverity::Warning
         } else {
             crate::writer_agent::kernel::StoryReviewSeverity::Info
         },
-        status: StoryDebtStatus::Open,
+        status,
         title: format!("Open promise: {}", promise.title),
-        message: if promise.expected_payoff.trim().is_empty() {
-            promise.description.clone()
-        } else {
-            format!(
-                "{} Expected payoff: {}",
-                promise.description, promise.expected_payoff
-            )
-        },
+        message: promise_debt_message(promise, age, stale, blocked),
         evidence: vec![EvidenceRef {
             source: EvidenceSource::PromiseLedger,
             reference: promise.title.clone(),
@@ -158,6 +172,18 @@ pub(crate) fn story_debt_from_open_promise(
         related_review_ids: Vec::new(),
         operations: story_debt_promise_operations(promise, active_chapter),
         created_at: 0,
+    }
+}
+
+fn chapter_number_from_title(chapter: &str) -> Option<i64> {
+    let digits = chapter
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse::<i64>().ok()
     }
 }
 
@@ -257,6 +283,15 @@ pub(crate) fn promise_debt_evidence_snippet(promise: &PlotPromiseSummary) -> Str
     if !promise.last_seen_chapter.trim().is_empty() {
         parts.push(format!("last seen: {}", promise.last_seen_chapter));
     }
+    if promise.promoted {
+        parts.push("status: promoted".to_string());
+    }
+    if promise.core {
+        parts.push("status: core".to_string());
+    }
+    if !promise.blocked_reason.trim().is_empty() {
+        parts.push(format!("blocked: {}", promise.blocked_reason));
+    }
     parts
         .into_iter()
         .filter(|part| !part.trim().is_empty())
@@ -278,10 +313,41 @@ pub(crate) fn chapter_from_operations(operations: &[WriterOperation]) -> Option<
 
 pub(crate) fn story_debt_status_weight(status: &StoryDebtStatus) -> i32 {
     match status {
+        StoryDebtStatus::Core => 5,
+        StoryDebtStatus::Blocked => 4,
+        StoryDebtStatus::Promoted => 3,
         StoryDebtStatus::Open => 2,
         StoryDebtStatus::Snoozed => 1,
         StoryDebtStatus::Stale => 0,
     }
+}
+
+fn promise_debt_message(
+    promise: &PlotPromiseSummary,
+    age: i64,
+    stale: bool,
+    blocked: bool,
+) -> String {
+    let mut parts = vec![promise.description.clone()];
+    if !promise.expected_payoff.trim().is_empty() {
+        parts.push(format!("Expected payoff: {}", promise.expected_payoff));
+    }
+    if promise.core {
+        parts.push("This is marked as a core hook and cannot keep drifting.".to_string());
+    } else if promise.promoted {
+        parts.push("This hook has been promoted and should enter near-term planning.".to_string());
+    }
+    if blocked {
+        parts.push(format!("Blocked by: {}", promise.blocked_reason));
+    }
+    if stale {
+        parts.push(format!("Stale for {} chapters.", age));
+    }
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(crate) fn queue_status_weight(
