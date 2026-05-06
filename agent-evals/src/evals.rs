@@ -65,6 +65,7 @@ pub use belief_conflict::*;
 pub use canon::*;
 pub use chapter_contract::*;
 pub use chapter_settlement::*;
+pub use settlement_replay::*;
 pub use chronology_preservation::*;
 pub use context::*;
 pub use e2e_scenarios::*;
