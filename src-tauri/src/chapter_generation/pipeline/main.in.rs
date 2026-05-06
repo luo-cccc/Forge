@@ -402,7 +402,7 @@ pub async fn run_chapter_generation_pipeline(
         selected_evidence: Some(context.selected_evidence.clone()),
         rule_stack: Some(context.rule_stack.clone()),
         trace_artifact: Some(context.trace_artifact.clone()),
-        settlement_delta: Some(settlement_delta),
+        settlement_delta: Some(settlement_delta.clone()),
         settlement_apply,
         length_telemetry: Some(length_telemetry),
         artifact_refs,
@@ -417,6 +417,7 @@ pub async fn run_chapter_generation_pipeline(
     PipelineTerminal::Completed {
         saved,
         generated_content: draft.content,
+        settlement_delta,
     }
 }
 

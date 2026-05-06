@@ -672,6 +672,7 @@ pub enum PipelineTerminal {
     Completed {
         saved: SaveGeneratedChapterOutput,
         generated_content: String,
+        settlement_delta: ChapterSettlementDelta,
     },
     Conflict(SaveConflict),
     Failed(ChapterGenerationError),

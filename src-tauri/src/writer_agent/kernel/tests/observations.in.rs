@@ -241,6 +241,44 @@ fn save_observation_uses_full_saved_text_not_tail_slice() {
 }
 
 #[test]
+fn authoritative_save_result_can_override_local_projection() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+    let mut obs = observation("章节尾部只有环境描写，没有明确交代玉佩。");
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+    obs.chapter_title = Some("第一章".to_string());
+    obs.chapter_revision = Some("rev-auth".to_string());
+    obs.prefix = obs.paragraph.clone();
+    let authoritative = ChapterResultSummary {
+        id: 0,
+        project_id: "default".to_string(),
+        chapter_title: "第一章".to_string(),
+        chapter_revision: "rev-auth".to_string(),
+        summary: "林墨已经归还玉佩。".to_string(),
+        state_changes: vec!["林墨归还玉佩。".to_string()],
+        character_progress: vec![],
+        new_conflicts: vec![],
+        new_clues: vec!["玉佩".to_string()],
+        promise_updates: vec!["玉佩: 已归还".to_string()],
+        canon_updates: vec![],
+        source_ref: "chapter_settlement:第一章:rev-auth".to_string(),
+        created_at: now_ms(),
+    };
+
+    kernel.observe_save_result(obs, authoritative).unwrap();
+
+    let result = kernel
+        .ledger_snapshot()
+        .recent_chapter_results
+        .into_iter()
+        .find(|item| item.chapter_revision == "rev-auth")
+        .unwrap();
+    assert_eq!(result.summary, "林墨已经归还玉佩。");
+    assert!(result.promise_updates.iter().any(|line| line.contains("已归还")));
+}
+
+#[test]
 fn invalid_task_packet_is_rejected_before_trace() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);

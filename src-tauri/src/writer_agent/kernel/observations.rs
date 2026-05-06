@@ -5,6 +5,22 @@ impl WriterAgentKernel {
         &mut self,
         observation: WriterObservation,
     ) -> Result<Vec<AgentProposal>, String> {
+        self.observe_with_precomputed_save_result(observation, None)
+    }
+
+    pub fn observe_save_result(
+        &mut self,
+        observation: WriterObservation,
+        result: ChapterResultSummary,
+    ) -> Result<Vec<AgentProposal>, String> {
+        self.observe_with_precomputed_save_result(observation, Some(result))
+    }
+
+    fn observe_with_precomputed_save_result(
+        &mut self,
+        observation: WriterObservation,
+        save_result: Option<ChapterResultSummary>,
+    ) -> Result<Vec<AgentProposal>, String> {
         self.observation_counter += 1;
         let mut proposals = Vec::new();
         let mut proposal_context_budgets = HashMap::new();
@@ -28,9 +44,10 @@ impl WriterAgentKernel {
         );
 
         if observation.reason == super::observation::ObservationReason::Save {
-            let result = chapter_result_from_observation(&observation, &self.memory);
+            let result = save_result
+                .unwrap_or_else(|| chapter_result_from_observation(&observation, &self.memory));
             if !result.is_empty() {
-                self.memory.record_chapter_result(&result).ok();
+                self.memory.upsert_chapter_result(&result).ok();
                 let calibration = self.calibrate_chapter_mission(
                     &observation,
                     &result,

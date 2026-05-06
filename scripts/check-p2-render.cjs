@@ -62,8 +62,6 @@ try {
 
   assertIncludes(html, "Writing Companion");
   assertIncludes(html, "What It Is Guarding");
-  assertIncludes(html, "Urgent Story Guards");
-  assertIncludes(html, "URGENT_PUBLIC_PREVIEW");
 
   const forbidden = [
     "Evidence Trace",

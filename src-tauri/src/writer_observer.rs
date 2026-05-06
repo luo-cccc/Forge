@@ -8,6 +8,16 @@ pub(crate) fn observe_chapter_save(
     content: &str,
     revision: &str,
 ) -> Result<(), String> {
+    observe_chapter_save_with_result(app, title, content, revision, None)
+}
+
+pub(crate) fn observe_chapter_save_with_result(
+    app: &tauri::AppHandle,
+    title: &str,
+    content: &str,
+    revision: &str,
+    precomputed_result: Option<writer_agent::memory::ChapterResultSummary>,
+) -> Result<(), String> {
     let project_id = storage::active_project_id(app)?;
     let text = html_to_plain_text(content);
     let paragraph = last_meaningful_paragraph(&text).unwrap_or_else(|| char_tail(&text, 400));
@@ -36,7 +46,11 @@ pub(crate) fn observe_chapter_save(
     let proposals = {
         let mut kernel = state.writer_kernel.lock().map_err(|e| e.to_string())?;
         refresh_kernel_canon_from_lorebook(app, &mut kernel);
-        kernel.observe(observation.clone())?
+        if let Some(result) = precomputed_result {
+            kernel.observe_save_result(observation.clone(), result)?
+        } else {
+            kernel.observe(observation.clone())?
+        }
     };
     for proposal in proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)
@@ -50,12 +64,46 @@ pub(crate) fn observe_generated_chapter_result(
     app: &tauri::AppHandle,
     saved: &chapter_generation::SaveGeneratedChapterOutput,
     generated_content: &str,
+    settlement_delta: Option<&chapter_generation::ChapterSettlementDelta>,
 ) {
-    if let Err(e) = observe_chapter_save(
+    let precomputed_result = settlement_delta.and_then(|delta| {
+        let project_id = storage::active_project_id(app).ok()?;
+        let memory_path = storage::active_project_data_dir(app)
+            .ok()?
+            .join(storage::WRITER_MEMORY_DB_FILENAME);
+        let memory = writer_agent::memory::WriterMemory::open(&memory_path).ok()?;
+        let created_at = memory
+            .latest_chapter_result(&project_id, &delta.chapter_title)
+            .ok()
+            .flatten()
+            .filter(|result| result.chapter_revision == delta.chapter_revision)
+            .map(|result| result.created_at)
+            .unwrap_or_else(agent_runtime::now_ms);
+        Some(writer_agent::memory::ChapterResultSummary {
+            id: 0,
+            project_id,
+            chapter_title: delta.chapter_title.clone(),
+            chapter_revision: delta.chapter_revision.clone(),
+            summary: delta.chapter_result.summary.clone(),
+            state_changes: delta.chapter_result.state_changes.clone(),
+            character_progress: delta.chapter_result.character_progress.clone(),
+            new_conflicts: delta.chapter_result.new_conflicts.clone(),
+            new_clues: delta.chapter_result.new_clues.clone(),
+            promise_updates: delta.chapter_result.promise_updates.clone(),
+            canon_updates: delta.chapter_result.canon_updates.clone(),
+            source_ref: format!(
+                "chapter_settlement:{}:{}",
+                delta.chapter_title, delta.chapter_revision
+            ),
+            created_at,
+        })
+    });
+    if let Err(e) = observe_chapter_save_with_result(
         app,
         &saved.chapter_title,
         generated_content,
         &saved.new_revision,
+        precomputed_result,
     ) {
         tracing::warn!(
             "WriterAgent generated-chapter result feedback failed for '{}': {}",

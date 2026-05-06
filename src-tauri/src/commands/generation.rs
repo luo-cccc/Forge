@@ -634,9 +634,15 @@ pub async fn batch_generate_chapter(
             PipelineTerminal::Completed {
                 saved,
                 generated_content,
+                settlement_delta,
             } => {
                 record_sprint_generation_completed(&app_clone, &saved);
-                crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
+                crate::observe_generated_chapter_result(
+                    &app_clone,
+                    &saved,
+                    &generated_content,
+                    Some(&settlement_delta),
+                );
                 let embed_app = app_clone.clone();
                 let embed_title = title_clone.clone();
                 tokio::spawn(async move {
@@ -784,9 +790,15 @@ pub async fn generate_chapter_autonomous(
             PipelineTerminal::Completed {
                 saved,
                 generated_content,
+                settlement_delta,
             } => {
                 record_sprint_generation_completed(&app_clone, &saved);
-                crate::observe_generated_chapter_result(&app_clone, &saved, &generated_content);
+                crate::observe_generated_chapter_result(
+                    &app_clone,
+                    &saved,
+                    &generated_content,
+                    Some(&settlement_delta),
+                );
                 let embed_app = app_clone.clone();
                 tokio::spawn(async move {
                     crate::auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content)

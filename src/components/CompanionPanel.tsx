@@ -687,7 +687,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 ))}
               </div>
             </div>
-            {mode !== "write" && (
+            {mode === "explore" && (
               <div className={`rounded border p-2 text-xs ${secondBrainToneClass(contextBudgetTone(trace))}`}>
                 {(() => {
                   const latestContextTrace = latestContextProposal(trace);
@@ -730,7 +730,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 })()}
               </div>
             )}
-            {mode !== "write" && (
+            {mode === "explore" && (
               <div className="text-xs text-text-muted">
                 <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
                 <div className="p-2 rounded bg-bg-raised border border-border-subtle">
@@ -754,7 +754,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 </div>
               </div>
             )}
-            {mode !== "write" && storageDiagnostics && (
+            {mode === "explore" && storageDiagnostics && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2 text-xs">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="font-medium text-text-primary">Project Storage</span>
@@ -816,12 +816,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   ))}
               </div>
             )}
-            {visibleProposals.length > 0 && (
+            {mode !== "write" && visibleProposals.length > 0 && (
               <div>
                 <div className="text-xs text-text-secondary font-medium mb-2">
-                  {mode === "write" ? "Urgent Story Guards" : "Pending Proposals"} ({visibleProposals.length})
+                  Pending Proposals ({visibleProposals.length})
                 </div>
-                {visibleProposals.slice(0, mode === "write" ? 3 : 5).map((p) => (
+                {visibleProposals.slice(0, 5).map((p) => (
                   <div key={p.id} className={`p-2 rounded border mb-1 text-xs ${
                     p.priority === "urgent" ? "border-danger/40 bg-danger/10" :
                     p.priority === "normal" ? "border-accent/30 bg-accent-subtle/20" :
@@ -843,10 +843,10 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       </div>
                     </div>
                     <p className="text-text-muted mb-2">{p.preview}</p>
-                    {mode !== "write" && p.rationale && (
+                    {p.rationale && (
                       <p className="text-text-secondary italic mb-1">{p.rationale}</p>
                     )}
-                    {mode !== "write" && p.evidence.length > 0 && (
+                    {p.evidence.length > 0 && (
                       <div className="mb-2 space-y-1">
                         {p.evidence.map((e, i) => (
                           <div key={i} className="p-1.5 rounded bg-bg-deep border border-border-subtle">
@@ -856,7 +856,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                         ))}
                       </div>
                     )}
-                    {mode !== "write" && primaryOperation(p) && (
+                    {primaryOperation(p) && (
                       <div className="mb-2 rounded bg-bg-deep border border-border-subtle p-1.5 text-[10px] text-text-muted">
                         {primaryOperation(p)?.kind}
                         {p.alternatives.length > 1 ? ` · ${p.alternatives.length} branches` : ""}
