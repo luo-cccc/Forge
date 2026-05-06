@@ -82,6 +82,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
   const agentMode = useAppStore((s) => s.agentMode);
   const isAgentThinking = useAppStore((s) => s.isAgentThinking);
+  const sprintProgress = useAppStore((s) => s.sprintProgress);
+  const setSprintProgress = useAppStore((s) => s.setSprintProgress);
 
   const [status, setStatus] = useState<WriterAgentStatus | null>(null);
   const [ledger, setLedger] = useState<WriterAgentLedgerSnapshot | null>(null);
@@ -111,6 +113,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
         invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
       ]);
+      invoke(Commands.getSupervisedSprintProgress)
+        .then((progress) => setSprintProgress(progress as typeof sprintProgress))
+        .catch(() => setSprintProgress(null));
       invoke<ProjectStorageDiagnostics>(Commands.getProjectStorageDiagnostics)
         .then(setStorageDiagnostics)
         .catch(() => setStorageDiagnostics(null));
@@ -153,7 +158,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     } catch {
       // kernel not initialized yet
     }
-  }, [currentChapter, foundationDirty]);
+  }, [currentChapter, foundationDirty, setSprintProgress, sprintProgress]);
 
   useEffect(() => {
     const initial = setTimeout(refreshStatus, 0);
@@ -629,6 +634,22 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {operationError && (
               <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
                 {operationError}
+              </div>
+            )}
+            {sprintProgress && (
+              <div className="rounded border border-accent/20 bg-accent-subtle/20 p-2 text-xs">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-medium text-text-secondary">Sprint</span>
+                  <span className="text-[10px] text-accent">{sprintProgress.status}</span>
+                </div>
+                <div className="text-text-primary">
+                  {sprintProgress.chaptersCompleted}/
+                  {sprintProgress.chaptersCompleted + sprintProgress.chaptersRemaining} chapters
+                </div>
+                <div className="mt-1 text-[10px] text-text-muted">
+                  checkpoints {sprintProgress.checkpointCount} · budget {sprintProgress.spentBudgetMicros}
+                  {sprintProgress.budgetCeilingMicros ? ` / ${sprintProgress.budgetCeilingMicros}` : ""}
+                </div>
               </div>
             )}
             <div className="space-y-2">

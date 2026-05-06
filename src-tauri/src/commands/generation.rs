@@ -7,6 +7,11 @@ use crate::chapter_generation::{
 use crate::llm_runtime;
 use crate::writer_agent::kernel::ModelStartedEventContext;
 use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
+use crate::writer_agent::supervised_sprint::{
+    cancel_sprint, checkpoint_sprint, create_sprint_plan_with_limits, pause_sprint,
+    record_budget_usage, resume_sprint, sprint_progress, SupervisedSprintPlan, SprintCheckpoint,
+    SprintProgress,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -65,6 +70,18 @@ struct BatchStatus {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChapterGenerationStart {
     request_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartSupervisedSprintPayload {
+    pub chapter_titles: Vec<String>,
+    #[serde(default)]
+    pub require_approval_per_chapter: bool,
+    #[serde(default)]
+    pub max_chapters_per_session: Option<usize>,
+    #[serde(default)]
+    pub budget_ceiling_micros: Option<u64>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -695,4 +712,139 @@ mod tests {
             "林墨停下脚步。"
         );
     }
+}
+
+#[tauri::command]
+pub fn start_supervised_sprint(
+    app: tauri::AppHandle,
+    payload: StartSupervisedSprintPayload,
+) -> Result<SupervisedSprintPlan, String> {
+    if payload.chapter_titles.is_empty() {
+        return Err("supervised sprint requires at least one chapter".to_string());
+    }
+    let sprint_id = crate::chapter_generation::make_request_id("sprint");
+    let plan = create_sprint_plan_with_limits(
+        &sprint_id,
+        &payload.chapter_titles,
+        payload.require_approval_per_chapter,
+        payload
+            .max_chapters_per_session
+            .unwrap_or(payload.chapter_titles.len())
+            .max(1),
+        payload.budget_ceiling_micros,
+    );
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    *sprint = Some(plan.clone());
+    Ok(plan)
+}
+
+#[tauri::command]
+pub fn get_supervised_sprint_plan(
+    app: tauri::AppHandle,
+) -> Result<Option<SupervisedSprintPlan>, String> {
+    let state = app.state::<crate::AppState>();
+    let sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    Ok(sprint.clone())
+}
+
+#[tauri::command]
+pub fn get_supervised_sprint_progress(
+    app: tauri::AppHandle,
+) -> Result<Option<SprintProgress>, String> {
+    let state = app.state::<crate::AppState>();
+    let sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    Ok(sprint.as_ref().map(sprint_progress))
+}
+
+#[tauri::command]
+pub fn pause_supervised_sprint(
+    app: tauri::AppHandle,
+) -> Result<Option<SprintProgress>, String> {
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint.as_mut() else {
+        return Ok(None);
+    };
+    pause_sprint(plan);
+    Ok(Some(sprint_progress(plan)))
+}
+
+#[tauri::command]
+pub fn resume_supervised_sprint(
+    app: tauri::AppHandle,
+) -> Result<Option<SprintProgress>, String> {
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint.as_mut() else {
+        return Ok(None);
+    };
+    if !resume_sprint(plan) {
+        return Ok(Some(sprint_progress(plan)));
+    }
+    Ok(Some(sprint_progress(plan)))
+}
+
+#[tauri::command]
+pub fn cancel_supervised_sprint(
+    app: tauri::AppHandle,
+) -> Result<Option<SprintProgress>, String> {
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint.as_mut() else {
+        return Ok(None);
+    };
+    cancel_sprint(plan);
+    Ok(Some(sprint_progress(plan)))
+}
+
+#[tauri::command]
+pub fn checkpoint_supervised_sprint(
+    app: tauri::AppHandle,
+    source: String,
+) -> Result<Option<SprintCheckpoint>, String> {
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint.as_mut() else {
+        return Ok(None);
+    };
+    Ok(Some(checkpoint_sprint(plan, &source)))
+}
+
+#[tauri::command]
+pub fn record_supervised_sprint_budget_usage(
+    app: tauri::AppHandle,
+    spent_micros: u64,
+) -> Result<Option<SprintProgress>, String> {
+    let state = app.state::<crate::AppState>();
+    let mut sprint = state
+        .current_sprint
+        .lock()
+        .map_err(|_| "Supervised sprint lock poisoned".to_string())?;
+    let Some(plan) = sprint.as_mut() else {
+        return Ok(None);
+    };
+    record_budget_usage(plan, spent_micros);
+    Ok(Some(sprint_progress(plan)))
 }

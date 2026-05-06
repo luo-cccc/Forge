@@ -67,7 +67,10 @@ use commands::diagnostics::{export_diagnostic_logs, export_writer_agent_trajecto
 use commands::editor::{abort_editor_prediction, report_editor_state, report_semantic_lint_state};
 use commands::generation::{
     analyze_chapter, analyze_pacing, ask_project_brain, batch_generate_chapter,
-    generate_chapter_autonomous, generate_parallel_drafts,
+    cancel_supervised_sprint, checkpoint_supervised_sprint, generate_chapter_autonomous,
+    generate_parallel_drafts, get_supervised_sprint_plan, get_supervised_sprint_progress,
+    pause_supervised_sprint, record_supervised_sprint_budget_usage, resume_supervised_sprint,
+    start_supervised_sprint,
 };
 use commands::graph::{
     compare_project_brain_source_revisions, cross_reference_brain_nodes,
@@ -181,6 +184,14 @@ pub fn run() {
             save_book_state,
             batch_generate_chapter,
             generate_chapter_autonomous,
+            start_supervised_sprint,
+            get_supervised_sprint_plan,
+            get_supervised_sprint_progress,
+            pause_supervised_sprint,
+            resume_supervised_sprint,
+            cancel_supervised_sprint,
+            checkpoint_supervised_sprint,
+            record_supervised_sprint_budget_usage,
             analyze_chapter,
             ask_project_brain,
             generate_parallel_drafts,

@@ -2,7 +2,7 @@ import { Suspense, lazy, useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import { Commands, Events, type ChapterGenerationEvent } from "../protocol";
+import { Commands, Events, type ChapterGenerationEvent, type SprintProgress, type VolumeSummary } from "../protocol";
 import type { Editor } from "@tiptap/core";
 
 const OutlinePanel = lazy(() => import("./OutlinePanel"));
@@ -33,6 +33,12 @@ function PanelFallback() {
 
 export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: ProjectTreeProps) {
   const currentChapter = useAppStore((s) => s.currentChapter);
+  const activeVolumeId = useAppStore((s) => s.activeVolumeId);
+  const setActiveVolumeId = useAppStore((s) => s.setActiveVolumeId);
+  const volumeList = useAppStore((s) => s.volumeList);
+  const setVolumeList = useAppStore((s) => s.setVolumeList);
+  const sprintProgress = useAppStore((s) => s.sprintProgress);
+  const setSprintProgress = useAppStore((s) => s.setSprintProgress);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [newTitle, setNewTitle] = useState("");
   const [tab, setTab] = useState<"chapters" | "outline" | "doctor" | "graph" | "storyboard" | "sandbox" | "settings">("chapters");
@@ -41,10 +47,22 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
     try {
       const result = await invoke<ChapterInfo[]>(Commands.readProjectDir);
       setChapters(result);
+      const volumes = await invoke<VolumeSummary[]>(Commands.listVolumes).catch(() => []);
+      setVolumeList(
+        volumes.map((volume) => ({
+          id: volume.id,
+          title: volume.title,
+          startChapter: volume.startChapter,
+          endChapter: volume.endChapter,
+          status: volume.status,
+        })),
+      );
+      const progress = await invoke<SprintProgress | null>(Commands.getSupervisedSprintProgress).catch(() => null);
+      setSprintProgress(progress);
     } catch (e) {
       console.error("Failed to read project dir:", e);
     }
-  }, []);
+  }, [setSprintProgress, setVolumeList]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -154,6 +172,17 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
           ⚙
         </button>
       </div>
+      {(activeVolumeId || sprintProgress) && (
+        <div className="px-3 py-2 border-b border-border-subtle bg-bg-deep text-[10px] text-text-muted space-y-1">
+          {activeVolumeId && <div>Volume filter: {activeVolumeId}</div>}
+          {sprintProgress && (
+            <div>
+              Sprint {sprintProgress.status} · {sprintProgress.chaptersCompleted}/
+              {sprintProgress.chaptersCompleted + sprintProgress.chaptersRemaining}
+            </div>
+          )}
+        </div>
+      )}
 
       {tab === "chapters" ? (
         <>
@@ -174,6 +203,23 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
             ))}
           </div>
           <div className="p-3 border-t border-border-subtle space-y-1.5">
+            <div className="flex gap-1">
+              <button
+                onClick={() => setActiveVolumeId(null)}
+                className={`px-2 py-1 rounded-sm text-[10px] border ${activeVolumeId === null ? "border-accent text-accent" : "border-border-subtle text-text-muted"}`}
+              >
+                All
+              </button>
+              {volumeList.slice(0, 4).map((volume) => (
+                <button
+                  key={volume.id}
+                  onClick={() => setActiveVolumeId(volume.id)}
+                  className={`px-2 py-1 rounded-sm text-[10px] border ${activeVolumeId === volume.id ? "border-accent text-accent" : "border-border-subtle text-text-muted"}`}
+                >
+                  {volume.title}
+                </button>
+              ))}
+            </div>
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}

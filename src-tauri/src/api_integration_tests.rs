@@ -454,6 +454,110 @@ async fn real_author_session_three_chapter_smoke() {
 }
 
 #[tokio::test]
+async fn real_author_session_thirty_chapter_gate() {
+    let Some(settings) = test_settings("real_author_session_thirty_chapter_gate") else {
+        return;
+    };
+
+    let anchors = ["寒影刀", "张三", "镜中墟", "霜铃塔", "旧债"];
+    let base_plans = [
+        "茶馆旧债被重新点燃，林墨必须逼张三开口。",
+        "账册露出新的缺页，张三继续隐瞒入口代价。",
+        "镜中墟倒影逼近封门真相，但还不能一次说穿。",
+        "北境宗门施压，张三被迫站到风险前面。",
+        "林墨必须在人和账册之间做选择，并承担后果。",
+    ];
+
+    let mut rolling_summary = String::new();
+    let mut drafts = Vec::new();
+    let mut carry_rates = Vec::new();
+    let mut anchor_hit_rates = Vec::new();
+
+    for index in 1..=30 {
+        let plan = base_plans[(index - 1) % base_plans.len()];
+        let context = [
+            "项目: 镜中墟".to_string(),
+            "Story Contract: 都市玄幻长篇。主角林墨追查寒影刀旧债，张三掌握镜中墟入口，霜铃塔账册牵出北境宗门。章节要持续制造情绪债务并逐步兑现，不能自动抹平旧伏笔。".to_string(),
+            format!("当前计划: 第{}章：{}", index, plan),
+            if rolling_summary.is_empty() {
+                "前文摘要: 无".to_string()
+            } else {
+                format!("前文摘要: {}", rolling_summary)
+            },
+            "硬约束锚点: 寒影刀、张三、镜中墟、霜铃塔、旧债。正文必须保留至少 3 个锚点，并让相关锚点通过行动、对话、后果或债务压力参与当前场景。".to_string(),
+            "要求: 写中文正文；保持连续性、关系压力和商业网文节奏；不要解释，不要 Markdown。".to_string(),
+        ]
+        .join("\n");
+
+        let draft = run_text_profile_smoke(
+            &settings,
+            "real_author_session_thirty_chapter_gate.chapter",
+            llm_runtime::LlmRequestProfile::ChapterDraft,
+            vec![
+                serde_json::json!({"role": "system", "content": "你是中文长篇小说作者。只输出正文。重视人物关系、伏笔、情绪债务、兑现节奏和章节钩子。不得静默丢失当前上下文中的命名锚点和未偿债务。"}),
+                serde_json::json!({"role": "user", "content": context}),
+            ],
+            90,
+        )
+        .await;
+
+        let hit_count = anchors
+            .iter()
+            .filter(|anchor| draft.contains(**anchor))
+            .count();
+        assert!(
+            hit_count >= 3,
+            "chapter {} dropped too many anchors: hit_count={} draft={}",
+            index,
+            hit_count,
+            draft
+        );
+
+        let carry = anchor_carry::score_anchor_carry(
+            &draft,
+            &anchors
+                .iter()
+                .map(|anchor| anchor.to_string())
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            carry.carry_rate >= 0.6,
+            "chapter {} anchor carry too weak: {:.2} draft={}",
+            index,
+            carry.carry_rate,
+            draft
+        );
+
+        drafts.push(draft.clone());
+        carry_rates.push(carry.carry_rate);
+        anchor_hit_rates.push(carry.mention_rate);
+        rolling_summary = preview_text(&draft, 220);
+    }
+
+    let avg_chars = drafts
+        .iter()
+        .map(|draft| draft.chars().count())
+        .sum::<usize>()
+        / drafts.len().max(1);
+    let min_carry = carry_rates
+        .iter()
+        .fold(1.0_f64, |min, rate| min.min(*rate));
+    let avg_hit = if anchor_hit_rates.is_empty() {
+        0.0
+    } else {
+        anchor_hit_rates.iter().sum::<f64>() / anchor_hit_rates.len() as f64
+    };
+
+    eprintln!(
+        "real_author_session_thirty_chapter_gate ok chapters={} avg_chars={} min_carry_rate={:.2} avg_anchor_hit={:.2}",
+        drafts.len(),
+        avg_chars,
+        min_carry,
+        avg_hit
+    );
+}
+
+#[tokio::test]
 async fn stream_chat_early_cancel() {
     let Some(settings) = test_settings("stream_chat_early_cancel") else {
         return;

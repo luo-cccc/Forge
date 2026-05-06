@@ -66,6 +66,8 @@ const classification = {
   get_writer_agent_pending_proposals: RISK.READ_ONLY,
   get_story_review_queue: RISK.READ_ONLY,
   get_story_debt_snapshot: RISK.READ_ONLY,
+  get_supervised_sprint_plan: RISK.READ_ONLY,
+  get_supervised_sprint_progress: RISK.READ_ONLY,
   get_reader_compensation_review_chain: RISK.READ_ONLY,
   get_writer_agent_trace: RISK.READ_ONLY,
   get_writer_agent_inspector_timeline: RISK.READ_ONLY,
@@ -103,6 +105,12 @@ const classification = {
   save_volume: RISK.MEMORY_WRITE,
   save_volume_snapshot: RISK.MEMORY_WRITE,
   save_book_state: RISK.MEMORY_WRITE,
+  start_supervised_sprint: RISK.MEMORY_WRITE,
+  pause_supervised_sprint: RISK.MEMORY_WRITE,
+  resume_supervised_sprint: RISK.MEMORY_WRITE,
+  cancel_supervised_sprint: RISK.MEMORY_WRITE,
+  checkpoint_supervised_sprint: RISK.MEMORY_WRITE,
+  record_supervised_sprint_budget_usage: RISK.MEMORY_WRITE,
 
   // Manuscript write
   create_chapter: RISK.MANUSCRIPT_WRITE,
@@ -178,6 +186,12 @@ const KERNEL_AUDIT_COMMANDS = [
   "apply_proposal_feedback",
   "record_implicit_ghost_rejection",
   "agent_observe",
+  "start_supervised_sprint",
+  "pause_supervised_sprint",
+  "resume_supervised_sprint",
+  "cancel_supervised_sprint",
+  "checkpoint_supervised_sprint",
+  "record_supervised_sprint_budget_usage",
 ];
 
 const issues = [];

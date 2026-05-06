@@ -16,6 +16,8 @@ pub(crate) struct AppState {
     pub(crate) editor_prediction: Mutex<Option<EditorPredictionTask>>,
     pub(crate) writer_kernel: Mutex<writer_agent::WriterAgentKernel>,
     pub(crate) manual_agent_history: Mutex<ManualAgentHistory>,
+    pub(crate) current_sprint:
+        Mutex<Option<writer_agent::supervised_sprint::SupervisedSprintPlan>>,
 }
 
 impl AppState {
@@ -28,6 +30,7 @@ impl AppState {
             editor_prediction: Mutex::new(None),
             writer_kernel: Mutex::new(writer_kernel),
             manual_agent_history: Mutex::new(ManualAgentHistory::default()),
+            current_sprint: Mutex::new(None),
         })
     }
 }

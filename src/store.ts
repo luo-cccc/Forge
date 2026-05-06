@@ -9,6 +9,7 @@ import type {
   PatchStatus,
   StoryMode,
   StoryboardMarker,
+  SprintProgress,
 } from "./protocol";
 
 interface OutlineNode {
@@ -34,6 +35,8 @@ interface AppState {
   setVolumeList: (
     volumes: Array<{ id: string; title: string; startChapter: number; endChapter: number; status: string }>,
   ) => void;
+  sprintProgress: SprintProgress | null;
+  setSprintProgress: (progress: SprintProgress | null) => void;
   isInlineRequest: boolean;
   setIsInlineRequest: (v: boolean) => void;
   actionEpoch: number;
@@ -95,6 +98,8 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveVolumeId: (volumeId) => set({ activeVolumeId: volumeId }),
   volumeList: [],
   setVolumeList: (volumes) => set({ volumeList: volumes }),
+  sprintProgress: null,
+  setSprintProgress: (progress) => set({ sprintProgress: progress }),
 
   isInlineRequest: false,
   setIsInlineRequest: (v) => set({ isInlineRequest: v }),

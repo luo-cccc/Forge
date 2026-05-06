@@ -11,6 +11,8 @@ export const Commands = {
   generateParallelDrafts: "generate_parallel_drafts",
   askProjectBrain: "ask_project_brain",
   batchGenerateChapter: "batch_generate_chapter",
+  cancelSupervisedSprint: "cancel_supervised_sprint",
+  checkpointSupervisedSprint: "checkpoint_supervised_sprint",
   checkApiKey: "check_api_key",
   createChapter: "create_chapter",
   deleteLoreEntry: "delete_lore_entry",
@@ -33,6 +35,8 @@ export const Commands = {
   getReaderCompensationReviewChain: "get_reader_compensation_review_chain",
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
+  getSupervisedSprintPlan: "get_supervised_sprint_plan",
+  getSupervisedSprintProgress: "get_supervised_sprint_progress",
   getAgentTools: "get_agent_tools",
   getEffectiveAgentToolInventory: "get_effective_agent_tool_inventory",
   getChapterRevision: "get_chapter_revision",
@@ -49,11 +53,13 @@ export const Commands = {
   listFileBackups: "list_file_backups",
   readProjectDir: "read_project_dir",
   recordImplicitGhostRejection: "record_implicit_ghost_rejection",
+  recordSupervisedSprintBudgetUsage: "record_supervised_sprint_budget_usage",
   reportEditorState: "report_editor_state",
   reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
   listVolumes: "list_volumes",
   renameChapterFile: "rename_chapter_file",
+  resumeSupervisedSprint: "resume_supervised_sprint",
   restoreFileBackup: "restore_file_backup",
   saveChapter: "save_chapter",
   saveLoreEntry: "save_lore_entry",
@@ -62,6 +68,8 @@ export const Commands = {
   saveVolume: "save_volume",
   saveVolumeSnapshot: "save_volume_snapshot",
   setApiKey: "set_api_key",
+  startSupervisedSprint: "start_supervised_sprint",
+  pauseSupervisedSprint: "pause_supervised_sprint",
 } as const;
 
 export const Events = {
@@ -132,6 +140,64 @@ export interface BookStateSummary {
   irreversibleChanges: string[];
   sourceRef: string;
   updatedAt: string;
+}
+
+export interface StartSupervisedSprintPayload {
+  chapterTitles: string[];
+  requireApprovalPerChapter?: boolean;
+  maxChaptersPerSession?: number;
+  budgetCeilingMicros?: number;
+}
+
+export interface SprintChapterTarget {
+  chapterTitle: string;
+  chapterNumber: number;
+  status: string;
+  receiptId?: string | null;
+  preflightReadiness?: string | null;
+  requiresAuthorReview: boolean;
+  lastError?: string | null;
+}
+
+export interface SupervisedSprintPlan {
+  sprintId: string;
+  chapters: SprintChapterTarget[];
+  totalChapters: number;
+  currentIndex: number;
+  status: string;
+  requireApprovalPerChapter: boolean;
+  maxChaptersPerSession: number;
+  spentBudgetMicros: number;
+  budgetCeilingMicros?: number | null;
+  checkpointCount: number;
+  lastCheckpointId?: string | null;
+}
+
+export interface SprintProgress {
+  sprintId: string;
+  status: string;
+  chaptersCompleted: number;
+  chaptersRemaining: number;
+  currentChapter?: string | null;
+  receiptsRecorded: number;
+  settlementsCompleted: number;
+  lastError?: string | null;
+  checkpointCount: number;
+  spentBudgetMicros: number;
+  budgetCeilingMicros?: number | null;
+}
+
+export interface SprintCheckpoint {
+  checkpointId: string;
+  sprintId: string;
+  status: string;
+  currentIndex: number;
+  currentChapter?: string | null;
+  receiptsRecorded: number;
+  settlementsCompleted: number;
+  spentBudgetMicros: number;
+  budgetCeilingMicros?: number | null;
+  source: string;
 }
 
 export interface ProjectFileRestored {

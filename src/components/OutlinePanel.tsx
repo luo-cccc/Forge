@@ -26,6 +26,8 @@ export default function OutlinePanel() {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
   const isEditorDirty = useAppStore((s) => s.isEditorDirty);
+  const activeVolumeId = useAppStore((s) => s.activeVolumeId);
+  const volumeList = useAppStore((s) => s.volumeList);
 
   const refresh = useCallback(async () => {
     try {
@@ -168,6 +170,16 @@ export default function OutlinePanel() {
     retired: "bg-bg-raised text-text-muted border border-border-subtle",
   };
 
+  const visibleNodes = nodes.filter((node) => {
+    if (!activeVolumeId) return true;
+    const volume = volumeList.find((item) => item.id === activeVolumeId);
+    if (!volume) return true;
+    const digits = node.chapter_title.replace(/\D+/g, "");
+    const number = digits ? Number(digits) : NaN;
+    if (!Number.isFinite(number)) return true;
+    return number >= volume.startChapter && number <= volume.endChapter;
+  });
+
   return (
     <div className="flex flex-col h-full relative">
       {toast && (
@@ -176,7 +188,7 @@ export default function OutlinePanel() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
-        {nodes.map((node) => {
+        {visibleNodes.map((node) => {
           const isGen = generating.has(node.chapter_title);
           return (
             <div

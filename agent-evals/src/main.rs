@@ -201,6 +201,9 @@ fn main() {
     results.push(run_supervised_sprint_stops_before_unapproved_save_eval());
     results.push(run_supervised_sprint_carries_forward_settlement_feedback_eval());
     results.push(run_supervised_sprint_records_receipts_per_chapter_eval());
+    results.push(run_supervised_sprint_resume_from_checkpoint_eval());
+    results.push(run_supervised_sprint_budget_ceiling_blocks_advance_eval());
+    results.push(run_supervised_sprint_recovery_preserves_receipts_eval());
     // 11.4C Reader Compensation Model evals
     results.push(run_reader_compensation_profile_extracts_lack_eval());
     results.push(run_reader_compensation_profile_requires_author_approval_eval());
