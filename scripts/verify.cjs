@@ -7,6 +7,7 @@ const steps = [
   ["npm", ["run", "check:p2"]],
   ["npm", ["run", "check:p2-render"]],
   ["npm", ["run", "check:audit"]],
+  ["npm", ["run", "check:save-path"]],
   ["npm", ["run", "check:architecture"]],
   ["npm", ["run", "check:baseline"]],
   [isWindows ? "cargo.exe" : "cargo", ["fmt", "--all", "--", "--check"]],
