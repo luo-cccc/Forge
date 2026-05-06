@@ -94,7 +94,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
-  const [todayFive, setTodayFive] = useState<TodayFiveSummary | null>(null);
+  const [todayFiveSummary, setTodayFiveSummary] = useState<TodayFiveSummary | null>(null);
   const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<"status" | "foundation" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -108,7 +108,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [nextReviewQueue, nextTodayFive, nextTrace] = await Promise.all([
+      const [nextReviewQueue, nextTodayFiveSummary, nextTrace] = await Promise.all([
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
         invoke<TodayFiveSummary>(Commands.getWriterAgentTodayFive),
         invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
@@ -128,7 +128,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         setChapterBackups([]);
       }
       setReviewQueue(nextReviewQueue);
-      setTodayFive(nextTodayFive);
+      setTodayFiveSummary(nextTodayFiveSummary);
       setTrace(nextTrace);
       if (mode !== "write") {
         const [nextStatus, nextLedger, nextProposals, nextStoryDebt] = await Promise.all([
@@ -549,7 +549,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       || (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3)
       || b.priority - a.priority,
   );
-  const secondBrainItems = todayFive?.items ?? [];
+  const secondBrainItems = todayFiveSummary?.items ?? [];
   const availableTabs =
     mode === "write"
       ? (["status"] as const)

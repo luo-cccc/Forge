@@ -16,6 +16,7 @@ const mergedSource = source + "\n" + helpersSource;
 const appSource = fs.readFileSync(appPath, "utf8");
 const inspectorSource = fs.readFileSync(inspectorPath, "utf8");
 
+const companionSource = source;
 const componentAst = ts.createSourceFile(componentPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const appAst = ts.createSourceFile(appPath, appSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const inspectorAst = ts.createSourceFile(inspectorPath, inspectorSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -71,6 +72,9 @@ function ancestorHasGuard(node, guardPattern) {
       ts.isParenthesizedExpression(current)
     ) {
       if (guardPattern.test(normalize(current.getText()))) return true;
+    }
+    if (ts.isIfStatement(current)) {
+      if (guardPattern.test(normalize(current.expression.getText()))) return true;
     }
     if (ts.isFunctionLike(current)) return false;
     current = current.parent;
@@ -221,6 +225,21 @@ const checks = [
       /setStoryMode/.test(inspectorSource) &&
       !/Metacognitive Gate/.test(source) &&
       !/Run Diagnostic/.test(source),
+  },
+  {
+    name: "Companion status tab renders from TodayFive backend command",
+    pass:
+      /Commands\.getWriterAgentTodayFive/.test(companionSource) &&
+      /todayFiveSummary/.test(companionSource),
+  },
+  {
+    name: "Companion write mode data source is exclusively TodayFive",
+    pass:
+      companionSource.includes("todayFiveSummary") &&
+      (!/getWriterAgentLedger\b/.test(companionSource) ||
+        hasGuardedNeedle(componentAst, /getWriterAgentLedger\b/, modeNotWrite)) &&
+      (!/getWriterAgentPendingProposals\b/.test(companionSource) ||
+        hasGuardedNeedle(componentAst, /getWriterAgentPendingProposals\b/, modeNotWrite)),
   },
 ];
 

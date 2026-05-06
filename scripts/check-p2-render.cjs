@@ -33,6 +33,7 @@ const stateOverrides = [
   fixture.proposals,
   fixture.reviewQueue,
   fixture.storyDebt,
+  fixture.todayFive,
   fixture.trace,
   "status",
   fixedNow,
@@ -91,6 +92,16 @@ try {
     console.error("Write-mode Companion render leaked inspector/internal content:");
     for (const leak of leaks) {
       console.error(`- ${leak}`);
+    }
+    process.exit(1);
+  }
+
+  const todayFiveSlots = ["Agent Guard", "Book Contract", "Chapter Mission", "Open Promise", "Next Move"];
+  const missingSlots = todayFiveSlots.filter((label) => !html.includes(label));
+  if (missingSlots.length > 0) {
+    console.error("Write-mode Companion render is missing TodayFive informational slots:");
+    for (const slot of missingSlots) {
+      console.error(`- ${slot}`);
     }
     process.exit(1);
   }
@@ -177,6 +188,7 @@ function mockInvoke(command) {
   if (command === "get_writer_agent_trace") return Promise.resolve(fixture.trace);
   if (command === "get_project_storage_diagnostics") return Promise.resolve(fixture.storageDiagnostics);
   if (command === "list_file_backups") return Promise.resolve(fixture.chapterBackups);
+  if (command === "get_writer_agent_today_five") return Promise.resolve(fixture.todayFive);
   return Promise.resolve(null);
 }
 
@@ -349,6 +361,16 @@ function buildFixture() {
       createdAt: fixedNow,
       expiresAt: fixedNow + 60_000,
     }],
+    todayFive: {
+      chapterTitle: "Chapter-7",
+      items: [
+        { slot: "agent_guard", label: "Agent Guard", value: "Active", detail: "Guard protocol is enforcing P2 boundaries", tone: "neutral" },
+        { slot: "book_contract", label: "Book Contract", value: "Strong", detail: "Story contract quality is strong with no gaps", tone: "success" },
+        { slot: "chapter_mission", label: "Chapter Mission", value: "On track", detail: "Chapter-7 mission is active and on schedule", tone: "neutral" },
+        { slot: "open_promise", label: "Open Promise", value: "1 open", detail: "The old key promise will pay off in Chapter-9", tone: "accent" },
+        { slot: "next_move", label: "Next Move", value: "Make the clue cost something", detail: "Chapter-7 goal from next beat", tone: "neutral" },
+      ],
+    },
     storyDebt: {
       chapterTitle: "Chapter-7",
       total: 0,
