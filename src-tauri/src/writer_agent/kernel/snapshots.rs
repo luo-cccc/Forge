@@ -1,6 +1,57 @@
 use super::*;
 use std::collections::BTreeMap;
 
+fn chapter_number_from_title(chapter: &str) -> Option<i64> {
+    let digits = chapter
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if !digits.is_empty() {
+        return digits.parse::<i64>().ok();
+    }
+    let start = chapter.find('第')?;
+    let rest = &chapter[start + '第'.len_utf8()..];
+    let end = rest.find('章').unwrap_or(rest.len());
+    let raw = rest[..end].trim();
+    parse_chinese_number(raw)
+}
+
+fn parse_chinese_number(raw: &str) -> Option<i64> {
+    let digit = |ch: char| match ch {
+        '零' => Some(0),
+        '一' => Some(1),
+        '二' | '两' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    };
+    if raw.is_empty() {
+        return None;
+    }
+    if raw == "十" {
+        return Some(10);
+    }
+    if let Some(idx) = raw.find('十') {
+        let left = raw[..idx].chars().next().and_then(digit).unwrap_or(1);
+        let right = raw[idx + '十'.len_utf8()..]
+            .chars()
+            .next()
+            .and_then(digit)
+            .unwrap_or(0);
+        return Some((left * 10 + right) as i64);
+    }
+    let mut value = 0i64;
+    for ch in raw.chars() {
+        value = value * 10 + i64::from(digit(ch)?);
+    }
+    Some(value)
+}
+
 impl WriterAgentKernel {
     pub fn status(&self) -> WriterAgentStatus {
         let open = self
@@ -177,37 +228,143 @@ impl WriterAgentKernel {
     }
 
     pub fn ledger_snapshot(&self) -> WriterAgentLedgerSnapshot {
+        let active_chapter_number = self
+            .active_chapter
+            .as_deref()
+            .and_then(chapter_number_from_title);
+        let active_volume = active_chapter_number.and_then(|number| {
+            self.memory
+                .find_volume_for_chapter(&self.project_id, number)
+                .ok()
+                .flatten()
+        });
+        let book_state = self
+            .memory
+            .get_book_state(&self.project_id)
+            .unwrap_or_default();
+        let arc_snapshots = active_volume
+            .as_ref()
+            .map(|volume| {
+                self.memory
+                    .list_arc_snapshots(&self.project_id, &volume.id)
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let volume_snapshots = active_volume
+            .as_ref()
+            .map(|volume| {
+                self.memory
+                    .list_volumes(&self.project_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|candidate| candidate.start_chapter <= volume.start_chapter)
+                    .rev()
+                    .take(3)
+                    .filter_map(|candidate| {
+                        self.memory
+                            .get_latest_volume_snapshot(&self.project_id, &candidate.id)
+                            .ok()
+                            .flatten()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let active_chapter_mission = self.active_chapter.as_deref().and_then(|chapter| {
             self.memory
                 .get_chapter_mission(&self.project_id, chapter)
                 .ok()
                 .flatten()
         });
-        let recent_chapter_results = self
+        let all_recent_results = self
             .memory
             .list_recent_chapter_results(&self.project_id, 20)
             .unwrap_or_default();
-        let open_promises = self.memory.get_open_promise_summaries().unwrap_or_default();
+        let recent_chapter_results = if let Some(volume) = active_volume.as_ref() {
+            all_recent_results
+                .iter()
+                .filter(|result| {
+                    chapter_number_from_title(&result.chapter_title).is_some_and(|number| {
+                        number >= volume.start_chapter && number <= volume.end_chapter
+                    })
+                })
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            all_recent_results.clone()
+        };
+        let all_open_promises = self.memory.get_open_promise_summaries().unwrap_or_default();
+        let open_promises = if let Some(volume) = active_volume.as_ref() {
+            let mut scoped = all_open_promises
+                .iter()
+                .filter(|promise| {
+                    chapter_number_from_title(&promise.introduced_chapter).is_some_and(|number| {
+                        number >= volume.start_chapter && number <= volume.end_chapter
+                    }) || chapter_number_from_title(&promise.last_seen_chapter).is_some_and(
+                        |number| number >= volume.start_chapter && number <= volume.end_chapter,
+                    )
+                })
+                .take(50)
+                .cloned()
+                .collect::<Vec<_>>();
+            if scoped.len() < 50 {
+                for promise in all_open_promises.iter().take(50) {
+                    if scoped.iter().any(|existing| existing.id == promise.id) {
+                        continue;
+                    }
+                    scoped.push(promise.clone());
+                    if scoped.len() >= 50 {
+                        break;
+                    }
+                }
+            }
+            scoped
+        } else {
+            all_open_promises
+        };
         let next_beat = derive_next_beat(
             self.active_chapter.as_deref(),
             active_chapter_mission.as_ref(),
             &recent_chapter_results,
             &open_promises,
         );
+        let chapter_missions = self
+            .memory
+            .list_chapter_missions(&self.project_id, 50)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|mission| {
+                if let Some(volume) = active_volume.as_ref() {
+                    chapter_number_from_title(&mission.chapter_title).is_some_and(|number| {
+                        number >= volume.start_chapter && number <= volume.end_chapter
+                    })
+                } else {
+                    true
+                }
+            })
+            .take(100)
+            .collect();
 
         WriterAgentLedgerSnapshot {
             story_contract: self
                 .memory
                 .get_story_contract(&self.project_id)
                 .unwrap_or_default(),
+            book_state,
+            active_volume: active_volume.clone(),
+            arc_snapshots,
+            volume_snapshots,
             active_chapter_mission,
-            chapter_missions: self
-                .memory
-                .list_chapter_missions(&self.project_id, 50)
-                .unwrap_or_default(),
+            chapter_missions,
             recent_chapter_results,
             next_beat,
-            canon_entities: self.memory.list_canon_entities().unwrap_or_default(),
+            canon_entities: self
+                .memory
+                .list_canon_entities()
+                .unwrap_or_default()
+                .into_iter()
+                .take(50)
+                .collect(),
             canon_rules: self.memory.list_canon_rules(20).unwrap_or_default(),
             open_promises,
             recent_decisions: self.memory.list_recent_decisions(20).unwrap_or_default(),

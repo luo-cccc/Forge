@@ -231,6 +231,7 @@ fn belief_confidence(source: &ContextSource) -> f32 {
     match source {
         ContextSource::SystemContract
         | ContextSource::ProjectBrief
+        | ContextSource::BookState
         | ContextSource::ChapterMission
         | ContextSource::CanonSlice
         | ContextSource::PromiseSlice => 0.9,
@@ -243,7 +244,11 @@ fn belief_confidence(source: &ContextSource) -> f32 {
         | ContextSource::PreviousChapter
         | ContextSource::NextChapter
         | ContextSource::NeighborText => 0.75,
-        ContextSource::AuthorStyle | ContextSource::OutlineSlice | ContextSource::RagExcerpt => 0.7,
+        ContextSource::AuthorStyle
+        | ContextSource::OutlineSlice
+        | ContextSource::RagExcerpt
+        | ContextSource::ArcSnapshot
+        | ContextSource::VolumeSnapshot => 0.7,
         ContextSource::StoryImpactRadius => 0.82,
         ContextSource::ReaderCompensation => 0.75,
     }
@@ -284,7 +289,16 @@ fn context_source_purpose(source: &ContextSource) -> &'static str {
         ContextSource::SystemContract | ContextSource::ProjectBrief => {
             "Keep the task inside the book-level contract."
         }
+        ContextSource::BookState => {
+            "Keep the task inside book-level long-term state and irreversible changes."
+        }
         ContextSource::ChapterMission => "Preserve this chapter's active mission.",
+        ContextSource::ArcSnapshot => {
+            "Respect the active arc summary and mid-range story commitments."
+        }
+        ContextSource::VolumeSnapshot => {
+            "Carry forward recent volume-level settled outcomes and inherited pressure."
+        }
         ContextSource::NextBeat => "Carry forward the next intended story beat.",
         ContextSource::ResultFeedback => "Use the previous chapter result feedback loop.",
         ContextSource::AuthorStyle => "Preserve learned author style preferences.",

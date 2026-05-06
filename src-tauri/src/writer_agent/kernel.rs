@@ -13,8 +13,8 @@ use agent_harness_core::{PermissionMode, PermissionPolicy};
 
 use super::canon::CanonEngine;
 use super::context::{
-    append_context_source_with_budget, assemble_observation_context,
-    assemble_observation_context_with_default_budget, AgentTask, ContextSource, WritingContextPack,
+    append_context_source_with_budget, assemble_observation_context_with_default_budget, AgentTask,
+    ContextSource, WritingContextPack,
 };
 use super::diagnostics::{
     DiagnosticCategory, DiagnosticResult, DiagnosticSeverity, DiagnosticsEngine,
@@ -22,8 +22,9 @@ use super::diagnostics::{
 use super::feedback::{FeedbackAction, ProposalFeedback};
 use super::intent::{AgentBehavior, IntentEngine};
 use super::memory::{
-    ChapterResultSummary, ContextBudgetTrace, ContextRecallSummary, ManualAgentTurnSummary,
-    StoryContractQuality, WriterMemory,
+    ArcSnapshotSummary, BookStateSummary, ChapterResultSummary, ContextBudgetTrace,
+    ContextRecallSummary, ManualAgentTurnSummary, StoryContractQuality, VolumeSnapshotSummary,
+    VolumeSummary, WriterMemory,
 };
 use super::observation::WriterObservation;
 use super::operation::{OperationResult, WriterOperation};
@@ -138,6 +139,10 @@ pub struct WriterAgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct WriterAgentLedgerSnapshot {
     pub story_contract: Option<super::memory::StoryContractSummary>,
+    pub book_state: Option<BookStateSummary>,
+    pub active_volume: Option<VolumeSummary>,
+    pub arc_snapshots: Vec<ArcSnapshotSummary>,
+    pub volume_snapshots: Vec<VolumeSnapshotSummary>,
     pub active_chapter_mission: Option<super::memory::ChapterMissionSummary>,
     pub chapter_missions: Vec<super::memory::ChapterMissionSummary>,
     pub recent_chapter_results: Vec<super::memory::ChapterResultSummary>,

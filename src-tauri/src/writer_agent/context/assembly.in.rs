@@ -1,4 +1,8 @@
 
+use crate::writer_agent::memory::{
+    ArcSnapshotSummary, BookStateSummary, VolumeSnapshotSummary, VolumeSummary,
+};
+
 /// Assembles a ContextPack under strict budget constraints.
 pub fn assemble_context_pack(
     task: AgentTask,
@@ -247,18 +251,34 @@ fn source_truncation_reason(total_budget: usize, draft: &SourceDraft) -> Option<
     }
 }
 
-pub fn assemble_observation_context(
+pub fn query_story_os(
     task: AgentTask,
     observation: &WriterObservation,
     memory: &WriterMemory,
     total_budget: usize,
 ) -> WritingContextPack {
+    let chapter_number = observation
+        .chapter_title
+        .as_deref()
+        .and_then(chapter_number_from_title);
+    let active_volume = chapter_number
+        .and_then(|number| memory.find_volume_for_chapter(&observation.project_id, number).ok().flatten());
+    let book_state = memory.get_book_state(&observation.project_id).ok().flatten();
+    let volume_snapshots = related_volume_snapshots(
+        &observation.project_id,
+        active_volume.as_ref(),
+        memory,
+    );
+    let arc_snapshots = related_arc_snapshots(&observation.project_id, active_volume.as_ref(), memory);
+
     let project_brief = build_project_brief(&observation.project_id, memory);
     let chapter_mission = build_chapter_mission(&observation.project_id, observation, memory);
     let next_beat = build_next_beat(&observation.project_id, observation, memory);
     let result_feedback = build_result_feedback(&observation.project_id, observation, memory);
     let decisions = memory.list_recent_decisions(6).unwrap_or_default();
-    let open_promises = memory.get_open_promise_summaries().unwrap_or_default();
+    let all_open_promises = memory.get_open_promise_summaries().unwrap_or_default();
+    let open_promises =
+        prefilter_promises_for_story_os(observation, active_volume.as_ref(), &all_open_promises);
     let decision_slice = build_decision_slice(&decisions);
     let relevance = WritingRelevance::new(
         observation,
@@ -270,6 +290,9 @@ pub fn assemble_observation_context(
     let canon_slice = build_canon_slice(observation, memory, &relevance, &open_promises);
     let promise_slice = build_promise_slice(observation, &open_promises, &relevance, &decisions);
     let author_style = build_style_slice(memory);
+    let book_state_text = build_book_state_context(book_state.as_ref());
+    let arc_snapshot_text = build_arc_snapshot_context(&arc_snapshots);
+    let volume_snapshot_text = build_volume_snapshot_context(&volume_snapshots);
     let selected_text = observation.selected_text().to_string();
     let cursor_prefix = if observation.prefix.trim().is_empty() {
         observation.paragraph.clone()
@@ -287,6 +310,9 @@ pub fn assemble_observation_context(
             ContextSource::CursorSuffix => non_empty(cursor_suffix.clone()),
             ContextSource::SelectedText => non_empty(selected_text.clone()),
             ContextSource::ProjectBrief => non_empty(project_brief.clone()),
+            ContextSource::BookState => non_empty(book_state_text.clone()),
+            ContextSource::ArcSnapshot => non_empty(arc_snapshot_text.clone()),
+            ContextSource::VolumeSnapshot => non_empty(volume_snapshot_text.clone()),
             ContextSource::ChapterMission => non_empty(chapter_mission.clone()),
             ContextSource::NextBeat => non_empty(next_beat.clone()),
             ContextSource::ResultFeedback => non_empty(result_feedback.clone()),
@@ -300,6 +326,225 @@ pub fn assemble_observation_context(
         },
         total_budget,
     )
+}
+
+pub fn assemble_observation_context(
+    task: AgentTask,
+    observation: &WriterObservation,
+    memory: &WriterMemory,
+    total_budget: usize,
+) -> WritingContextPack {
+    query_story_os(task, observation, memory, total_budget)
+}
+
+fn build_book_state_context(book_state: Option<&BookStateSummary>) -> String {
+    let Some(book_state) = book_state else {
+        return String::new();
+    };
+    let mut lines = Vec::new();
+    push_contract_line(&mut lines, "全书标题", &book_state.title);
+    if !book_state.long_term_constraints.is_empty() {
+        lines.push(format!(
+            "长期约束: {}",
+            book_state.long_term_constraints.join(" / ")
+        ));
+    }
+    if !book_state.mega_promises.is_empty() {
+        lines.push(format!("全书长线承诺: {}", book_state.mega_promises.join(" / ")));
+    }
+    if !book_state.irreversible_changes.is_empty() {
+        lines.push(format!(
+            "不可逆变化: {}",
+            book_state.irreversible_changes.join(" / ")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn build_arc_snapshot_context(arcs: &[ArcSnapshotSummary]) -> String {
+    arcs.iter()
+        .take(2)
+        .map(|arc| {
+            format!(
+                "[{} {}-{}]\n{}",
+                arc.title,
+                arc.start_chapter,
+                arc.end_chapter,
+                compact_story_snapshot(&arc.snapshot)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn build_volume_snapshot_context(volumes: &[VolumeSnapshotSummary]) -> String {
+    volumes
+        .iter()
+        .take(3)
+        .map(|volume| {
+            format!(
+                "[{}]\n{}",
+                volume.volume_id,
+                compact_story_snapshot(&volume.snapshot)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn compact_story_snapshot(snapshot: &serde_json::Value) -> String {
+    match snapshot {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .take(6)
+            .map(|(key, value)| format!("{}: {}", key, compact_json_value(value)))
+            .collect::<Vec<_>>()
+            .join(" | "),
+        _ => compact_json_value(snapshot),
+    }
+}
+
+fn compact_json_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .take(4)
+            .map(compact_json_value)
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => value.to_string(),
+    }
+}
+
+fn related_volume_snapshots(
+    project_id: &str,
+    active_volume: Option<&VolumeSummary>,
+    memory: &WriterMemory,
+) -> Vec<VolumeSnapshotSummary> {
+    let Some(active_volume) = active_volume else {
+        return Vec::new();
+    };
+    let volumes = memory.list_volumes(project_id).unwrap_or_default();
+    volumes
+        .into_iter()
+        .filter(|volume| volume.start_chapter <= active_volume.start_chapter)
+        .rev()
+        .take(3)
+        .filter_map(|volume| memory.get_latest_volume_snapshot(project_id, &volume.id).ok().flatten())
+        .collect()
+}
+
+fn related_arc_snapshots(
+    project_id: &str,
+    active_volume: Option<&VolumeSummary>,
+    memory: &WriterMemory,
+) -> Vec<ArcSnapshotSummary> {
+    let Some(active_volume) = active_volume else {
+        return Vec::new();
+    };
+    memory
+        .list_arc_snapshots(project_id, &active_volume.id)
+        .unwrap_or_default()
+}
+
+fn prefilter_promises_for_story_os(
+    observation: &WriterObservation,
+    active_volume: Option<&VolumeSummary>,
+    promises: &[PlotPromiseSummary],
+) -> Vec<PlotPromiseSummary> {
+    let current_chapter = observation.chapter_title.as_deref().unwrap_or_default();
+    let current_number = chapter_number_from_title(current_chapter);
+    let mut selected = promises
+        .iter()
+        .filter(|promise| {
+            if promise.expected_payoff.contains(current_chapter) {
+                return true;
+            }
+            if let (Some(volume), Some(introduced)) = (
+                active_volume,
+                chapter_number_from_title(&promise.introduced_chapter),
+            ) {
+                return introduced >= volume.start_chapter && introduced <= volume.end_chapter;
+            }
+            if let (Some(volume), Some(last_seen)) = (
+                active_volume,
+                chapter_number_from_title(&promise.last_seen_chapter),
+            ) {
+                return last_seen >= volume.start_chapter && last_seen <= volume.end_chapter;
+            }
+            if let (Some(now), Some(payoff)) = (
+                current_number,
+                chapter_number_from_title(&promise.expected_payoff),
+            ) {
+                return (now - payoff).abs() <= 8;
+            }
+            false
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.len() < 30 {
+        for promise in promises.iter().take(30) {
+            if selected.iter().any(|existing| existing.id == promise.id) {
+                continue;
+            }
+            selected.push(promise.clone());
+            if selected.len() >= 30 {
+                break;
+            }
+        }
+    }
+    selected
+}
+
+fn chapter_number_from_title(chapter: &str) -> Option<i64> {
+    let digits = chapter.chars().filter(|ch| ch.is_ascii_digit()).collect::<String>();
+    if !digits.is_empty() {
+        return digits.parse::<i64>().ok();
+    }
+
+    let start = chapter.find('第')?;
+    let rest = &chapter[start + '第'.len_utf8()..];
+    let end = rest.find('章').unwrap_or(rest.len());
+    let raw = rest[..end].trim();
+    parse_chinese_number(raw)
+}
+
+fn parse_chinese_number(raw: &str) -> Option<i64> {
+    if raw.is_empty() {
+        return None;
+    }
+    let digit = |ch: char| match ch {
+        '零' => Some(0),
+        '一' => Some(1),
+        '二' | '两' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    };
+    if raw == "十" {
+        return Some(10);
+    }
+    if let Some(idx) = raw.find('十') {
+        let left = raw[..idx].chars().next().and_then(digit).unwrap_or(1);
+        let right = raw[idx + '十'.len_utf8()..]
+            .chars()
+            .next()
+            .and_then(digit)
+            .unwrap_or(0);
+        return Some((left * 10 + right) as i64);
+    }
+    let mut value = 0i64;
+    for ch in raw.chars() {
+        value = value * 10 + i64::from(digit(ch)?);
+    }
+    Some(value)
 }
 
 fn build_chapter_mission(

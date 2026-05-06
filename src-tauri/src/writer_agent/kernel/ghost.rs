@@ -263,11 +263,13 @@ pub(crate) fn context_pack_evidence(
             | ContextSource::SelectedText => EvidenceSource::ChapterText,
             ContextSource::CanonSlice => EvidenceSource::Canon,
             ContextSource::PromiseSlice => EvidenceSource::PromiseLedger,
-            ContextSource::ProjectBrief => EvidenceSource::StoryContract,
+            ContextSource::ProjectBrief | ContextSource::BookState => EvidenceSource::StoryContract,
             ContextSource::ChapterMission => EvidenceSource::ChapterMission,
             ContextSource::DecisionSlice => EvidenceSource::AuthorFeedback,
             ContextSource::AuthorStyle => EvidenceSource::StyleLedger,
-            ContextSource::OutlineSlice => EvidenceSource::Outline,
+            ContextSource::OutlineSlice
+            | ContextSource::ArcSnapshot
+            | ContextSource::VolumeSnapshot => EvidenceSource::Outline,
             ContextSource::ResultFeedback => EvidenceSource::ChapterText,
             ContextSource::StoryImpactRadius => EvidenceSource::StoryImpactRadius,
             _ => EvidenceSource::ChapterText,

@@ -240,11 +240,14 @@ fn classify_source(source: &ContextSource) -> ContextSpineLayer {
     match source {
         ContextSource::SystemContract => ContextSpineLayer::FrozenPrefix,
         ContextSource::ProjectBrief
+        | ContextSource::BookState
         | ContextSource::AuthorStyle
         | ContextSource::CanonSlice
         | ContextSource::PromiseSlice
         | ContextSource::DecisionSlice => ContextSpineLayer::ProjectStablePrefix,
         ContextSource::ChapterMission
+        | ContextSource::ArcSnapshot
+        | ContextSource::VolumeSnapshot
         | ContextSource::NextBeat
         | ContextSource::ResultFeedback
         | ContextSource::StoryImpactRadius

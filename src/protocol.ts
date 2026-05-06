@@ -112,6 +112,18 @@ export interface VolumeSnapshotSummary {
   createdAt: string;
 }
 
+export interface ArcSnapshotSummary {
+  arcId: string;
+  projectId: string;
+  volumeId: string;
+  title: string;
+  startChapter: number;
+  endChapter: number;
+  snapshot: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BookStateSummary {
   projectId: string;
   title: string;
@@ -1085,6 +1097,10 @@ export interface MemoryReliabilitySummary {
 
 export interface WriterAgentLedgerSnapshot {
   storyContract?: StoryContractSummary | null;
+  bookState?: BookStateSummary | null;
+  activeVolume?: VolumeSummary | null;
+  arcSnapshots?: ArcSnapshotSummary[];
+  volumeSnapshots?: VolumeSnapshotSummary[];
   activeChapterMission?: ChapterMissionSummary | null;
   chapterMissions: ChapterMissionSummary[];
   recentChapterResults: ChapterResultSummary[];

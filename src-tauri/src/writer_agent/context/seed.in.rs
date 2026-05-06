@@ -245,7 +245,8 @@ fn build_canon_slice(
 ) -> String {
     let mut lines = Vec::new();
     if let Ok(entities) = memory.list_canon_entities() {
-        let mut scored = entities
+        let candidate_entities = prefilter_canon_candidates(observation, &entities, open_promises);
+        let mut scored = candidate_entities
             .into_iter()
             .filter_map(|entity| {
                 let score = score_canon_entity(&entity, observation, relevance, open_promises);
@@ -284,7 +285,8 @@ fn build_promise_slice(
     relevance: &WritingRelevance,
     decisions: &[CreativeDecisionSummary],
 ) -> String {
-    let mut scored = promises
+    let candidate_promises = prefilter_promise_candidates(observation, promises);
+    let mut scored = candidate_promises
         .iter()
         .map(|promise| {
             (
@@ -308,6 +310,68 @@ fn build_promise_slice(
         .map(|(score, promise)| format_promise_line(promise, &score.reasons))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn prefilter_canon_candidates(
+    observation: &WriterObservation,
+    entities: &[CanonEntitySummary],
+    open_promises: &[PlotPromiseSummary],
+) -> Vec<CanonEntitySummary> {
+    let paragraph = observation.paragraph.as_str();
+    let chapter = observation.chapter_title.as_deref().unwrap_or_default();
+    let mut selected = entities
+        .iter()
+        .filter(|entity| {
+            paragraph.contains(&entity.name)
+                || (!entity.summary.trim().is_empty() && paragraph.contains(entity.summary.as_str()))
+                || open_promises
+                    .iter()
+                    .any(|promise| promise.title.contains(&entity.name) || promise.description.contains(&entity.name))
+                || (!chapter.is_empty() && entity.summary.contains(chapter))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.len() < 30 {
+        for entity in entities.iter().take(30) {
+            if selected.iter().any(|existing| existing.name == entity.name) {
+                continue;
+            }
+            selected.push(entity.clone());
+            if selected.len() >= 30 {
+                break;
+            }
+        }
+    }
+    selected
+}
+
+fn prefilter_promise_candidates(
+    observation: &WriterObservation,
+    promises: &[PlotPromiseSummary],
+) -> Vec<PlotPromiseSummary> {
+    let paragraph = observation.paragraph.as_str();
+    let chapter = observation.chapter_title.as_deref().unwrap_or_default();
+    let mut selected = promises
+        .iter()
+        .filter(|promise| {
+            paragraph.contains(&promise.title)
+                || paragraph.contains(&promise.description)
+                || (!chapter.is_empty() && promise.expected_payoff.contains(chapter))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.len() < 30 {
+        for promise in promises.iter().take(30) {
+            if selected.iter().any(|existing| existing.id == promise.id) {
+                continue;
+            }
+            selected.push(promise.clone());
+            if selected.len() >= 30 {
+                break;
+            }
+        }
+    }
+    selected
 }
 
 fn build_style_slice(memory: &WriterMemory) -> String {

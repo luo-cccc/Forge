@@ -255,6 +255,54 @@ ContextPack:\n{}",
 }
 
 pub(crate) fn render_ledger_snapshot_for_prompt(snapshot: &WriterAgentLedgerSnapshot) -> String {
+    let book_state = snapshot
+        .book_state
+        .as_ref()
+        .map(|state| {
+            let mut lines = Vec::new();
+            if !state.long_term_constraints.is_empty() {
+                lines.push(format!(
+                    "- constraints: {}",
+                    state.long_term_constraints.join(" / ")
+                ));
+            }
+            if !state.mega_promises.is_empty() {
+                lines.push(format!(
+                    "- mega promises: {}",
+                    state.mega_promises.join(" / ")
+                ));
+            }
+            if !state.irreversible_changes.is_empty() {
+                lines.push(format!(
+                    "- irreversible changes: {}",
+                    state.irreversible_changes.join(" / ")
+                ));
+            }
+            lines.join("\n")
+        })
+        .unwrap_or_default();
+    let volume = snapshot
+        .active_volume
+        .as_ref()
+        .map(|volume| {
+            format!(
+                "- {} [{}-{}] status={}",
+                volume.title, volume.start_chapter, volume.end_chapter, volume.status
+            )
+        })
+        .unwrap_or_default();
+    let arc = snapshot
+        .arc_snapshots
+        .iter()
+        .take(2)
+        .map(|arc| {
+            format!(
+                "- {} [{}-{}]",
+                arc.title, arc.start_chapter, arc.end_chapter
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let canon = snapshot
         .canon_entities
         .iter()
@@ -293,6 +341,9 @@ pub(crate) fn render_ledger_snapshot_for_prompt(snapshot: &WriterAgentLedgerSnap
         .join("\n");
 
     [
+        ("Book state", book_state),
+        ("Active volume", volume),
+        ("Arc snapshots", arc),
         ("Canon entities", canon),
         ("Open promises", promises),
         ("Recent creative decisions", decisions),

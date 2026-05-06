@@ -169,7 +169,9 @@ fn profile_reasoning_env(profile: LlmRequestProfile) -> Option<&'static str> {
         LlmRequestProfile::GeneralChat => Some("OPENAI_CHAT_DISABLE_REASONING"),
         LlmRequestProfile::Json => Some("OPENAI_JSON_DISABLE_REASONING"),
         LlmRequestProfile::ChapterDraft => Some("OPENAI_CHAPTER_DRAFT_DISABLE_REASONING"),
-        LlmRequestProfile::ChapterContinuation => Some("OPENAI_CHAPTER_CONTINUATION_DISABLE_REASONING"),
+        LlmRequestProfile::ChapterContinuation => {
+            Some("OPENAI_CHAPTER_CONTINUATION_DISABLE_REASONING")
+        }
         LlmRequestProfile::ChapterCompress => Some("OPENAI_CHAPTER_COMPRESS_DISABLE_REASONING"),
         LlmRequestProfile::GhostPreview => Some("OPENAI_GHOST_PREVIEW_DISABLE_REASONING"),
         LlmRequestProfile::Analysis => Some("OPENAI_ANALYSIS_DISABLE_REASONING"),

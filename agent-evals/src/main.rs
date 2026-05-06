@@ -154,6 +154,12 @@ fn main() {
     results.push(run_tool_called_run_event_eval());
     results.push(run_tool_executor_audit_records_tool_called_eval());
     results.push(run_volume_isolation_context_scope_eval());
+    results.push(run_tiered_memory_cold_tier_boundary_eval());
+    results.push(run_tiered_memory_cross_volume_promotion_eval());
+    results.push(run_arc_snapshot_available_in_warm_tier_eval());
+    results.push(run_book_state_present_without_cold_recall_eval());
+    results.push(run_incremental_update_bounded_entries_eval());
+    results.push(run_ledger_snapshot_tiered_latency_eval());
     results.push(run_project_brain_provider_budget_eval());
     results.push(run_project_brain_provider_budget_approval_eval());
     results.push(run_manual_request_provider_budget_eval());

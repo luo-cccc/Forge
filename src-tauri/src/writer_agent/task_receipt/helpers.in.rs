@@ -6,8 +6,11 @@ fn is_diagnostic_required_source(source: &ContextSource) -> bool {
             | ContextSource::CanonSlice
             | ContextSource::ChapterMission
             | ContextSource::ProjectBrief
+            | ContextSource::BookState
             | ContextSource::ResultFeedback
             | ContextSource::NextBeat
+            | ContextSource::ArcSnapshot
+            | ContextSource::VolumeSnapshot
             | ContextSource::PromiseSlice
             | ContextSource::DecisionSlice
             | ContextSource::StoryImpactRadius
