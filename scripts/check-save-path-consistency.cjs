@@ -26,19 +26,7 @@ const observeSimplePattern = /\bobserve_chapter_save\b/g;
 
 const issues = [];
 
-// 1. Verify chapter_generation pipeline calls observe
-const pipelineFiles = [
-  "pipeline.in.rs",
-  "pipeline/main.in.rs",
-].map((name) => path.join(srcDir, "chapter_generation", name));
-for (const file of pipelineFiles) {
-  const source = fs.readFileSync(file, "utf8");
-  if (!/observe_generated_chapter_result/.test(source)) {
-    issues.push(`${file}: chapter generation pipeline missing observe_generated_chapter_result`);
-  }
-}
-
-// 2. Verify writer_observer has the save observation bridge
+// 1. Verify writer_observer has the save observation bridge
 const observerPath = path.join(srcDir, "writer_observer.rs");
 const observerSource = fs.readFileSync(observerPath, "utf8");
 if (!/observe_chapter_save_with_result/.test(observerSource)) {

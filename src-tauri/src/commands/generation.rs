@@ -1293,6 +1293,7 @@ pub fn repair_chapter_state(
         ),
         &artifacts.artifact_refs,
     );
+    crate::observe_chapter_save(&app, &chapter_title, &content, &revision)?;
     Ok(RepairChapterStateResult {
         chapter_title,
         revision,

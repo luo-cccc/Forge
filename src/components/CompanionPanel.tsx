@@ -108,12 +108,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt, nextTodayFive, nextTrace] = await Promise.all([
-        invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
-        invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
-        invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
+      const [nextReviewQueue, nextTodayFive, nextTrace] = await Promise.all([
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
-        invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
         invoke<TodayFiveSummary>(Commands.getWriterAgentTodayFive),
         invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
       ]);
@@ -131,39 +127,47 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       } else {
         setChapterBackups([]);
       }
-      setStatus(nextStatus);
-      setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
-      setStoryDebt(nextStoryDebt);
       setTodayFive(nextTodayFive);
       setTrace(nextTrace);
-      if (foundationChapterRef.current !== currentChapter) {
-        foundationChapterRef.current = currentChapter;
-        setFoundationDirty(false);
-        setFoundationSaveState("idle");
-        setMissionDraft(emptyChapterMissionDraft());
-      }
-      setContractDraft((prev) =>
-        foundationDirty || hasStoryContractContent(prev)
-          ? prev
-          : storyContractDraftFromSummary(nextLedger.storyContract),
-      );
-      const activeMission =
-        nextLedger.activeChapterMission ??
-        nextLedger.chapterMissions.find((mission) => mission.chapterTitle === currentChapter);
-      setMissionDraft((prev) =>
-        foundationDirty || hasChapterMissionContent(prev) ? prev : chapterMissionDraftFromSummary(activeMission),
-      );
-      setProposals((prev) => {
-        const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
-        return merged.filter((proposal) =>
-          nextProposals.some((pending) => pending.id === proposal.id)
+      if (mode !== "write") {
+        const [nextStatus, nextLedger, nextProposals, nextStoryDebt] = await Promise.all([
+          invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
+          invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
+          invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
+          invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
+        ]);
+        setStatus(nextStatus);
+        setLedger(nextLedger);
+        setStoryDebt(nextStoryDebt);
+        if (foundationChapterRef.current !== currentChapter) {
+          foundationChapterRef.current = currentChapter;
+          setFoundationDirty(false);
+          setFoundationSaveState("idle");
+          setMissionDraft(emptyChapterMissionDraft());
+        }
+        setContractDraft((prev) =>
+          foundationDirty || hasStoryContractContent(prev)
+            ? prev
+            : storyContractDraftFromSummary(nextLedger.storyContract),
         );
-      });
+        const activeMission =
+          nextLedger.activeChapterMission ??
+          nextLedger.chapterMissions.find((mission) => mission.chapterTitle === currentChapter);
+        setMissionDraft((prev) =>
+          foundationDirty || hasChapterMissionContent(prev) ? prev : chapterMissionDraftFromSummary(activeMission),
+        );
+        setProposals((prev) => {
+          const merged = nextProposals.reduce((acc, proposal) => mergeProposal(acc, proposal), prev);
+          return merged.filter((proposal) =>
+            nextProposals.some((pending) => pending.id === proposal.id)
+          );
+        });
+      }
     } catch {
       // kernel not initialized yet
     }
-  }, [currentChapter, foundationDirty, setSprintProgress]);
+  }, [currentChapter, foundationDirty, mode, setSprintProgress]);
 
   useEffect(() => {
     const initial = setTimeout(refreshStatus, 0);
@@ -225,14 +229,16 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setStatus(nextStatus);
       setProposals((prev) => prev.filter((p) => p.id !== proposalId));
       setReviewQueue((prev) => prev.filter((entry) => entry.proposalId !== proposalId));
-      const nextLedger = await invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger);
-      setLedger(nextLedger);
-      const nextStoryDebt = await invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot);
-      setStoryDebt(nextStoryDebt);
+      if (mode !== "write") {
+        const nextLedger = await invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger);
+        setLedger(nextLedger);
+        const nextStoryDebt = await invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot);
+        setStoryDebt(nextStoryDebt);
+      }
     } catch (e) {
       console.error("Proposal feedback failed:", e);
     }
-  }, [nowMs]);
+  }, [mode, nowMs]);
 
   const handleFeedback = useCallback(async (proposalId: string, action: ProposalFeedback["action"]) => {
     await recordFeedback(proposalId, action);
