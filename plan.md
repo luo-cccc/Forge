@@ -72,32 +72,76 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 - Writer Agent Kernel、TaskPacket、typed operations、memory、trajectory、approval/audit、provider budget、post-write diagnostics、metacognitive gate 已有地基。
 - Story Contract、Chapter Mission、Result Feedback Loop、Promise Ledger 已经活跃。
 - `supervised_sprint.rs` 已有第一阶段能力，覆盖 preflight → receipt → review → save → settlement。
-- 当前验证基线可稳定通过：`agent-harness-core` 88 tests、`agent-writer` 227 tests、`agent-evals` 246/246 passing。
+- 当前验证基线可稳定通过：`agent-harness-core` 89 tests、`agent-writer` 239 tests、`agent-evals` 256/256 passing、`check:audit` 72 commands 0 issues。
+- Week 1 已落地：
+  - `ChapterContract`
+  - 章节生成 continuation / compress / length-validate 骨架
+  - `probe:scale`、1000 章 fixture 和 benchmark 报告
+- Week 2 已落地：
+  - `VectorDB` 候选收敛搜索
+  - `Volume / Arc / Book` 数据层和最小 CRUD
+- Week 3 已落地：
+  - `query_story_os()` 主路径
+  - `BookState / ArcSnapshot / VolumeSnapshot` warm tier
+  - 分层 `ledger_snapshot()`
+- Week 4 已落地：
+  - `Sprint v2` pause / resume / checkpoint / budget ceiling
+  - 最小前端状态显示
+  - `real_author_session_thirty_chapter_gate` opt-in 长会话门
 
-当前硬伤：
+当前剩余真实缺口：
 
-- `chapter_draft` 仍是 `maxTokens=640` 的短输出 profile，不支持稳定 3500 字章节。
-- Project Brain 搜索仍是 `VectorDB` 全量扫描。
-- context assembly / ledger snapshot 仍有全量拉取路径。
-- 章节生产没有 `target_chars / min_chars / max_chars` contract。
-- 评测仍然过度依赖 synthetic 短程场景。
+- `chapter_draft maxTokens=640` 的默认 profile 仍不支持稳定 3500 字正文，当前更像“长度受约束的章节草稿链路”，不是成熟长章产线。
+- `50 章 synthetic 长度合规率 >95%` 还没有专门 gate 报告。
+- `search_hybrid() < 100ms @ 50,000 chunks`、`context assembly < 500ms @ Chapter 500` 还没有用真实 Week gate artifact 做正式验收。
+- `30 章真实作者 gate` 已存在但默认未执行，仍需显式预算和人工确认。
+
+### 3.1 当前完成度
+
+按 4 周主线看，代码完成度是：
+
+- Week 1：已完成最小闭环
+- Week 2：已完成最小闭环
+- Week 3：已完成最小闭环
+- Week 4：已完成最小闭环
+
+按最终验收门看，完成度是：
+
+- 已完成：
+  - `ChapterContract` 已进入生成/保存校验
+  - `Sprint v2` pause / resume / checkpoint / budget ceiling
+  - `1000` 章 synthetic fixture 与 `probe:scale` 入口
+  - `30` 章真实作者 gate 的 opt-in 测试入口
+- 部分完成：
+  - staged generation 已有骨架，但不是完整 scene planner / segment orchestrator
+  - `Story OS` 已接入主链路，但 cold tier 仍是保守实现
+  - `VectorDB` 已从全量扫描升级为候选收敛搜索，但未用真实 50k benchmark artifact 固化门槛
+- 未完成：
+  - `50` 章 synthetic 长度合规率 `>95%` 的正式 gate
+  - 真实 `30` 章长会话跑数和结果归档
+  - 更深的 Sprint 自动编排，而不只是状态机与命令面
 
 ---
 
 ## 4. 本轮完成定义
 
-4 周结束时，至少满足以下门：
+当前按验收门核对如下：
 
-- 默认 autonomous chapter generation 保存结果落在 `3000-4000` 字区间。
-- 50 章 synthetic 连续生成的长度合规率 `> 95%`。
-- Chapter 500 的 context assembly `< 500ms`。
-- `search_hybrid()` 在 50,000 chunks 下 `< 100ms`。
-- `ledger_snapshot()` 在 1000 章 fixture 下 `< 50ms`。
-- `Sprint v2` 支持 pause / resume / checkpoint / cumulative budget ceiling。
-- 1000 章 synthetic gate 可跑。
-- 30 章真实作者 gate 以 opt-in 方式可跑。
+| 验收门 | 状态 | 备注 |
+|------|------|------|
+| 默认 autonomous chapter generation 保存结果落在 `3000-4000` 字区间 | 部分完成 | contract / continuation / compress 已落地，但没有长样本 gate 报告 |
+| `50` 章 synthetic 连续生成长度合规率 `>95%` | 未完成 | 还缺专门脚本 / eval / artifact |
+| Chapter 500 的 context assembly `<500ms` | 部分完成 | `query_story_os()` 已接入，缺正式 benchmark artifact |
+| `search_hybrid() <100ms @ 50,000 chunks` | 部分完成 | 候选收敛搜索已落地，缺正式 50k benchmark artifact |
+| `ledger_snapshot() <50ms @ 1000 章 fixture` | 部分完成 | tiered snapshot 已落地且 eval 通过，缺单独 latency artifact |
+| `Sprint v2` 支持 pause / resume / checkpoint / cumulative budget ceiling | 已完成 | 后端、命令、最小 UI、eval 都已落地 |
+| `1000` 章 synthetic gate 可跑 | 已完成 | `npm run probe:scale` 已落地 |
+| `30` 章真实作者 gate opt-in 可跑 | 已完成 | 测试入口已落地，默认未执行 |
 
-如果 4 周结束时只做到了“架构更优雅”，但没过上面这些门，视为未完成。
+判定标准不变：
+
+- 如果只做到“架构更优雅”，但没有 gate 或 artifact，就不算最终完成。
+- 当前状态更准确地说是：**4 周开发主线已落地，最终验收仍有 3 个关键门待补证据。**
 
 ---
 
