@@ -617,8 +617,6 @@ fn chapter_source_confidence(source_type: &str) -> f32 {
     }
 }
 
-include!("runtime_artifacts.in.rs");
-
 fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }

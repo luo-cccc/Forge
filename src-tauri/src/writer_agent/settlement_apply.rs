@@ -1,0 +1,241 @@
+use crate::chapter_generation::{
+    ChapterBookStateDeltaBucket, ChapterPromiseDeltaAction, ChapterPromiseDeltaEntry,
+    ChapterSettlementApplyResult, ChapterSettlementDelta,
+};
+use crate::writer_agent::memory::{BookStateSummary, ChapterResultSummary, WriterMemory};
+
+pub fn apply_chapter_settlement_delta(
+    memory: &WriterMemory,
+    project_id: &str,
+    delta: &ChapterSettlementDelta,
+) -> Result<ChapterSettlementApplyResult, String> {
+    let source_ref = format!(
+        "chapter_settlement:{}:{}",
+        delta.chapter_title, delta.chapter_revision
+    );
+    let chapter_result = ChapterResultSummary {
+        id: 0,
+        project_id: project_id.to_string(),
+        chapter_title: delta.chapter_title.clone(),
+        chapter_revision: delta.chapter_revision.clone(),
+        summary: delta.chapter_result.summary.clone(),
+        state_changes: delta.chapter_result.state_changes.clone(),
+        character_progress: delta.chapter_result.character_progress.clone(),
+        new_conflicts: delta.chapter_result.new_conflicts.clone(),
+        new_clues: delta.chapter_result.new_clues.clone(),
+        promise_updates: delta.chapter_result.promise_updates.clone(),
+        canon_updates: delta.chapter_result.canon_updates.clone(),
+        source_ref: source_ref.clone(),
+        created_at: crate::agent_runtime::now_ms(),
+    };
+    let chapter_result_snapshot_id = memory
+        .upsert_chapter_result(&chapter_result)
+        .map_err(|e| e.to_string())?;
+
+    let mut promise_created = 0usize;
+    let mut promise_advanced = 0usize;
+    let mut promise_resolved = 0usize;
+    let mut promise_deferred = 0usize;
+    let mut promise_abandoned = 0usize;
+    let mut warnings = Vec::new();
+
+    for update in &delta.promise_updates {
+        match update.action {
+            ChapterPromiseDeltaAction::Introduced => match memory
+                .find_open_promise_by_title(&update.title)
+            {
+                Ok(Some(existing)) => {
+                    memory
+                        .touch_promise_last_seen(existing.id, &update.chapter, &update.source_ref)
+                        .map_err(|e| e.to_string())?;
+                    memory
+                        .update_promise_status_flags(
+                            existing.id,
+                            &update.blocked_reason,
+                            existing.promoted || update.promoted,
+                            existing.core || update.core,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    promise_advanced += 1;
+                }
+                Ok(None) => {
+                    memory
+                        .add_promise_with_status_flags(
+                            &update.kind,
+                            &update.title,
+                            &update.description,
+                            &update.chapter,
+                            &update.source_ref,
+                            &update.expected_payoff,
+                            update.priority,
+                            &update.related_entities,
+                            &update.blocked_reason,
+                            update.promoted,
+                            update.core,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    promise_created += 1;
+                }
+                Err(error) => return Err(error.to_string()),
+            },
+            ChapterPromiseDeltaAction::Advanced => {
+                if let Some(promise_id) = resolve_promise_id(memory, update)? {
+                    memory
+                        .touch_promise_last_seen(promise_id, &update.chapter, &update.source_ref)
+                        .map_err(|e| e.to_string())?;
+                    memory
+                        .update_promise_status_flags(
+                            promise_id,
+                            &update.blocked_reason,
+                            update.promoted,
+                            update.core,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    if !update.expected_payoff.trim().is_empty() {
+                        memory
+                            .defer_promise(promise_id, &update.expected_payoff)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    promise_advanced += 1;
+                } else {
+                    warnings.push(format!("promise advance skipped: {}", update.title));
+                }
+            }
+            ChapterPromiseDeltaAction::Resolved => {
+                if let Some(promise_id) = resolve_promise_id(memory, update)? {
+                    if memory
+                        .resolve_promise(promise_id, &update.chapter)
+                        .map_err(|e| e.to_string())?
+                    {
+                        promise_resolved += 1;
+                    } else {
+                        warnings.push(format!("promise already closed: {}", update.title));
+                    }
+                } else {
+                    warnings.push(format!("promise resolve skipped: {}", update.title));
+                }
+            }
+            ChapterPromiseDeltaAction::Deferred => {
+                if let Some(promise_id) = resolve_promise_id(memory, update)? {
+                    if memory
+                        .defer_promise(promise_id, &update.expected_payoff)
+                        .map_err(|e| e.to_string())?
+                    {
+                        memory
+                            .touch_promise_last_seen(
+                                promise_id,
+                                &update.chapter,
+                                &update.source_ref,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        memory
+                            .update_promise_status_flags(
+                                promise_id,
+                                &update.blocked_reason,
+                                update.promoted,
+                                update.core,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        promise_deferred += 1;
+                    }
+                } else {
+                    warnings.push(format!("promise defer skipped: {}", update.title));
+                }
+            }
+            ChapterPromiseDeltaAction::Abandoned => {
+                if let Some(promise_id) = resolve_promise_id(memory, update)? {
+                    if memory
+                        .abandon_promise(promise_id)
+                        .map_err(|e| e.to_string())?
+                    {
+                        promise_abandoned += 1;
+                    }
+                } else {
+                    warnings.push(format!("promise abandon skipped: {}", update.title));
+                }
+            }
+        }
+    }
+
+    let existing = memory
+        .get_book_state(project_id)
+        .map_err(|e| e.to_string())?
+        .unwrap_or(BookStateSummary {
+            project_id: project_id.to_string(),
+            title: project_id.to_string(),
+            long_term_constraints: Vec::new(),
+            mega_promises: Vec::new(),
+            irreversible_changes: Vec::new(),
+            source_ref: source_ref.clone(),
+            updated_at: String::new(),
+        });
+    let mut book_state = existing.clone();
+    let before = (
+        book_state.long_term_constraints.clone(),
+        book_state.mega_promises.clone(),
+        book_state.irreversible_changes.clone(),
+    );
+    for update in &delta.book_state_updates {
+        let target = match update.bucket {
+            ChapterBookStateDeltaBucket::LongTermConstraint => {
+                &mut book_state.long_term_constraints
+            }
+            ChapterBookStateDeltaBucket::MegaPromise => &mut book_state.mega_promises,
+            ChapterBookStateDeltaBucket::IrreversibleChange => &mut book_state.irreversible_changes,
+        };
+        if !target.iter().any(|item| item == &update.value) {
+            target.push(update.value.clone());
+        }
+    }
+    book_state.source_ref = source_ref.clone();
+    let book_state_updated = before
+        != (
+            book_state.long_term_constraints.clone(),
+            book_state.mega_promises.clone(),
+            book_state.irreversible_changes.clone(),
+        );
+    if book_state_updated {
+        memory
+            .upsert_book_state(&book_state)
+            .map_err(|e| e.to_string())?;
+    }
+
+    memory
+        .record_decision(
+            &delta.chapter_title,
+            "Chapter settlement applied",
+            "applied_chapter_settlement_delta",
+            &[],
+            &format!(
+                "Applied typed settlement delta for {} at {}.",
+                delta.chapter_title, delta.chapter_revision
+            ),
+            &[source_ref],
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(ChapterSettlementApplyResult {
+        applied: true,
+        chapter_result_snapshot_id: Some(chapter_result_snapshot_id),
+        promise_created,
+        promise_advanced,
+        promise_resolved,
+        promise_deferred,
+        promise_abandoned,
+        book_state_updated,
+        warnings,
+    })
+}
+
+fn resolve_promise_id(
+    memory: &WriterMemory,
+    update: &ChapterPromiseDeltaEntry,
+) -> Result<Option<i64>, String> {
+    if let Some(id) = update.promise_id {
+        return Ok(Some(id));
+    }
+    Ok(memory
+        .find_open_promise_by_title(&update.title)
+        .map_err(|e| e.to_string())?
+        .map(|promise| promise.id))
+}

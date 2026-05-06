@@ -26,6 +26,7 @@ pub mod project_intake;
 pub mod promise_planner;
 pub mod research_subtask;
 pub mod rewrite_impact;
+pub mod settlement_apply;
 pub mod supervised_sprint;
 
 // ── Memory & Feedback ──

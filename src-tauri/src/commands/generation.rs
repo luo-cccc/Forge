@@ -517,6 +517,27 @@ fn record_chapter_context_pack_built(
     kernel.record_chapter_context_pack_built_run_event(context, created_at_ms);
 }
 
+fn build_chapter_generation_config(
+    app: &tauri::AppHandle,
+    settings: llm_runtime::LlmSettings,
+    payload: GenerateChapterAutonomousPayload,
+    user_profile_entries: Vec<String>,
+) -> crate::chapter_generation::ChapterGenerationConfig {
+    let project_id =
+        crate::storage::active_project_id(app).unwrap_or_else(|_| "default".to_string());
+    let memory_path = crate::storage::active_project_data_dir(app)
+        .map(|dir| dir.join(crate::storage::WRITER_MEMORY_DB_FILENAME))
+        .unwrap_or_else(|_| std::path::PathBuf::from(crate::storage::WRITER_MEMORY_DB_FILENAME));
+    crate::chapter_generation::ChapterGenerationConfig {
+        app: app.clone(),
+        settings,
+        payload,
+        user_profile_entries,
+        project_id,
+        memory_path,
+    }
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -565,19 +586,7 @@ pub async fn batch_generate_chapter(
         let model_app = app_clone.clone();
 
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
-            crate::chapter_generation::ChapterGenerationConfig {
-                app: app_clone.clone(),
-                settings,
-                payload,
-                user_profile_entries,
-                project_id: crate::storage::active_project_id(&app_clone)
-                    .unwrap_or_else(|_| "default".to_string()),
-                memory_path: crate::storage::active_project_data_dir(&app_clone)
-                    .map(|dir| dir.join(crate::storage::WRITER_MEMORY_DB_FILENAME))
-                    .unwrap_or_else(|_| {
-                        std::path::PathBuf::from(crate::storage::WRITER_MEMORY_DB_FILENAME)
-                    }),
-            },
+            build_chapter_generation_config(&app_clone, settings, payload, user_profile_entries),
             |event| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
@@ -727,19 +736,7 @@ pub async fn generate_chapter_autonomous(
         let guard_app = app_clone.clone();
         let model_app = app_clone.clone();
         let terminal = crate::chapter_generation::run_chapter_generation_pipeline(
-            crate::chapter_generation::ChapterGenerationConfig {
-                app: app_clone.clone(),
-                settings,
-                payload,
-                user_profile_entries,
-                project_id: crate::storage::active_project_id(&app_clone)
-                    .unwrap_or_else(|_| "default".to_string()),
-                memory_path: crate::storage::active_project_data_dir(&app_clone)
-                    .map(|dir| dir.join(crate::storage::WRITER_MEMORY_DB_FILENAME))
-                    .unwrap_or_else(|_| {
-                        std::path::PathBuf::from(crate::storage::WRITER_MEMORY_DB_FILENAME)
-                    }),
-            },
+            build_chapter_generation_config(&app_clone, settings, payload, user_profile_entries),
             |event: ChapterGenerationEvent| {
                 let _ = app_clone.emit(crate::events::CHAPTER_GENERATION, event);
             },
@@ -1248,8 +1245,11 @@ pub fn repair_chapter_state(
         &memory,
         Vec::new(),
     );
-    let settlement_apply =
-        crate::chapter_generation::apply_chapter_settlement_delta(&memory, &project_id, &delta)?;
+    let settlement_apply = crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
+        &memory,
+        &project_id,
+        &delta,
+    )?;
     let telemetry = crate::chapter_generation::ChapterLengthTelemetry {
         target_chars: context.chapter_contract.target_chars,
         min_chars: context.chapter_contract.min_chars,

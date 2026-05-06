@@ -140,27 +140,13 @@ pub(crate) fn story_debt_from_open_promise(
         chapter_number_from_title(&promise.introduced_chapter).unwrap_or_default();
     let age = current_number.saturating_sub(introduced_number);
     let stale = age >= 8;
-    let blocked = !promise.blocked_reason.trim().is_empty();
-    let status = if promise.core {
-        StoryDebtStatus::Core
-    } else if blocked {
-        StoryDebtStatus::Blocked
-    } else if promise.promoted {
-        StoryDebtStatus::Promoted
-    } else if stale {
-        StoryDebtStatus::Stale
-    } else {
-        StoryDebtStatus::Open
-    };
+    let blocked = promise_is_blocked(promise);
+    let status = promise_debt_status(promise, stale, blocked);
     StoryDebtEntry {
         id: format!("debt_promise_{}", promise.id),
         chapter_title: active_chapter.clone(),
         category: StoryDebtCategory::Promise,
-        severity: if promise.core || blocked || stale || promise.priority >= 5 {
-            crate::writer_agent::kernel::StoryReviewSeverity::Warning
-        } else {
-            crate::writer_agent::kernel::StoryReviewSeverity::Info
-        },
+        severity: promise_debt_severity(promise, stale, blocked),
         status,
         title: format!("Open promise: {}", promise.title),
         message: promise_debt_message(promise, age, stale, blocked),
@@ -319,6 +305,40 @@ pub(crate) fn story_debt_status_weight(status: &StoryDebtStatus) -> i32 {
         StoryDebtStatus::Open => 2,
         StoryDebtStatus::Snoozed => 1,
         StoryDebtStatus::Stale => 0,
+    }
+}
+
+fn promise_is_blocked(promise: &PlotPromiseSummary) -> bool {
+    !promise.blocked_reason.trim().is_empty()
+}
+
+fn promise_debt_status(
+    promise: &PlotPromiseSummary,
+    stale: bool,
+    blocked: bool,
+) -> StoryDebtStatus {
+    if promise.core {
+        StoryDebtStatus::Core
+    } else if blocked {
+        StoryDebtStatus::Blocked
+    } else if promise.promoted {
+        StoryDebtStatus::Promoted
+    } else if stale {
+        StoryDebtStatus::Stale
+    } else {
+        StoryDebtStatus::Open
+    }
+}
+
+fn promise_debt_severity(
+    promise: &PlotPromiseSummary,
+    stale: bool,
+    blocked: bool,
+) -> crate::writer_agent::kernel::StoryReviewSeverity {
+    if promise.core || blocked || stale || promise.priority >= 5 {
+        crate::writer_agent::kernel::StoryReviewSeverity::Warning
+    } else {
+        crate::writer_agent::kernel::StoryReviewSeverity::Info
     }
 }
 

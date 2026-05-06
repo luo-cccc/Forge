@@ -443,9 +443,12 @@ fn settlement_delta_apply_updates_memory_ledgers() {
         repairable: true,
     };
 
-    let applied =
-        crate::chapter_generation::apply_chapter_settlement_delta(&memory, "novel-a", &delta)
-            .unwrap();
+    let applied = crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
+        &memory,
+        "novel-a",
+        &delta,
+    )
+    .unwrap();
 
     assert!(applied.applied);
     assert_eq!(applied.promise_created, 1);

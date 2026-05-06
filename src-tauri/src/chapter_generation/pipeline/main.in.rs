@@ -318,7 +318,7 @@ pub async fn run_chapter_generation_pipeline(
     let settlement_delta = build_chapter_settlement_delta(&config, &context, &draft.content, &saved);
     let settlement_apply =
         match crate::writer_agent::memory::WriterMemory::open(&config.memory_path) {
-            Ok(memory) => match apply_chapter_settlement_delta(
+            Ok(memory) => match crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
                 &memory,
                 &config.project_id,
                 &settlement_delta,
