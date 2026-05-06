@@ -113,9 +113,10 @@ fn derive_promise_delta_entries(
         if !(title_hit || desc_hit) {
             continue;
         }
-        let resolved = ["交代", "说出", "揭开", "归还", "放回", "找到", "解释", "兑现"]
-            .iter()
-            .any(|cue| lowercase.contains(cue));
+        let resolved = title_hit
+            && ["交代", "说出", "揭开", "归还", "放回", "找到", "解释", "兑现", "真相大白", "水落石出"]
+                .iter()
+                .any(|cue| lowercase.contains(cue));
         let blocked_reason = if chapter_result
             .new_conflicts
             .iter()

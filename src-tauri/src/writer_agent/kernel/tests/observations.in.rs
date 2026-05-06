@@ -214,6 +214,33 @@ fn save_observation_records_chapter_result_feedback() {
 }
 
 #[test]
+fn save_observation_uses_full_saved_text_not_tail_slice() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let mut kernel = WriterAgentKernel::new("default", memory);
+    let early = "林墨确认玉佩已经归还。";
+    let filler = "风雪压过旧门。".repeat(260);
+    let mut obs = observation(&format!("{}\n{}", early, filler));
+    obs.reason = ObservationReason::Save;
+    obs.source = ObservationSource::ChapterSave;
+    obs.chapter_title = Some("第一章".to_string());
+    obs.chapter_revision = Some("rev-full".to_string());
+    obs.prefix = format!("{}\n{}", early, filler);
+
+    kernel.observe(obs).unwrap();
+
+    let result = kernel
+        .ledger_snapshot()
+        .recent_chapter_results
+        .into_iter()
+        .find(|item| item.chapter_revision == "rev-full")
+        .unwrap();
+    assert!(
+        result.state_changes.iter().any(|line| line.contains("归还")),
+        "full saved text should preserve early state changes"
+    );
+}
+
+#[test]
 fn invalid_task_packet_is_rejected_before_trace() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);
@@ -269,4 +296,3 @@ fn save_observation_result_feedback_feeds_next_task_packet() {
         .iter()
         .any(|belief| belief.subject == "ResultFeedback" && belief.statement.contains("玉佩")));
 }
-

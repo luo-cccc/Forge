@@ -28,7 +28,16 @@ pub fn validate_promise_candidate_with_dedup(
     if let Ok(existing) = memory.get_open_promise_summaries() {
         if existing
             .iter()
-            .any(|p| p.title.trim() == candidate.title.trim())
+            .any(|p| {
+                crate::writer_agent::memory::promise_identity_matches(
+                    &candidate.kind,
+                    &candidate.title,
+                    &candidate.description,
+                    &p.kind,
+                    &p.title,
+                    &p.description,
+                )
+            })
         {
             return MemoryCandidateQuality::Duplicate {
                 existing_name: candidate.title.clone(),

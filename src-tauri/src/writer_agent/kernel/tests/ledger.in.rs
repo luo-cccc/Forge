@@ -541,3 +541,58 @@ fn story_debt_snapshot_uses_five_state_promise_ordering() {
     );
     assert!(story_debt.open_count >= 3);
 }
+
+#[test]
+fn settlement_upsert_preserves_original_result_created_at() {
+    let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    let original = crate::writer_agent::memory::ChapterResultSummary {
+        id: 0,
+        project_id: "novel-a".to_string(),
+        chapter_title: "Chapter-9".to_string(),
+        chapter_revision: "rev-keep-time".to_string(),
+        summary: "初版结果".to_string(),
+        state_changes: vec!["林墨失去玉佩。".to_string()],
+        character_progress: vec![],
+        new_conflicts: vec![],
+        new_clues: vec![],
+        promise_updates: vec![],
+        canon_updates: vec![],
+        source_ref: "chapter_save:Chapter-9:rev-keep-time".to_string(),
+        created_at: 111,
+    };
+    memory.record_chapter_result(&original).unwrap();
+
+    let delta = crate::chapter_generation::ChapterSettlementDelta {
+        chapter_title: "Chapter-9".to_string(),
+        chapter_revision: "rev-keep-time".to_string(),
+        summary: "修复后的结果".to_string(),
+        chapter_result: crate::chapter_generation::ChapterResultDelta {
+            summary: "修复后的结果".to_string(),
+            state_changes: vec!["林墨失去玉佩。".to_string()],
+            character_progress: vec![],
+            new_conflicts: vec![],
+            new_clues: vec![],
+            promise_updates: vec![],
+            canon_updates: vec![],
+        },
+        promise_updates: vec![],
+        arc_updates: vec![],
+        book_state_updates: vec![],
+        chapter_fact_delta: vec![],
+        promise_delta: vec![],
+        arc_delta: vec![],
+        book_state_delta: vec![],
+        continuity_issues: vec![],
+        repairable: true,
+    };
+
+    crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(&memory, "novel-a", &delta)
+        .unwrap();
+
+    let latest = memory
+        .latest_chapter_result("novel-a", "Chapter-9")
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest.created_at, 111);
+    assert_eq!(latest.summary, "修复后的结果");
+}

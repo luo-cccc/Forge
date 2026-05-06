@@ -121,6 +121,58 @@ impl PromiseKind {
     }
 }
 
+pub fn canonicalize_promise_identity_segment(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| {
+            !ch.is_whitespace() && !matches!(ch, '，' | '。' | '！' | '？' | ',' | '.' | '!' | '?')
+        })
+        .flat_map(|ch| ch.to_lowercase())
+        .collect::<String>()
+}
+
+pub fn promise_identity_key(kind: &str, title: &str, description: &str) -> String {
+    let title_key = canonicalize_promise_identity_segment(title);
+    let description_key = canonicalize_promise_identity_segment(description)
+        .chars()
+        .take(24)
+        .collect::<String>();
+    format!("{}|{}|{}", kind.trim(), title_key, description_key)
+}
+
+pub fn promise_identity_matches(
+    left_kind: &str,
+    left_title: &str,
+    left_description: &str,
+    right_kind: &str,
+    right_title: &str,
+    right_description: &str,
+) -> bool {
+    if left_kind.trim() != right_kind.trim() {
+        return false;
+    }
+    let left_title_key = canonicalize_promise_identity_segment(left_title);
+    let right_title_key = canonicalize_promise_identity_segment(right_title);
+    if left_title_key.is_empty() || left_title_key != right_title_key {
+        return false;
+    }
+    let left_desc = canonicalize_promise_identity_segment(left_description);
+    let right_desc = canonicalize_promise_identity_segment(right_description);
+    if left_desc.is_empty() || right_desc.is_empty() {
+        return false;
+    }
+    left_desc.contains(&right_desc)
+        || right_desc.contains(&left_desc)
+        || shared_prefix_len(&left_desc, &right_desc) >= 10
+}
+
+fn shared_prefix_len(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(l, r)| l == r)
+        .count()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryContractSummary {

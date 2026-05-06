@@ -1,4 +1,3 @@
-use agent_harness_core::truncate_context;
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
@@ -183,63 +182,4 @@ pub(crate) fn collect_user_profile_entries(app: &tauri::AppHandle) -> Result<Vec
             )
         })
         .collect())
-}
-
-fn writer_agent_memory_messages(
-    observation: &crate::writer_agent::observation::WriterObservation,
-) -> Vec<serde_json::Value> {
-    let text = observation.prefix.trim();
-    vec![
-        serde_json::json!({
-            "role": "system",
-            "content": "你是中文长篇小说项目的记忆抽取器。只从用户已经写出的正文中抽取值得长期保存的设定 canon 和未回收伏笔 promises。不要发明正文没有的信息。输出严格 JSON，不要 Markdown。JSON schema: {\"canon\":[{\"kind\":\"character|object|place|rule|entity\",\"name\":\"\",\"aliases\":[],\"summary\":\"\",\"attributes\":{},\"confidence\":0.0}],\"promises\":[{\"kind\":\"open_question|object_in_motion|foreshadowing|mystery\",\"title\":\"\",\"description\":\"\",\"introducedChapter\":\"\",\"expectedPayoff\":\"\",\"priority\":0,\"confidence\":0.0}]}。只返回置信度 >=0.55 的条目，最多 canon 5 条、promises 5 条。"
-        }),
-        serde_json::json!({
-            "role": "user",
-            "content": format!(
-                "章节: {}\n当前段落:\n{}\n\n章节文本摘录:\n{}",
-                observation.chapter_title.as_deref().unwrap_or("current chapter"),
-                observation.paragraph,
-                truncate_context(text, 3_500)
-            )
-        }),
-    ]
-}
-
-pub(crate) fn spawn_llm_memory_proposals(
-    app: tauri::AppHandle,
-    observation: crate::writer_agent::observation::WriterObservation,
-) {
-    let Some(api_key) = resolve_api_key() else {
-        return;
-    };
-    let settings = llm_runtime::settings(api_key);
-    let model = settings.model.clone();
-    let messages = writer_agent_memory_messages(&observation);
-
-    tokio::spawn(async move {
-        let value = match llm_runtime::chat_json(&settings, messages, 20).await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("Writer Agent LLM memory extraction failed: {}", e);
-                return;
-            }
-        };
-
-        let state = app.state::<AppState>();
-        let proposals = {
-            let mut kernel = match state.writer_kernel.lock() {
-                Ok(kernel) => kernel,
-                Err(e) => {
-                    tracing::error!("Writer kernel lock poisoned: {}", e);
-                    return;
-                }
-            };
-            kernel.create_llm_memory_proposals(observation, value, &model)
-        };
-
-        for proposal in proposals {
-            let _ = app.emit(events::AGENT_PROPOSAL, proposal);
-        }
-    });
 }

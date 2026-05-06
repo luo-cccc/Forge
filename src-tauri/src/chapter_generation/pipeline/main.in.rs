@@ -315,7 +315,27 @@ pub async fn run_chapter_generation_pipeline(
     if let Err(error) = update_outline_after_generation(&config.app, &context.target, &saved) {
         warnings.push(format!("Outline update skipped: {}", error.message));
     }
-    let settlement_delta = build_chapter_settlement_delta(&config, &context, &draft.content, &saved);
+    let settlement_delta = match build_chapter_settlement_delta(&config, &context, &draft.content, &saved) {
+        Ok(delta) => delta,
+        Err(error) => {
+            warnings.push(format!("Settlement build failed: {}", error));
+            ChapterSettlementDelta {
+                chapter_title: saved.chapter_title.clone(),
+                chapter_revision: saved.new_revision.clone(),
+                summary: String::new(),
+                chapter_result: ChapterResultDelta::default(),
+                promise_updates: Vec::new(),
+                arc_updates: Vec::new(),
+                book_state_updates: Vec::new(),
+                chapter_fact_delta: Vec::new(),
+                promise_delta: Vec::new(),
+                arc_delta: Vec::new(),
+                book_state_delta: Vec::new(),
+                continuity_issues: context.warnings.clone(),
+                repairable: true,
+            }
+        }
+    };
     let settlement_apply =
         match crate::writer_agent::memory::WriterMemory::open(&config.memory_path) {
             Ok(memory) => match crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
@@ -405,10 +425,10 @@ fn build_chapter_settlement_delta(
     context: &BuiltChapterContext,
     generated_content: &str,
     saved: &SaveGeneratedChapterOutput,
-) -> ChapterSettlementDelta {
+) -> Result<ChapterSettlementDelta, String> {
     let memory = crate::writer_agent::memory::WriterMemory::open(&config.memory_path)
-        .expect("writer memory must open for chapter settlement");
-    build_basic_chapter_settlement_delta(
+        .map_err(|e| e.to_string())?;
+    Ok(build_basic_chapter_settlement_delta(
         &config.project_id,
         &saved.chapter_title,
         &saved.new_revision,
@@ -421,7 +441,7 @@ fn build_chapter_settlement_delta(
             .filter(|warning| !warning.trim().is_empty())
             .cloned()
             .collect(),
-    )
+    ))
 }
 
 impl ChapterGenerationEvent {

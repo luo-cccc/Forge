@@ -41,9 +41,11 @@ pub fn apply_chapter_settlement_delta(
 
     for update in &delta.promise_updates {
         match update.action {
-            ChapterPromiseDeltaAction::Introduced => match memory
-                .find_open_promise_by_title(&update.title)
-            {
+            ChapterPromiseDeltaAction::Introduced => match memory.find_open_promise_by_identity(
+                &update.kind,
+                &update.title,
+                &update.description,
+            ) {
                 Ok(Some(existing)) => {
                     memory
                         .touch_promise_last_seen(existing.id, &update.chapter, &update.source_ref)
@@ -235,7 +237,7 @@ fn resolve_promise_id(
         return Ok(Some(id));
     }
     Ok(memory
-        .find_open_promise_by_title(&update.title)
+        .find_open_promise_by_identity(&update.kind, &update.title, &update.description)
         .map_err(|e| e.to_string())?
         .map(|promise| promise.id))
 }

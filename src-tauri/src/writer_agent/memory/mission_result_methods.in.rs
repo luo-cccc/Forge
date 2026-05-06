@@ -200,9 +200,8 @@ impl WriterMemory {
                      new_clues_json=?5,
                      promise_updates_json=?6,
                      canon_updates_json=?7,
-                     source_ref=?8,
-                     created_at=?9
-                 WHERE id=?10",
+                     source_ref=?8
+                 WHERE id=?9",
                 rusqlite::params![
                     result.summary,
                     string_vec_json(&result.state_changes),
@@ -212,7 +211,6 @@ impl WriterMemory {
                     string_vec_json(&result.promise_updates),
                     string_vec_json(&result.canon_updates),
                     result.source_ref,
-                    result.created_at as i64,
                     existing_id,
                 ],
             )?;

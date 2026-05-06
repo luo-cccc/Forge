@@ -341,11 +341,20 @@ pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
     let duplicate = PlotPromiseOp {
         kind: "mystery_clue".to_string(),
         title: "玉佩下落".to_string(),
-        description: "张三带走了玉佩，去向不明。".to_string(),
+        description: "张三带走了玉佩，需要后续交代。".to_string(),
         introduced_chapter: "Ch2".to_string(),
         expected_payoff: "Ch5".to_string(),
         priority: 4,
         related_entities: vec!["张三".to_string(), "玉佩".to_string()],
+    };
+    let same_title_but_distinct = PlotPromiseOp {
+        kind: "mystery_clue".to_string(),
+        title: "玉佩下落".to_string(),
+        description: "林墨怀疑另一枚玉佩藏在旧门后。".to_string(),
+        introduced_chapter: "Ch4".to_string(),
+        expected_payoff: "Ch8".to_string(),
+        priority: 4,
+        related_entities: vec!["林墨".to_string(), "旧门".to_string()],
     };
     let new_promise = PlotPromiseOp {
         kind: "object_whereabouts".to_string(),
@@ -361,7 +370,14 @@ pub fn run_promise_dedup_against_existing_eval() -> EvalResult {
     match validate_promise_candidate_with_dedup(&duplicate, &memory) {
         MemoryCandidateQuality::Duplicate { .. } => {}
         other => errors.push(format!(
-            "expected Duplicate for same-title promise, got {:?}",
+            "expected Duplicate for same-identity promise, got {:?}",
+            other
+        )),
+    }
+    match validate_promise_candidate_with_dedup(&same_title_but_distinct, &memory) {
+        MemoryCandidateQuality::Acceptable => {}
+        other => errors.push(format!(
+            "expected Acceptable for same-title but distinct promise, got {:?}",
             other
         )),
     }

@@ -25,7 +25,7 @@ pub(crate) fn observe_chapter_save(
             to: cursor,
         }),
         selection: None,
-        prefix: char_tail(&text, 3_000),
+        prefix: text.clone(),
         suffix: String::new(),
         paragraph,
         full_text_digest: Some(storage::content_revision(&text)),
@@ -41,10 +41,6 @@ pub(crate) fn observe_chapter_save(
     for proposal in proposals {
         app.emit(events::AGENT_PROPOSAL, proposal)
             .map_err(|e| format!("Failed to emit agent proposal: {}", e))?;
-    }
-
-    if crate::api_key::resolve_api_key().is_some() {
-        crate::memory_context::spawn_llm_memory_proposals(app.clone(), observation);
     }
 
     Ok(())

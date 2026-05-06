@@ -159,6 +159,27 @@ impl WriterMemory {
         .optional()
     }
 
+    pub fn find_open_promise_by_identity(
+        &self,
+        kind: &str,
+        title: &str,
+        description: &str,
+    ) -> rusqlite::Result<Option<PlotPromiseSummary>> {
+        Ok(self
+            .get_open_promise_summaries()?
+            .into_iter()
+            .find(|promise| {
+                crate::writer_agent::memory::promise_identity_matches(
+                    kind,
+                    title,
+                    description,
+                    &promise.kind,
+                    &promise.title,
+                    &promise.description,
+                )
+            }))
+    }
+
     pub fn touch_promise_last_seen(
         &self,
         promise_id: i64,
