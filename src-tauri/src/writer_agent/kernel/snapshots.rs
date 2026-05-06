@@ -507,6 +507,7 @@ impl WriterAgentKernel {
 include!("snapshots/memory_reliability.in.rs");
 
 include!("snapshots/context_trends.in.rs");
+include!("snapshots/today_five.in.rs");
 
 include!("reader_compensation_review.in.rs");
 include!("cache_metrics.in.rs");

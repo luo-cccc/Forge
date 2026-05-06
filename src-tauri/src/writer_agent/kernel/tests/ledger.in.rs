@@ -403,6 +403,7 @@ fn settlement_delta_apply_updates_memory_ledgers() {
         chapter_title: "Chapter-12".to_string(),
         chapter_revision: "rev-1".to_string(),
         summary: "林墨归还玉佩，并确认旧门后的血契未断。".to_string(),
+        extraction: crate::chapter_generation::ChapterSettlementExtraction::default(),
         chapter_result: crate::chapter_generation::ChapterResultDelta {
             summary: "林墨归还玉佩，并确认旧门后的血契未断。".to_string(),
             state_changes: vec!["林墨归还玉佩。".to_string()],
@@ -566,6 +567,7 @@ fn settlement_upsert_preserves_original_result_created_at() {
         chapter_title: "Chapter-9".to_string(),
         chapter_revision: "rev-keep-time".to_string(),
         summary: "修复后的结果".to_string(),
+        extraction: crate::chapter_generation::ChapterSettlementExtraction::default(),
         chapter_result: crate::chapter_generation::ChapterResultDelta {
             summary: "修复后的结果".to_string(),
             state_changes: vec!["林墨失去玉佩。".to_string()],

@@ -364,6 +364,53 @@ pub struct ChapterResultDelta {
     pub canon_updates: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSettlementEvidence {
+    pub excerpt: String,
+    pub signal: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterResultExtractionCandidate {
+    pub field: String,
+    pub value: String,
+    pub confidence: f32,
+    pub evidence: Vec<ChapterSettlementEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterPromiseExtractionCandidate {
+    pub action: String,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    pub confidence: f32,
+    pub expected_payoff: String,
+    pub evidence: Vec<ChapterSettlementEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterBookStateExtractionCandidate {
+    pub bucket: String,
+    pub value: String,
+    pub confidence: f32,
+    pub evidence: Vec<ChapterSettlementEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSettlementExtraction {
+    pub summary_candidates: Vec<ChapterResultExtractionCandidate>,
+    pub chapter_result_candidates: Vec<ChapterResultExtractionCandidate>,
+    pub promise_candidates: Vec<ChapterPromiseExtractionCandidate>,
+    pub book_state_candidates: Vec<ChapterBookStateExtractionCandidate>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ChapterPromiseDeltaAction {
@@ -433,6 +480,8 @@ pub struct ChapterSettlementDelta {
     pub chapter_title: String,
     pub chapter_revision: String,
     pub summary: String,
+    #[serde(default)]
+    pub extraction: ChapterSettlementExtraction,
     #[serde(default)]
     pub chapter_result: ChapterResultDelta,
     #[serde(default)]

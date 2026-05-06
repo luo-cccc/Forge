@@ -323,6 +323,7 @@ pub async fn run_chapter_generation_pipeline(
                 chapter_title: saved.chapter_title.clone(),
                 chapter_revision: saved.new_revision.clone(),
                 summary: String::new(),
+                extraction: ChapterSettlementExtraction::default(),
                 chapter_result: ChapterResultDelta::default(),
                 promise_updates: Vec::new(),
                 arc_updates: Vec::new(),

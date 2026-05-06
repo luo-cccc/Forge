@@ -8,7 +8,7 @@ const baselineItems = [
   ["cargo run -p agent-evals", "265/265 evals passing"],
   ["npm run check:p2", "18/18 checks passing"],
   ["npm run check:p2-render", "write-mode DOM guard passing"],
-  ["npm run check:audit", "73 commands, 0 issues"],
+  ["npm run check:audit", "74 commands, 0 issues"],
   ["npm run check:architecture", "14/14 files within budget, eval root guard passing"],
   ["npm run lint", "passing"],
   ["npm run build", "passing"],

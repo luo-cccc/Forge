@@ -224,6 +224,23 @@ pub struct StoryDebtSnapshot {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TodayFiveSummary {
+    pub chapter_title: Option<String>,
+    pub items: Vec<TodayFiveItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodayFiveItem {
+    pub slot: String,
+    pub label: String,
+    pub value: String,
+    pub detail: String,
+    pub tone: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StoryDebtEntry {
     pub id: String,
     pub chapter_title: Option<String>,

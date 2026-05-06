@@ -66,6 +66,7 @@ const classification = {
   get_writer_agent_pending_proposals: RISK.READ_ONLY,
   get_story_review_queue: RISK.READ_ONLY,
   get_story_debt_snapshot: RISK.READ_ONLY,
+  get_writer_agent_today_five: RISK.READ_ONLY,
   get_supervised_sprint_plan: RISK.READ_ONLY,
   get_supervised_sprint_progress: RISK.READ_ONLY,
   get_reader_compensation_review_chain: RISK.READ_ONLY,

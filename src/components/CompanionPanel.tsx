@@ -32,7 +32,6 @@ import {
   type StoryContractDraft,
 } from "./CompanionPanel.contract";
 import {
-  buildSecondBrainItems,
   contextBudgetTone,
   formatContextBudgetDetail,
   formatContextBudgetValue,
@@ -59,6 +58,7 @@ import type {
   StoryDebtSnapshot,
   StoryDebtEntry,
   StoryReviewQueueEntry,
+  TodayFiveSummary,
   WriterAgentTraceSnapshot,
   WriterOperation,
 } from "../protocol";
@@ -77,6 +77,8 @@ interface ApplyOperationResult {
   error?: string;
 }
 
+type CompanionTone = "neutral" | "accent" | "danger" | "success";
+
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
@@ -92,6 +94,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [reviewQueue, setReviewQueue] = useState<StoryReviewQueueEntry[]>([]);
   const [storyDebt, setStoryDebt] = useState<StoryDebtSnapshot | null>(null);
+  const [todayFive, setTodayFive] = useState<TodayFiveSummary | null>(null);
   const [trace, setTrace] = useState<WriterAgentTraceSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<"status" | "foundation" | "queue" | "promises" | "canon" | "decisions" | "audit">("status");
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -105,12 +108,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt, nextTrace] = await Promise.all([
+      const [nextStatus, nextLedger, nextProposals, nextReviewQueue, nextStoryDebt, nextTodayFive, nextTrace] = await Promise.all([
         invoke<WriterAgentStatus>(Commands.getWriterAgentStatus),
         invoke<WriterAgentLedgerSnapshot>(Commands.getWriterAgentLedger),
         invoke<AgentProposal[]>(Commands.getWriterAgentPendingProposals),
         invoke<StoryReviewQueueEntry[]>(Commands.getStoryReviewQueue),
         invoke<StoryDebtSnapshot>(Commands.getStoryDebtSnapshot),
+        invoke<TodayFiveSummary>(Commands.getWriterAgentTodayFive),
         invoke<WriterAgentTraceSnapshot>(Commands.getWriterAgentTrace, { limit: 24 }),
       ]);
       invoke<SprintProgress | null>(Commands.getSupervisedSprintProgress)
@@ -131,6 +135,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       setLedger(nextLedger);
       setReviewQueue(nextReviewQueue);
       setStoryDebt(nextStoryDebt);
+      setTodayFive(nextTodayFive);
       setTrace(nextTrace);
       if (foundationChapterRef.current !== currentChapter) {
         foundationChapterRef.current = currentChapter;
@@ -538,15 +543,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       || (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3)
       || b.priority - a.priority,
   );
-  const secondBrainItems = buildSecondBrainItems(
-    ledger,
-    storyDebt,
-    pendingProposals,
-    currentChapter,
-    trace,
-    isAgentThinking,
-    rankedPromises,
-  );
+  const secondBrainItems = todayFive?.items ?? [];
   const availableTabs =
     mode === "write"
       ? (["status"] as const)
@@ -669,13 +666,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
               <div className="grid grid-cols-1 gap-2 2xl:grid-cols-2">
                 {secondBrainItems.map((item) => (
                   <div
-                    key={item.label}
-                    className={`min-w-0 rounded border p-2 text-xs ${secondBrainToneClass(item.tone)}`}
+                    key={item.slot}
+                    className={`min-w-0 rounded border p-2 text-xs ${secondBrainToneClass(item.tone as CompanionTone)}`}
                   >
                     <div className="mb-1 text-[10px] uppercase tracking-wide text-text-muted">
                       {item.label}
                     </div>
-                    <div className={`truncate font-medium ${secondBrainValueClass(item.tone)}`} title={item.value}>
+                    <div className={`truncate font-medium ${secondBrainValueClass(item.tone as CompanionTone)}`} title={item.value}>
                       {item.value}
                     </div>
                     {item.detail && (

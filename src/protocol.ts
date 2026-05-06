@@ -32,6 +32,7 @@ export const Commands = {
   getWriterAgentTrace: "get_writer_agent_trace",
   getWriterAgentInspectorTimeline: "get_writer_agent_inspector_timeline",
   getWriterAgentCompanionTimelineSummary: "get_writer_agent_companion_timeline_summary",
+  getWriterAgentTodayFive: "get_writer_agent_today_five",
   getReaderCompensationReviewChain: "get_reader_compensation_review_chain",
   getStoryReviewQueue: "get_story_review_queue",
   getStoryDebtSnapshot: "get_story_debt_snapshot",
@@ -1012,6 +1013,19 @@ export interface StoryDebtEntry {
   relatedReviewIds: string[];
   operations: WriterOperation[];
   createdAt: number;
+}
+
+export interface TodayFiveItem {
+  slot: string;
+  label: string;
+  value: string;
+  detail: string;
+  tone: "neutral" | "accent" | "danger" | "success" | string;
+}
+
+export interface TodayFiveSummary {
+  chapterTitle?: string;
+  items: TodayFiveItem[];
 }
 
 export type WriterOperation =

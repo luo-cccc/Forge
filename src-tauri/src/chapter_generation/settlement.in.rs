@@ -22,20 +22,26 @@ pub fn build_basic_chapter_settlement_delta(
     );
     let chapter_result = chapter_result_from_observation(&observation, memory);
     let open_promises = memory.get_open_promise_summaries().unwrap_or_default();
-    let promise_updates = derive_promise_delta_entries(
+    let extraction = build_settlement_extraction(
         generated_content,
         &observation,
         &chapter_result,
         &open_promises,
     );
+    let promise_updates = materialize_promise_delta_entries(&extraction, &chapter_result, &open_promises);
     let book_state_updates = derive_book_state_updates(&chapter_result, &promise_updates);
     let arc_updates = derive_arc_updates(&chapter_result, &promise_updates);
-    let summary = chapter_result.summary.clone();
+    let summary = extraction
+        .summary_candidates
+        .first()
+        .map(|candidate| candidate.value.clone())
+        .unwrap_or_else(|| chapter_result.summary.clone());
 
     ChapterSettlementDelta {
         chapter_title: chapter_title.to_string(),
         chapter_revision: chapter_revision.to_string(),
         summary,
+        extraction,
         chapter_result: ChapterResultDelta {
             summary: chapter_result.summary.clone(),
             state_changes: chapter_result.state_changes.clone(),
@@ -94,14 +100,47 @@ fn settlement_observation(
     }
 }
 
-fn derive_promise_delta_entries(
+fn build_settlement_extraction(
     generated_content: &str,
     observation: &WriterObservation,
     chapter_result: &ChapterResultSummary,
     open_promises: &[PlotPromiseSummary],
-) -> Vec<ChapterPromiseDeltaEntry> {
-    let mut updates = Vec::new();
+) -> ChapterSettlementExtraction {
+    let mut promise_candidates = Vec::new();
+    let mut chapter_result_candidates = Vec::new();
     let lowercase = generated_content.to_lowercase();
+
+    chapter_result_candidates.push(ChapterResultExtractionCandidate {
+        field: "summary".to_string(),
+        value: chapter_result.summary.clone(),
+        confidence: 0.72,
+        evidence: vec![ChapterSettlementEvidence {
+            excerpt: chapter_result.summary.clone(),
+            signal: "chapter_result_summary".to_string(),
+        }],
+    });
+    for line in &chapter_result.state_changes {
+        chapter_result_candidates.push(ChapterResultExtractionCandidate {
+            field: "state_change".to_string(),
+            value: line.clone(),
+            confidence: 0.7,
+            evidence: vec![ChapterSettlementEvidence {
+                excerpt: line.clone(),
+                signal: "state_change_cue".to_string(),
+            }],
+        });
+    }
+    for line in &chapter_result.new_conflicts {
+        chapter_result_candidates.push(ChapterResultExtractionCandidate {
+            field: "new_conflict".to_string(),
+            value: line.clone(),
+            confidence: 0.68,
+            evidence: vec![ChapterSettlementEvidence {
+                excerpt: line.clone(),
+                signal: "conflict_cue".to_string(),
+            }],
+        });
+    }
 
     for promise in open_promises {
         let title_hit =
@@ -131,62 +170,147 @@ fn derive_promise_delta_entries(
         } else {
             String::new()
         };
-        updates.push(ChapterPromiseDeltaEntry {
+        promise_candidates.push(ChapterPromiseExtractionCandidate {
             action: if resolved {
-                ChapterPromiseDeltaAction::Resolved
+                "resolved".to_string()
             } else if !blocked_reason.is_empty() {
-                ChapterPromiseDeltaAction::Deferred
+                "deferred".to_string()
             } else {
-                ChapterPromiseDeltaAction::Advanced
+                "advanced".to_string()
             },
-            promise_id: Some(promise.id),
             kind: promise.kind.clone(),
             title: promise.title.clone(),
             description: promise.description.clone(),
-            chapter: observation
-                .chapter_title
-                .clone()
-                .unwrap_or_else(|| "current chapter".to_string()),
-            source_ref: chapter_result.source_ref.clone(),
             expected_payoff: if !blocked_reason.is_empty() {
                 next_chapter_label(&chapter_result.chapter_title)
             } else {
                 promise.expected_payoff.clone()
             },
-            priority: promise.priority,
-            related_entities: Vec::new(),
-            core: promise.core || promise.priority >= 7,
-            promoted: promise.promoted || promise.priority >= 5,
-            blocked_reason,
-            evidence: chapter_result.summary.clone(),
+            confidence: if resolved { 0.82 } else if !blocked_reason.is_empty() { 0.74 } else { 0.7 },
+            evidence: vec![
+                ChapterSettlementEvidence {
+                    excerpt: promise.title.clone(),
+                    signal: if title_hit { "title_hit".to_string() } else { "description_hit".to_string() },
+                },
+                ChapterSettlementEvidence {
+                    excerpt: chapter_result.summary.clone(),
+                    signal: "result_summary".to_string(),
+                },
+                ChapterSettlementEvidence {
+                    excerpt: blocked_reason.clone(),
+                    signal: "blocked_reason".to_string(),
+                },
+            ]
+            .into_iter()
+            .filter(|item| !item.excerpt.trim().is_empty())
+            .collect(),
         });
     }
 
     for promise in extract_plot_promises(generated_content, observation) {
-        if updates.iter().any(|existing| existing.title == promise.title)
+        if promise_candidates.iter().any(|existing| existing.title == promise.title)
             || open_promises.iter().any(|existing| existing.title == promise.title)
         {
             continue;
         }
-        updates.push(ChapterPromiseDeltaEntry {
-            action: ChapterPromiseDeltaAction::Introduced,
-            promise_id: None,
+        promise_candidates.push(ChapterPromiseExtractionCandidate {
+            action: "introduced".to_string(),
             kind: promise.kind.clone(),
             title: promise.title.clone(),
             description: promise.description.clone(),
-            chapter: promise.introduced_chapter.clone(),
-            source_ref: chapter_result.source_ref.clone(),
             expected_payoff: promise.expected_payoff.clone(),
-            priority: promise.priority,
-            related_entities: promise.related_entities.clone(),
-            core: promise.priority >= 5,
-            promoted: promise.priority >= 4,
-            blocked_reason: String::new(),
-            evidence: promise.description.clone(),
+            confidence: 0.66,
+            evidence: vec![ChapterSettlementEvidence {
+                excerpt: promise.description.clone(),
+                signal: "new_promise_extracted".to_string(),
+            }],
         });
     }
 
-    updates
+    let summary_candidates = vec![ChapterResultExtractionCandidate {
+        field: "summary".to_string(),
+        value: chapter_result.summary.clone(),
+        confidence: 0.72,
+        evidence: vec![ChapterSettlementEvidence {
+            excerpt: chapter_result.summary.clone(),
+            signal: "chapter_result_summary".to_string(),
+        }],
+    }];
+    let book_state_candidates = chapter_result
+        .state_changes
+        .iter()
+        .filter(|line| looks_irreversible(line))
+        .map(|line| ChapterBookStateExtractionCandidate {
+            bucket: "irreversible_change".to_string(),
+            value: line.clone(),
+            confidence: 0.76,
+            evidence: vec![ChapterSettlementEvidence {
+                excerpt: line.clone(),
+                signal: "irreversible_state_change".to_string(),
+            }],
+        })
+        .collect();
+
+    ChapterSettlementExtraction {
+        summary_candidates,
+        chapter_result_candidates,
+        promise_candidates,
+        book_state_candidates,
+        warnings: Vec::new(),
+    }
+}
+
+fn materialize_promise_delta_entries(
+    extraction: &ChapterSettlementExtraction,
+    chapter_result: &ChapterResultSummary,
+    open_promises: &[PlotPromiseSummary],
+) -> Vec<ChapterPromiseDeltaEntry> {
+    extraction
+        .promise_candidates
+        .iter()
+        .filter(|candidate| candidate.confidence >= 0.6)
+        .map(|candidate| {
+            let existing = open_promises
+                .iter()
+                .find(|promise| promise.title == candidate.title && promise.kind == candidate.kind);
+            let action = match candidate.action.as_str() {
+                "introduced" => ChapterPromiseDeltaAction::Introduced,
+                "resolved" => ChapterPromiseDeltaAction::Resolved,
+                "deferred" => ChapterPromiseDeltaAction::Deferred,
+                _ => ChapterPromiseDeltaAction::Advanced,
+            };
+            ChapterPromiseDeltaEntry {
+                action,
+                promise_id: existing.map(|promise| promise.id),
+                kind: candidate.kind.clone(),
+                title: candidate.title.clone(),
+                description: candidate.description.clone(),
+                chapter: chapter_result.chapter_title.clone(),
+                source_ref: chapter_result.source_ref.clone(),
+                expected_payoff: candidate.expected_payoff.clone(),
+                priority: existing.map(|promise| promise.priority).unwrap_or(4),
+                related_entities: Vec::new(),
+                core: existing.map(|promise| promise.core).unwrap_or(false),
+                promoted: existing.map(|promise| promise.promoted).unwrap_or(false),
+                blocked_reason: if candidate.action == "deferred" {
+                    chapter_result
+                        .new_conflicts
+                        .iter()
+                        .find(|line| line.contains(&candidate.title))
+                        .cloned()
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                evidence: candidate
+                    .evidence
+                    .iter()
+                    .map(|item| item.excerpt.clone())
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            }
+        })
+        .collect()
 }
 
 fn derive_book_state_updates(

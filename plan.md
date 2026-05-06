@@ -148,6 +148,110 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 - `Promise Ledger` 能区分普通未回收、陈旧债务、核心债务、阻塞债务。
 - `repair-state` 可以在不改正文的前提下修复 state 并重新过 gate。
 
+### 3.3 底层封顶冲刺
+
+在 `3.2` 主线推进后，必须插入一个单独的“底层封顶冲刺”，先把内核语义封死，再进入用户感受层和前端打磨。
+
+这不是新功能阶段，而是“把已经做出来的能力收成一套稳定生产内核”的阶段。
+
+顺序必须是：
+
+1. 底层封顶
+2. 用户感受层打磨
+3. 前端表达层完善
+
+#### 3.3.1 为什么必须单独封顶
+
+当前 Forge 已经有：
+
+- `ChapterContract`
+- staged generation
+- `Story OS`
+- `Sprint v2`
+- typed settlement
+- `repair-state`
+- `TodayFiveSummary` 雏形
+
+这说明骨架已经足够，但“真相源 / 结算链 / 恢复链 / 默认行为”还没有完全定死。
+
+如果现在直接大做前端，会把仍在变化的底层语义包进 UI，后续每次改 state、settlement、save feedback、Companion 默认行为，都会带来前端返工。
+
+所以这一阶段的目标不是“再多做”，而是“彻底收口”。
+
+#### 3.3.2 本阶段只收 5 件事
+
+1. 权威状态封顶
+   - 章节保存、章节结算、结果反馈、`next beat`、`story debt`、Companion 默认状态，全部只认一套 authoritative state。
+   - 禁止再出现“后台一套推断、前端一套推断、save-observe 又一套推断”。
+
+2. settlement extraction 封顶
+   - 把 `ChapterSettlementDelta` 的 `chapter_result / promise_updates / book_state_updates` 固化成显式 extraction pipeline：
+     - candidate
+     - confidence
+     - evidence
+     - materialize
+     - apply
+   - `settlement` 必须可回放、可比较、可审计，而不是“看起来结构化”。
+
+3. 恢复与时序封顶
+   - `repair-state`、回滚、重新 apply、重建 artifact 必须严格幂等。
+   - 维修动作不能改变章节时间顺序、recent results 排序、`next beat` 语义。
+
+4. provider budget / 审计封顶
+   - 所有 provider call 必须进入同一种 `budget / approval / run-event` 体系。
+   - 不允许再有 save 后隐形模型调用、旁路抽取、未记账 provider 路径。
+
+5. 默认用户面封顶
+   - “作者今天最该看的 5 件事”必须变成后端 schema，而不是前端 display helper 即时推断。
+   - write mode 与 Inspect mode 的信息边界必须固定。
+
+#### 3.3.3 本阶段明确不做
+
+- 不新增大型产品面板
+- 不扩张 agent 数量
+- 不扩入口形态
+- 不先做视觉重构
+- 不先做营销/展示型前端包装
+
+#### 3.3.4 本阶段完成定义
+
+只有同时满足下面条件，才算“底层封顶完成”：
+
+- 所有保存路径产出同构的 authoritative chapter result
+- settlement extraction 有显式 artifact，可重放
+- `repair-state` 幂等，且不改 chronology
+- 所有 provider call 都能在 run events 中被追到
+- Companion write mode 只消费后端 `TodayFiveSummary`
+- `npm run verify` 全绿
+- `cargo run -p agent-evals` 全绿
+- 新增 3 个专项 gate：
+  - `save path consistency`
+  - `settlement replay consistency`
+  - `chronology preservation`
+
+#### 3.3.5 封顶后再进入的阶段
+
+底层封顶完成后，下一阶段才进入“用户感受层打磨”。
+
+这层不是前端样式，而是默认行为 contract，重点只处理：
+
+- 什么时候打断作者
+- 什么时候只记录不说话
+- 什么时候必须提示风险
+- `TodayFiveSummary` 的排序规则
+- 什么信息进入 write mode
+- 什么信息只进入 Inspect
+- 哪些失败自动修复
+- 哪些失败必须作者确认
+
+只有这一层稳定下来，前端表达层才值得细做。
+
+#### 3.3.6 最终一句话
+
+本阶段的唯一目标是：
+
+> 把 Forge 从“功能已经很多的长篇系统”，收成“语义闭合、真相统一、恢复可靠、默认行为稳定的长篇生产内核”。
+
 ### 3.1 当前完成度
 
 按 4 周主线看，代码完成度是：
