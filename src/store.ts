@@ -28,6 +28,12 @@ interface AppState {
   setIsAgentThinking: (v: boolean) => void;
   outlineData: OutlineNode[];
   setOutlineData: (data: OutlineNode[]) => void;
+  activeVolumeId: string | null;
+  setActiveVolumeId: (volumeId: string | null) => void;
+  volumeList: Array<{ id: string; title: string; startChapter: number; endChapter: number; status: string }>;
+  setVolumeList: (
+    volumes: Array<{ id: string; title: string; startChapter: number; endChapter: number; status: string }>,
+  ) => void;
   isInlineRequest: boolean;
   setIsInlineRequest: (v: boolean) => void;
   actionEpoch: number;
@@ -85,6 +91,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   outlineData: [],
   setOutlineData: (data) => set({ outlineData: data }),
+  activeVolumeId: null,
+  setActiveVolumeId: (volumeId) => set({ activeVolumeId: volumeId }),
+  volumeList: [],
+  setVolumeList: (volumes) => set({ volumeList: volumes }),
 
   isInlineRequest: false,
   setIsInlineRequest: (v) => set({ isInlineRequest: v }),

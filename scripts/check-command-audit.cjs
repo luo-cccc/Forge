@@ -50,6 +50,9 @@ const classification = {
   load_chapter: RISK.READ_ONLY,
   get_chapter_revision: RISK.READ_ONLY,
   get_outline: RISK.READ_ONLY,
+  list_volumes: RISK.READ_ONLY,
+  get_volume_snapshot: RISK.READ_ONLY,
+  get_book_state: RISK.READ_ONLY,
   get_project_graph_data: RISK.READ_ONLY,
   get_agent_tools: RISK.READ_ONLY,
   get_effective_agent_tool_inventory: RISK.READ_ONLY,
@@ -97,6 +100,9 @@ const classification = {
   record_implicit_ghost_rejection: RISK.MEMORY_WRITE,
   approve_writer_operation: RISK.MEMORY_WRITE,
   record_writer_operation_durable_save: RISK.MEMORY_WRITE,
+  save_volume: RISK.MEMORY_WRITE,
+  save_volume_snapshot: RISK.MEMORY_WRITE,
+  save_book_state: RISK.MEMORY_WRITE,
 
   // Manuscript write
   create_chapter: RISK.MANUSCRIPT_WRITE,
@@ -108,6 +114,7 @@ const classification = {
   // Destructive
   delete_lore_entry: RISK.DESTRUCTIVE,
   delete_outline_node: RISK.DESTRUCTIVE,
+  delete_volume: RISK.DESTRUCTIVE,
   rename_chapter_file: RISK.DESTRUCTIVE,
   restore_file_backup: RISK.DESTRUCTIVE,
   restore_project_brain_source_revision: RISK.DESTRUCTIVE,
@@ -211,9 +218,13 @@ for (const cmd of Object.keys(classification)) {
 const writeCommandsWithDirectWrites = [
   "save_chapter",
   "save_outline_node",
+  "save_volume",
+  "save_volume_snapshot",
+  "save_book_state",
   "create_chapter",
   "delete_lore_entry",
   "delete_outline_node",
+  "delete_volume",
   "rename_chapter_file",
   "restore_file_backup",
   "restore_project_brain_source_revision",

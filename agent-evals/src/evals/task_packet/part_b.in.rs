@@ -58,6 +58,7 @@ pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
         request_id: "chapter-trace-eval".to_string(),
         target,
         base_revision: "rev-8".to_string(),
+        chapter_contract: agent_writer_lib::chapter_generation::ChapterContract::default(),
         prompt_context: "User instruction\nCurrent chapter beat\nRelevant lorebook entries"
             .to_string(),
         sources,
@@ -530,4 +531,3 @@ pub fn run_continuity_diagnostic_artifact_recorded_eval() -> EvalResult {
         errors,
     )
 }
-

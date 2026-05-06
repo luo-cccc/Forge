@@ -177,6 +177,11 @@ fn seed_story_model_if_empty(
         Ok(_) => {}
         Err(e) => tracing::warn!("Chapter mission seed skipped: {}", e),
     }
+    match memory.ensure_default_book_state(project_id, &project_name) {
+        Ok(true) => tracing::info!("Seeded default book state for project {}", project_id),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("Book state seed skipped: {}", e),
+    }
 }
 
 pub(crate) fn startup_error(message: String) -> Box<dyn std::error::Error> {

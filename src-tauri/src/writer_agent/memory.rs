@@ -195,6 +195,56 @@ pub struct NextBeatSummary {
     pub source_refs: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeSummary {
+    pub id: String,
+    pub project_id: String,
+    pub title: String,
+    pub start_chapter: i64,
+    pub end_chapter: i64,
+    pub contract: serde_json::Value,
+    pub mission: serde_json::Value,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeSnapshotSummary {
+    pub project_id: String,
+    pub volume_id: String,
+    pub snapshot: serde_json::Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArcSnapshotSummary {
+    pub project_id: String,
+    pub arc_id: String,
+    pub volume_id: String,
+    pub title: String,
+    pub start_chapter: i64,
+    pub end_chapter: i64,
+    pub snapshot: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BookStateSummary {
+    pub project_id: String,
+    pub title: String,
+    pub long_term_constraints: Vec<String>,
+    pub mega_promises: Vec<String>,
+    pub irreversible_changes: Vec<String>,
+    pub source_ref: String,
+    pub updated_at: String,
+}
+
 impl ChapterMissionSummary {
     pub fn is_empty(&self) -> bool {
         [
@@ -650,3 +700,4 @@ include!("memory/tracing_tests.in.rs");
 include!("memory/reader_compensation_methods.in.rs");
 include!("memory/emotional_debt_lifecycle_methods.in.rs");
 include!("memory/emotional_debt_ledger_methods.in.rs");
+include!("memory/volume_arc_book_methods.in.rs");

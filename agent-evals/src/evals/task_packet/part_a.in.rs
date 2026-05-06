@@ -178,6 +178,7 @@ pub fn run_chapter_generation_task_packet_eval() -> EvalResult {
         request_id: "chapter-eval-1".to_string(),
         target,
         base_revision: "rev-7".to_string(),
+        chapter_contract: agent_writer_lib::chapter_generation::ChapterContract::default(),
         prompt_context: "User instruction\nOutline / beat sheet\nRelevant lorebook entries"
             .to_string(),
         sources,
@@ -677,4 +678,3 @@ pub fn run_generic_persona_not_used_as_foundation_eval() -> EvalResult {
         errors,
     )
 }
-

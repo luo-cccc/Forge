@@ -78,8 +78,9 @@ use commands::lore::{delete_lore_entry, get_lorebook, save_lore_entry};
 use commands::manual_agent::ask_agent;
 use commands::metacognitive_recovery::run_metacognitive_recovery;
 use commands::outline::{
-    delete_outline_node, get_outline, reorder_outline_nodes, save_outline_node,
-    update_outline_status,
+    delete_outline_node, delete_volume, get_book_state, get_outline, get_volume_snapshot,
+    list_volumes, reorder_outline_nodes, save_book_state, save_outline_node, save_volume,
+    save_volume_snapshot, update_outline_status,
 };
 use commands::settings::{check_api_key, set_api_key};
 use commands::writer_agent::{
@@ -171,6 +172,13 @@ pub fn run() {
             delete_outline_node,
             update_outline_status,
             reorder_outline_nodes,
+            list_volumes,
+            save_volume,
+            delete_volume,
+            get_volume_snapshot,
+            save_volume_snapshot,
+            get_book_state,
+            save_book_state,
             batch_generate_chapter,
             generate_chapter_autonomous,
             analyze_chapter,

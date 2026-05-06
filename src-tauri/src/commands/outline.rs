@@ -1,4 +1,6 @@
 use crate::storage::OutlineNode;
+use crate::writer_agent::memory::{BookStateSummary, VolumeSnapshotSummary, VolumeSummary};
+use tauri::Manager;
 
 #[tauri::command]
 pub fn get_outline(app: tauri::AppHandle) -> Result<Vec<OutlineNode>, String> {
@@ -80,4 +82,145 @@ pub fn reorder_outline_nodes(
         &["outline:order".to_string()],
     );
     Ok(nodes)
+}
+
+#[tauri::command]
+pub fn list_volumes(app: tauri::AppHandle) -> Result<Vec<VolumeSummary>, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .list_volumes(&kernel.project_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_volume(app: tauri::AppHandle, volume: VolumeSummary) -> Result<VolumeSummary, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .upsert_volume(&volume)
+        .map_err(|e| e.to_string())?;
+    crate::audit_project_file_write(
+        &app,
+        &format!("volume:{}", volume.id),
+        &format!("Volume saved: {}", volume.title),
+        "saved_volume",
+        &format!(
+            "Author saved volume '{}' (chapters {}-{}, status '{}').",
+            volume.title, volume.start_chapter, volume.end_chapter, volume.status
+        ),
+        &[format!("volume:{}", volume.id)],
+    );
+    Ok(volume)
+}
+
+#[tauri::command]
+pub fn delete_volume(app: tauri::AppHandle, volume_id: String) -> Result<bool, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    let deleted = kernel
+        .memory
+        .delete_volume(&kernel.project_id, &volume_id)
+        .map_err(|e| e.to_string())?;
+    if deleted {
+        crate::audit_project_file_write(
+            &app,
+            &format!("volume:{}", volume_id),
+            "Volume deleted",
+            "deleted_volume",
+            &format!("Author deleted volume '{}'.", volume_id),
+            &[format!("volume:{}", volume_id)],
+        );
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
+pub fn get_volume_snapshot(
+    app: tauri::AppHandle,
+    volume_id: String,
+) -> Result<Option<VolumeSnapshotSummary>, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .get_latest_volume_snapshot(&kernel.project_id, &volume_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_volume_snapshot(
+    app: tauri::AppHandle,
+    snapshot: VolumeSnapshotSummary,
+) -> Result<i64, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    let id = kernel
+        .memory
+        .upsert_volume_snapshot(&snapshot)
+        .map_err(|e| e.to_string())?;
+    crate::audit_project_file_write(
+        &app,
+        &format!("volume_snapshot:{}", snapshot.volume_id),
+        "Volume snapshot saved",
+        "saved_volume_snapshot",
+        &format!("Author saved volume snapshot for '{}'.", snapshot.volume_id),
+        &[format!("volume_snapshot:{}", snapshot.volume_id)],
+    );
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn get_book_state(app: tauri::AppHandle) -> Result<Option<BookStateSummary>, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .get_book_state(&kernel.project_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_book_state(
+    app: tauri::AppHandle,
+    book_state: BookStateSummary,
+) -> Result<BookStateSummary, String> {
+    let state = app.state::<crate::AppState>();
+    let kernel = state
+        .writer_kernel
+        .lock()
+        .map_err(|_| "Writer kernel lock poisoned".to_string())?;
+    kernel
+        .memory
+        .upsert_book_state(&book_state)
+        .map_err(|e| e.to_string())?;
+    crate::audit_project_file_write(
+        &app,
+        "book_state",
+        "Book state saved",
+        "saved_book_state",
+        &format!("Author saved book state '{}'.", book_state.title),
+        &["book_state".to_string()],
+    );
+    Ok(book_state)
 }

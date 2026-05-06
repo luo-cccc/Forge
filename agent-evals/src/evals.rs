@@ -50,6 +50,7 @@ mod supervised_sprint;
 mod task_packet;
 mod tool_policy;
 mod trajectory;
+mod volume_scope;
 mod writing_relevance;
 pub use context_spine::*;
 pub use reader_compensation::*;
@@ -81,6 +82,7 @@ pub use supervised_sprint::*;
 pub use task_packet::*;
 pub use tool_policy::*;
 pub use trajectory::*;
+pub use volume_scope::*;
 pub use writing_relevance::*;
 
 fn eval_llm_message(role: &str, content: &str) -> agent_harness_core::provider::LlmMessage {

@@ -15,6 +15,7 @@ export const Commands = {
   createChapter: "create_chapter",
   deleteLoreEntry: "delete_lore_entry",
   deleteOutlineNode: "delete_outline_node",
+  deleteVolume: "delete_volume",
   exportDiagnosticLogs: "export_diagnostic_logs",
   exportWriterAgentTrajectory: "export_writer_agent_trajectory",
   generateChapterAutonomous: "generate_chapter_autonomous",
@@ -41,6 +42,8 @@ export const Commands = {
   ingestExternalResearch: "ingest_external_research",
   getLorebook: "get_lorebook",
   getOutline: "get_outline",
+  getBookState: "get_book_state",
+  getVolumeSnapshot: "get_volume_snapshot",
   getProjectGraphData: "get_project_graph_data",
   loadChapter: "load_chapter",
   listFileBackups: "list_file_backups",
@@ -49,11 +52,15 @@ export const Commands = {
   reportEditorState: "report_editor_state",
   reportSemanticLintState: "report_semantic_lint_state",
   reorderOutlineNodes: "reorder_outline_nodes",
+  listVolumes: "list_volumes",
   renameChapterFile: "rename_chapter_file",
   restoreFileBackup: "restore_file_backup",
   saveChapter: "save_chapter",
   saveLoreEntry: "save_lore_entry",
   saveOutlineNode: "save_outline_node",
+  saveBookState: "save_book_state",
+  saveVolume: "save_volume",
+  saveVolumeSnapshot: "save_volume_snapshot",
   setApiKey: "set_api_key",
 } as const;
 
@@ -83,6 +90,36 @@ export const Events = {
 export interface ChapterRestored {
   title: string;
   revision: string;
+}
+
+export interface VolumeSummary {
+  id: string;
+  projectId: string;
+  title: string;
+  startChapter: number;
+  endChapter: number;
+  contract: unknown;
+  mission: unknown;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VolumeSnapshotSummary {
+  projectId: string;
+  volumeId: string;
+  snapshot: unknown;
+  createdAt: string;
+}
+
+export interface BookStateSummary {
+  projectId: string;
+  title: string;
+  longTermConstraints: string[];
+  megaPromises: string[];
+  irreversibleChanges: string[];
+  sourceRef: string;
+  updatedAt: string;
 }
 
 export interface ProjectFileRestored {

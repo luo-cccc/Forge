@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -290,6 +290,51 @@ CREATE TABLE IF NOT EXISTS emotional_debt_ledger (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS volumes (
+    id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    start_chapter INTEGER DEFAULT 0,
+    end_chapter INTEGER DEFAULT 0,
+    contract_json TEXT DEFAULT '{}',
+    mission_json TEXT DEFAULT '{}',
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(project_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS volume_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    volume_id TEXT NOT NULL,
+    snapshot_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS arc_snapshots (
+    arc_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    volume_id TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    start_chapter INTEGER DEFAULT 0,
+    end_chapter INTEGER DEFAULT 0,
+    snapshot_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(project_id, arc_id)
+);
+
+CREATE TABLE IF NOT EXISTS book_state (
+    project_id TEXT PRIMARY KEY,
+    title TEXT DEFAULT '',
+    long_term_constraints_json TEXT DEFAULT '[]',
+    mega_promises_json TEXT DEFAULT '[]',
+    irreversible_changes_json TEXT DEFAULT '[]',
+    source_ref TEXT DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 "#;
 
 const INDEX_SCHEMA: &str = r#"
@@ -325,4 +370,7 @@ CREATE INDEX IF NOT EXISTS idx_edl_kind ON emotional_debt_lifecycles(debt_kind);
 CREATE INDEX IF NOT EXISTS idx_edlgr_project_status ON emotional_debt_ledger(project_id, payoff_status);
 CREATE INDEX IF NOT EXISTS idx_edlgr_kind_risk ON emotional_debt_ledger(debt_kind, overdue_risk);
 CREATE INDEX IF NOT EXISTS idx_edlgr_introduced ON emotional_debt_ledger(introduced_chapter);
+CREATE INDEX IF NOT EXISTS idx_volumes_project_range ON volumes(project_id, start_chapter, end_chapter);
+CREATE INDEX IF NOT EXISTS idx_volume_snapshots_project_volume ON volume_snapshots(project_id, volume_id);
+CREATE INDEX IF NOT EXISTS idx_arc_snapshots_project_volume ON arc_snapshots(project_id, volume_id);
 "#;
