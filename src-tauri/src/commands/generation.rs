@@ -95,6 +95,8 @@ pub struct RepairChapterStateResult {
     pub artifact_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlement_replay_matches: Option<bool>,
+    #[serde(default)]
+    pub already_repaired: bool,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1223,6 +1225,33 @@ pub fn repair_chapter_state(
     let project_id = crate::storage::active_project_id(&app)?;
     let content = crate::storage::load_chapter(&app, chapter_title.clone())?;
     let revision = crate::storage::chapter_revision(&app, &chapter_title)?;
+
+    // Idempotency guard: skip repair if settlement already exists for this revision
+    let project_dir = crate::storage::active_project_data_dir(&app)?;
+    let runtime_dir = project_dir.join("chapter_runtime");
+    if let Ok(entries) = std::fs::read_dir(&runtime_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.contains(&chapter_title) && name.ends_with(".settlement.json") {
+                let raw = std::fs::read_to_string(entry.path())
+                    .map_err(|e| e.to_string())?;
+                let existing: crate::chapter_generation::ChapterSettlementDelta =
+                    serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+                if existing.chapter_revision == revision {
+                    return Ok(RepairChapterStateResult {
+                        chapter_title: chapter_title.clone(),
+                        revision: revision.clone(),
+                        settlement_delta: existing,
+                        settlement_apply: Default::default(),
+                        artifact_refs: Vec::new(),
+                        settlement_replay_matches: None,
+                        already_repaired: true,
+                    });
+                }
+            }
+        }
+    }
+
     let memory_path = crate::storage::active_project_data_dir(&app)?
         .join(crate::storage::WRITER_MEMORY_DB_FILENAME);
     let memory =
@@ -1319,5 +1348,6 @@ pub fn repair_chapter_state(
         settlement_apply,
         artifact_refs: artifacts.artifact_refs,
         settlement_replay_matches: Some(replay.matches_original),
+        already_repaired: false,
     })
 }
