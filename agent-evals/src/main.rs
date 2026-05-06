@@ -200,6 +200,7 @@ fn main() {
     results.push(run_chapter_settlement_creates_reviewable_updates_eval());
     results.push(run_chapter_settlement_requires_approval_for_ledger_writes_eval());
     results.push(run_chapter_settlement_prioritizes_high_risk_promises_eval());
+    results.push(run_chronology_preservation_eval());
     results.push(run_rewrite_impact_preview_is_read_only_eval());
     results.push(run_rewrite_impact_preview_includes_bidirectional_story_edges_eval());
     results.push(run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval());
