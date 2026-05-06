@@ -268,6 +268,24 @@ for (const cmd of KERNEL_AUDIT_COMMANDS) {
   if (idx >= 0) issues.splice(idx, 1);
 }
 
+// ── Provider Budget Coverage ──
+const BUDGET_FUNCTIONS = [
+  "WriterProviderBudgetRequest",
+  "check_provider_budget",
+  "provider_budget_preflight",
+  "provider_budget_report",
+  "record_supervised_sprint_budget_usage",
+];
+
+for (const cmd of commands) {
+  if (classification[cmd] !== RISK.PROVIDER_CALL) continue;
+  const body = extractFunctionBody(cmd);
+  const hasBudget = BUDGET_FUNCTIONS.some((fn) => body.includes(fn));
+  if (!hasBudget) {
+    issues.push(`${cmd}: provider call missing budget gating`);
+  }
+}
+
 // Output
 console.log(
   `\nCommand Boundary Audit: ${commands.length} commands, ${
