@@ -408,6 +408,8 @@ pub struct ChapterSettlementExtraction {
     pub chapter_result_candidates: Vec<ChapterResultExtractionCandidate>,
     pub promise_candidates: Vec<ChapterPromiseExtractionCandidate>,
     pub book_state_candidates: Vec<ChapterBookStateExtractionCandidate>,
+    pub character_state_deltas: Vec<CharacterStateDeltaEntry>,
+    pub relationship_deltas: Vec<RelationshipDeltaEntry>,
     pub warnings: Vec<String>,
 }
 

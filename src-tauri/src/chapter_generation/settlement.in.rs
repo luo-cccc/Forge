@@ -37,6 +37,9 @@ pub fn build_basic_chapter_settlement_delta(
         .map(|candidate| candidate.value.clone())
         .unwrap_or_else(|| chapter_result.summary.clone());
 
+    let character_state_deltas = extraction.character_state_deltas.clone();
+    let relationship_deltas = extraction.relationship_deltas.clone();
+
     ChapterSettlementDelta {
         chapter_title: chapter_title.to_string(),
         chapter_revision: chapter_revision.to_string(),
@@ -64,6 +67,8 @@ pub fn build_basic_chapter_settlement_delta(
             .iter()
             .map(render_book_state_delta_line)
             .collect(),
+        character_state_deltas,
+        relationship_deltas,
         continuity_issues,
         repairable: true,
         ..Default::default()
@@ -252,11 +257,58 @@ fn build_settlement_extraction(
         })
         .collect();
 
+    let character_state_deltas: Vec<CharacterStateDeltaEntry> = chapter_result
+        .character_progress
+        .iter()
+        .filter_map(|prog| {
+            let parts: Vec<&str> = prog.splitn(2, ':').collect();
+            if parts.len() < 2 {
+                return None;
+            }
+            let name = parts[0].trim();
+            let detail = parts[1].trim();
+            if name.is_empty() || detail.is_empty() {
+                return None;
+            }
+            Some(CharacterStateDeltaEntry {
+                character_name: name.to_string(),
+                chapter_title: chapter_result.chapter_title.clone(),
+                action: "upserted".to_string(),
+                core_commitments: vec![detail.to_string()],
+                goal_state: serde_json::json!({}),
+                source_ref: chapter_result.source_ref.clone(),
+            })
+        })
+        .collect();
+
+    let relationship_deltas: Vec<RelationshipDeltaEntry> = chapter_result
+        .new_conflicts
+        .iter()
+        .filter(|c| {
+            let lower = c.to_lowercase();
+            lower.contains("关系") || lower.contains("盟友") || lower.contains("敌对")
+                || lower.contains("决裂") || lower.contains("结盟")
+        })
+        .map(|_conflict| {
+            RelationshipDeltaEntry {
+                character_a_name: String::new(),
+                character_b_name: String::new(),
+                action: "changed".to_string(),
+                relation_type: "complex".to_string(),
+                visibility: "public".to_string(),
+                chapter_title: chapter_result.chapter_title.clone(),
+                source_ref: chapter_result.source_ref.clone(),
+            }
+        })
+        .collect();
+
     ChapterSettlementExtraction {
         summary_candidates,
         chapter_result_candidates,
         promise_candidates,
         book_state_candidates,
+        character_state_deltas,
+        relationship_deltas,
         warnings: Vec::new(),
     }
 }
