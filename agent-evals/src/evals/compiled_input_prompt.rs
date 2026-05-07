@@ -29,14 +29,7 @@ pub fn run_compiled_input_prompt_eval() -> EvalResult {
         compiled_at_ms: now_ms(),
     };
 
-    let spine = build_chapter_generation_spine(
-        &target,
-        None,
-        None,
-        None,
-        Some(&compiled),
-        &memory,
-    );
+    let spine = build_chapter_generation_spine(&target, None, None, None, Some(&compiled), &memory);
 
     let focus = spine.focus_pack;
     let has_intent = focus.contains("Write action scene");

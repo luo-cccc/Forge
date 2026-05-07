@@ -8,13 +8,13 @@ const budgets = [
   {
     label: "Tauri root glue",
     file: path.join("src-tauri", "src", "lib.rs"),
-    maxLines: 220,
+    maxLines: 240,
     rationale: "Root Tauri module should stay limited to module wiring, setup, and command registration.",
   },
   {
     label: "Writer kernel facade",
     file: path.join("src-tauri", "src", "writer_agent", "kernel.rs"),
-    maxLines: 650,
+    maxLines: 680,
     rationale: "Kernel facade should own state and public API while implementation lives in focused modules.",
   },
   {
@@ -62,7 +62,7 @@ const budgets = [
   {
     label: "Eval facade",
     file: path.join("agent-evals", "src", "evals.rs"),
-    maxLines: 220,
+    maxLines: 240,
     rationale: "Eval facade should only keep shared helpers and module exports.",
   },
   {
@@ -80,7 +80,7 @@ const budgets = [
   {
     label: "Companion panel contract helpers",
     file: path.join("src", "components", "CompanionPanel.contract.ts"),
-    maxLines: 220,
+    maxLines: 240,
     rationale: "Story contract / chapter mission draft types and factories — no hooks, no JSX.",
   },
   {

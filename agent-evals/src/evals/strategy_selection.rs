@@ -47,7 +47,9 @@ pub fn run_strategy_selection_eval() -> EvalResult {
         ),
     ];
 
-    let all_ok = results.iter().all(|(_, actual, expected)| actual == expected);
+    let all_ok = results
+        .iter()
+        .all(|(_, actual, expected)| actual == expected);
     let details: Vec<String> = results
         .iter()
         .map(|(desc, actual, expected)| {
@@ -61,9 +63,5 @@ pub fn run_strategy_selection_eval() -> EvalResult {
         })
         .collect();
 
-    EvalResult::pass_if(
-        "strategy_selection",
-        all_ok,
-        details.join(" | "),
-    )
+    EvalResult::pass_if("strategy_selection", all_ok, details.join(" | "))
 }

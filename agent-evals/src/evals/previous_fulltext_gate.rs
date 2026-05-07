@@ -1,6 +1,6 @@
 use crate::fixtures::*;
 use agent_writer_lib::chapter_generation::{
-    BuildChapterContextInput, ChapterContract, ChapterContextBudget,
+    BuildChapterContextInput, ChapterContextBudget, ChapterContract,
 };
 
 pub fn run_previous_fulltext_gate_eval() -> EvalResult {
@@ -26,9 +26,7 @@ pub fn run_previous_fulltext_gate_eval() -> EvalResult {
     } else {
         "low"
     };
-    let low_risk_triggers = continuity_risk == "high"
-        || unresolved_debt_density > 3
-        || false; // no structured evidence check needed here
+    let low_risk_triggers = continuity_risk == "high" || unresolved_debt_density > 3 || false; // no structured evidence check needed here
 
     // High risk: many open promises -> should trigger upgrade.
     let high_risk = BuildChapterContextInput {
@@ -52,9 +50,7 @@ pub fn run_previous_fulltext_gate_eval() -> EvalResult {
     } else {
         "low"
     };
-    let high_risk_triggers = continuity_risk == "high"
-        || unresolved_debt_density > 3
-        || false;
+    let high_risk_triggers = continuity_risk == "high" || unresolved_debt_density > 3 || false;
 
     let ok = !low_risk_triggers && high_risk_triggers;
     EvalResult::pass_if(

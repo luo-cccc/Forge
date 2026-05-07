@@ -1328,7 +1328,11 @@ pub fn repair_chapter_state(
             chapter_summary_override: None,
             user_profile_entries: crate::collect_user_profile_entries(&app).unwrap_or_default(),
             compiled_input: None,
-            open_promise_count: memory.get_open_promises().ok().map(|p| p.len()).unwrap_or(0),
+            open_promise_count: memory
+                .get_open_promises()
+                .ok()
+                .map(|p| p.len())
+                .unwrap_or(0),
         },
     )
     .map_err(|error| error.message.clone())?;
