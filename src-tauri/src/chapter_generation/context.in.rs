@@ -16,6 +16,20 @@ fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _
     items
 }
 
+fn emotional_arc_guidance(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
+    let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
+    if let Some(latest) = results.first() {
+        if !latest.summary.is_empty() {
+            let snippet: String = latest.summary.chars().take(200).collect();
+            return format!(
+                "## 情感指引\n上一章读者感受: {}。请延续并回应读者的情感预期。",
+                snippet
+            );
+        }
+    }
+    String::new()
+}
+
 fn author_voice_sample(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
     let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
     if let Some(latest) = results.first() {
@@ -379,6 +393,10 @@ pub fn build_chapter_context(
                     let voice = author_voice_sample(&memory, &project_id);
                     if !voice.is_empty() {
                         prompt_context = format!("{}{}\n\n", prompt_context, voice);
+                    }
+                    let arc_guidance = emotional_arc_guidance(&memory, &project_id);
+                    if !arc_guidance.is_empty() {
+                        prompt_context = format!("{}{}\n\n", prompt_context, arc_guidance);
                     }
                 }
             }
