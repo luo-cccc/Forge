@@ -1,4 +1,4 @@
-fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _chapter_title: &str) -> Vec<String> {
+pub fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _chapter_title: &str) -> Vec<String> {
     let mut items = Vec::new();
     if let Ok(promises) = memory.get_open_promise_summaries() {
         for p in promises.iter().filter(|p| p.priority >= 5).take(3) {
@@ -16,7 +16,7 @@ fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _
     items
 }
 
-fn character_voice_cards(memory: &crate::writer_agent::memory::WriterMemory) -> String {
+pub fn character_voice_cards(memory: &crate::writer_agent::memory::WriterMemory) -> String {
     if let Ok(chars) = memory.list_characters(None) {
         let cards: Vec<String> = chars
             .iter()
@@ -31,7 +31,7 @@ fn character_voice_cards(memory: &crate::writer_agent::memory::WriterMemory) -> 
     String::new()
 }
 
-fn emotional_arc_guidance(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
+pub fn emotional_arc_guidance(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
     let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
     if let Some(latest) = results.first() {
         if !latest.summary.is_empty() {
@@ -45,7 +45,7 @@ fn emotional_arc_guidance(memory: &crate::writer_agent::memory::WriterMemory, pr
     String::new()
 }
 
-fn author_voice_sample(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
+pub fn author_voice_sample(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
     let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
     if let Some(latest) = results.first() {
         if !latest.summary.is_empty() {
@@ -58,7 +58,7 @@ fn author_voice_sample(memory: &crate::writer_agent::memory::WriterMemory, proje
     String::new()
 }
 
-fn curated_context_summary(memory: &crate::writer_agent::memory::WriterMemory) -> String {
+pub fn curated_context_summary(memory: &crate::writer_agent::memory::WriterMemory) -> String {
     let mut lines = Vec::new();
     if let Ok(promises) = memory.get_open_promise_summaries() {
         let mut sorted = promises.clone();

@@ -321,6 +321,12 @@ fn main() {
     results.push(run_strategy_selection_eval());
     results.push(run_strategy_validation_eval());
     results.push(run_anchor_regression_eval());
+    // Writing quality sprint evals
+    results.push(run_writing_checklist_eval());
+    results.push(run_curated_context_eval());
+    results.push(run_voice_anchor_eval());
+    results.push(run_emotional_arc_eval());
+    results.push(run_voice_card_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
