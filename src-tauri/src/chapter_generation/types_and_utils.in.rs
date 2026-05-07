@@ -503,6 +503,29 @@ pub struct RelationshipDeltaEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct KnowledgeDeltaEntry {
+    pub topic: String,
+    pub truth_state: String,
+    pub holder_type: String,
+    pub holder_id: i64,
+    pub knowledge_mode: String,
+    pub chapter_title: String,
+    pub source_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityDeltaEntry {
+    pub character_name: String,
+    pub public_identity: String,
+    pub private_identity: String,
+    pub revealed_to: Vec<String>,
+    pub chapter_title: String,
+    pub source_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChapterSettlementDelta {
     pub chapter_title: String,
     pub chapter_revision: String,
@@ -525,6 +548,10 @@ pub struct ChapterSettlementDelta {
     pub character_state_deltas: Vec<CharacterStateDeltaEntry>,
     #[serde(default)]
     pub relationship_deltas: Vec<RelationshipDeltaEntry>,
+    #[serde(default)]
+    pub knowledge_deltas: Vec<KnowledgeDeltaEntry>,
+    #[serde(default)]
+    pub identity_deltas: Vec<IdentityDeltaEntry>,
     pub continuity_issues: Vec<String>,
     pub repairable: bool,
 }
