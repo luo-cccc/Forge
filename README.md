@@ -194,7 +194,7 @@ Expected current baseline. This block is generated from `scripts/verification-ba
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 89 tests passing
 - `cargo test -p agent-writer`: 247 tests passing
-- `cargo run -p agent-evals`: 288/288 evals passing
+- `cargo run -p agent-evals`: 290/290 evals passing
 - `npm run check:p2`: 20/20 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:save-path`: passed
