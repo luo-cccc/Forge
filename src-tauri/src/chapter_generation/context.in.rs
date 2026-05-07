@@ -16,6 +16,19 @@ fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _
     items
 }
 
+fn author_voice_sample(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
+    let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
+    if let Some(latest) = results.first() {
+        if !latest.summary.is_empty() {
+            return format!(
+                "## 参考你的写作风格\n{}",
+                latest.summary.chars().take(300).collect::<String>()
+            );
+        }
+    }
+    String::new()
+}
+
 fn curated_context_summary(memory: &crate::writer_agent::memory::WriterMemory) -> String {
     let mut lines = Vec::new();
     if let Ok(promises) = memory.get_open_promise_summaries() {
@@ -361,6 +374,12 @@ pub fn build_chapter_context(
                 let curated = curated_context_summary(&memory);
                 if !curated.is_empty() {
                     prompt_context = format!("{}{}\n\n", prompt_context, curated);
+                }
+                if let Ok(project_id) = storage::active_project_id(app) {
+                    let voice = author_voice_sample(&memory, &project_id);
+                    if !voice.is_empty() {
+                        prompt_context = format!("{}{}\n\n", prompt_context, voice);
+                    }
                 }
             }
         }
