@@ -410,6 +410,10 @@ pub struct ChapterSettlementExtraction {
     pub book_state_candidates: Vec<ChapterBookStateExtractionCandidate>,
     pub character_state_deltas: Vec<CharacterStateDeltaEntry>,
     pub relationship_deltas: Vec<RelationshipDeltaEntry>,
+    #[serde(default)]
+    pub knowledge_deltas: Vec<KnowledgeDeltaEntry>,
+    #[serde(default)]
+    pub identity_deltas: Vec<IdentityDeltaEntry>,
     pub warnings: Vec<String>,
 }
 

@@ -39,6 +39,8 @@ pub fn build_basic_chapter_settlement_delta(
 
     let character_state_deltas = extraction.character_state_deltas.clone();
     let relationship_deltas = extraction.relationship_deltas.clone();
+    let knowledge_deltas = extraction.knowledge_deltas.clone();
+    let identity_deltas = extraction.identity_deltas.clone();
 
     ChapterSettlementDelta {
         chapter_title: chapter_title.to_string(),
@@ -69,6 +71,8 @@ pub fn build_basic_chapter_settlement_delta(
             .collect(),
         character_state_deltas,
         relationship_deltas,
+        knowledge_deltas,
+        identity_deltas,
         continuity_issues,
         repairable: true,
         ..Default::default()
@@ -302,6 +306,56 @@ fn build_settlement_extraction(
         })
         .collect();
 
+    let knowledge_deltas: Vec<KnowledgeDeltaEntry> = {
+        let mut deltas = Vec::new();
+        let lower_summary = chapter_result.summary.to_lowercase();
+        let reveal_cues = ["reveal", "揭露", "揭示", "透露", "暴露", "发现", "知道", "明白",
+            "真相", "秘密", "真相大白", "水落石出", "展现", "披露", "坦白", "发现"];
+        let has_reveal_cue = reveal_cues.iter().any(|cue| lower_summary.contains(cue))
+            || chapter_result.new_conflicts.iter().any(|line| {
+                let lower = line.to_lowercase();
+                reveal_cues.iter().any(|cue| lower.contains(cue))
+            });
+        if has_reveal_cue {
+            deltas.push(KnowledgeDeltaEntry {
+                topic: chapter_result.summary.chars().take(80).collect(),
+                truth_state: "revealed".to_string(),
+                holder_type: "character".to_string(),
+                holder_id: 0,
+                knowledge_mode: "known".to_string(),
+                chapter_title: chapter_result.chapter_title.clone(),
+                source_ref: chapter_result.source_ref.clone(),
+            });
+        }
+        deltas
+    };
+
+    let identity_deltas: Vec<IdentityDeltaEntry> = {
+        let identity_keywords = ["身份", "identity", "认同", "伪装", "面具", "真面目",
+            "真实身份", "假身份", "扮演", "角色"];
+        chapter_result
+            .character_progress
+            .iter()
+            .filter(|prog| {
+                let lower = prog.to_lowercase();
+                identity_keywords.iter().any(|kw| lower.contains(kw))
+            })
+            .map(|prog| {
+                let parts: Vec<&str> = prog.splitn(2, ':').collect();
+                let name = parts.first().map(|s| s.trim()).unwrap_or("");
+                let detail = parts.get(1).map(|s| s.trim()).unwrap_or("");
+                IdentityDeltaEntry {
+                    character_name: name.to_string(),
+                    public_identity: detail.to_string(),
+                    private_identity: String::new(),
+                    revealed_to: Vec::new(),
+                    chapter_title: chapter_result.chapter_title.clone(),
+                    source_ref: chapter_result.source_ref.clone(),
+                }
+            })
+            .collect()
+    };
+
     ChapterSettlementExtraction {
         summary_candidates,
         chapter_result_candidates,
@@ -309,6 +363,8 @@ fn build_settlement_extraction(
         book_state_candidates,
         character_state_deltas,
         relationship_deltas,
+        knowledge_deltas,
+        identity_deltas,
         warnings: Vec::new(),
     }
 }
