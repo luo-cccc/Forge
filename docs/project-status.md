@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-07
+Last updated: 2026-05-08
 
 ## Positioning
 
@@ -124,6 +124,7 @@ The planned implementation and offline eval gates from `plan.md` are complete as
 - Inspector timeline views now separate debug/internal replay from the default companion summary. The frontend Inspect mode reads `get_writer_agent_inspector_timeline` and `get_writer_agent_trace`, with filters for failure, save_completed, run event, task packet, lifecycle, context recall, product metrics, and metacognition, plus side summaries for provider budget, latest failure/save, save-to-feedback latency, proposal context budgets, post-write diagnostics, current context-source pressure, persisted per-session context pressure trend, and metacognitive risk/action. Failure cards and the latest-failure summary provide recovery navigation chips; the metacognition card now provides both navigation chips and real read-only recovery runs for Planning Review / Continuity Diagnostic. Trajectory export warns about manuscript/project-memory/feedback leakage before any sharing and now has both native Forge JSONL, `writer.metacognition`, and Trace Viewer compatible local export options.
 - Real provider smoke tests now live behind `FORGE_REAL_API_TESTS=1` and require a real `OPENAI_API_KEY`, so ordinary `cargo test` / `npm run verify` remains offline. `llm_runtime` has separate bounded env controls for general chat, JSON, chapter draft, chapter continuation, chapter compress, ghost preview, analysis, parallel draft, manual rewrite, tool continuation, and Project Brain stream temperature / output tokens, plus provider-scoped `*_DISABLE_REASONING` toggles. OpenRouter reasoning controls are only injected when `OPENAI_API_BASE` contains `openrouter.ai`, keeping other OpenAI-compatible providers on the standard payload.
 - Local real-provider 5-chapter "镜中墟" author-session simulations on 2026-05-05 produced 35 operations with 0 provider failures, JSON validity 1.0, A/B/C branch validity 1.0, hook rate 1.0, and 1536-dimension embeddings after disabling reasoning for short/structured profiles. Chapter reasoning A/B showed the tradeoff clearly: leaving chapter reasoning enabled produced about 6.9s average chat latency, 25.0s p95, and 0.8 minimum anchor hit rate; the current disabled-reasoning chapter profile later reached about 5.1s average chat latency, 13.4s p95, 0.8 minimum anchor hit rate, and 0.8 minimum anchor carry rate when measured with the updated long-session runner. Forge now defaults chapter drafts to provider-scoped reasoning disabled for lower latency, while strengthening the chapter prompt to preserve named anchors through scene action, dialogue, consequence, or payoff pressure. The real-provider path now also includes an opt-in Rust `api_integration_tests::real_author_session_three_chapter_smoke` gate so long-session regression checks are not limited to ignored local scripts. Treat this as the current measured profile, not a final optimum.
+- Chapter generation now compiles `CompiledInput` on the real pipeline path using the active project id, passes it into `BuiltChapterContext`, includes it in prompt context, and persists `compiled_input.json` when runtime artifacts are written. The `input_compiler` eval now verifies a non-`eval` project mission is used so this cannot silently fall back to the old test-only project id.
 
 ## Current Verification Baseline
 
@@ -132,7 +133,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 89 tests passing
 - `cargo test -p agent-writer`: 247 tests passing
-- `cargo run -p agent-evals`: 329/329 evals passing
+- `cargo run -p agent-evals`: 332/332 evals passing
 - `npm run check:p2`: 20/20 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:save-path`: passed

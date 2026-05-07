@@ -1,6 +1,6 @@
 # Forge Writer Agent 4 周冲刺计划
 
-Last updated: 2026-05-07
+Last updated: 2026-05-08
 
 ## 0. 产品北极星
 
@@ -109,9 +109,9 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 在 4 周主线闭合后，下一阶段不再优先追求“更多入口 / 更多面板 / 更多 agent 名称”，而是把 Forge 补成更硬的长篇生产内核。只采纳 5 条：
 
-1. 输入治理编译层 ✅ (2026-05-07) + Writing Quality 赋能 ✅ (2026-05-07)
+1. 输入治理编译层 ✅ (2026-05-08) + Writing Quality 赋能 ✅ (2026-05-07)
    - 已落地：`CompiledInput { intent_text, selected_evidence, rule_stack, trace_hint }` 编译工件
-   - 已接入 `BuiltChapterContext`，持久化为 `compiled_input.json`
+   - 已接入真实 chapter generation pipeline，使用当前 `project_id` 编译，进入 `BuiltChapterContext`，并持久化为 `compiled_input.json`
    - 目标：让“为什么这样写”在每章生成前可见、可复盘、可复用。 ✅
 
 2. 结构化权威状态
@@ -1612,19 +1612,26 @@ Week 4：
 - 新增 gate：
   - `chapter_generation_previous_fulltext_upgrade_only_on_risk`
 
-#### 13.3.4 CompiledInput 进入章节生成主链
+#### 13.3.4 CompiledInput 进入章节生成主链 ✅ 第一阶段完成
 
 目标：
 
 - 把“为什么写、用哪些证据、遵守哪些规则”压缩为稳定工件
 - 降低 prompt prose 漂移带来的质量抖动
 
-要做的事：
+已完成：
 
 - `CompiledInput { intent_text, selected_evidence, rule_stack, trace_hint }`
   进入 `BuiltChapterContext`
+- 真实 chapter generation pipeline 调用 `compile_input()`，不再固定传 `None`
+- compiler 使用当前 `project_id` 读取 Chapter Mission，避免只命中 `eval` 项目
+- `compiled_input.json` 随 runtime artifacts 持久化
+
+剩余优化：
+
 - chapter draft / continuation / compress prompt 优先消费 compiled input
 - `selected_evidence` 不再只是 artifact，而是 prompt 一级输入
+- context prose 与 compiled input 的重复度继续下降
 
 明确不做：
 
@@ -1633,11 +1640,12 @@ Week 4：
 
 完成定义：
 
-- chapter generation prompt 中能看到 compact compiled input
+- chapter generation prompt 中能看到 compact compiled input ✅
+- `compiled_input.json` 成为默认 runtime artifact ✅
+- project-scoped Chapter Mission 能进入 compiled input ✅
 - context prose 与 compiled input 的重复度明显下降
-- `compiled_input.json` 成为默认 runtime artifact
 - 新增 gate：
-  - `chapter_generation_compiled_input_enters_prompt`
+  - `chapter_generation_compiled_input_enters_prompt` ✅ (`compiled_input_prompt`, `input_compiler`)
   - `chapter_generation_selected_evidence_stability`
 
 #### 13.3.5 Story Impact Radius 成为章节证据选择前置层
@@ -1705,7 +1713,7 @@ Week 4：
 
 这 6 件事不能乱做，必须按下面顺序推进：
 
-1. `CompiledInput` 主链接入
+1. `CompiledInput` 主链接入 ✅
 2. chapter generation 接入 `ContextSpine`
 3. `FocusPack` 增量刷新
 4. 上一章全文升级策略

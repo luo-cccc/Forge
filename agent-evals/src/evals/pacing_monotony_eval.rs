@@ -39,9 +39,7 @@ pub fn run_pacing_monotony_eval() -> EvalResult {
     let engine = DiagnosticsEngine::new();
     let results = engine.diagnose(paragraph, 0, "ch1", "eval", &memory);
 
-    let pacing_monotony = results
-        .iter()
-        .find(|r| r.message.contains("节奏单调"));
+    let pacing_monotony = results.iter().find(|r| r.message.contains("节奏单调"));
     if pacing_monotony.is_none() {
         errors.push(format!(
             "expected pacing monotony diagnostic with 4+ action chapters, got {} results",

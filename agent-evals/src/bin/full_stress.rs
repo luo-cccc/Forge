@@ -151,7 +151,11 @@ fn main() {
         let ctx = curated_context_summary(&memory);
         let checklist = build_writing_checklist(&memory, &title);
         let arc = emotional_arc_guidance(&memory, pid);
-        let checklist_str = checklist.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n");
+        let checklist_str = checklist
+            .iter()
+            .map(|s| format!("- {}", s))
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let system = format!(
             "{}\n{}\n{}\n## 本章写作清单\n{}\n{}\n\n你是长篇小说的作者助手。当前章节：{}。严格输出{}—{}字的中文章节正文。不要超出上限。只输出正文，不要标题。",

@@ -1,8 +1,8 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::project_intake::seed_project_from_idea;
+use std::path::Path;
 
 pub fn run_idea_seed_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -15,6 +15,10 @@ pub fn run_idea_seed_eval() -> EvalResult {
     EvalResult::pass_if(
         "idea_seed",
         has_chars && chars_in_memory,
-        format!("extracted_chars={} memory_chars={}", report.identified_characters.len(), chars_in_memory)
+        format!(
+            "extracted_chars={} memory_chars={}",
+            report.identified_characters.len(),
+            chars_in_memory
+        ),
     )
 }

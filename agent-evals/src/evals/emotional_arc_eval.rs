@@ -18,7 +18,8 @@ pub fn run_emotional_arc_eval() -> EvalResult {
             project_id: "eval".to_string(),
             chapter_title: "第一章".to_string(),
             chapter_revision: "rev-1".to_string(),
-            summary: "读者此刻应感到紧张不安，期待主角冲破困境。但尚未揭示幕后黑手的身份。".to_string(),
+            summary: "读者此刻应感到紧张不安，期待主角冲破困境。但尚未揭示幕后黑手的身份。"
+                .to_string(),
             state_changes: vec![],
             character_progress: vec![],
             new_conflicts: vec![],

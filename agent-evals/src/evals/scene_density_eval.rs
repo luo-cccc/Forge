@@ -21,9 +21,7 @@ pub fn run_scene_density_eval() -> EvalResult {
     let engine = DiagnosticsEngine::new();
     let results = engine.diagnose(paragraph, 0, "ch1", "eval", &memory);
 
-    let scene_density = results
-        .iter()
-        .find(|r| r.message.contains("场景密度较高"));
+    let scene_density = results.iter().find(|r| r.message.contains("场景密度较高"));
     if scene_density.is_none() {
         errors.push(format!(
             "expected scene density warning with 7 scenes, got {} results",

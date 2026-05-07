@@ -64,10 +64,7 @@ pub fn run_curated_context_eval() -> EvalResult {
 
     eval_result(
         "writer_agent:curated_context",
-        format!(
-            "promises={} knowledge={}",
-            promise_count, knowledge_count
-        ),
+        format!("promises={} knowledge={}", promise_count, knowledge_count),
         errors,
     )
 }

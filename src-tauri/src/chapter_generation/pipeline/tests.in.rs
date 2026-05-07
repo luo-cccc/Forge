@@ -329,7 +329,7 @@ mod tests {
             crate::llm_runtime::LlmRequestProfile::ChapterCompress,
         );
 
-        assert_eq!(continuation.requested_output_tokens, 900);
-        assert_eq!(compress.requested_output_tokens, 2_400);
+        assert_eq!(continuation.requested_output_tokens, 2_200);
+        assert_eq!(compress.requested_output_tokens, 5_200);
     }
 }

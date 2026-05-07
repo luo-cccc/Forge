@@ -4,6 +4,7 @@ use crate::agent_runtime;
 
 pub fn compile_input(
     memory: &WriterMemory,
+    project_id: &str,
     chapter_title: &str,
     _user_instruction: &str,
 ) -> CompiledInput {
@@ -12,7 +13,9 @@ pub fn compile_input(
 
     // Get chapter mission as intent
     let intent = memory
-        .get_chapter_mission("eval", chapter_title).ok().flatten()
+        .get_chapter_mission(project_id, chapter_title)
+        .ok()
+        .flatten()
         .map(|m| m.mission)
         .unwrap_or_else(|| format!("Write chapter {}", chapter_title));
 

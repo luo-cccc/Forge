@@ -13,10 +13,20 @@ pub fn run_voice_card_eval() -> EvalResult {
 
     // Seed multiple characters
     memory
-        .upsert_character("云逸", &[], "protagonist", "踏上寻找真相的旅途，内心充满疑问")
+        .upsert_character(
+            "云逸",
+            &[],
+            "protagonist",
+            "踏上寻找真相的旅途，内心充满疑问",
+        )
         .ok();
     memory
-        .upsert_character("墨尘", &["黑衣客".to_string()], "antagonist", "暗中策划阴谋，身份成谜")
+        .upsert_character(
+            "墨尘",
+            &["黑衣客".to_string()],
+            "antagonist",
+            "暗中策划阴谋，身份成谜",
+        )
         .ok();
     memory
         .upsert_character("青璃", &[], "supporting", "陪伴云逸，提供关键线索支撑")

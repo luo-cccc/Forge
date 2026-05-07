@@ -58,17 +58,13 @@ function App() {
   const isAgentThinking = useAppStore((s) => s.isAgentThinking);
   const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const showSettings = hasApiKey === false;
 
   useEffect(() => {
     invoke<boolean>(Commands.checkApiKey, { provider: "openai" })
       .then(setHasApiKey)
       .catch(() => setHasApiKey(false));
   }, []);
-
-  useEffect(() => {
-    if (hasApiKey === false) setShowSettings(true);
-  }, [hasApiKey]);
 
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
@@ -284,7 +280,7 @@ function App() {
           <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--fg-text-primary)' }}>欢迎使用 Forge</h2>
           <p style={{ color: 'var(--fg-text-secondary)', marginBottom: 'var(--space-6)', fontSize: 'var(--text-sm)' }}>请先配置 API Key 以开始写作。密钥存储在系统密钥链中，不会上传到任何服务器。</p>
           <SettingsView />
-          <button className="forge-btn forge-btn-primary" style={{ marginTop: 'var(--space-4)' }} onClick={() => { setShowSettings(false); invoke<boolean>(Commands.checkApiKey, { provider: "openai" }).then(setHasApiKey).catch(() => setHasApiKey(false)); }}>完成设置，开始写作</button>
+          <button className="forge-btn forge-btn-primary" style={{ marginTop: 'var(--space-4)' }} onClick={() => { invoke<boolean>(Commands.checkApiKey, { provider: "openai" }).then(setHasApiKey).catch(() => setHasApiKey(false)); }}>完成设置，开始写作</button>
         </div>
       </div>
     );

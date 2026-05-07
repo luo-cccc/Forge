@@ -34,11 +34,24 @@ pub async fn run_chapter_generation_pipeline(
         None,
     ));
 
-    let open_promise_count = crate::writer_agent::memory::WriterMemory::open(&config.memory_path)
-        .ok()
+    let memory = crate::writer_agent::memory::WriterMemory::open(&config.memory_path).ok();
+    let open_promise_count = memory
+        .as_ref()
         .and_then(|m| m.get_open_promises().ok())
         .map(|p| p.len())
         .unwrap_or(0);
+    let compiled_input = memory.as_ref().map(|m| {
+        crate::writer_agent::input_governance::compiler::compile_input(
+            m,
+            &config.project_id,
+            config
+                .payload
+                .target_chapter_title
+                .as_deref()
+                .unwrap_or("target chapter"),
+            &config.payload.user_instruction,
+        )
+    });
 
     let build_input = BuildChapterContextInput {
         request_id: request_id.clone(),
@@ -49,7 +62,7 @@ pub async fn run_chapter_generation_pipeline(
         chapter_contract: config.payload.chapter_contract.clone().unwrap_or_default(),
         chapter_summary_override: config.payload.chapter_summary_override.clone(),
         user_profile_entries: config.user_profile_entries.clone(),
-        compiled_input: None,
+        compiled_input,
         open_promise_count,
     };
 

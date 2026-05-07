@@ -13,13 +13,34 @@ pub fn run_writing_checklist_eval() -> EvalResult {
 
     // Seed open promises with high priority
     memory
-        .add_promise("clue", "密道秘密", "破庙地下有密道", "ch1", "ch5揭示密道真相", 8)
+        .add_promise(
+            "clue",
+            "密道秘密",
+            "破庙地下有密道",
+            "ch1",
+            "ch5揭示密道真相",
+            8,
+        )
         .ok();
     memory
-        .add_promise("conflict", "背叛伏笔", "同伴行为可疑", "ch2", "ch6背叛揭示", 6)
+        .add_promise(
+            "conflict",
+            "背叛伏笔",
+            "同伴行为可疑",
+            "ch2",
+            "ch6背叛揭示",
+            6,
+        )
         .ok();
     memory
-        .add_promise("goal", "寻剑任务", "主角需找到古剑", "ch1", "ch4找到古剑", 4)
+        .add_promise(
+            "goal",
+            "寻剑任务",
+            "主角需找到古剑",
+            "ch1",
+            "ch4找到古剑",
+            4,
+        )
         .ok();
 
     // Seed a protagonist character
@@ -39,7 +60,10 @@ pub fn run_writing_checklist_eval() -> EvalResult {
         errors.push("checklist should include high-priority promise '密道秘密'".to_string());
     }
     // Should include protagonist
-    if !checklist.iter().any(|item| item.contains("云逸") || item.contains("墨尘")) {
+    if !checklist
+        .iter()
+        .any(|item| item.contains("云逸") || item.contains("墨尘"))
+    {
         errors.push("checklist should include protagonist character".to_string());
     }
 

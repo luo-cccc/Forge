@@ -22,9 +22,7 @@ pub fn run_voice_drift_eval() -> EvalResult {
     let engine = DiagnosticsEngine::new();
     let results = engine.diagnose(paragraph, 0, "ch1", "eval", &memory);
 
-    let voice_drift = results
-        .iter()
-        .find(|r| r.message.contains("声音漂移"));
+    let voice_drift = results.iter().find(|r| r.message.contains("声音漂移"));
     if voice_drift.is_none() {
         errors.push(format!(
             "expected voice drift diagnostic for taciturn protagonist with long sentences, got {} results",
@@ -33,7 +31,10 @@ pub fn run_voice_drift_eval() -> EvalResult {
     } else {
         let r = voice_drift.unwrap();
         if !r.message.contains("云逸") {
-            errors.push(format!("voice drift message should mention character name, got: {}", r.message));
+            errors.push(format!(
+                "voice drift message should mention character name, got: {}",
+                r.message
+            ));
         }
     }
 

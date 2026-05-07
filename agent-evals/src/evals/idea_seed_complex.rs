@@ -1,8 +1,8 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::project_intake::seed_project_from_idea;
+use std::path::Path;
 
 pub fn run_idea_seed_complex_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -29,8 +29,17 @@ pub fn run_idea_seed_complex_eval() -> EvalResult {
     let recs = report.recommendations.len();
 
     let comprehensive = has_chars && has_canon && has_promises && has_conflicts;
-    EvalResult::pass_if("idea_seed_complex", comprehensive,
-        format!("chars={} canon={} promises={} conflicts={} recs={} conf={:.2}",
-            report.identified_characters.len(), report.identified_canon.len(),
-            report.open_promises.len(), report.conflicts.len(), recs, report.confidence))
+    EvalResult::pass_if(
+        "idea_seed_complex",
+        comprehensive,
+        format!(
+            "chars={} canon={} promises={} conflicts={} recs={} conf={:.2}",
+            report.identified_characters.len(),
+            report.identified_canon.len(),
+            report.open_promises.len(),
+            report.conflicts.len(),
+            recs,
+            report.confidence
+        ),
+    )
 }

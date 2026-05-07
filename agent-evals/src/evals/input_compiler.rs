@@ -10,19 +10,32 @@ pub fn run_input_compiler_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "test", "fantasy", "p", "j", "")
         .unwrap();
     memory
+        .ensure_chapter_mission_seed(
+            "novel-a",
+            "Chapter-1",
+            "Open with a costly rescue",
+            "林墨",
+            "",
+            "救援留下代价",
+            "eval",
+        )
+        .unwrap();
+    memory
         .upsert_character("\u{6797}\u{58a8}", &[], "protagonist", "\u{4e3b}\u{89d2}")
         .unwrap();
     memory
         .upsert_knowledge_item("setting_valley", "objective", "test")
         .unwrap();
-    let compiled = compile_input(&memory, "Chapter-1", "write action scene");
-    let ok = !compiled.intent_text.is_empty() && !compiled.selected_evidence.is_empty();
+    let compiled = compile_input(&memory, "novel-a", "Chapter-1", "write action scene");
+    let mission_used = compiled.intent_text == "Open with a costly rescue";
+    let ok = mission_used && !compiled.selected_evidence.is_empty();
     EvalResult::pass_if(
         "input_compiler",
         ok,
         format!(
-            "compiledOk={} evidenceCount={}",
+            "compiledOk={} missionUsed={} evidenceCount={}",
             ok,
+            mission_used,
             compiled.selected_evidence.len()
         ),
     )
