@@ -367,49 +367,49 @@ export function buildSecondBrainItems(
       label: "Book Contract",
       value: contractValue,
       detail: contractDetail,
-      tone: contractDebt ? "danger" : hasStoryContract && !contractNeedsReview ? "success" : "accent",
+      tone: contractDebt ? "⚠️ 需要注意" : hasStoryContract && !contractNeedsReview ? "✅ 一切正常" : "📝 提个醒",
     },
     {
       label: "Chapter Mission",
       value: missionValue,
       detail: missionDetail,
       tone: missionDebt
-        ? "danger"
+        ? "⚠️ 需要注意"
         : missionCalibration
-          ? "danger"
+          ? "⚠️ 需要注意"
           : chapterMission
             ? missionStatusTone(chapterMission.status)
-            : "accent",
+            : "📝 提个醒",
     },
     {
       label: "Last Result",
       value: resultValue,
       detail: resultDetail,
-      tone: latestResult ? "success" : "accent",
+      tone: latestResult ? "✅ 一切正常" : "📝 提个醒",
     },
     {
       label: "Scene Goal",
       value: sceneValue,
       detail: sceneDetail,
-      tone: sceneGoal || nextBeat ? "accent" : "neutral",
+      tone: sceneGoal || nextBeat ? "📝 提个醒" : "neutral",
     },
     {
       label: "Open Promise",
       value: promiseValue,
       detail: promiseDetail,
-      tone: openPromise || promiseDebt ? "accent" : "success",
+      tone: openPromise || promiseDebt ? "📝 提个醒" : "✅ 一切正常",
     },
     {
       label: "Canon Risk",
       value: canonValue,
       detail: canonDetail,
-      tone: canonRisk ? "danger" : "success",
+      tone: canonRisk ? "⚠️ 需要注意" : "✅ 一切正常",
     },
     {
       label: "Arc / Pacing",
       value: arcValue,
       detail: arcDetail,
-      tone: pacingDebt || arcProposal ? "accent" : "success",
+      tone: pacingDebt || arcProposal ? "📝 提个醒" : "✅ 一切正常",
     },
   ];
   const priority = new Map<string, number>([

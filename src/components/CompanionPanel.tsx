@@ -516,6 +516,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     nowMs,
     refreshStatus,
     status?.projectId,
+    todayFiveSummary,
   ]);
 
   const handleRestoreLatestChapterBackup = useCallback(async () => {
