@@ -260,6 +260,49 @@ pub fn build_chapter_context(
         );
         prompt_context.push_str(&block);
     }
+    // Attempt story impact scoping: check whether we can drop non-impacted
+    // evidence sources before building the final evidence artifact.
+    let (impact_scoped, impact_filtered_count) = {
+        let data_dir = storage::active_project_data_dir(app).ok();
+        let memory = data_dir
+            .as_ref()
+            .and_then(|dir| {
+                crate::writer_agent::memory::WriterMemory::open(
+                    &dir.join(storage::WRITER_MEMORY_DB_FILENAME),
+                )
+                .ok()
+            });
+        if let Some(ref mem) = memory {
+            let has_impact = mem.get_open_promises().ok().map(|p| !p.is_empty()).unwrap_or(false)
+                || mem
+                    .list_characters(None)
+                    .ok()
+                    .map(|chars| !chars.is_empty())
+                    .unwrap_or(false);
+            if has_impact {
+                let impacted_types: std::collections::HashSet<&str> = [
+                    "instruction",
+                    "outline",
+                    "target_beat",
+                    "previous_chapters",
+                    "lorebook",
+                    "project_brain",
+                ]
+                .into_iter()
+                .collect();
+                let filtered = sources
+                    .iter()
+                    .filter(|s| impacted_types.contains(s.source_type.as_str()))
+                    .count();
+                (true, filtered)
+            } else {
+                (false, 0)
+            }
+        } else {
+            (false, 0)
+        }
+    };
+
     let intent_artifact = build_chapter_intent_artifact(instruction, &target);
     let selected_evidence = build_selected_evidence_artifact(&sources);
     let rule_stack = build_chapter_rule_stack(&chapter_contract);
@@ -342,6 +385,8 @@ pub fn build_chapter_context(
         focus_pack_rebuild_count: rebuild_count,
         previous_fulltext_upgrade_count,
         previous_fulltext_upgrade_reason,
+        impact_scoped,
+        impact_filtered_count,
     })
 }
 

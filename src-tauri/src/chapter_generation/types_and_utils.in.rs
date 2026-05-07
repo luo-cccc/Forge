@@ -700,6 +700,10 @@ pub struct BuiltChapterContext {
     pub previous_fulltext_upgrade_count: usize,
     #[serde(default)]
     pub previous_fulltext_upgrade_reason: String,
+    #[serde(default)]
+    pub impact_scoped: bool,
+    #[serde(default)]
+    pub impact_filtered_count: usize,
 }
 
 #[derive(Debug, Clone)]
