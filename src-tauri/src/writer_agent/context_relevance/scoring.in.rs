@@ -3,6 +3,8 @@ pub(crate) fn score_canon_entity(
     observation: &WriterObservation,
     relevance: &WritingRelevance,
     open_promises: &[PlotPromiseSummary],
+    memory: &WriterMemory,
+    chapter_title: &str,
 ) -> RelevanceScore {
     let mut score = RelevanceScore::default();
     let entity_text = canon_entity_text(entity);
@@ -58,6 +60,12 @@ pub(crate) fn score_canon_entity(
     if score.score == 0 && observation.paragraph.contains(&entity.summary) {
         score.add(8, "cursor overlaps entity summary");
     }
+
+    let filter = apply_typed_filter(&entity_text, chapter_title, memory);
+    score.score = (score.score as f64 * filter.total_multiplier()) as i32;
+    for reason in &filter.reasons {
+        score.reasons.push(format!("typedFilter:{}", reason));
+    }
     score
 }
 
@@ -66,6 +74,8 @@ pub(crate) fn score_promise(
     observation: &WriterObservation,
     relevance: &WritingRelevance,
     decisions: &[CreativeDecisionSummary],
+    memory: &WriterMemory,
+    chapter_title: &str,
 ) -> RelevanceScore {
     let mut score = RelevanceScore::default();
     score.add(
@@ -135,6 +145,11 @@ pub(crate) fn score_promise(
         }
     }
 
+    let filter = apply_typed_filter(&promise_text, chapter_title, memory);
+    score.score = (score.score as f64 * filter.total_multiplier()) as i32;
+    for reason in &filter.reasons {
+        score.reasons.push(format!("typedFilter:{}", reason));
+    }
     score
 }
 

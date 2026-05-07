@@ -288,7 +288,7 @@ pub fn query_story_os(
         &decision_slice,
     );
     let canon_slice = build_canon_slice(observation, memory, &relevance, &open_promises);
-    let promise_slice = build_promise_slice(observation, &open_promises, &relevance, &decisions);
+    let promise_slice = build_promise_slice(observation, &open_promises, &relevance, &decisions, memory);
     let author_style = build_style_slice(memory);
     let book_state_text = build_book_state_context(book_state.as_ref());
     let arc_snapshot_text = build_arc_snapshot_context(&arc_snapshots);

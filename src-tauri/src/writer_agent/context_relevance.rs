@@ -144,6 +144,7 @@ pub fn writing_scene_types(text: &str) -> Vec<String> {
         .collect()
 }
 
+include!("context_relevance/typed_filter.in.rs");
 include!("context_relevance/scoring.in.rs");
 include!("context_relevance/focus.in.rs");
 include!("context_relevance/scene_helpers.in.rs");

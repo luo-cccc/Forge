@@ -249,7 +249,7 @@ fn build_canon_slice(
         let mut scored = candidate_entities
             .into_iter()
             .filter_map(|entity| {
-                let score = score_canon_entity(&entity, observation, relevance, open_promises);
+                let score = score_canon_entity(&entity, observation, relevance, open_promises, memory, observation.chapter_title.as_deref().unwrap_or_default());
                 if score.score > 0 {
                     Some((score, entity))
                 } else {
@@ -284,13 +284,15 @@ fn build_promise_slice(
     promises: &[PlotPromiseSummary],
     relevance: &WritingRelevance,
     decisions: &[CreativeDecisionSummary],
+    memory: &WriterMemory,
 ) -> String {
     let candidate_promises = prefilter_promise_candidates(observation, promises);
+    let chapter_title = observation.chapter_title.as_deref().unwrap_or_default();
     let mut scored = candidate_promises
         .iter()
         .map(|promise| {
             (
-                score_promise(promise, observation, relevance, decisions),
+                score_promise(promise, observation, relevance, decisions, memory, chapter_title),
                 promise,
             )
         })
