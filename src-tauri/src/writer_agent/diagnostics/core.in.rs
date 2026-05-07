@@ -512,6 +512,26 @@ impl DiagnosticsEngine {
             }
         }
 
+        // Pacing monotony check
+        if let Ok(recent) = memory.list_recent_chapter_results(project_id, 5) {
+            if recent.len() >= 4 {
+                let action_chapters = recent.iter().filter(|r| r.summary.contains("冲突") || r.summary.contains("战斗")).count();
+                if action_chapters >= 4 {
+                    results.push(DiagnosticResult {
+                        id: next_id(),
+                        severity: DiagnosticSeverity::Info,
+                        category: DiagnosticCategory::PacingNote,
+                        message: format!("节奏单调: 最近{}章中有{}章以动作/冲突为主，建议插入过渡或情绪章节", recent.len(), action_chapters),
+                        entity_name: None,
+                        from: paragraph_offset, to: paragraph_offset + 1,
+                        evidence: vec![DiagnosticEvidence { source: "pacing".into(), reference: "recent_chapters".into(), snippet: format!("action_ratio={}/{}", action_chapters, recent.len()) }],
+                        fix_suggestion: Some("考虑插入过渡章节或情绪场景以调节节奏".into()),
+                        operations: Vec::new(),
+                    });
+                }
+            }
+        }
+
         // 6. Adjust severity based on author ignore patterns.
         for result in &mut results {
             let category_str = diagnostic_category_str(&result.category);
