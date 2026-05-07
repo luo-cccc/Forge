@@ -307,6 +307,10 @@ fn main() {
     results.push(run_scene_obligation_diagnostic_eval());
     results.push(run_companion_contract_eval());
     results.push(run_todayfive_content_quality_eval());
+    results.push(run_onboarding_contract_eval());
+    results.push(run_story_snapshot_contract_eval());
+    results.push(run_retrospective_contract_eval());
+    results.push(run_trust_stats_contract_eval());
     results.push(run_repair_confirm_contract_eval());
     results.push(run_interrupt_contract_eval());
     results.push(run_inspect_boundary_contract_eval());
