@@ -1,11 +1,13 @@
 pub fn run_save_completed_links_post_write_diagnostics_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
-            "主角惯用武器是寒影刀",
+            "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

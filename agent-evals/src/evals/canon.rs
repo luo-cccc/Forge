@@ -258,11 +258,13 @@ pub fn run_story_review_queue_canon_eval() -> EvalResult {
 pub fn run_timeline_contradiction_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "张三",
             &["三哥".to_string()],
             "protagonist",
             "第三章已死亡。",
+            &serde_json::json!({"status": "dead"}),
+            0.92,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
