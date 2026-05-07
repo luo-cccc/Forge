@@ -54,6 +54,8 @@ function App() {
   const setCurrentChapter = useAppStore((s) => s.setCurrentChapter);
   const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
   const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
+  const isAgentThinking = useAppStore((s) => s.isAgentThinking);
+  const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
 
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
@@ -76,6 +78,20 @@ function App() {
   const handleSelectionUpdate = useCallback((sel: SelectionState) => {
     selectionRef.current = sel;
   }, []);
+
+  const handleGenerate = useCallback(async () => {
+    setIsAgentThinking(true);
+    try {
+      await invoke(Commands.generateChapterAutonomous, {
+        title: currentChapter,
+        content: editorRef.current?.getHTML() || "",
+      });
+    } catch (e) {
+      console.error("Generation failed:", e);
+    } finally {
+      setIsAgentThinking(false);
+    }
+  }, [currentChapter, setIsAgentThinking]);
 
   const handleSelectChapter = useCallback(
     async (title: string) => {
@@ -248,7 +264,7 @@ function App() {
     return { full, paragraph, selected, cursorPosition };
   }, []);
 
-  const rightRailWidth =
+  const _rightRailWidth =
     storyMode === "write"
       ? "w-72"
       : storyMode === "review"
@@ -256,69 +272,95 @@ function App() {
         : storyMode === "inspect"
           ? "w-[48rem]"
           : "w-[32rem]";
-  const companionHeight =
+  const _companionHeight =
     storyMode === "explore" ? "h-[36%]" : storyMode === "review" ? "h-full" : "h-full";
 
   return (
-    <div className="h-screen bg-bg-deep text-text-primary flex">
-      <div className="w-48 h-full flex-shrink-0">
-        <ProjectTree
-          onSelectChapter={handleSelectChapter}
-          editorRef={editorRef}
-          onApplyFix={handleApplyFix}
-        />
-      </div>
-      <div className="flex-1 h-full min-w-0">
-        <EditorPanel
-          onEditorReady={handleEditorReady}
-          onSelectionUpdate={handleSelectionUpdate}
-        />
-      </div>
-      <div className={`${rightRailWidth} h-full flex-shrink-0 border-l border-border-subtle flex flex-col min-h-0`}>
-        <div className="border-b border-border-subtle px-3 py-2">
-          <div className="grid grid-cols-4 gap-1 rounded bg-bg-deep border border-border-subtle p-1">
-            {(["write", "review", "explore", "inspect"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setStoryMode(mode)}
-                className={`px-2 py-1 text-xs rounded-sm transition-colors ${
-                  storyMode === mode
-                    ? "bg-accent text-bg-deep"
-                    : "text-text-muted hover:text-text-secondary"
-                }`}
-              >
-                {mode === "write"
-                  ? "Write"
-                  : mode === "review"
-                    ? "Review"
-                    : mode === "explore"
-                      ? "Explore"
-                      : "Inspect"}
-              </button>
-            ))}
-          </div>
+    <div className="forge-root">
+      {/* Header */}
+      <header className="forge-header">
+        <div className="forge-header-left">
+          <span className="forge-header-title">Forge</span>
+          <span className="forge-header-status">
+            <span className={`dot ${isAgentThinking ? 'active' : ''}`} />
+            {isAgentThinking ? '正在生成...' : '空闲'}
+          </span>
         </div>
-        {storyMode === "inspect" ? (
-          <div className="min-h-0 flex-1">
-            <WriterInspectorPanel getContext={getContext} />
+        <div className="forge-header-right">
+          <button className="forge-btn forge-btn-primary" onClick={() => handleGenerate()}>
+            生成下一章
+          </button>
+        </div>
+      </header>
+
+      {/* Body */}
+      <div className="forge-body">
+        {/* Left Sidebar */}
+        <aside className="forge-sidebar">
+          <div className="forge-sidebar-section">
+            <div className="forge-sidebar-label">章节</div>
           </div>
-        ) : (
-          <div className={`${companionHeight} min-h-0 ${storyMode === "explore" ? "border-b border-border-subtle" : ""}`}>
+          <ProjectTree
+            onSelectChapter={handleSelectChapter}
+            editorRef={editorRef}
+            onApplyFix={handleApplyFix}
+          />
+        </aside>
+
+        {/* Center Editor */}
+        <main className="forge-editor-area">
+          <div className="forge-editor-scroll">
+            <EditorPanel
+              onEditorReady={handleEditorReady}
+              onSelectionUpdate={handleSelectionUpdate}
+            />
+          </div>
+        </main>
+
+        {/* Right Companion */}
+        <aside className="forge-companion">
+          <div className="forge-sidebar-section" style={{ borderBottom: '1px solid var(--fg-border-subtle)' }}>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--fg-surface)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
+              {(["write", "review", "explore", "inspect"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setStoryMode(mode)}
+                  className={`forge-btn ${storyMode === mode ? 'forge-btn-primary' : 'forge-btn-ghost'}`}
+                  style={{ flex: 1, justifyContent: 'center', height: 26, fontSize: 'var(--text-xs)' }}
+                >
+                  {mode === "write" ? "写" : mode === "review" ? "审" : mode === "explore" ? "探" : "查"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {storyMode === "inspect" ? (
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <WriterInspectorPanel getContext={getContext} />
+            </div>
+          ) : (
             <CompanionPanel
               mode={storyMode}
               onApplyOperation={handleApplyWriterOperation}
             />
-          </div>
-        )}
-        {storyMode === "explore" && (
-          <div className="flex-1 min-h-0">
-          <AgentPanel
-            mode={storyMode}
-            getContext={getContext}
-          />
-          </div>
-        )}
+          )}
+          {storyMode === "explore" && (
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <AgentPanel mode={storyMode} getContext={getContext} />
+            </div>
+          )}
+        </aside>
       </div>
+
+      {/* Status Bar */}
+      <footer className="forge-statusbar">
+        <div className="forge-statusbar-left">
+          {isAgentThinking && <span className="forge-statusbar-phase">⏳ 正在生成...</span>}
+          <span className="forge-statusbar-perf">本地 &lt;5ms · 上下文 &lt;5ms</span>
+        </div>
+        <div className="forge-statusbar-right">
+          <span>325 gates</span>
+        </div>
+      </footer>
     </div>
   );
 }

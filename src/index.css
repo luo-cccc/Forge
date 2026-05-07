@@ -1,345 +1,97 @@
-@import "tailwindcss";
+@import './styles/tokens.css';
 
-@theme {
-  --color-bg-deep: #12100E;
-  --color-bg-surface: #1A1816;
-  --color-bg-raised: #22201D;
-  --color-border-subtle: #2A2724;
-  --color-border-active: #3D3934;
-  --color-text-primary: #E4DAC8;
-  --color-text-secondary: #8A8278;
-  --color-text-muted: #5C5650;
-  --color-accent: #D4943A;
-  --color-accent-subtle: #3D2E1A;
-  --color-code-bg: #161310;
-  --color-success: #5A8A6A;
-  --color-danger: #8A5050;
-  --color-search-bg: #3D2E1A;
-  --color-search-border: #D4943A;
-  --font-family-display: "Source Serif 4", "Noto Serif SC", Georgia, serif;
-  --font-family-editor: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: var(--color-bg-deep);
-  color: var(--color-text-primary);
-  -webkit-font-smoothing: antialiased;
-}
-
-.ghost-text {
-  color: color-mix(in srgb, var(--color-text-muted) 78%, transparent);
-  font-style: italic;
-  pointer-events: none;
-  white-space: pre-wrap;
-}
-
-.ghost-text[data-intent="dialogue"] {
-  color: color-mix(in srgb, var(--color-accent) 48%, var(--color-text-muted));
-}
-
-.ghost-text[data-intent="instruction"],
-.ghost-text[data-intent="scenery"] {
-  color: color-mix(in srgb, var(--color-success) 45%, var(--color-text-muted));
-}
-
-.inline-ai-preview {
-  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 72%, transparent);
-  background: color-mix(in srgb, var(--color-accent-subtle) 72%, transparent);
-  color: var(--color-accent);
-  white-space: pre-wrap;
-}
-
-.inline-ai-preview-insert {
-  padding: 0 2px;
-}
-
-.inline-ai-preview-replacement {
-  margin-left: 2px;
-  padding: 0 2px;
-}
-
-.inline-ai-preview-target {
-  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
-  text-decoration-line: line-through;
-  text-decoration-color: color-mix(in srgb, var(--color-danger) 72%, transparent);
-}
-
-.semantic-lint {
-  cursor: help;
-  text-decoration-line: underline;
-  text-decoration-style: wavy;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-
-.semantic-lint-warning {
-  text-decoration-color: var(--color-accent);
-}
-
-.semantic-lint-error {
-  text-decoration-color: var(--color-danger);
-}
-
-.semantic-lint-info {
-  text-decoration-color: var(--color-success);
-}
-
-.entity-anchor {
-  cursor: help;
-  text-decoration-line: underline;
-  text-decoration-style: solid;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
-  text-decoration-color: color-mix(in srgb, var(--color-success) 68%, transparent);
-}
-
-.entity-hover-card {
-  position: fixed;
-  z-index: 60;
-  width: 320px;
-  max-height: 220px;
-  overflow: hidden;
-  border: 1px solid var(--color-border-active);
-  border-radius: 6px;
-  background: var(--color-bg-surface);
-  box-shadow: 0 12px 30px rgba(0,0,0,0.42);
-  padding: 10px 12px;
-  pointer-events: none;
-}
-
-.entity-hover-title {
-  color: var(--color-accent);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.entity-hover-chapter {
-  color: var(--color-text-muted);
-  font-size: 10px;
-  margin-top: 2px;
-}
-
-.entity-hover-content {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
-  margin-top: 8px;
-  display: -webkit-box;
-  -webkit-line-clamp: 6;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.parallel-drafts-pane {
-  width: 360px;
-  min-width: 320px;
-  height: 100%;
-  border-left: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-surface);
+/* ── Forge Codex Layout ── */
+.forge-root {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  background: var(--fg-surface);
 }
 
-.parallel-drafts-header {
-  height: 40px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
+/* ── Header ── */
+.forge-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  letter-spacing: 0;
+  height: var(--header-height);
+  padding: 0 var(--space-4);
+  background: var(--fg-surface);
+  border-bottom: 1px solid var(--fg-border-subtle);
+  flex-shrink: 0;
+  z-index: 50;
 }
+.forge-header-left { display: flex; align-items: center; gap: var(--space-3); }
+.forge-header-title { font-size: var(--text-sm); font-weight: 600; color: var(--fg-text-primary); letter-spacing: -0.01em; }
+.forge-header-status { font-size: var(--text-xs); color: var(--fg-text-tertiary); display: flex; align-items: center; gap: var(--space-1); }
+.forge-header-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-success); }
+.forge-header-status .dot.active { background: var(--fg-accent); animation: pulse-dot 1.5s ease-in-out infinite; }
+.forge-header-right { display: flex; align-items: center; gap: var(--space-2); }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-.parallel-drafts-close {
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  color: var(--color-text-muted);
-  background: var(--color-bg-raised);
-  cursor: pointer;
-}
+/* ── Main Body ── */
+.forge-body { display: flex; flex: 1; overflow: hidden; }
 
-.parallel-drafts-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 10px;
-}
+/* ── Left Sidebar ── */
+.forge-sidebar { width: var(--sidebar-width); background: var(--fg-surface); border-right: 1px solid var(--fg-border-subtle); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+.forge-sidebar.collapsed { width: 0; border: none; overflow: hidden; }
+.forge-sidebar-section { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--fg-border-subtle); }
+.forge-sidebar-label { font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-text-tertiary); margin-bottom: var(--space-2); }
+.forge-chapter-item { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm); color: var(--fg-text-secondary); transition: background var(--duration-fast) var(--ease-out); user-select: none; }
+.forge-chapter-item:hover { background: var(--fg-surface-hover); color: var(--fg-text-primary); }
+.forge-chapter-item.active { background: var(--fg-accent-muted); color: var(--fg-text-primary); font-weight: 500; }
+.forge-chapter-item .index { font-size: var(--text-xs); color: var(--fg-text-tertiary); font-family: var(--font-mono); min-width: 24px; }
 
-.parallel-drafts-muted,
-.parallel-drafts-error {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  padding: 8px 2px;
-}
+/* ── Editor Center ── */
+.forge-editor-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--fg-surface); }
+.forge-editor-scroll { flex: 1; overflow-y: auto; padding: var(--space-8) var(--space-12); max-width: 820px; margin: 0 auto; width: 100%; }
+.forge-editor-content { font-family: var(--font-mono); font-size: 1rem; line-height: 1.75; color: var(--fg-text-primary); white-space: pre-wrap; outline: none; min-height: 60vh; caret-color: var(--fg-accent); }
+.forge-editor-content:empty::before { content: '开始写...'; color: var(--fg-text-tertiary); }
 
-.parallel-drafts-error {
-  color: var(--color-danger);
-}
+/* ── Ghost Hint ── */
+.forge-ghost-hint { position: fixed; bottom: var(--status-bar-height); right: var(--companion-width); padding: var(--space-1) var(--space-3); background: var(--fg-surface-overlay); border-radius: var(--radius-sm); font-size: var(--text-xs); color: var(--fg-text-tertiary); font-family: var(--font-ui); border: 1px solid var(--fg-border-subtle); z-index: 40; pointer-events: none; }
+.forge-ghost-hint.loading { color: var(--fg-accent); }
 
-.parallel-draft {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 6px;
-  background: var(--color-bg-deep);
-  margin-bottom: 10px;
-  overflow: hidden;
-}
+/* ── Companion ── */
+.forge-companion { width: var(--companion-width); background: var(--fg-surface); border-left: 1px solid var(--fg-border-subtle); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+.forge-companion.collapsed { width: 0; border: none; overflow: hidden; }
+.forge-companion-card { padding: var(--space-4); border-bottom: 1px solid var(--fg-border-subtle); }
+.forge-companion-card-label { font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-1); }
+.forge-companion-card-label.guard { color: var(--fg-success); }
+.forge-companion-card-label.contract { color: var(--fg-text-secondary); }
+.forge-companion-card-label.mission { color: var(--fg-text-secondary); }
+.forge-companion-card-label.promise { color: var(--fg-warning); }
+.forge-companion-card-label.next { color: var(--fg-accent); }
+.forge-companion-card-value { font-size: var(--text-sm); color: var(--fg-text-primary); font-weight: 500; line-height: var(--leading-tight); }
+.forge-companion-card-detail { font-size: var(--text-xs); color: var(--fg-text-tertiary); margin-top: var(--space-1); line-height: var(--leading-normal); }
+.forge-companion-card.tone-danger .forge-companion-card-label { color: var(--fg-danger); }
 
-.parallel-draft-label {
-  color: var(--color-accent);
-  font-size: 11px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
+/* ── Status Bar ── */
+.forge-statusbar { display: flex; align-items: center; justify-content: space-between; height: var(--status-bar-height); padding: 0 var(--space-4); background: var(--fg-surface-raised); border-top: 1px solid var(--fg-border-subtle); font-size: var(--text-xs); color: var(--fg-text-tertiary); flex-shrink: 0; }
+.forge-statusbar-left { display: flex; align-items: center; gap: var(--space-3); }
+.forge-statusbar-right { display: flex; align-items: center; gap: var(--space-3); }
+.forge-statusbar-phase { color: var(--fg-accent); }
+.forge-statusbar-perf { color: var(--fg-text-tertiary); font-family: var(--font-mono); }
 
-.parallel-draft-text {
-  display: flex;
-  flex-direction: column;
-}
+/* ── Buttons ── */
+.forge-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 500; font-family: var(--font-ui); cursor: pointer; border: 1px solid transparent; transition: all var(--duration-fast) var(--ease-out); user-select: none; height: 28px; line-height: 1; }
+.forge-btn-primary { background: var(--fg-accent); color: white; border-color: var(--fg-accent); }
+.forge-btn-primary:hover { background: var(--fg-accent-hover); }
+.forge-btn-secondary { background: transparent; color: var(--fg-text-secondary); border-color: var(--fg-border); }
+.forge-btn-secondary:hover { background: var(--fg-surface-hover); color: var(--fg-text-primary); }
+.forge-btn-ghost { background: transparent; color: var(--fg-text-tertiary); }
+.forge-btn-ghost:hover { background: var(--fg-surface-hover); color: var(--fg-text-primary); }
+.forge-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.parallel-draft-segment {
-  text-align: left;
-  padding: 9px 10px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-  cursor: pointer;
-}
+/* ── Onboarding ── */
+.forge-onboarding { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: var(--space-4); text-align: center; padding: var(--space-8); }
+.forge-onboarding textarea { width: 100%; max-width: 560px; min-height: 160px; padding: var(--space-4); background: var(--fg-surface-raised); border: 1px solid var(--fg-border); border-radius: var(--radius-md); color: var(--fg-text-primary); font-family: var(--font-ui); font-size: var(--text-base); resize: vertical; line-height: var(--leading-relaxed); }
+.forge-onboarding textarea:focus { border-color: var(--fg-accent); outline: none; }
+.forge-onboarding textarea::placeholder { color: var(--fg-text-tertiary); }
 
-.parallel-draft-segment:last-child {
-  border-bottom: 0;
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .forge-sidebar { display: none; }
+  .forge-companion { display: none; }
+  .forge-editor-scroll { padding: var(--space-4) var(--space-4); max-width: 100%; }
+  .forge-ghost-hint { right: var(--space-4); }
 }
-
-.parallel-draft-segment:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-raised);
-}
-
-/* Patch Review Overlay */
-.patch-review-overlay {
-  position: fixed;
-  bottom: 32px;
-  right: 0;
-  width: 384px;
-  max-height: 60vh;
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-active);
-  border-radius: 8px 8px 0 0;
-  overflow-y: auto;
-  z-index: 40;
-  box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
-}
-.patch-review-header {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-.patch-review-title { font-weight: 600; color: var(--color-text-primary); }
-.patch-review-stats { color: var(--color-text-muted); flex: 1; }
-.patch-review-actions { display: flex; gap: 4px; }
-.patch-btn-accept, .patch-btn-accept-small {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.patch-btn-reject, .patch-btn-reject-small {
-  background: transparent;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border-active);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.patch-btn-dismiss {
-  background: transparent;
-  color: var(--color-danger);
-  border: 1px solid var(--color-border-active);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.patch-review-list { padding: 4px 0; }
-.patch-item {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  transition: opacity 0.15s;
-}
-.patch-item-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-.patch-item-index {
-  color: var(--color-accent);
-  font-weight: 600;
-  font-size: 11px;
-}
-.patch-item-desc {
-  color: var(--color-text-primary);
-  font-size: 12px;
-  flex: 1;
-}
-.patch-item-severity { font-size: 10px; text-transform: uppercase; padding: 1px 4px; border-radius: 2px; }
-.patch-sev-warning { background: var(--color-accent-subtle); color: var(--color-accent); }
-.patch-sev-info { background: rgba(90,138,106,0.15); color: var(--color-success); }
-.patch-sev-suggestion { background: var(--color-bg-raised); color: var(--color-text-muted); }
-.patch-item-diff { font-size: 11px; margin: 4px 0; }
-.patch-old { color: var(--color-danger); }
-.patch-new { color: var(--color-success); }
-.patch-label { font-weight: 600; margin-right: 4px; }
-.patch-item-actions { display: flex; gap: 4px; margin-top: 4px; }
-.patch-mark.patch-pending {
-  background-color: rgba(212,148,58,0.15);
-  border-bottom: 2px solid var(--color-accent);
-  cursor: pointer;
-}
-.patch-mark.patch-review {
-  background-color: rgba(212,148,58,0.25);
-  border-bottom: 2px dashed var(--color-accent);
-}
-
-/* CoWriter Status Bar */
-.cowriter-status-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 24px;
-  padding: 0 12px;
-  background: var(--color-bg-deep);
-  border-top: 1px solid var(--color-border-subtle);
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-.status-left { min-width: 120px; }
-.status-thinking { color: var(--color-accent); }
-.status-idle { color: var(--color-success); }
-.status-center { display: flex; align-items: center; gap: 6px; }
-.context-bar { width: 120px; height: 4px; background: var(--color-bg-raised); border-radius: 2px; overflow: hidden; }
-.context-fill { height: 100%; background: var(--color-accent); transition: width 0.3s; }
-.context-label { font-size: 10px; }
-.status-right { min-width: 100px; text-align: right; }
-.status-model { color: var(--color-text-secondary); }
