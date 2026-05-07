@@ -84,10 +84,63 @@ pub fn build_chapter_context(
         None,
     );
 
+    let mut previous_fulltext_upgrade_count: usize = 0;
+    let mut previous_fulltext_upgrade_reason = String::new();
+
     if let Some(target_index) = target.number.map(|n| n - 1) {
         let previous_nodes =
             select_previous_nodes(&outline, target_index, input.budget.previous_chapter_count);
-        let previous_text = build_adjacent_chapter_context(app, previous_nodes);
+        let mut previous_text = build_adjacent_chapter_context(app, previous_nodes.clone());
+
+        // Risk gate: upgrade to fulltext when continuity risk is elevated.
+        let open_promise_count = input.open_promise_count;
+        let unresolved_debt_density = open_promise_count;
+        let continuity_risk = if open_promise_count > 5 {
+            "high"
+        } else if open_promise_count > 2 {
+            "medium"
+        } else {
+            "low"
+        };
+        let previous_structured_evidence_insufficient = previous_text.len() < 100;
+
+        let should_upgrade_fulltext = continuity_risk == "high"
+            || unresolved_debt_density > 3
+            || previous_structured_evidence_insufficient;
+
+        if should_upgrade_fulltext {
+            let mut reasons = Vec::new();
+            if continuity_risk == "high" {
+                reasons.push(format!(
+                    "continuity_risk=high (open_promises={})",
+                    open_promise_count
+                ));
+            }
+            if unresolved_debt_density > 3 {
+                reasons.push(format!(
+                    "unresolved_debt_density={}",
+                    unresolved_debt_density
+                ));
+            }
+            if previous_structured_evidence_insufficient {
+                reasons.push("structured_evidence_insufficient".to_string());
+            }
+            previous_fulltext_upgrade_reason = reasons.join("; ");
+
+            for node in &previous_nodes {
+                if let Ok(full) = storage::load_chapter(app, node.chapter_title.clone()) {
+                    if !full.trim().is_empty() {
+                        let snippet = snippet_text(&full, 1200);
+                        previous_text.push_str(&format!(
+                            "\n\n## Previous chapter fulltext: {} (risk upgrade)\n{}",
+                            node.chapter_title, snippet
+                        ));
+                        previous_fulltext_upgrade_count += 1;
+                    }
+                }
+            }
+        }
+
         composer.add_source(
             "previous_chapters",
             "previous",
@@ -287,6 +340,8 @@ pub fn build_chapter_context(
         stable_prefix_chars,
         dynamic_tail_chars,
         focus_pack_rebuild_count: rebuild_count,
+        previous_fulltext_upgrade_count,
+        previous_fulltext_upgrade_reason,
     })
 }
 

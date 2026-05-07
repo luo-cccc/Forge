@@ -34,6 +34,12 @@ pub async fn run_chapter_generation_pipeline(
         None,
     ));
 
+    let open_promise_count = crate::writer_agent::memory::WriterMemory::open(&config.memory_path)
+        .ok()
+        .and_then(|m| m.get_open_promises().ok())
+        .map(|p| p.len())
+        .unwrap_or(0);
+
     let build_input = BuildChapterContextInput {
         request_id: request_id.clone(),
         target_chapter_title: config.payload.target_chapter_title.clone(),
@@ -44,6 +50,7 @@ pub async fn run_chapter_generation_pipeline(
         chapter_summary_override: config.payload.chapter_summary_override.clone(),
         user_profile_entries: config.user_profile_entries.clone(),
         compiled_input: None,
+        open_promise_count,
     };
 
     let context = match build_chapter_context(&config.app, build_input) {

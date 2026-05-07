@@ -696,6 +696,10 @@ pub struct BuiltChapterContext {
     pub stable_prefix_chars: usize,
     pub dynamic_tail_chars: usize,
     pub focus_pack_rebuild_count: usize,
+    #[serde(default)]
+    pub previous_fulltext_upgrade_count: usize,
+    #[serde(default)]
+    pub previous_fulltext_upgrade_reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -709,6 +713,7 @@ pub struct BuildChapterContextInput {
     pub chapter_summary_override: Option<String>,
     pub user_profile_entries: Vec<String>,
     pub compiled_input: Option<CompiledInput>,
+    pub open_promise_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
