@@ -252,6 +252,35 @@ pub fn apply_chapter_settlement_delta(
         }
     }
 
+    // Apply fact deltas with cross-chapter dedup
+    let mut fact_applied = 0usize;
+    {
+        let known_entities = memory.get_canon_entity_names().unwrap_or_default();
+        for fact_line in &delta.chapter_fact_delta {
+            let mut inserted = false;
+            for entity_name in &known_entities {
+                if fact_line.contains(entity_name.as_str()) {
+                    let fact_key = format!(
+                        "fact-{}",
+                        crate::storage::content_revision(fact_line)
+                    );
+                    if let Ok(_) = memory.update_canon_attribute(
+                        entity_name,
+                        &fact_key,
+                        fact_line,
+                        0.5,
+                    ) {
+                        inserted = true;
+                    }
+                    break; // One entity per fact line
+                }
+            }
+            if inserted {
+                fact_applied += 1;
+            }
+        }
+    }
+
     let existing = memory
         .get_book_state(project_id)
         .map_err(|e| e.to_string())?
@@ -323,6 +352,7 @@ pub fn apply_chapter_settlement_delta(
         knowledge_applied,
         identity_applied,
         scene_applied,
+        fact_applied,
         warnings,
     })
 }

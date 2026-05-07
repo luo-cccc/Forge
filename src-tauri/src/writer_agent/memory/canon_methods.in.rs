@@ -41,7 +41,7 @@ impl WriterMemory {
                     rusqlite::params![entity_id, key],
                 )?;
                 self.conn.execute(
-                    "INSERT INTO canon_facts (entity_id, key, value, source_ref, confidence, status, updated_at)
+                    "INSERT OR IGNORE INTO canon_facts (entity_id, key, value, source_ref, confidence, status, updated_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, 'active', datetime('now'))",
                     rusqlite::params![entity_id, key, fact_value, "canon_entity.attributes", confidence],
                 )?;
@@ -101,7 +101,7 @@ impl WriterMemory {
             rusqlite::params![entity_id, attribute],
         )?;
         self.conn.execute(
-            "INSERT INTO canon_facts (entity_id, key, value, source_ref, confidence, status, updated_at)
+            "INSERT OR IGNORE INTO canon_facts (entity_id, key, value, source_ref, confidence, status, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, 'active', datetime('now'))",
             rusqlite::params![entity_id, attribute, value, "canon.update_attribute", confidence],
         )?;

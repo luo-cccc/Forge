@@ -609,7 +609,19 @@ pub struct ChapterSettlementApplyResult {
     pub knowledge_applied: usize,
     pub identity_applied: usize,
     pub scene_applied: usize,
+    pub fact_applied: usize,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LengthPhaseTelemetry {
+    pub continuation_count: usize,
+    pub compress_count: usize,
+    pub hard_compress_count: usize,
+    pub continuation_latency_ms: u64,
+    pub compress_latency_ms: u64,
+    pub hard_compress_latency_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -629,6 +641,8 @@ pub struct ChapterLengthTelemetry {
     pub hard_compress_applied: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    #[serde(default)]
+    pub phase_telemetry: LengthPhaseTelemetry,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
