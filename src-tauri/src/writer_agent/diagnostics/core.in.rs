@@ -181,30 +181,33 @@ impl DiagnosticsEngine {
         }
 
         // 3. Knowledge visibility check: flag if characters act on knowledge they shouldn't have
-        if let Ok(ownerships) = memory.get_knowledge_by_holder("character", 0, chapter_id) {
-            for ownership in &ownerships {
-                if ownership.knowledge_mode == "misbelief" {
-                    // Check if paragraph contradicts the misbelief
-                    if paragraph.contains(&ownership.topic) {
-                        results.push(DiagnosticResult {
-                            id: next_id(),
-                            severity: DiagnosticSeverity::Warning,
-                            category: DiagnosticCategory::CanonConflict,
-                            message: format!(
-                                "知识冲突: 角色仍处于误判状态，但段落内容涉及 {}",
-                                ownership.topic
-                            ),
-                            entity_name: None,
-                            from: 0,
-                            to: paragraph.chars().count(),
-                            evidence: vec![DiagnosticEvidence {
-                                source: "knowledge".into(),
-                                reference: ownership.topic.clone(),
-                                snippet: format!("mode={}", ownership.knowledge_mode),
-                            }],
-                            fix_suggestion: Some("确认此角色此时是否应该知道这条信息".into()),
-                            operations: Vec::new(),
-                        });
+        for entity in &entities {
+            if let Ok(Some(character)) = memory.get_character_by_name(entity) {
+                if let Ok(ownerships) = memory.get_knowledge_by_holder("character", character.id, chapter_id) {
+                    for ownership in &ownerships {
+                        if ownership.knowledge_mode == "misbelief" {
+                            if paragraph.contains(&ownership.topic) {
+                                results.push(DiagnosticResult {
+                                    id: next_id(),
+                                    severity: DiagnosticSeverity::Warning,
+                                    category: DiagnosticCategory::CanonConflict,
+                                    message: format!(
+                                        "知识冲突: {} 仍处于误判状态，但段落内容涉及 {}",
+                                        entity, ownership.topic
+                                    ),
+                                    entity_name: Some(entity.clone()),
+                                    from: 0,
+                                    to: paragraph.chars().count(),
+                                    evidence: vec![DiagnosticEvidence {
+                                        source: "knowledge".into(),
+                                        reference: ownership.topic.clone(),
+                                        snippet: format!("mode={}", ownership.knowledge_mode),
+                                    }],
+                                    fix_suggestion: Some("确认此角色此时是否应该知道这条信息".into()),
+                                    operations: Vec::new(),
+                                });
+                            }
+                        }
                     }
                 }
             }
