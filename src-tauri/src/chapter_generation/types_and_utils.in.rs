@@ -414,6 +414,8 @@ pub struct ChapterSettlementExtraction {
     pub knowledge_deltas: Vec<KnowledgeDeltaEntry>,
     #[serde(default)]
     pub identity_deltas: Vec<IdentityDeltaEntry>,
+    #[serde(default)]
+    pub scene_deltas: Vec<SceneResultProjection>,
     pub warnings: Vec<String>,
 }
 
@@ -519,6 +521,15 @@ pub struct KnowledgeDeltaEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct SceneResultProjection {
+    pub scene_id: i64,
+    pub outcome: String,
+    pub consequence: String,
+    pub source_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct IdentityDeltaEntry {
     pub character_name: String,
     pub public_identity: String,
@@ -556,6 +567,8 @@ pub struct ChapterSettlementDelta {
     pub knowledge_deltas: Vec<KnowledgeDeltaEntry>,
     #[serde(default)]
     pub identity_deltas: Vec<IdentityDeltaEntry>,
+    #[serde(default)]
+    pub scene_deltas: Vec<SceneResultProjection>,
     pub continuity_issues: Vec<String>,
     pub repairable: bool,
 }

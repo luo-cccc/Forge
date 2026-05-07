@@ -27,6 +27,7 @@ pub fn build_basic_chapter_settlement_delta(
         &observation,
         &chapter_result,
         &open_promises,
+        memory,
     );
     let promise_updates = materialize_promise_delta_entries(&extraction, &chapter_result, &open_promises);
     let book_state_updates = derive_book_state_updates(&chapter_result, &promise_updates);
@@ -41,6 +42,7 @@ pub fn build_basic_chapter_settlement_delta(
     let relationship_deltas = extraction.relationship_deltas.clone();
     let knowledge_deltas = extraction.knowledge_deltas.clone();
     let identity_deltas = extraction.identity_deltas.clone();
+    let scene_deltas = extraction.scene_deltas.clone();
 
     ChapterSettlementDelta {
         chapter_title: chapter_title.to_string(),
@@ -73,6 +75,7 @@ pub fn build_basic_chapter_settlement_delta(
         relationship_deltas,
         knowledge_deltas,
         identity_deltas,
+        scene_deltas,
         continuity_issues,
         repairable: true,
         ..Default::default()
@@ -115,6 +118,7 @@ fn build_settlement_extraction(
     observation: &WriterObservation,
     chapter_result: &ChapterResultSummary,
     open_promises: &[PlotPromiseSummary],
+    memory: &WriterMemory,
 ) -> ChapterSettlementExtraction {
     let mut promise_candidates = Vec::new();
     let mut chapter_result_candidates = Vec::new();
@@ -356,6 +360,38 @@ fn build_settlement_extraction(
             .collect()
     };
 
+    let scene_deltas: Vec<SceneResultProjection> = {
+        let scenes = memory
+            .list_scenes_by_chapter(&chapter_result.chapter_title)
+            .unwrap_or_default();
+        if scenes.is_empty() {
+            vec![SceneResultProjection {
+                scene_id: 0,
+                outcome: chapter_result.summary.clone(),
+                consequence: chapter_result
+                    .new_conflicts
+                    .first()
+                    .cloned()
+                    .unwrap_or_default(),
+                source_ref: chapter_result.source_ref.clone(),
+            }]
+        } else {
+            scenes
+                .iter()
+                .map(|s| SceneResultProjection {
+                    scene_id: s.id,
+                    outcome: chapter_result.summary.clone(),
+                    consequence: chapter_result
+                        .state_changes
+                        .first()
+                        .cloned()
+                        .unwrap_or_default(),
+                    source_ref: chapter_result.source_ref.clone(),
+                })
+                .collect()
+        }
+    };
+
     ChapterSettlementExtraction {
         summary_candidates,
         chapter_result_candidates,
@@ -365,6 +401,7 @@ fn build_settlement_extraction(
         relationship_deltas,
         knowledge_deltas,
         identity_deltas,
+        scene_deltas,
         warnings: Vec::new(),
     }
 }
