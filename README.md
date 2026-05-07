@@ -232,7 +232,7 @@ This baseline describes the expected state of the current branch only after the 
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 89 tests passing
 - `cargo test -p agent-writer`: 247 tests passing
-- `cargo run -p agent-evals`: 311/311 evals passing
+- `cargo run -p agent-evals`: 315/315 evals passing
 - `npm run check:p2`: 20/20 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:save-path`: passed
