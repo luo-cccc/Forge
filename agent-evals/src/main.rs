@@ -319,6 +319,7 @@ fn main() {
     results.push(run_previous_fulltext_gate_eval());
     results.push(run_impact_scoped_recall_eval());
     results.push(run_strategy_selection_eval());
+    results.push(run_strategy_validation_eval());
     results.push(run_anchor_regression_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();

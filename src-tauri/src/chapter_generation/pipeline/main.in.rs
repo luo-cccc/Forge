@@ -510,7 +510,7 @@ fn build_chapter_settlement_delta(
     ))
 }
 
-fn select_generation_strategy(
+pub fn select_generation_strategy(
     context: &BuiltChapterContext,
     repair_history: usize,
 ) -> GenerationStrategy {
