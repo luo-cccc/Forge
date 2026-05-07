@@ -398,7 +398,50 @@ pub(crate) fn promise_subject_pressure(
         }
     }
 
+    pressure *= knowledge_readiness_factor(promise, memory, current_chapter);
+    pressure *= timeline_due_factor(promise, memory, current_chapter);
     pressure
+}
+
+pub(crate) fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+    let mut factor = 1.0;
+    for related in &promise.related_entities {
+        if let Some(name) = related.strip_prefix("character:") {
+            if let Ok(Some(c)) = memory.get_character_by_name(name) {
+                if let Ok(ownerships) = memory.get_knowledge_by_holder("character", c.id, current_chapter) {
+                    for o in &ownerships {
+                        match o.knowledge_mode.as_str() {
+                            "aware" | "suspecting" => factor = f64::min(factor * 1.1, 3.0),
+                            "concealing" => factor *= 0.8,
+                            "misbelief" => factor *= 0.5,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    factor
+}
+
+pub(crate) fn timeline_due_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+    let expected_num = extract_chapter_number(&promise.expected_payoff);
+    if expected_num == 0 { return 1.0; }
+    let expected_chapter = format!("Chapter-{}", expected_num);
+    if let Ok(mappings) = memory.get_time_mapping_for_chapter(current_chapter) {
+        if let Ok(expected_mappings) = memory.get_time_mapping_for_chapter(&expected_chapter) {
+            if let (Some(cur), Some(exp)) = (mappings.first(), expected_mappings.first()) {
+                if let (Ok(Some(cur_ts)), Ok(Some(exp_ts))) = (
+                    memory.get_time_slice_by_id(cur.time_slice_id),
+                    memory.get_time_slice_by_id(exp.time_slice_id),
+                ) {
+                    if cur_ts.relative_order > exp_ts.relative_order { return 1.3; }
+                    if cur.narrative_mode == "flashback" && cur_ts.relative_order < exp_ts.relative_order { return 0.3; }
+                }
+            }
+        }
+    }
+    1.0
 }
 
 fn extract_chapter_number(chapter: &str) -> i64 {
