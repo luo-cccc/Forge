@@ -365,7 +365,7 @@ fn chapter_number(chapter: &str) -> Option<i64> {
     numbers.last().copied()
 }
 
-pub(crate) fn promise_subject_pressure(
+pub fn promise_subject_pressure(
     promise: &PlotPromiseSummary,
     memory: &WriterMemory,
     current_chapter: &str,
@@ -403,7 +403,7 @@ pub(crate) fn promise_subject_pressure(
     pressure
 }
 
-pub(crate) fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+pub fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
     let mut factor = 1.0;
     for related in &promise.related_entities {
         if let Some(name) = related.strip_prefix("character:") {
@@ -424,7 +424,7 @@ pub(crate) fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &
     factor
 }
 
-pub(crate) fn timeline_due_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+pub fn timeline_due_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
     let expected_num = extract_chapter_number(&promise.expected_payoff);
     if expected_num == 0 { return 1.0; }
     let expected_chapter = format!("Chapter-{}", expected_num);

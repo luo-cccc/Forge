@@ -278,6 +278,9 @@ fn main() {
     results.push(run_story_time_mapping_eval());
     results.push(run_flashback_identity_eval());
     results.push(run_timeline_event_order_eval());
+    results.push(run_typed_context_filter_eval());
+    results.push(run_planner_fallback_eval());
+    results.push(run_scene_obligation_diagnostic_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
