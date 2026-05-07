@@ -588,6 +588,9 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             isAgentThinking ? "bg-accent animate-pulse" : "bg-success"
           }`} />
         </div>
+        <div className="mb-2 text-[10px] text-text-muted">
+          {isAgentThinking ? "正在生成..." : "空闲"}
+        </div>
         {todayFiveSummary && (() => {
           const guardTone = todayFiveSummary.items[0]?.tone;
           const readiness = guardTone?.includes("需要注意") ? { emoji: "⚠️", text: "建议先处理冲突", color: "text-yellow-400" }
