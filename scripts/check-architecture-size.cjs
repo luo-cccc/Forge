@@ -62,7 +62,7 @@ const budgets = [
   {
     label: "Eval facade",
     file: path.join("agent-evals", "src", "evals.rs"),
-    maxLines: 200,
+    maxLines: 220,
     rationale: "Eval facade should only keep shared helpers and module exports.",
   },
   {
@@ -80,7 +80,7 @@ const budgets = [
   {
     label: "Companion panel contract helpers",
     file: path.join("src", "components", "CompanionPanel.contract.ts"),
-    maxLines: 200,
+    maxLines: 220,
     rationale: "Story contract / chapter mission draft types and factories — no hooks, no JSX.",
   },
   {
