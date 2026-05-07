@@ -432,6 +432,8 @@ pub struct ChapterSettlementExtraction {
     #[serde(default)]
     pub scene_deltas: Vec<SceneResultProjection>,
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub emotional_debt_cues: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -588,6 +590,8 @@ pub struct ChapterSettlementDelta {
     pub repairable: bool,
     #[serde(default)]
     pub reader_takeaway: Option<ReaderTakeaway>,
+    #[serde(default)]
+    pub emotional_debt_cues: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

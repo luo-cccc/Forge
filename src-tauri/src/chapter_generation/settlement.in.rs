@@ -43,6 +43,7 @@ pub fn build_basic_chapter_settlement_delta(
     let knowledge_deltas = extraction.knowledge_deltas.clone();
     let identity_deltas = extraction.identity_deltas.clone();
     let scene_deltas = extraction.scene_deltas.clone();
+    let emotional_debt_cues = extraction.emotional_debt_cues.clone();
 
     let reader_takeaway = ReaderTakeaway {
         emotional_beat: {
@@ -105,6 +106,7 @@ pub fn build_basic_chapter_settlement_delta(
         continuity_issues,
         repairable: true,
         reader_takeaway: Some(reader_takeaway),
+        emotional_debt_cues,
         ..Default::default()
     }
 }
@@ -419,6 +421,24 @@ fn build_settlement_extraction(
         }
     };
 
+    // Emotional debt cue extraction: scan state_changes and new_conflicts for pressure keywords
+    let mut emotional_debt_cues = Vec::new();
+    let emotional_keywords = ["愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦"];
+    for line in &chapter_result.state_changes {
+        for keyword in &emotional_keywords {
+            if line.contains(keyword) && !emotional_debt_cues.contains(&keyword.to_string()) {
+                emotional_debt_cues.push(keyword.to_string());
+            }
+        }
+    }
+    for line in &chapter_result.new_conflicts {
+        for keyword in &emotional_keywords {
+            if line.contains(keyword) && !emotional_debt_cues.contains(&keyword.to_string()) {
+                emotional_debt_cues.push(keyword.to_string());
+            }
+        }
+    }
+
     ChapterSettlementExtraction {
         summary_candidates,
         chapter_result_candidates,
@@ -430,6 +450,7 @@ fn build_settlement_extraction(
         identity_deltas,
         scene_deltas,
         warnings: Vec::new(),
+        emotional_debt_cues,
     }
 }
 
