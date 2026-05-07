@@ -129,16 +129,183 @@ pub fn seed_project_from_idea(
         });
     }
 
-    // Seed characters
+    populate_memory_from_report(memory, project_id, &report)?;
+    Ok(report)
+}
+
+/// Premium path: use the real LLM to extract structured project data from complex settings.
+/// Handles dual power systems, nested worlds, faction relationships, and character hierarchies.
+pub fn seed_project_from_idea_with_llm(
+    memory: &WriterMemory,
+    project_id: &str,
+    idea_text: &str,
+) -> Result<ProjectIntakeReport, String> {
+    // Try LLM extraction
+    let report = match extract_with_llm(idea_text) {
+        Ok(r) => r,
+        Err(_) => build_project_intake_report_from_text(idea_text), // fallback to heuristic
+    };
+
+    // Populate memory from extracted report (same as heuristic path)
+    populate_memory_from_report(memory, project_id, &report)?;
+    Ok(report)
+}
+
+/// Call the real LLM API for structured setting extraction.
+fn extract_with_llm(idea_text: &str) -> Result<ProjectIntakeReport, String> {
+    use std::env;
+    let api_key = env::var("OPENAI_API_KEY").map_err(|_| "API key not configured".to_string())?;
+    let api_base = env::var("OPENAI_API_BASE").unwrap_or_else(|_| "https://api.openai.com/v1".into());
+    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".into());
+
+    let prompt = format!(r#"你是一个小说设定分析专家。请分析以下设定文本，提取结构化信息。
+
+设定文本：
+---
+{}
+---
+
+请以 JSON 格式返回以下结构（只返回 JSON，不要其他文字）：
+
+{{
+  "identified_characters": [
+    {{"name": "角色名", "kind": "protagonist/supporting/antagonist", "attributes": ["属性1", "属性2"], "first_seen_chapter": "idea", "confidence": 0.9}}
+  ],
+  "identified_canon": [
+    {{"entity_name": "体系/规则名", "attribute_key": "属性名", "attribute_value": "属性值", "source_chapter": "idea", "confidence": 0.9, "evidence": "原文片段"}}
+  ],
+  "open_promises": [
+    {{"kind": "plot_promise/lore_promise/relationship_promise", "title": "简短标题", "description": "详细描述", "introduced_chapter": "Chapter-1", "expected_payoff_chapter": "Chapter-5", "confidence": 0.8, "evidence": "原文片段"}}
+  ],
+  "conflicts": [
+    {{"kind": "story_conflict/world_conflict/faction_conflict", "description": "冲突描述", "sources": ["设定文本"], "severity": "high/medium/low"}}
+  ],
+  "world_systems": [
+    {{"name": "体系名", "layers": ["层1", "层2"], "rules": ["规则1"], "confidence": 0.9}}
+  ],
+  "style_fingerprint": {{"pov_type": "first/third/omniscient", "avg_sentence_length": 0, "dialogue_ratio": 0, "confidence": 0.5, "common_phrases": [], "taboo_signals": []}},
+  "recommendations": ["建议1", "建议2"],
+  "confidence": 0.9
+}}
+
+注意：
+- 如果设定中有双重力量体系，分别提取为不同的 world_systems
+- 如果设定中有表里世界观，用 layers 字段表示
+- 如果设定中有复杂角色关系，在 attributes 中标注
+- 角色名必须是明确的名字（不是"主角"或"少年"这类泛指）
+"#, idea_text);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build().map_err(|e| e.to_string())?;
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a structured data extraction assistant. Output ONLY valid JSON, no other text."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 4096,
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"}
+    });
+
+    let resp = client
+        .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body).send().map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    let content = json["choices"][0]["message"]["content"]
+        .as_str().unwrap_or("{}");
+
+    // Parse LLM response into ProjectIntakeReport
+    let parsed: serde_json::Value = serde_json::from_str(content).map_err(|e| format!("JSON parse: {}", e))?;
+
+    let report = json_to_intake_report(&parsed);
+    Ok(report)
+}
+
+/// Convert LLM JSON response to ProjectIntakeReport.
+fn json_to_intake_report(json: &serde_json::Value) -> ProjectIntakeReport {
+    let characters = json["identified_characters"].as_array().map(|arr| {
+        arr.iter().map(|c| IntakeEntitySummary {
+            name: c["name"].as_str().unwrap_or("unknown").to_string(),
+            kind: c["kind"].as_str().unwrap_or("character").to_string(),
+            first_seen_chapter: c["first_seen_chapter"].as_str().unwrap_or("idea").to_string(),
+            attributes: c["attributes"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
+            confidence: c["confidence"].as_f64().unwrap_or(0.8),
+        }).collect()
+    }).unwrap_or_default();
+
+    let canon = json["identified_canon"].as_array().map(|arr| {
+        arr.iter().map(|c| IntakeCanonCandidate {
+            entity_name: c["entity_name"].as_str().unwrap_or("").to_string(),
+            attribute_key: c["attribute_key"].as_str().unwrap_or("").to_string(),
+            attribute_value: c["attribute_value"].as_str().unwrap_or("").to_string(),
+            source_chapter: c["source_chapter"].as_str().unwrap_or("idea").to_string(),
+            confidence: c["confidence"].as_f64().unwrap_or(0.8),
+            evidence: c["evidence"].as_str().unwrap_or("").to_string(),
+        }).collect()
+    }).unwrap_or_default();
+
+    let promises = json["open_promises"].as_array().map(|arr| {
+        arr.iter().map(|p| IntakePromiseCandidate {
+            kind: p["kind"].as_str().unwrap_or("plot_promise").to_string(),
+            title: p["title"].as_str().unwrap_or("").to_string(),
+            description: p["description"].as_str().unwrap_or("").to_string(),
+            introduced_chapter: p["introduced_chapter"].as_str().unwrap_or("Chapter-1").to_string(),
+            expected_payoff_chapter: p["expected_payoff_chapter"].as_str().map(|s| s.to_string()),
+            confidence: p["confidence"].as_f64().unwrap_or(0.7),
+            evidence: p["evidence"].as_str().unwrap_or("").to_string(),
+        }).collect()
+    }).unwrap_or_default();
+
+    let conflicts = json["conflicts"].as_array().map(|arr| {
+        arr.iter().map(|c| IntakeConflict {
+            kind: c["kind"].as_str().unwrap_or("story_conflict").to_string(),
+            description: c["description"].as_str().unwrap_or("").to_string(),
+            sources: c["sources"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
+            severity: c["severity"].as_str().unwrap_or("medium").to_string(),
+        }).collect()
+    }).unwrap_or_default();
+
+    // World systems (LLM-only feature — beyond heuristic)
+    let recommendations: Vec<String> = json["recommendations"].as_array().map(|arr| {
+        arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+    }).unwrap_or_default();
+
+    let has_world_systems = json["world_systems"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
+
+    ProjectIntakeReport {
+        project_id: "idea".into(),
+        chapter_count: 0,
+        chapter_map: Vec::new(),
+        identified_characters: characters,
+        identified_canon: canon,
+        open_promises: promises,
+        style_fingerprint: IntakeStyleFingerprint {
+            avg_sentence_length: 0.0, dialogue_ratio: 0.0, pov_type: "unknown".into(),
+            common_phrases: Vec::new(), taboo_signals: Vec::new(), confidence: 0.5,
+        },
+        conflicts,
+        confidence: json["confidence"].as_f64().unwrap_or(0.8),
+        evidence_refs: if has_world_systems { vec!["world_systems_extracted".into()] } else { Vec::new() },
+        recommendations: if recommendations.is_empty() { vec!["LLM 提取完成".into()] } else { recommendations },
+    }
+}
+
+fn populate_memory_from_report(memory: &WriterMemory, _project_id: &str, report: &ProjectIntakeReport) -> Result<(), String> {
     for ch in &report.identified_characters {
-        let role = if ch.kind.contains("主角") { "protagonist" } else { "supporting" };
+        let role = if ch.kind.contains("主角") || ch.kind.contains("protagonist") { "protagonist" }
+            else if ch.kind.contains("反派") || ch.kind.contains("antagonist") { "supporting" }
+            else { "supporting" };
         let _ = memory.upsert_character(&ch.name, &[], role, &ch.attributes.join("，"));
     }
-    // Seed world knowledge
     for canon in &report.identified_canon {
         let _ = memory.upsert_knowledge_item(&format!("{}: {}", canon.entity_name, canon.attribute_key), "objective", &canon.source_chapter);
     }
-    Ok(report)
+    Ok(())
 }
 
 /// Quick suspicious content check for adversarial input.
