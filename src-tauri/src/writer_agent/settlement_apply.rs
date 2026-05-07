@@ -245,6 +245,7 @@ pub fn apply_chapter_settlement_delta(
     // Apply scene deltas
     let mut scene_applied = 0usize;
     for proj in &delta.scene_deltas {
+        if proj.scene_id == 0 { continue; }
         match memory.record_scene_result(proj.scene_id, &proj.outcome, &proj.consequence, &proj.source_ref) {
             Ok(_) => { scene_applied += 1; }
             Err(e) => warnings.push(format!("scene_result failed: {}", e)),
