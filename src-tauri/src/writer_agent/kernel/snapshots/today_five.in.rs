@@ -257,10 +257,37 @@ impl WriterAgentKernel {
                     slot: "next".to_string(),
                     label: "下一步".to_string(),
                     value: next_value,
-                    detail: canon_risk
-                        .map(|entry| entry.message.clone())
-                        .or_else(|| latest_result.and_then(|result| result.new_conflicts.first().cloned()))
-                        .unwrap_or_else(|| "No immediate blocker.".to_string()),
+                    detail: {
+                        let mut base = canon_risk
+                            .map(|entry| entry.message.clone())
+                            .or_else(|| latest_result.and_then(|result| result.new_conflicts.first().cloned()))
+                            .unwrap_or_else(|| "No immediate blocker.".to_string());
+                        let reader_beat = latest_result.as_ref().and_then(|result| {
+                            let changes = result.state_changes.join(" ");
+                            if changes.contains("冲突") {
+                                Some("紧张")
+                            } else if changes.contains("和解") {
+                                Some("感动")
+                            } else {
+                                None
+                            }
+                        });
+                        let reader_expectation = open_promise
+                            .and_then(|p| if p.expected_payoff.is_empty() { None } else { Some(p.expected_payoff.as_str()) });
+                        if reader_beat.is_some() || reader_expectation.is_some() {
+                            base.push_str("。读者期待：");
+                            if let Some(beat) = reader_beat {
+                                base.push_str(beat);
+                                if reader_expectation.is_some() {
+                                    base.push('，');
+                                }
+                            }
+                            if let Some(expectation) = reader_expectation {
+                                base.push_str(expectation);
+                            }
+                        }
+                        base
+                    },
                     tone: if canon_risk.is_some() {
                         "⚠️ 需要注意".to_string()
                     } else {
