@@ -244,6 +244,9 @@ pub fn build_chapter_context(
         participants: Vec::new(),
     }];
 
+    let stable_prefix_chars: usize = sources.iter().take(3).map(|s| s.included_chars).sum();
+    let dynamic_tail_chars: usize = sources.iter().skip(3).map(|s| s.included_chars).sum();
+
     Ok(BuiltChapterContext {
         request_id,
         target,
@@ -260,6 +263,8 @@ pub fn build_chapter_context(
         trace_artifact,
         scene_plan,
         compiled_input: input.compiled_input.clone(),
+        stable_prefix_chars,
+        dynamic_tail_chars,
     })
 }
 
@@ -637,4 +642,79 @@ fn chapter_source_confidence(source_type: &str) -> f32 {
 
 fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
+}
+
+/// Cache-aware context spine for chapter generation.
+/// Layers ordered from most cache-stable to most volatile.
+#[derive(Debug, Clone, Default)]
+pub struct ChapterContextSpine {
+    pub frozen_prefix: String,
+    pub project_stable: String,
+    pub focus_pack: String,
+    pub hot_buffer: String,
+    pub ephemeral: String,
+}
+
+impl ChapterContextSpine {
+    pub fn prefix_char_count(&self) -> usize {
+        self.frozen_prefix.chars().count() + self.project_stable.chars().count()
+    }
+
+    pub fn tail_char_count(&self) -> usize {
+        self.focus_pack.chars().count()
+            + self.hot_buffer.chars().count()
+            + self.ephemeral.chars().count()
+    }
+
+    pub fn total_chars(&self) -> usize {
+        self.frozen_prefix.chars().count()
+            + self.project_stable.chars().count()
+            + self.focus_pack.chars().count()
+            + self.hot_buffer.chars().count()
+            + self.ephemeral.chars().count()
+    }
+}
+
+pub fn build_chapter_generation_spine(
+    target: &ChapterTarget,
+    contract: Option<&crate::writer_agent::memory::StoryContractSummary>,
+    mission: Option<&crate::writer_agent::memory::ChapterMissionSummary>,
+    result_feedback: Option<&crate::writer_agent::memory::ChapterResultSummary>,
+    compiled_input: Option<&CompiledInput>,
+    _memory: &crate::writer_agent::memory::WriterMemory,
+) -> ChapterContextSpine {
+    let mut spine = ChapterContextSpine::default();
+
+    spine.frozen_prefix = format!(
+        "Chapter generation contract for '{}'. Output: chapter text only.",
+        target.title
+    );
+
+    if let Some(c) = contract {
+        spine.project_stable = format!(
+            "Story: {} — {} | {}",
+            c.genre, c.main_conflict, c.tone_contract
+        );
+    }
+
+    let mut focus = String::new();
+    if let Some(m) = mission {
+        focus.push_str(&format!("Mission: {}\n", m.mission));
+    }
+    if let Some(rf) = result_feedback {
+        focus.push_str(&format!("Previous result: {}\n", rf.summary));
+    }
+    if let Some(ci) = compiled_input {
+        focus.push_str(&format!(
+            "Plan: {}\nEvidence: {}\nRules: {}",
+            ci.intent_text,
+            ci.selected_evidence.join("; "),
+            ci.rule_stack.join("; ")
+        ));
+    }
+    spine.focus_pack = focus;
+
+    spine.hot_buffer = format!("Target: {}", target.title);
+
+    spine
 }

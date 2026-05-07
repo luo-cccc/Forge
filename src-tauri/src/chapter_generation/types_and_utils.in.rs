@@ -693,6 +693,8 @@ pub struct BuiltChapterContext {
     #[serde(default)]
     pub scene_plan: Vec<ScenePlanEntry>,
     pub compiled_input: Option<CompiledInput>,
+    pub stable_prefix_chars: usize,
+    pub dynamic_tail_chars: usize,
 }
 
 #[derive(Debug, Clone)]

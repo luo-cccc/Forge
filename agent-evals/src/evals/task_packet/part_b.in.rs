@@ -77,6 +77,8 @@ pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
         trace_artifact: agent_writer_lib::chapter_generation::ChapterTraceArtifact::default(),
         scene_plan: Vec::new(),
         compiled_input: None,
+        stable_prefix_chars: 0,
+        dynamic_tail_chars: 0,
     };
     let packet = build_chapter_generation_task_packet(
         &kernel.project_id,
