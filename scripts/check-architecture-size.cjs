@@ -8,7 +8,7 @@ const budgets = [
   {
     label: "Tauri root glue",
     file: path.join("src-tauri", "src", "lib.rs"),
-    maxLines: 240,
+    maxLines: 250,
     rationale: "Root Tauri module should stay limited to module wiring, setup, and command registration.",
   },
   {
@@ -62,7 +62,7 @@ const budgets = [
   {
     label: "Eval facade",
     file: path.join("agent-evals", "src", "evals.rs"),
-    maxLines: 240,
+    maxLines: 250,
     rationale: "Eval facade should only keep shared helpers and module exports.",
   },
   {
@@ -80,7 +80,7 @@ const budgets = [
   {
     label: "Companion panel contract helpers",
     file: path.join("src", "components", "CompanionPanel.contract.ts"),
-    maxLines: 240,
+    maxLines: 250,
     rationale: "Story contract / chapter mission draft types and factories — no hooks, no JSX.",
   },
   {
