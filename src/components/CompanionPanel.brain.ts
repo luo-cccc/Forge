@@ -11,15 +11,15 @@ import type {
 
 
 export function postWriteReportTone(report: WriterPostWriteDiagnosticReport): SecondBrainTone {
-  if (report.errorCount > 0) return "danger";
-  if (report.warningCount > 0) return "accent";
-  return "success";
+  if (report.errorCount > 0) return "⚠️ 需要注意";
+  if (report.warningCount > 0) return "📝 提个醒";
+  return "✅ 一切正常";
 }
 
 export function memoryReliabilityTone(status: string): SecondBrainTone {
-  if (status === "needs_review") return "danger";
-  if (status === "trusted") return "success";
-  return "accent";
+  if (status === "needs_review") return "⚠️ 需要注意";
+  if (status === "trusted") return "✅ 一切正常";
+  return "📝 提个醒";
 }
 
 export function memoryReliabilityPercent(value: number): string {
@@ -36,7 +36,7 @@ export function postWriteReportCounts(report: WriterPostWriteDiagnosticReport): 
   return `${report.errorCount} errors · ${report.warningCount} warnings · ${report.infoCount} info`;
 }
 
-type SecondBrainTone = "neutral" | "accent" | "danger" | "success";
+type SecondBrainTone = "neutral" | "⚠️ 需要注意" | "📝 提个醒" | "✅ 一切正常";
 
 interface SecondBrainItem {
   label: string;
@@ -75,16 +75,16 @@ function proposalForArc(proposals: AgentProposal[]): AgentProposal | undefined {
 }
 
 export function secondBrainToneClass(tone: SecondBrainTone): string {
-  if (tone === "danger") return "border-danger/40 bg-danger/10";
-  if (tone === "accent") return "border-accent/30 bg-accent-subtle/20";
-  if (tone === "success") return "border-success/30 bg-success/10";
+  if (tone.includes("需要注意")) return "border-danger/40 bg-danger/10";
+  if (tone.includes("提个醒")) return "border-accent/30 bg-accent-subtle/20";
+  if (tone.includes("一切正常")) return "border-success/30 bg-success/10";
   return "border-border-subtle bg-bg-raised";
 }
 
 export function secondBrainValueClass(tone: SecondBrainTone): string {
-  if (tone === "danger") return "text-danger";
-  if (tone === "accent") return "text-accent";
-  if (tone === "success") return "text-success";
+  if (tone.includes("需要注意")) return "text-danger";
+  if (tone.includes("提个醒")) return "text-accent";
+  if (tone.includes("一切正常")) return "text-success";
   return "text-text-primary";
 }
 
@@ -95,9 +95,9 @@ export function latestContextProposal(trace: WriterAgentTraceSnapshot | null): W
 export function contextBudgetTone(trace: WriterAgentTraceSnapshot | null): SecondBrainTone {
   const budget = latestContextProposal(trace)?.contextBudget;
   if (!budget) return "neutral";
-  if (budget.used > budget.totalBudget) return "danger";
-  if (budget.sourceReports.some((source) => source.truncated)) return "accent";
-  return "success";
+  if (budget.used > budget.totalBudget) return "⚠️ 需要注意";
+  if (budget.sourceReports.some((source) => source.truncated)) return "📝 提个醒";
+  return "✅ 一切正常";
 }
 
 export function formatContextBudgetValue(proposal: WriterProposalTrace | undefined): string {
@@ -133,10 +133,10 @@ function missionStatusLabel(status: string | undefined): string {
 }
 
 function missionStatusTone(status: string | undefined): SecondBrainTone {
-  if (status === "completed") return "success";
-  if (status === "drifted" || status === "needs_review" || status === "blocked") return "danger";
-  if (status === "active" || status === "in_progress") return "accent";
-  return "accent";
+  if (status === "completed") return "✅ 一切正常";
+  if (status === "drifted" || status === "needs_review" || status === "blocked") return "⚠️ 需要注意";
+  if (status === "active" || status === "in_progress") return "📝 提个醒";
+  return "📝 提个醒";
 }
 
 export function sourceBudgetClass(truncated: boolean): string {
@@ -163,10 +163,10 @@ function guardModeTone(
   storyDebt: StoryDebtSnapshot | null,
   isAgentThinking: boolean,
 ): SecondBrainTone {
-  if (isAgentThinking) return "accent";
-  if ((storyDebt?.canonRiskCount ?? 0) > 0 || (storyDebt?.missionCount ?? 0) > 0) return "danger";
-  if ((storyDebt?.openCount ?? 0) > 0) return "accent";
-  if (latestTaskPacket(trace)?.foundationComplete) return "success";
+  if (isAgentThinking) return "📝 提个醒";
+  if ((storyDebt?.canonRiskCount ?? 0) > 0 || (storyDebt?.missionCount ?? 0) > 0) return "⚠️ 需要注意";
+  if ((storyDebt?.openCount ?? 0) > 0) return "📝 提个醒";
+  if (latestTaskPacket(trace)?.foundationComplete) return "✅ 一切正常";
   return "neutral";
 }
 

@@ -77,7 +77,7 @@ interface ApplyOperationResult {
   error?: string;
 }
 
-type CompanionTone = "neutral" | "accent" | "danger" | "success";
+type CompanionTone = "neutral" | "⚠️ 需要注意" | "📝 提个醒" | "✅ 一切正常";
 
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
   const currentChapter = useAppStore((s) => s.currentChapter);

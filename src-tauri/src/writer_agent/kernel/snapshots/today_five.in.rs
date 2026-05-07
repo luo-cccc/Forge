@@ -146,20 +146,20 @@ impl WriterAgentKernel {
             items: vec![
                 TodayFiveItem {
                     slot: "guard".to_string(),
-                    label: "Agent Guard".to_string(),
+                    label: "今日状态".to_string(),
                     value: guard_value,
                     detail: guard_detail,
                     tone: if debt.canon_risk_count > 0 || debt.mission_count > 0 {
-                        "danger".to_string()
+                        "⚠️ 需要注意".to_string()
                     } else if debt.open_count > 0 {
-                        "accent".to_string()
+                        "📝 提个醒".to_string()
                     } else {
-                        "success".to_string()
+                        "✅ 一切正常".to_string()
                     },
                 },
                 TodayFiveItem {
                     slot: "contract".to_string(),
-                    label: "Book Contract".to_string(),
+                    label: "全书承诺".to_string(),
                     value: contract_debt
                         .map(|entry| entry.title.clone())
                         .or_else(|| {
@@ -180,14 +180,14 @@ impl WriterAgentKernel {
                         })
                         .unwrap_or_else(|| "Set the book-level promise.".to_string()),
                     tone: if contract_debt.is_some() {
-                        "danger".to_string()
+                        "⚠️ 需要注意".to_string()
                     } else {
-                        "accent".to_string()
+                        "📝 提个醒".to_string()
                     },
                 },
                 TodayFiveItem {
                     slot: "mission".to_string(),
-                    label: "Chapter Mission".to_string(),
+                    label: "本章目标".to_string(),
                     value: mission_debt
                         .map(|entry| entry.title.clone())
                         .or_else(|| chapter_mission.map(|mission| mission.mission.clone()))
@@ -200,14 +200,14 @@ impl WriterAgentKernel {
                         })
                         .unwrap_or_else(|| "Open a chapter mission.".to_string()),
                     tone: if mission_debt.is_some() {
-                        "danger".to_string()
+                        "⚠️ 需要注意".to_string()
                     } else {
-                        "accent".to_string()
+                        "📝 提个醒".to_string()
                     },
                 },
                 TodayFiveItem {
                     slot: "promise".to_string(),
-                    label: "Open Promise".to_string(),
+                    label: "待兑现线索".to_string(),
                     value: open_promise
                         .map(|promise| promise.title.clone())
                         .unwrap_or_else(|| "No open promise".to_string()),
@@ -241,23 +241,23 @@ impl WriterAgentKernel {
                         })
                         .unwrap_or_else(|| "No open promise".to_string()),
                     tone: if open_promise.is_some() {
-                        "accent".to_string()
+                        "📝 提个醒".to_string()
                     } else {
-                        "success".to_string()
+                        "✅ 一切正常".to_string()
                     },
                 },
                 TodayFiveItem {
                     slot: "next".to_string(),
-                    label: "Next Move".to_string(),
+                    label: "下一步".to_string(),
                     value: next_value,
                     detail: canon_risk
                         .map(|entry| entry.message.clone())
                         .or_else(|| latest_result.and_then(|result| result.new_conflicts.first().cloned()))
                         .unwrap_or_else(|| "No immediate blocker.".to_string()),
                     tone: if canon_risk.is_some() {
-                        "danger".to_string()
+                        "⚠️ 需要注意".to_string()
                     } else {
-                        "accent".to_string()
+                        "📝 提个醒".to_string()
                     },
                 },
             ],

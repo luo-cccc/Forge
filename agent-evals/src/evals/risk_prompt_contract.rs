@@ -72,8 +72,8 @@ pub fn run_risk_prompt_contract_eval() -> EvalResult {
         .find(|i| i.slot == "guard");
     let tone_no_debt = guard_clean.map(|i| i.tone.as_str()).unwrap_or("none");
 
-    let debt_danger = tone_with_debt == "danger";
-    let no_debt_safe = tone_no_debt == "success" || tone_no_debt == "accent";
+    let debt_danger = tone_with_debt == "⚠️ 需要注意";
+    let no_debt_safe = tone_no_debt == "✅ 一切正常" || tone_no_debt == "📝 提个醒";
     let ok = debt_danger && no_debt_safe;
     EvalResult::pass_if(
         "writer_agent:risk_prompt_contract",
