@@ -290,6 +290,7 @@ fn main() {
     results.push(run_scene_obligation_diagnostic_eval());
     results.push(run_companion_contract_eval());
     results.push(run_todayfive_content_quality_eval());
+    results.push(run_repair_confirm_contract_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
