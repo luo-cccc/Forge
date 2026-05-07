@@ -748,6 +748,8 @@ impl WriterMemory {
 
 include!("memory/canon_methods.in.rs");
 include!("memory/character_methods.in.rs");
+include!("memory/character_state_methods.in.rs");
+include!("memory/relationship_methods.in.rs");
 include!("memory/promises_methods.in.rs");
 include!("memory/style_contract_methods.in.rs");
 include!("memory/mission_result_methods.in.rs");
