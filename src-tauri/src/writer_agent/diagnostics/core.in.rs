@@ -532,6 +532,23 @@ impl DiagnosticsEngine {
             }
         }
 
+        // Scene density check
+        if let Ok(scenes) = memory.list_scenes_by_chapter(chapter_id) {
+            if scenes.len() > 6 {
+                results.push(DiagnosticResult {
+                    id: next_id(),
+                    severity: DiagnosticSeverity::Info,
+                    category: DiagnosticCategory::PacingNote,
+                    message: format!("场景密度较高: 本章有{}个场景，建议不超过6个", scenes.len()),
+                    entity_name: None,
+                    from: paragraph_offset, to: paragraph_offset + 1,
+                    evidence: vec![DiagnosticEvidence { source: "scene".into(), reference: chapter_id.into(), snippet: format!("scene_count={}", scenes.len()) }],
+                    fix_suggestion: Some("考虑合并部分场景或移至下一章".into()),
+                    operations: Vec::new(),
+                });
+            }
+        }
+
         // 6. Adjust severity based on author ignore patterns.
         for result in &mut results {
             let category_str = diagnostic_category_str(&result.category);
