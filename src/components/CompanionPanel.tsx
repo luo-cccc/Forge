@@ -430,6 +430,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   }, [recordFeedback]);
 
   const handleSaveFoundation = useCallback(async () => {
+    const saveStart = performance.now();
     setOperationError(null);
     setFoundationSaveState("saving");
     const projectId = status?.projectId ?? ledger?.storyContract?.projectId ?? "local-project";
@@ -501,7 +502,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       }
       setFoundationDirty(false);
       setFoundationSaveState("saved");
-      setSaveFeedback(`已保存 · ${todayFiveSummary?.items[3]?.detail || '线索已更新'}`);
+      const elapsed = Math.round(performance.now() - saveStart);
+      setSaveFeedback(`已保存 · ${todayFiveSummary?.items[3]?.detail || '线索已更新'} · <${elapsed}ms`);
       await refreshStatus();
     } catch (e) {
       setFoundationSaveState("error");
