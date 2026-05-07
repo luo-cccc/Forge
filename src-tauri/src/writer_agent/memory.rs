@@ -770,3 +770,4 @@ include!("memory/emotional_debt_ledger_methods.in.rs");
 include!("memory/volume_arc_book_methods.in.rs");
 include!("memory/sprint_methods.in.rs");
 include!("memory/scene_methods.in.rs");
+include!("memory/scene_state_methods.in.rs");
