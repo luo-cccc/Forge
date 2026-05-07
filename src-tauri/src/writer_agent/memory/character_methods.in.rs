@@ -48,7 +48,6 @@ impl WriterMemory {
              WHERE name=?3 AND kind='character'",
             rusqlite::params![attrs_json, confidence, name],
         )?;
-        // Store individual facts
         if let Some(obj) = attributes.as_object() {
             for (key, value) in obj {
                 let _ = self.conn.execute(
@@ -104,13 +103,7 @@ impl WriterMemory {
     }
 
     pub fn list_characters(&self, role_type_filter: Option<&str>) -> rusqlite::Result<Vec<CharacterSummary>> {
-        let query = if let Some(rt) = role_type_filter {
-            format!("SELECT id, name, aliases_json, role_type, current_state_summary, updated_at FROM characters WHERE role_type = '{}' ORDER BY name", rt)
-        } else {
-            "SELECT id, name, aliases_json, role_type, current_state_summary, updated_at FROM characters ORDER BY name".to_string()
-        };
-        let mut stmt = self.conn.prepare(&query)?;
-        let rows = stmt.query_map([], |row| {
+        let row_to_summary = |row: &rusqlite::Row| -> rusqlite::Result<CharacterSummary> {
             Ok(CharacterSummary {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -119,8 +112,20 @@ impl WriterMemory {
                 current_state_summary: row.get(4)?,
                 updated_at: row.get(5)?,
             })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
+        };
+        if let Some(rt) = role_type_filter {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, name, aliases_json, role_type, current_state_summary, updated_at FROM characters WHERE role_type = ?1 ORDER BY name"
+            )?;
+            let rows = stmt.query_map(rusqlite::params![rt], row_to_summary)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, name, aliases_json, role_type, current_state_summary, updated_at FROM characters ORDER BY name"
+            )?;
+            let rows = stmt.query_map([], row_to_summary)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        }
     }
 
     pub fn character_exists(&self, name: &str) -> rusqlite::Result<bool> {
