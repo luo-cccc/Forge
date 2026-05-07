@@ -109,10 +109,10 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 在 4 周主线闭合后，下一阶段不再优先追求“更多入口 / 更多面板 / 更多 agent 名称”，而是把 Forge 补成更硬的长篇生产内核。只采纳 5 条：
 
-1. 输入治理编译层
-   - 把 `ChapterMission / 作者当前指令 / Story OS 检索结果 / 规则优先级` 先编译成可审查工件，再进入正文生成。
-   - 默认产物是运行时 `intent / selected evidence / rule stack / trace`，优先进入 `Inspect / run event / audit trail`，不把工作区暴露成大量必须手管的文件。
-   - 目标：让“为什么这样写”在每章生成前可见、可复盘、可复用。
+1. 输入治理编译层 ✅ (2026-05-07)
+   - 已落地：`CompiledInput { intent_text, selected_evidence, rule_stack, trace_hint }` 编译工件
+   - 已接入 `BuiltChapterContext`，持久化为 `compiled_input.json`
+   - 目标：让“为什么这样写”在每章生成前可见、可复盘、可复用。 ✅
 
 2. 结构化权威状态
    - 把章节结算统一收敛到 typed delta：`chapter_fact_delta / promise_delta / arc_delta / book_state_delta`，由代码层 apply，再投影给 UI 与导出层。
@@ -938,6 +938,11 @@ Sprint D 必须补：
 #### 3.3.11 最后一句话
 
 如果 `3.3` 是底层封顶冲刺，那么 `3.3.7` 到 `3.3.10` 就是底层封顶真正的四根梁：
+
+> **2026-05-07 状态更新：四根梁全部完成，加上算法适配、性能 gate、用户感受层、前端表达层、Feedback Learning、Reader Compensation、Emotional Debt。**
+> **当前基线：89 + 247 + 307 evals，0 audit issues。**
+
+
 
 - 人物
 - 知识与身份

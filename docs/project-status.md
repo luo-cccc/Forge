@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## Positioning
 
@@ -38,6 +38,28 @@ P1 is in progress:
 - Companion Panel write mode remains quiet and now summarizes acceptance/save health instead of exposing raw operation traces.
 - `agent-evals` now includes 10 long-form product scenario checks in `agent-evals/src/evals/product_scenarios.rs`, covering multi-chapter promise tracking, result feedback handoff, payoff timing, resolved-promise quieting, object whereabouts, mission drift, canon guardrails, style feedback, decision metrics, and context explainability. A separate synthetic 20-chapter continuous-writing fixture covers cross-session save observations, task drift, foreshadowing recall, author feedback, story debt, and product metrics replay. More realistic author-project fixtures are still needed before product value can be called proven.
 - Writer Agent context relevance ranking now prioritizes Canon / Promise ledger slices by mission, next beat, result feedback, recent decisions, cursor-local story signals, open promises, and lightweight scene-type matches, with `WHY writing_relevance` explanations on retrieved entries. Project Brain / vector chunks are now reranked after semantic retrieval using the same writing-focus, scene-type, avoid-term, and active-chapter proximity signals; standalone `query_project_brain` also injects active WriterMemory focus into retrieval and rerank. Scene-type explanations prioritize setup/payoff and reveal over generic action/description signals, Project Brain rerank explains adjacent/current chapter proximity, and Project Brain rerank now extracts author-project terms from indexed keywords/phrase boundaries.
+
+## Sprint Completion (May 2026)
+
+All plan.md items completed as of 2026-05-07:
+
+| Phase | Gates | Status |
+|-------|-------|--------|
+| §3.3 Foundation Lockdown | 3 | ✅ |
+| Sprint A: Entity State | 4 | ✅ |
+| Sprint B: Knowledge & Identity | 3 | ✅ |
+| Sprint C: Scene Orchestration | 3 | ✅ |
+| Sprint D: Timeline | 3 | ✅ |
+| Algorithm Adaptation | 3 | ✅ |
+| Reinforcement (§3.2) | 4 | ✅ |
+| Performance Gates | 2 | ✅ |
+| UX Contract | 6 | ✅ |
+| Feel Layer | — | ✅ |
+| Perf UX | — | ✅ |
+| Feedback Learning | 3 | ✅ |
+| Reader Compensation | 3 | ✅ |
+| Emotional Debt | 4 | ✅ |
+| **Total** | **41 gates** | **307 evals** |
 
 ## What Is Solid Now
 

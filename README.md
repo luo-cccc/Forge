@@ -42,19 +42,55 @@ docs/                        Architecture plans and project status
 scripts/                     Local static checks
 ```
 
+## State Layers
+
+### Entity State (Sprint A)
+- Characters table with role types, aliases, and current state summaries — authoritative over canon_entities
+- Character state versions: chapter-interval-valid snapshots of commitments, goals, and identity state
+- Character relationships: pairwise edges with relation type, visibility, and chapter validity windows
+- Promise subject binding: promises explicitly bound to characters/relationships/objects
+
+### Knowledge & Identity (Sprint B)
+- Knowledge items: objective/ambiguous/retconned truth states
+- Knowledge ownership: per-character knowledge modes (aware/misbelief/suspecting/concealing) with chapter windows
+- Identity layers: public vs private identity per character, with reveal tracking
+- Reveal events: timestamped transitions from hidden to known
+
+### Scene Orchestration (Sprint C)
+- Scenes: chapter subdivision with sequence, type (scene/flashback/interlude), and summary
+- Scene state: objective, participants, location, entry/exit states
+- Scene obligations: promise/mission/payoff bindings per scene
+- Scene results: outcome and consequence per scene
+
+### Timeline (Sprint D)
+- Story time slices: labeled time periods with relative ordering — independent of chapter order
+- Chapter time mapping: per-chapter/scene narrative mode (present/flashback/flashforward/parallel)
+- Timeline events: typed events keyed to time slices and subjects
+
+### Algorithm Adaptation
+- Typed filter pre-step in context retrieval: entity/knowledge/scene boosts before text rerank
+- Multi-factor promise planner: subject pressure × knowledge readiness × timeline due × hook triage × reader expectation × emotional debt × rejection penalty
+- Full-factor diagnostics: canon + OOC + timeline + knowledge visibility + identity conflict + scene obligation + emotional debt + flashback identity
+- Input governance compiler: pre-generation intent/evidence/rule-stack compilation artifact
+
 ## Foundation Features
 
-- `TaskPacket` contract for core agent actions: objective, context, beliefs, tool policy, success criteria, and feedback checkpoints.
-- Story Contract / Book Contract context for genre, reader promise, main conflict, boundaries, and tone.
-- Chapter Mission tracking for what the current chapter must advance, include, avoid, and resolve.
-- Result Feedback Loop on save: chapter summaries, state changes, new/settled promises, conflicts, and next-beat handoff.
-- Promise Ledger for unresolved topics, emotional debt, object whereabouts, and payoff expectations.
-- Companion Panel quiet mode: current guard state, chapter mission, open promises, canon risk, arc/pacing, and next step.
-- Typed `WriterOperation` flow for text, canon, promise, style, story contract, chapter mission, and outline changes.
-- Effective Tool Inventory and allowlist filtering so model-visible tools respect side-effect limits.
-- Append-only WriterRunEventStore for privacy-preserving replay of observations, context packs, provider starts, tool calls, proposals, operation lifecycle, feedback, saves, diagnostics, and failures.
-- Inspect mode for internal timeline review, failure evidence, provider budget reports, post-write diagnostics, proposal context budgets, and persisted context pressure trends.
-- Trajectory export as JSONL for observations, proposals, feedback, task packets, state snapshots, product metrics, and Trace Viewer compatible local replay.
+- `TaskPacket` contract for core agent actions: objective, context, beliefs, tool policy, success criteria
+- Story Contract / Chapter Mission / Result Feedback Loop for chapter-level contract enforcement
+- Promise Ledger: plot promises, emotional debt, object whereabouts, character commitments, mystery clues
+- `ChapterContract`: 3500±500 chars enforced at draft+save; continuation/compress/hard_compress phases
+- Supervised Sprint v2: pause/resume/checkpoint/budget ceiling for multi-chapter advancement
+- VectorDB: ANN + BM25 hybrid search, <5ms @ 50K chunks
+- Story OS: 3-tier query (hot/warm/cold), context assembly <5ms @ Chapter 500
+- Typed `WriterOperation`: 40+ variants covering text, canon, promise, character, relationship, knowledge, identity, scene, timeline
+- Companion Panel: 5-item TodayFiveSummary (guard/contract/mission/promise/next), de-jargonified labels
+- Instinct mode: full timeline, failure evidence, provider budget, diagnostics, context pressure
+- Append-only WriterRunEventStore + trajectory JSONL export
+- Input governance compiler: pre-generation intent/evidence/rule-stack artifact
+- Feedback learning: planner penalty on rejected kinds, ghost boost on accepted styles, diagnostic severity demotion on ignored warnings
+- Reader Compensation: per-chapter emotional beat, expectation, unresolved lack projections
+- Emotional Debt: pressure cue extraction, payoff boost, overdue detection
+- Per-phase generation progress events to frontend
 
 ## Local Storage And Secrets
 
