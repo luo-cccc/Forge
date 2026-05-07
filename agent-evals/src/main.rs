@@ -203,6 +203,7 @@ fn main() {
     results.push(run_save_path_consistency_eval());
     results.push(run_save_perf_eval());
     results.push(run_entity_apply_perf_eval());
+    results.push(run_input_compiler_eval());
     results.push(run_settlement_replay_eval());
     results.push(run_chronology_preservation_eval());
     results.push(run_character_state_versioning_eval());

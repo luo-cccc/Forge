@@ -196,6 +196,7 @@ pub fn run_chapter_generation_task_packet_eval() -> EvalResult {
         rule_stack: agent_writer_lib::chapter_generation::ChapterRuleStackArtifact::default(),
         trace_artifact: agent_writer_lib::chapter_generation::ChapterTraceArtifact::default(),
         scene_plan: Vec::new(),
+        compiled_input: None,
     };
     let packet = build_chapter_generation_task_packet(
         "eval-project",
