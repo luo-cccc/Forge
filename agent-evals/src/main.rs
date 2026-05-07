@@ -289,6 +289,11 @@ fn main() {
     results.push(run_extended_cache_requires_explicit_policy_eval());
     results.push(run_trajectory_exports_prompt_cache_metrics_eval());
     results.push(run_product_metrics_tracks_cache_stability_eval());
+    // Perf Sprint 1: context efficiency evals
+    results.push(run_compiled_input_prompt_eval());
+    results.push(run_stable_prefix_reuse_eval());
+    results.push(run_focus_rebuild_eval());
+    results.push(run_spine_telemetry_eval());
     // Sprint C: scene orchestration evals
     results.push(run_scene_sequence_eval());
     results.push(run_scene_obligation_eval());
