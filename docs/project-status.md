@@ -114,7 +114,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 - `npm run check:p2`: 20/20 checks passing
 - `npm run check:p2-render`: write-mode DOM guard passing
 - `npm run check:save-path`: passed
-- `npm run check:audit`: 74 commands, 6 budget gaps
+- `npm run check:audit`: 74 commands, 0 issues
 - `npm run check:architecture`: 14/14 files within budget, eval root guard passing
 - `npm run lint`: passing
 - `npm run build`: passing
