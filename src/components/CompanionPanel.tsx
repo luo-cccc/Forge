@@ -103,6 +103,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const [missionDraft, setMissionDraft] = useState<ChapterMissionDraft>(() => emptyChapterMissionDraft());
   const [foundationSaveState, setFoundationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [foundationDirty, setFoundationDirty] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [showAllPromises, setShowAllPromises] = useState(false);
   const foundationChapterRef = useRef(currentChapter);
 
@@ -210,6 +211,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     });
     return () => { fn.then((f) => f()); };
   }, []);
+
+  useEffect(() => {
+    if (!saveFeedback) return;
+    const id = setTimeout(() => setSaveFeedback(null), 4000);
+    return () => clearTimeout(id);
+  }, [saveFeedback]);
 
   const recordFeedback = useCallback(async (
     proposalId: string,
@@ -494,6 +501,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       }
       setFoundationDirty(false);
       setFoundationSaveState("saved");
+      setSaveFeedback(`已保存 · ${todayFiveSummary?.items[3]?.detail || '线索已更新'}`);
       await refreshStatus();
     } catch (e) {
       setFoundationSaveState("error");
@@ -690,6 +698,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 ))}
               </div>
             </div>
+            {saveFeedback && (
+              <div className="rounded border border-success/30 bg-success/10 p-2 text-xs text-success animate-pulse">
+                {saveFeedback}
+              </div>
+            )}
             {mode === "explore" && (
               <div className={`rounded border p-2 text-xs ${secondBrainToneClass(contextBudgetTone(trace))}`}>
                 {(() => {
