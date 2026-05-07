@@ -401,7 +401,36 @@ pub fn promise_subject_pressure(
     pressure *= knowledge_readiness_factor(promise, memory, current_chapter);
     pressure *= timeline_due_factor(promise, memory, current_chapter);
     pressure *= hook_debt_triage_factor(promise, current_chapter);
+    pressure *= promise_kind_rejection_penalty(&promise.kind, memory);
     pressure
+}
+
+/// If the author keeps rejecting promises of a given kind, new promises of
+/// that kind get a penalty multiplier below 1.0.
+pub fn promise_kind_rejection_penalty(kind: &str, memory: &WriterMemory) -> f64 {
+    let audits = match memory.list_memory_audit(20) {
+        Ok(list) => list,
+        Err(_) => return 1.0,
+    };
+    let mut total = 0usize;
+    let mut rejected = 0usize;
+    for entry in &audits {
+        if entry.kind == kind || entry.kind.contains(kind) || kind.contains(&entry.kind) {
+            total += 1;
+            if entry.action.contains("rejected") {
+                rejected += 1;
+            }
+        }
+    }
+    if total < 3 {
+        return 1.0;
+    }
+    let rate = rejected as f64 / total as f64;
+    if rate > 0.5 {
+        0.7
+    } else {
+        1.0
+    }
 }
 
 pub fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
