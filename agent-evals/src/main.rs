@@ -274,6 +274,10 @@ fn main() {
     results.push(run_scene_sequence_eval());
     results.push(run_scene_obligation_eval());
     results.push(run_scene_result_projection_eval());
+    // Sprint D: timeline evals
+    results.push(run_story_time_mapping_eval());
+    results.push(run_flashback_identity_eval());
+    results.push(run_timeline_event_order_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
