@@ -1375,6 +1375,44 @@ pub fn repair_chapter_state(
         );
     }
 
+    // Rebuild character state versions from settlement deltas
+    if !delta.character_state_deltas.is_empty() {
+        for cs_delta in &delta.character_state_deltas {
+            if let Ok(Some(character)) = memory.get_character_by_name(&cs_delta.character_name) {
+                let _ = memory.close_active_states_for_character(character.id, &cs_delta.chapter_title);
+                let _ = memory.upsert_character_state(
+                    character.id,
+                    &cs_delta.chapter_title,
+                    &serde_json::json!(cs_delta.core_commitments),
+                    &cs_delta.goal_state,
+                    &serde_json::json!({}),
+                    &[],
+                    &cs_delta.source_ref,
+                );
+            }
+        }
+    }
+
+    // Rebuild character relationships from settlement deltas
+    if !delta.relationship_deltas.is_empty() {
+        for rel_delta in &delta.relationship_deltas {
+            if !rel_delta.character_a_name.is_empty() && !rel_delta.character_b_name.is_empty() {
+                if let (Ok(Some(a)), Ok(Some(b))) = (
+                    memory.get_character_by_name(&rel_delta.character_a_name),
+                    memory.get_character_by_name(&rel_delta.character_b_name),
+                ) {
+                    let _ = memory.upsert_relationship(
+                        a.id, b.id,
+                        &rel_delta.relation_type,
+                        &rel_delta.visibility,
+                        &rel_delta.chapter_title,
+                        &rel_delta.source_ref,
+                    );
+                }
+            }
+        }
+    }
+
     let telemetry = crate::chapter_generation::ChapterLengthTelemetry {
         target_chars: context.chapter_contract.target_chars,
         min_chars: context.chapter_contract.min_chars,
