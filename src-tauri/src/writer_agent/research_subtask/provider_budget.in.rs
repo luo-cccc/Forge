@@ -257,5 +257,9 @@ pub fn subtask_operation_kind_label(operation: &WriterOperation) -> &'static str
         WriterOperation::KnowledgeOwnershipUpsert { .. } => "knowledge_ownership.upsert",
         WriterOperation::IdentityLayerUpsert { .. } => "identity_layer.upsert",
         WriterOperation::RevealEventRecord { .. } => "reveal_event.record",
+        WriterOperation::SceneUpsert { .. } => "scene.upsert",
+        WriterOperation::SceneStateUpsert { .. } => "scene_state.upsert",
+        WriterOperation::SceneObligationUpsert { .. } => "scene_obligation.upsert",
+        WriterOperation::SceneResultRecord { .. } => "scene_result.record",
     }
 }

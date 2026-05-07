@@ -161,6 +161,46 @@ pub enum WriterOperation {
         revealed_to: String,
         chapter: String,
     },
+    #[serde(rename = "scene.upsert")]
+    SceneUpsert {
+        #[serde(rename = "chapterTitle")]
+        chapter_title: String,
+        sequence: i32,
+        #[serde(rename = "sceneType")]
+        scene_type: String,
+        summary: String,
+    },
+    #[serde(rename = "scene_state.upsert")]
+    SceneStateUpsert {
+        #[serde(rename = "sceneId")]
+        scene_id: i64,
+        objective: String,
+        participants: Vec<String>,
+        #[serde(rename = "locationRef")]
+        location_ref: String,
+        #[serde(rename = "entryState")]
+        entry_state: serde_json::Value,
+        #[serde(rename = "exitState")]
+        exit_state: serde_json::Value,
+    },
+    #[serde(rename = "scene_obligation.upsert")]
+    SceneObligationUpsert {
+        #[serde(rename = "sceneId")]
+        scene_id: i64,
+        #[serde(rename = "promiseIds")]
+        promise_ids: Vec<i64>,
+        #[serde(rename = "missionRefs")]
+        mission_refs: Vec<String>,
+        #[serde(rename = "payoffTargets")]
+        payoff_targets: Vec<String>,
+    },
+    #[serde(rename = "scene_result.record")]
+    SceneResultRecord {
+        #[serde(rename = "sceneId")]
+        scene_id: i64,
+        outcome: String,
+        consequence: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

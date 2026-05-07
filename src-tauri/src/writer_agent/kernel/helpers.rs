@@ -69,6 +69,10 @@ pub(crate) fn approval_required_for_operation(operation: &WriterOperation) -> bo
             | WriterOperation::KnowledgeOwnershipUpsert { .. }
             | WriterOperation::IdentityLayerUpsert { .. }
             | WriterOperation::RevealEventRecord { .. }
+            | WriterOperation::SceneUpsert { .. }
+            | WriterOperation::SceneStateUpsert { .. }
+            | WriterOperation::SceneObligationUpsert { .. }
+            | WriterOperation::SceneResultRecord { .. }
     )
 }
 
@@ -268,6 +272,10 @@ pub(crate) fn operation_kind_label(operation: &WriterOperation) -> &'static str 
         WriterOperation::KnowledgeOwnershipUpsert { .. } => "knowledge_ownership.upsert",
         WriterOperation::IdentityLayerUpsert { .. } => "identity_layer.upsert",
         WriterOperation::RevealEventRecord { .. } => "reveal_event.record",
+        WriterOperation::SceneUpsert { .. } => "scene.upsert",
+        WriterOperation::SceneStateUpsert { .. } => "scene_state.upsert",
+        WriterOperation::SceneObligationUpsert { .. } => "scene_obligation.upsert",
+        WriterOperation::SceneResultRecord { .. } => "scene_result.record",
     }
 }
 
@@ -337,6 +345,23 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
         }
         WriterOperation::RevealEventRecord { subject_id, .. } => {
             Some(format!("canon:reveal_event:{}", subject_id))
+        }
+        WriterOperation::SceneUpsert {
+            chapter_title,
+            sequence,
+            ..
+        } => Some(format!(
+            "scene:{}:{}",
+            chapter_title, sequence
+        )),
+        WriterOperation::SceneStateUpsert { scene_id, .. } => {
+            Some(format!("scene:state:{}", scene_id))
+        }
+        WriterOperation::SceneObligationUpsert { scene_id, .. } => {
+            Some(format!("scene:obligation:{}", scene_id))
+        }
+        WriterOperation::SceneResultRecord { scene_id, .. } => {
+            Some(format!("scene:result:{}", scene_id))
         }
     }
 }

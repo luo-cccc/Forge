@@ -669,6 +669,123 @@ pub(crate) fn execute_writer_operation(
                 revision_after: None,
             })
         }
+        WriterOperation::SceneUpsert {
+            chapter_title,
+            sequence,
+            scene_type,
+            summary,
+        } => {
+            let scene_id = memory
+                .upsert_scene(chapter_title, *sequence, scene_type, summary)
+                .map_err(|e| format!("scene.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    chapter_title,
+                    &format!("Scene upsert: {} seq {}", chapter_title, sequence),
+                    "upserted_scene",
+                    &[],
+                    summary,
+                    &[format!("scene:{}", scene_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::SceneStateUpsert {
+            scene_id,
+            objective,
+            participants,
+            location_ref,
+            entry_state,
+            exit_state,
+        } => {
+            memory
+                .upsert_scene_state(
+                    *scene_id,
+                    objective,
+                    participants,
+                    location_ref,
+                    entry_state,
+                    exit_state,
+                )
+                .map_err(|e| format!("scene_state.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Scene state upsert: {}", scene_id),
+                    "upserted_scene_state",
+                    &[],
+                    objective,
+                    &[format!("scene:state:{}", scene_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::SceneObligationUpsert {
+            scene_id,
+            promise_ids,
+            mission_refs,
+            payoff_targets,
+        } => {
+            memory
+                .upsert_scene_obligations(
+                    *scene_id,
+                    promise_ids,
+                    mission_refs,
+                    payoff_targets,
+                )
+                .map_err(|e| format!("scene_obligation.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Scene obligation upsert: {}", scene_id),
+                    "upserted_scene_obligations",
+                    &[],
+                    &format!("Promises: {:?}, Missions: {:?}", promise_ids, mission_refs),
+                    &[format!("scene:obligation:{}", scene_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::SceneResultRecord {
+            scene_id,
+            outcome,
+            consequence,
+        } => {
+            memory
+                .record_scene_result(*scene_id, outcome, consequence, "writer_operation")
+                .map_err(|e| format!("scene_result.record: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Scene result record: {}", scene_id),
+                    "recorded_scene_result",
+                    &[],
+                    outcome,
+                    &[format!("scene:result:{}", scene_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
         WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
             success: false,
             operation,
