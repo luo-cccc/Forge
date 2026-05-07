@@ -147,6 +147,17 @@ impl WriterAgentKernel {
             self.memory.list_characters(None).unwrap_or_default().len(),
         );
         let guard_detail = format!("{} | {}", guard_detail, chapter_summary);
+        // Emotional debt tracking: check if any open promise relates to emotional keywords
+        let emotional_keywords = ["愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦"];
+        let has_emotional_cues = ledger
+            .open_promises
+            .iter()
+            .any(|p| emotional_keywords.iter().any(|kw| p.title.contains(kw) || p.description.contains(kw)));
+        let guard_detail = if has_emotional_cues {
+            format!("{} | 情绪跟踪: 已激活", guard_detail)
+        } else {
+            guard_detail
+        };
 
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
