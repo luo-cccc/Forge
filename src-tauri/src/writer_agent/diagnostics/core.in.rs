@@ -205,6 +205,38 @@ impl DiagnosticsEngine {
             }
         }
 
+        // 1c. Flashback identity consistency check
+        if let Ok(mappings) = memory.get_time_mapping_for_chapter(chapter_id) {
+            if mappings.iter().any(|m| m.narrative_mode == "flashback") {
+                for entity in &entities {
+                    if let Ok(Some(character)) = memory.get_character_by_name(entity) {
+                        if let Ok(Some(identity)) = memory.get_active_identity(character.id, chapter_id) {
+                            if identity.public_identity != identity.private_identity
+                                && !identity.public_identity.is_empty()
+                                && !identity.private_identity.is_empty()
+                            {
+                                results.push(DiagnosticResult {
+                                    id: next_id(),
+                                    severity: DiagnosticSeverity::Info,
+                                    category: DiagnosticCategory::TimelineIssue,
+                                    message: format!("闪回场景: {} 的公开身份({})在闪回时间点可能需要与当前身份({})一致", entity, identity.public_identity, identity.private_identity),
+                                    entity_name: Some(entity.clone()),
+                                    from: paragraph_offset,
+                                    to: paragraph_offset + paragraph.chars().count(),
+                                    evidence: vec![DiagnosticEvidence {
+                                        source: "identity".into(), reference: entity.clone(),
+                                        snippet: format!("flashback: public={} private={}", identity.public_identity, identity.private_identity),
+                                    }],
+                                    fix_suggestion: Some("确认闪回中角色的身份状态是否与故事时间一致".into()),
+                                    operations: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 3. Knowledge visibility check: flag if characters act on knowledge they shouldn't have
         for entity in &entities {
             if let Ok(Some(character)) = memory.get_character_by_name(entity) {
