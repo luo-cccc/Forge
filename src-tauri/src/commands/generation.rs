@@ -6,7 +6,9 @@ use crate::chapter_generation::{
 };
 use crate::llm_runtime;
 use crate::writer_agent::kernel::ModelStartedEventContext;
-use crate::writer_agent::provider_budget::WriterProviderBudgetApproval;
+use crate::writer_agent::provider_budget::{
+    evaluate_provider_budget, WriterProviderBudgetApproval,
+};
 use crate::writer_agent::supervised_sprint::{
     advance_sprint, budget_ceiling_reached, cancel_sprint, checkpoint_sprint,
     create_sprint_plan_with_limits, pause_sprint, record_budget_usage, resume_sprint,
@@ -862,6 +864,22 @@ pub async fn analyze_chapter(
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
 
+    // Provider budget preflight
+    let _budget_report = evaluate_provider_budget(
+        crate::writer_agent::provider_budget::WriterProviderBudgetRequest::new(
+            crate::writer_agent::provider_budget::WriterProviderBudgetTask::ManualRequest,
+            &settings.model,
+            2000,
+            1024,
+        ),
+    );
+    tracing::info!(
+        task = "analyze_chapter",
+        decision = ?_budget_report.decision,
+        tokens = _budget_report.estimated_total_tokens,
+        "Provider budget preflight"
+    );
+
     let system_prompt = r#"You are a professional novel editor. Analyze the chapter and output a JSON object with a "reviews" array.
 
 Each review must have:
@@ -941,6 +959,22 @@ pub async fn generate_parallel_drafts(
 ) -> Result<Vec<ParallelDraft>, String> {
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
+
+    let _budget_report = evaluate_provider_budget(
+        crate::writer_agent::provider_budget::WriterProviderBudgetRequest::new(
+            crate::writer_agent::provider_budget::WriterProviderBudgetTask::GhostPreview,
+            &settings.model,
+            2000,
+            2000,
+        ),
+    );
+    tracing::info!(
+        task = "generate_parallel_drafts",
+        decision = ?_budget_report.decision,
+        tokens = _budget_report.estimated_total_tokens,
+        "Provider budget preflight"
+    );
+
     let chapter = payload
         .chapter_title
         .as_deref()
@@ -1004,6 +1038,22 @@ pub async fn generate_parallel_drafts(
 pub async fn analyze_pacing(summaries: String) -> Result<String, String> {
     let api_key = crate::require_api_key()?;
     let settings = llm_runtime::settings(api_key);
+
+    let _budget_report = evaluate_provider_budget(
+        crate::writer_agent::provider_budget::WriterProviderBudgetRequest::new(
+            crate::writer_agent::provider_budget::WriterProviderBudgetTask::ManualRequest,
+            &settings.model,
+            3000,
+            1024,
+        ),
+    );
+    tracing::info!(
+        task = "analyze_pacing",
+        decision = ?_budget_report.decision,
+        tokens = _budget_report.estimated_total_tokens,
+        "Provider budget preflight"
+    );
+
     let text = llm_runtime::chat_text_profile(
         &settings,
         vec![
@@ -1226,28 +1276,37 @@ pub fn repair_chapter_state(
     let content = crate::storage::load_chapter(&app, chapter_title.clone())?;
     let revision = crate::storage::chapter_revision(&app, &chapter_title)?;
 
-    // Idempotency guard: skip repair if settlement already exists for this revision
+    // Idempotency guard: skip repair if settlement already exists for this chapter+revision.
+    // Compare by deserialized fields (not filename substring) to avoid cross-chapter false matches.
     let project_dir = crate::storage::active_project_data_dir(&app)?;
     let runtime_dir = project_dir.join("chapter_runtime");
     if let Ok(entries) = std::fs::read_dir(&runtime_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.contains(&chapter_title) && name.ends_with(".settlement.json") {
-                let raw = std::fs::read_to_string(entry.path())
-                    .map_err(|e| e.to_string())?;
-                let existing: crate::chapter_generation::ChapterSettlementDelta =
-                    serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-                if existing.chapter_revision == revision {
-                    return Ok(RepairChapterStateResult {
-                        chapter_title: chapter_title.clone(),
-                        revision: revision.clone(),
-                        settlement_delta: existing,
-                        settlement_apply: Default::default(),
-                        artifact_refs: Vec::new(),
-                        settlement_replay_matches: None,
-                        already_repaired: true,
-                    });
-                }
+            if !name.ends_with(".settlement.json") {
+                continue;
+            }
+            let raw = match std::fs::read_to_string(entry.path()) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let existing: crate::chapter_generation::ChapterSettlementDelta =
+                match serde_json::from_str(&raw) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+            if existing.chapter_title == chapter_title
+                && existing.chapter_revision == revision
+            {
+                return Ok(RepairChapterStateResult {
+                    chapter_title: chapter_title.clone(),
+                    revision: revision.clone(),
+                    settlement_delta: existing,
+                    settlement_apply: Default::default(),
+                    artifact_refs: Vec::new(),
+                    settlement_replay_matches: None,
+                    already_repaired: true,
+                });
             }
         }
     }
@@ -1288,6 +1347,14 @@ pub fn repair_chapter_state(
         &memory,
         Vec::new(),
     );
+    // Snapshot chronology before repair to verify it is preserved
+    let chronology_before: Vec<String> = memory
+        .list_recent_chapter_results(&project_id, 20)
+        .unwrap_or_default()
+        .iter()
+        .map(|r| r.chapter_title.clone())
+        .collect();
+
     let settlement_apply = crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
         &memory,
         &project_id,
@@ -1341,6 +1408,23 @@ pub fn repair_chapter_state(
         &artifacts.artifact_refs,
     );
     crate::observe_chapter_save(&app, &chapter_title, &content, &revision)?;
+
+    // Verify chronology was preserved by the repair
+    let chronology_after: Vec<String> = memory
+        .list_recent_chapter_results(&project_id, 20)
+        .unwrap_or_default()
+        .iter()
+        .map(|r| r.chapter_title.clone())
+        .collect();
+    if chronology_before != chronology_after {
+        tracing::error!(
+            chapter = chapter_title,
+            before = ?chronology_before,
+            after = ?chronology_after,
+            "repair_chapter_state altered chapter chronology"
+        );
+    }
+
     Ok(RepairChapterStateResult {
         chapter_title,
         revision,

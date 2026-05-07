@@ -277,8 +277,14 @@ const BUDGET_FUNCTIONS = [
   "record_supervised_sprint_budget_usage",
 ];
 
+// Commands whose provider budget is handled by internal delegation
+const DELEGATED_BUDGET_COMMANDS = [
+  "ask_project_brain", // budget in brain_service::answer_query_with_focus
+];
+
 for (const cmd of commands) {
   if (classification[cmd] !== RISK.PROVIDER_CALL) continue;
+  if (DELEGATED_BUDGET_COMMANDS.includes(cmd)) continue;
   const body = extractFunctionBody(cmd);
   const hasBudget = BUDGET_FUNCTIONS.some((fn) => body.includes(fn));
   if (!hasBudget) {
