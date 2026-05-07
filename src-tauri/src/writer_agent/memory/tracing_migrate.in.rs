@@ -689,5 +689,62 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "created_at INTEGER DEFAULT 0",
     )?;
 
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS characters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            aliases_json TEXT DEFAULT '[]',
+            role_type TEXT NOT NULL DEFAULT 'supporting',
+            current_state_summary TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS character_state_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            character_id INTEGER NOT NULL,
+            valid_from_chapter TEXT NOT NULL,
+            valid_to_chapter TEXT DEFAULT '',
+            core_commitments_json TEXT DEFAULT '[]',
+            goal_state_json TEXT DEFAULT '{}',
+            identity_state_json TEXT DEFAULT '{}',
+            relationship_refs_json TEXT DEFAULT '[]',
+            source_ref TEXT DEFAULT '',
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (character_id) REFERENCES characters(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS character_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            character_a_id INTEGER NOT NULL,
+            character_b_id INTEGER NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'neutral',
+            visibility TEXT NOT NULL DEFAULT 'public',
+            valid_from_chapter TEXT NOT NULL,
+            valid_to_chapter TEXT DEFAULT '',
+            source_ref TEXT DEFAULT '',
+            FOREIGN KEY (character_a_id) REFERENCES characters(id),
+            FOREIGN KEY (character_b_id) REFERENCES characters(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO characters (name, aliases_json, role_type, current_state_summary)
+         SELECT name, aliases_json, 'supporting', summary FROM canon_entities WHERE kind = 'character'",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "subject_ids_json",
+        "subject_ids_json TEXT DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "plot_promises",
+        "subject_type",
+        "subject_type TEXT DEFAULT ''",
+    )?;
+
     Ok(())
 }

@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -53,7 +53,46 @@ CREATE TABLE IF NOT EXISTS plot_promises (
     promoted INTEGER DEFAULT 0,
     core INTEGER DEFAULT 0,
     related_entities_json TEXT DEFAULT '[]',
+    subject_ids_json TEXT DEFAULT '[]',
+    subject_type TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS characters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    aliases_json TEXT DEFAULT '[]',
+    role_type TEXT NOT NULL DEFAULT 'supporting',
+    current_state_summary TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS character_state_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id INTEGER NOT NULL,
+    valid_from_chapter TEXT NOT NULL,
+    valid_to_chapter TEXT DEFAULT '',
+    core_commitments_json TEXT DEFAULT '[]',
+    goal_state_json TEXT DEFAULT '{}',
+    identity_state_json TEXT DEFAULT '{}',
+    relationship_refs_json TEXT DEFAULT '[]',
+    source_ref TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (character_id) REFERENCES characters(id)
+);
+
+CREATE TABLE IF NOT EXISTS character_relationships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_a_id INTEGER NOT NULL,
+    character_b_id INTEGER NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'neutral',
+    visibility TEXT NOT NULL DEFAULT 'public',
+    valid_from_chapter TEXT NOT NULL,
+    valid_to_chapter TEXT DEFAULT '',
+    source_ref TEXT DEFAULT '',
+    FOREIGN KEY (character_a_id) REFERENCES characters(id),
+    FOREIGN KEY (character_b_id) REFERENCES characters(id)
 );
 
 CREATE TABLE IF NOT EXISTS style_preferences (
