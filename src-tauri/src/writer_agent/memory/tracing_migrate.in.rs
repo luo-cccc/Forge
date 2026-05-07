@@ -746,5 +746,51 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         "subject_type TEXT DEFAULT ''",
     )?;
 
+    // v18 migration: knowledge system + identity/reveal tables
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS knowledge_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic TEXT NOT NULL UNIQUE,
+            truth_state TEXT NOT NULL DEFAULT 'objective',
+            source_ref TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS knowledge_ownership (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            knowledge_id INTEGER NOT NULL,
+            holder_type TEXT NOT NULL,
+            holder_id INTEGER NOT NULL,
+            knowledge_mode TEXT NOT NULL DEFAULT 'aware',
+            valid_from_chapter TEXT NOT NULL,
+            valid_to_chapter TEXT DEFAULT '',
+            source_ref TEXT DEFAULT '',
+            FOREIGN KEY (knowledge_id) REFERENCES knowledge_items(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS identity_layers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            character_id INTEGER NOT NULL,
+            public_identity TEXT DEFAULT '',
+            private_identity TEXT DEFAULT '',
+            revealed_to_json TEXT DEFAULT '[]',
+            valid_from_chapter TEXT NOT NULL,
+            valid_to_chapter TEXT DEFAULT '',
+            FOREIGN KEY (character_id) REFERENCES characters(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS reveal_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_id INTEGER NOT NULL,
+            reveal_type TEXT NOT NULL,
+            revealed_to TEXT NOT NULL,
+            chapter TEXT NOT NULL,
+            source_ref TEXT DEFAULT ''
+        );",
+    )?;
+
     Ok(())
 }
