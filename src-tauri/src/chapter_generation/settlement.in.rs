@@ -44,6 +44,32 @@ pub fn build_basic_chapter_settlement_delta(
     let identity_deltas = extraction.identity_deltas.clone();
     let scene_deltas = extraction.scene_deltas.clone();
 
+    let reader_takeaway = ReaderTakeaway {
+        emotional_beat: {
+            let change_text = chapter_result.state_changes.join(" ");
+            if change_text.contains("冲突") {
+                "紧张".to_string()
+            } else if change_text.contains("和解") {
+                "感动".to_string()
+            } else {
+                "好奇".to_string()
+            }
+        },
+        expectation: open_promises
+            .first()
+            .map(|p| p.expected_payoff.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default(),
+        unresolved_lack: {
+            let stale: Vec<_> = open_promises
+                .iter()
+                .filter(|p| !p.last_seen_chapter.is_empty() && p.last_seen_chapter != chapter_title)
+                .map(|p| p.title.clone())
+                .collect();
+            stale.join("、")
+        },
+    };
+
     ChapterSettlementDelta {
         chapter_title: chapter_title.to_string(),
         chapter_revision: chapter_revision.to_string(),
@@ -78,6 +104,7 @@ pub fn build_basic_chapter_settlement_delta(
         scene_deltas,
         continuity_issues,
         repairable: true,
+        reader_takeaway: Some(reader_takeaway),
         ..Default::default()
     }
 }

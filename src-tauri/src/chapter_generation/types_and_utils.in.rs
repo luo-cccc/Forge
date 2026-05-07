@@ -373,6 +373,14 @@ pub struct ChapterResultDelta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct ReaderTakeaway {
+    pub emotional_beat: String,
+    pub expectation: String,
+    pub unresolved_lack: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChapterSettlementEvidence {
     pub excerpt: String,
     pub signal: String,
@@ -578,6 +586,8 @@ pub struct ChapterSettlementDelta {
     pub scene_deltas: Vec<SceneResultProjection>,
     pub continuity_issues: Vec<String>,
     pub repairable: bool,
+    #[serde(default)]
+    pub reader_takeaway: Option<ReaderTakeaway>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
