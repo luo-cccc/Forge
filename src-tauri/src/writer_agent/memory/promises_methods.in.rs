@@ -242,6 +242,61 @@ impl WriterMemory {
         Ok(changed > 0)
     }
 
+    pub fn bind_promise_subject(
+        &self,
+        promise_id: i64,
+        subject_ids: &[i64],
+        subject_type: &str,
+    ) -> rusqlite::Result<()> {
+        let ids_json = serde_json::to_string(subject_ids).unwrap_or_default();
+        self.conn.execute(
+            "UPDATE plot_promises SET subject_ids_json = ?1, subject_type = ?2 WHERE id = ?3",
+            rusqlite::params![ids_json, subject_type, promise_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_promises_by_subject(
+        &self,
+        subject_id: i64,
+        _subject_type: &str,
+    ) -> rusqlite::Result<Vec<PlotPromiseSummary>> {
+        let pattern = format!("%{}%", subject_id);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, title, description, introduced_chapter, last_seen_chapter,
+                    expected_payoff, status, priority, blocked_reason, promoted, core,
+                    related_entities_json, subject_ids_json, subject_type, created_at
+             FROM plot_promises
+             WHERE subject_ids_json LIKE ?1
+             ORDER BY priority DESC"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![pattern], |row| {
+            let kind: String = row.get(1)?;
+            let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
+            let _status: String = row.get(7)?;
+            let _related_entities_json: String = row.get(12)?;
+            let _subject_ids_json: String = row.get(13)?;
+            let _subject_type_val: String = row.get(14)?;
+            let _created_at: String = row.get(15)?;
+            Ok(PlotPromiseSummary {
+                id: row.get(0)?,
+                kind,
+                title: row.get(2)?,
+                description: row.get(3)?,
+                introduced_chapter: row.get(4)?,
+                last_seen_chapter: row.get(5)?,
+                last_seen_ref: String::new(),
+                expected_payoff: row.get(6)?,
+                priority: row.get(8)?,
+                risk,
+                blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
+                promoted: row.get::<_, i32>(10)? != 0,
+                core: row.get::<_, i32>(11)? != 0,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+    }
+
     // -- Style Preferences --
 
 
