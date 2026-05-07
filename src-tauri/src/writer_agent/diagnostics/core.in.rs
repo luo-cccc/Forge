@@ -142,6 +142,44 @@ impl DiagnosticsEngine {
             }
         }
 
+        // 1b. Hidden relationship exposure check.
+        for entity in &entities {
+            if let Ok(Some(character)) = memory.get_character_by_name(entity) {
+                if let Ok(relationships) = memory.get_active_relationships(character.id, chapter_id) {
+                    for rel in &relationships {
+                        if rel.visibility == "hidden" {
+                            if let (Ok(Some(a)), Ok(Some(b))) = (
+                                memory.get_character_by_id(rel.character_a_id),
+                                memory.get_character_by_id(rel.character_b_id),
+                            ) {
+                                if paragraph.contains(&a.name) && paragraph.contains(&b.name) {
+                                    results.push(DiagnosticResult {
+                                        id: next_id(),
+                                        severity: DiagnosticSeverity::Warning,
+                                        category: DiagnosticCategory::CanonConflict,
+                                        message: format!(
+                                            "隐藏角色关系可能被暴露: {} 与 {}",
+                                            a.name, b.name
+                                        ),
+                                        entity_name: Some(entity.clone()),
+                                        from: paragraph_offset,
+                                        to: paragraph_offset + paragraph.chars().count(),
+                                        evidence: vec![DiagnosticEvidence {
+                                            source: "relationship".into(),
+                                            reference: format!("rel:{}", rel.id),
+                                            snippet: format!("{}:{} (hidden)", rel.relation_type, rel.visibility),
+                                        }],
+                                        fix_suggestion: Some("确认此处是否应当揭示隐藏关系，或调整叙述以避免暴露。".into()),
+                                        operations: Vec::new(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Book-level contract checks.
         if let Ok(Some(contract)) = memory.get_story_contract(project_id) {
             for issue in detect_story_contract_violations(paragraph, paragraph_offset, &contract) {
