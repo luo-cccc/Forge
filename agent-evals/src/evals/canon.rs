@@ -3,13 +3,11 @@ use super::*;
 pub fn run_canon_conflict_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -66,13 +64,11 @@ pub fn run_canon_conflict_eval() -> EvalResult {
 pub fn run_canon_conflict_update_canon_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -144,13 +140,11 @@ pub fn run_canon_conflict_update_canon_eval() -> EvalResult {
 pub fn run_canon_conflict_apply_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -206,13 +200,11 @@ pub fn run_canon_conflict_apply_eval() -> EvalResult {
 pub fn run_story_review_queue_canon_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -258,13 +250,11 @@ pub fn run_story_review_queue_canon_eval() -> EvalResult {
 pub fn run_timeline_contradiction_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "张三",
             &["三哥".to_string()],
+            "protagonist",
             "第三章已死亡。",
-            &serde_json::json!({ "status": "已死亡" }),
-            0.92,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -302,13 +292,11 @@ pub fn run_timeline_contradiction_eval() -> EvalResult {
 pub fn run_character_conflict_flag_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "张三",
             &["刀客".to_string(), "叛徒".to_string()],
+            "protagonist",
             "曾经的同伴，现在投靠敌方",
-            &serde_json::json!({"武器": "长刀", "状态": "已背叛"}),
-            0.9,
         )
         .unwrap();
     memory
@@ -396,13 +384,11 @@ pub fn run_canon_false_positive_suppression_eval() -> EvalResult {
 pub fn run_same_entity_attribute_merge_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "林墨惯用寒影刀的刀客。",
-            &serde_json::json!({"weapon": "寒影刀"}),
-            0.9,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
