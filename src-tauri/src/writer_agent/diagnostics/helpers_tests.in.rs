@@ -24,7 +24,7 @@ mod tests {
     fn test_diagnose_weapon_conflict() {
         let m = test_memory();
         m.upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",
@@ -46,7 +46,7 @@ mod tests {
     fn test_diagnose_accepts_weapon_family_match() {
         let m = test_memory();
         m.upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",
@@ -243,7 +243,7 @@ mod tests {
     fn test_timeline_dead_character_action_warns() {
         let m = test_memory();
         m.upsert_canon_entity(
-            "character",
+            "location",
             "张三",
             &[],
             "上一章已死亡",

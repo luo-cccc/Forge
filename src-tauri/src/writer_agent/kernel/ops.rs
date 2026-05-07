@@ -61,16 +61,27 @@ pub(crate) fn execute_writer_operation(
             })
         }
         WriterOperation::CanonUpsertEntity { entity } => {
-            memory
-                .upsert_canon_entity(
-                    &entity.kind,
-                    &entity.name,
-                    &entity.aliases,
-                    &entity.summary,
-                    &entity.attributes,
-                    entity.confidence,
-                )
-                .map_err(|e| format!("canon: {}", e))?;
+            if entity.kind == "character" {
+                memory
+                    .upsert_character(
+                        &entity.name,
+                        &entity.aliases,
+                        "supporting",
+                        &entity.summary,
+                    )
+                    .map_err(|e| format!("character: {}", e))?;
+            } else {
+                memory
+                    .upsert_canon_entity(
+                        &entity.kind,
+                        &entity.name,
+                        &entity.aliases,
+                        &entity.summary,
+                        &entity.attributes,
+                        entity.confidence,
+                    )
+                    .map_err(|e| format!("canon: {}", e))?;
+            }
             Ok(OperationResult {
                 success: true,
                 operation,

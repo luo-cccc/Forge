@@ -293,7 +293,7 @@ mod tests {
             .unwrap();
         memory
             .upsert_canon_entity(
-                "character",
+                "location",
                 "可疑角色",
                 &[],
                 "?",

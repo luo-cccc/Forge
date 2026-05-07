@@ -8,6 +8,12 @@ impl WriterMemory {
         attributes: &serde_json::Value,
         confidence: f64,
     ) -> rusqlite::Result<i64> {
+        // Block character writes — characters table is now authoritative
+        if kind == "character" {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "use upsert_character for character entities".to_string(),
+            ));
+        }
         let aliases_json = serde_json::to_string(aliases).unwrap();
         let attrs_json = attributes.to_string();
         self.conn.execute(

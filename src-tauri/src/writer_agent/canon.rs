@@ -102,7 +102,7 @@ mod tests {
     fn test_canon_check_detects_entity_pattern() {
         let m = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
         m.upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",

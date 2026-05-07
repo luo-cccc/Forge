@@ -130,10 +130,10 @@ fn accepted_memory_candidate_writes_ledger() {
 
     assert!(result.success);
     assert!(kernel
-        .ledger_snapshot()
-        .canon_entities
-        .iter()
-        .any(|entity| entity.name == "沈照"));
+        .memory
+        .get_character_by_name("沈照")
+        .unwrap()
+        .is_some());
 }
 
 #[test]

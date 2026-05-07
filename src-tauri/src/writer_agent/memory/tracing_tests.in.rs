@@ -11,7 +11,7 @@ mod tests {
         let m = memory();
         let id = m
             .upsert_canon_entity(
-                "character",
+                "location",
                 "主角",
                 &["林墨".into()],
                 "主角",

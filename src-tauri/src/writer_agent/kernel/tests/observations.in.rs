@@ -3,7 +3,7 @@ fn observe_emits_canon_conflict_from_memory_facts() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     memory
         .upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",
@@ -50,7 +50,7 @@ fn observe_ghost_uses_context_pack_evidence() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     memory
         .upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",
@@ -96,7 +96,7 @@ fn observe_records_context_recalls_from_surfaced_evidence() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     memory
         .upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "主角",

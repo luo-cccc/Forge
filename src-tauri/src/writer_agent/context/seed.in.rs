@@ -593,7 +593,7 @@ mod tests {
             .unwrap();
         memory
             .upsert_canon_entity(
-                "character",
+                "location",
                 "林墨",
                 &[],
                 "主角",

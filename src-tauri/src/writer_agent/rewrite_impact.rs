@@ -158,7 +158,7 @@ mod tests {
             .unwrap();
         memory
             .upsert_canon_entity(
-                "character",
+                "location",
                 "林墨",
                 &[],
                 "主角",
@@ -181,7 +181,7 @@ mod tests {
         for i in 0..40 {
             memory
                 .upsert_canon_entity(
-                    "character",
+                    "location",
                     &format!("E{}", i),
                     &[],
                     "x",

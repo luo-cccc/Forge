@@ -229,13 +229,11 @@ pub(crate) fn refresh_kernel_canon_from_lorebook(
 
         let summary: String = entry.content.chars().take(240).collect();
         let aliases = Vec::<String>::new();
-        let _ = kernel.memory.upsert_canon_entity(
-            "character",
+        let _ = kernel.memory.upsert_character(
             keyword,
             &aliases,
+            "supporting",
             &summary,
-            &serde_json::Value::Object(attributes),
-            0.8,
         );
     }
 }

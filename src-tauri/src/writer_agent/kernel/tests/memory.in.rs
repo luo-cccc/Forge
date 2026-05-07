@@ -4,7 +4,7 @@ fn llm_memory_candidates_parse_filter_and_dedupe() {
     let value = serde_json::json!({
         "canon": [
             {
-                "kind": "character",
+                "kind": "location",
                 "name": "沈照",
                 "aliases": ["少年"],
                 "summary": "沈照把玉佩藏进袖中。",
@@ -12,7 +12,7 @@ fn llm_memory_candidates_parse_filter_and_dedupe() {
                 "confidence": 0.82
             },
             {
-                "kind": "character",
+                "kind": "location",
                 "name": "沈照",
                 "summary": "重复条目",
                 "confidence": 0.92
@@ -129,7 +129,7 @@ fn same_entity_memory_candidate_uses_attribute_merge_operation() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
     memory
         .upsert_canon_entity(
-            "character",
+            "location",
             "林墨",
             &[],
             "林墨惯用寒影刀的刀客。",
@@ -146,7 +146,7 @@ fn same_entity_memory_candidate_uses_attribute_merge_operation() {
         obs,
         serde_json::json!({
             "canon": [{
-                "kind": "character",
+                "kind": "location",
                 "name": "林墨",
                 "summary": "林墨出身北境寒山宗，惯用寒影刀。",
                 "attributes": { "origin": "北境寒山宗" },
