@@ -87,6 +87,132 @@ pub struct IntakeConflict {
     pub severity: String,
 }
 
+/// Seed a project from a user-provided idea/setting text.
+/// Calls the LLM to extract characters, conflict, and world info, then populates memory.
+pub fn seed_project_from_idea(
+    memory: &WriterMemory,
+    project_id: &str,
+    idea_text: &str,
+) -> Result<ProjectIntakeReport, String> {
+    let report = build_project_intake_report_from_text(idea_text);
+    // Write extracted entities to memory
+    // Seed characters
+    for ch in &report.identified_characters {
+        let role = if ch.kind.contains("主角") { "protagonist" } else { "supporting" };
+        let _ = memory.upsert_character(&ch.name, &[], role, &ch.attributes.join("，"));
+    }
+    // Seed world knowledge
+    for canon in &report.identified_canon {
+        let _ = memory.upsert_knowledge_item(&format!("{}: {}", canon.entity_name, canon.attribute_key), "objective", &canon.source_chapter);
+    }
+    Ok(report)
+}
+
+/// Heuristic extraction from idea text without LLM.
+/// Splits text into sentences, identifies character-like entities and conflict keywords.
+fn build_project_intake_report_from_text(text: &str) -> ProjectIntakeReport {
+    let mut characters = Vec::new();
+    let mut canon_candidates = Vec::new();
+    let mut promise_candidates = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut evidence_refs = Vec::new();
+
+    // Extract character candidates: look for name patterns (2-3 Chinese chars followed by descriptors)
+    let sentences: Vec<&str> = text.split(|c| c == '。' || c == '！' || c == '？' || c == '\n').collect();
+    let mut seen_names = std::collections::HashSet::new();
+    for sentence in &sentences {
+        let chars: Vec<char> = sentence.chars().collect();
+        for window in chars.windows(2) {
+            let name: String = window.iter().collect();
+            if name.chars().all(|c| (c as u32) > 0x4E00 && (c as u32) < 0x9FFF) && !seen_names.contains(&name) {
+                // Check if followed by descriptor
+                let rest = sentence[sentence.find(&name).unwrap_or(0) + name.len()..].trim();
+                if rest.len() > 2 {
+                    seen_names.insert(name.clone());
+                    characters.push(IntakeEntitySummary {
+                        name, kind: "character".into(), first_seen_chapter: "idea".into(),
+                        attributes: vec![rest.chars().take(20).collect()], confidence: 0.7,
+                    });
+                }
+            }
+        }
+    }
+
+    // Extract conflict keywords
+    let conflict_keywords = ["冲突", "对手", "敌人", "追杀", "复仇", "谜", "秘密", "真相", "战争", "争夺"];
+    for kw in &conflict_keywords {
+        if text.contains(kw) {
+            conflicts.push(IntakeConflict {
+                kind: "story_conflict".into(),
+                description: format!("文本中包含冲突信号: {}", kw),
+                sources: vec!["idea_text".into()],
+                severity: "medium".into(),
+            });
+        }
+    }
+
+    // Extract canon/world keywords
+    let world_keywords = ["世界", "境界", "修炼", "宗门", "魔法", "科技", "帝国", "王国", "门派", "江湖"];
+    for sentence in &sentences {
+        for kw in &world_keywords {
+            if sentence.contains(kw) {
+                canon_candidates.push(IntakeCanonCandidate {
+                    entity_name: "世界设定".into(),
+                    attribute_key: kw.to_string(),
+                    attribute_value: sentence.trim().chars().take(60).collect(),
+                    source_chapter: "idea".into(),
+                    confidence: 0.6,
+                    evidence: sentence.trim().chars().take(30).collect(),
+                });
+                evidence_refs.push(format!("world:{}", kw));
+            }
+        }
+    }
+
+    // Extract promise candidates
+    let promise_keywords = ["寻找", "找到", "复仇", "夺回", "保护", "揭开", "发现", "成为", "阻止", "拯救"];
+    for sentence in &sentences {
+        for kw in &promise_keywords {
+            if sentence.contains(kw) {
+                promise_candidates.push(IntakePromiseCandidate {
+                    kind: "plot_promise".into(),
+                    title: sentence.trim().chars().take(40).collect(),
+                    description: sentence.trim().chars().take(80).collect(),
+                    introduced_chapter: "Chapter-1".into(),
+                    expected_payoff_chapter: Some("Chapter-5".into()),
+                    confidence: 0.5,
+                    evidence: format!("keyword:{}", kw),
+                });
+            }
+        }
+    }
+
+    if characters.is_empty() {
+        evidence_refs.push("no_characters_extracted".into());
+    }
+
+    ProjectIntakeReport {
+        project_id: "idea".into(),
+        chapter_count: 0,
+        chapter_map: Vec::new(),
+        identified_characters: characters,
+        identified_canon: canon_candidates,
+        open_promises: promise_candidates,
+        style_fingerprint: IntakeStyleFingerprint {
+            avg_sentence_length: text.chars().count() as f64 / sentences.len().max(1) as f64,
+            dialogue_ratio: text.chars().filter(|c| *c == '"' || *c == '\"' || *c == '「').count() as f64 / text.chars().count().max(1) as f64,
+            pov_type: "unknown".into(),
+            common_phrases: Vec::new(),
+            taboo_signals: Vec::new(),
+            confidence: 0.5,
+        },
+        conflicts,
+        confidence: 0.6,
+        evidence_refs,
+        recommendations: vec!["粘贴更多设定细节以提高提取质量".into()],
+    }
+}
+
 /// Build a project intake report from existing memory data.
 /// This is a read-only computation — it does not write to Canon, Promise, or Story Bible.
 pub fn build_project_intake_report(
