@@ -264,17 +264,6 @@ function App() {
     return { full, paragraph, selected, cursorPosition };
   }, []);
 
-  const _rightRailWidth =
-    storyMode === "write"
-      ? "w-72"
-      : storyMode === "review"
-        ? "w-[28rem]"
-        : storyMode === "inspect"
-          ? "w-[48rem]"
-          : "w-[32rem]";
-  const _companionHeight =
-    storyMode === "explore" ? "h-[36%]" : storyMode === "review" ? "h-full" : "h-full";
-
   return (
     <div className="forge-root">
       {/* Header */}
