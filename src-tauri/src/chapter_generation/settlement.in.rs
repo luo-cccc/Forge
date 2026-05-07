@@ -66,6 +66,7 @@ pub fn build_basic_chapter_settlement_delta(
             .collect(),
         continuity_issues,
         repairable: true,
+        ..Default::default()
     }
 }
 

@@ -442,6 +442,7 @@ fn settlement_delta_apply_updates_memory_ledgers() {
         book_state_delta: vec!["mega_promise: 旧门血契 -> Chapter-14".to_string()],
         continuity_issues: vec![],
         repairable: true,
+        ..Default::default()
     };
 
     let applied = crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(
@@ -586,6 +587,7 @@ fn settlement_upsert_preserves_original_result_created_at() {
         book_state_delta: vec![],
         continuity_issues: vec![],
         repairable: true,
+        ..Default::default()
     };
 
     crate::writer_agent::settlement_apply::apply_chapter_settlement_delta(&memory, "novel-a", &delta)

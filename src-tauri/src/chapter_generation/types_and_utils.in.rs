@@ -476,6 +476,31 @@ pub struct ChapterArcDeltaEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct CharacterStateDeltaEntry {
+    pub character_name: String,
+    pub chapter_title: String,
+    pub action: String,
+    #[serde(default)]
+    pub core_commitments: Vec<String>,
+    #[serde(default)]
+    pub goal_state: serde_json::Value,
+    pub source_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationshipDeltaEntry {
+    pub character_a_name: String,
+    pub character_b_name: String,
+    pub action: String,
+    pub relation_type: String,
+    pub visibility: String,
+    pub chapter_title: String,
+    pub source_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChapterSettlementDelta {
     pub chapter_title: String,
     pub chapter_revision: String,
@@ -494,6 +519,10 @@ pub struct ChapterSettlementDelta {
     pub promise_delta: Vec<String>,
     pub arc_delta: Vec<String>,
     pub book_state_delta: Vec<String>,
+    #[serde(default)]
+    pub character_state_deltas: Vec<CharacterStateDeltaEntry>,
+    #[serde(default)]
+    pub relationship_deltas: Vec<RelationshipDeltaEntry>,
     pub continuity_issues: Vec<String>,
     pub repairable: bool,
 }

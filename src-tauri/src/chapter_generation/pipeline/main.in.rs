@@ -334,6 +334,7 @@ pub async fn run_chapter_generation_pipeline(
                 book_state_delta: Vec::new(),
                 continuity_issues: context.warnings.clone(),
                 repairable: true,
+                ..Default::default()
             }
         }
     };
