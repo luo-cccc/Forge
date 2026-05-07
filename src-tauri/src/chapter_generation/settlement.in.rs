@@ -22,14 +22,18 @@ pub fn build_basic_chapter_settlement_delta(
     );
     let chapter_result = chapter_result_from_observation(&observation, memory);
     let open_promises = memory.get_open_promise_summaries().unwrap_or_default();
-    let extraction = build_settlement_extraction(
+    let mut extraction = build_settlement_extraction(
         generated_content,
         &observation,
         &chapter_result,
         &open_promises,
         memory,
     );
-    let promise_updates = materialize_promise_delta_entries(&extraction, &chapter_result, &open_promises);
+    // Deduplicate promise candidates by title, keeping highest confidence
+    deduplicate_promise_candidates(&mut extraction.promise_candidates);
+
+    let promise_updates =
+        materialize_promise_delta_entries(&extraction, &chapter_result, &open_promises);
     let book_state_updates = derive_book_state_updates(&chapter_result, &promise_updates);
     let arc_updates = derive_arc_updates(&chapter_result, &promise_updates);
     let summary = extraction
@@ -89,7 +93,10 @@ pub fn build_basic_chapter_settlement_delta(
         arc_updates: arc_updates.clone(),
         book_state_updates: book_state_updates.clone(),
         chapter_fact_delta: chapter_fact_lines(&chapter_result),
-        promise_delta: promise_updates.iter().map(render_promise_delta_line).collect(),
+        promise_delta: promise_updates
+            .iter()
+            .map(render_promise_delta_line)
+            .collect(),
         arc_delta: arc_updates
             .iter()
             .map(|entry| format!("{}: {}", entry.scope, entry.value))
@@ -196,9 +203,20 @@ fn build_settlement_extraction(
             continue;
         }
         let resolved = title_hit
-            && ["交代", "说出", "揭开", "归还", "放回", "找到", "解释", "兑现", "真相大白", "水落石出"]
-                .iter()
-                .any(|cue| lowercase.contains(cue));
+            && [
+                "交代",
+                "说出",
+                "揭开",
+                "归还",
+                "放回",
+                "找到",
+                "解释",
+                "兑现",
+                "真相大白",
+                "水落石出",
+            ]
+            .iter()
+            .any(|cue| lowercase.contains(cue));
         let blocked_reason = if chapter_result
             .new_conflicts
             .iter()
@@ -229,11 +247,21 @@ fn build_settlement_extraction(
             } else {
                 promise.expected_payoff.clone()
             },
-            confidence: if resolved { 0.82 } else if !blocked_reason.is_empty() { 0.74 } else { 0.7 },
+            confidence: if resolved {
+                0.82
+            } else if !blocked_reason.is_empty() {
+                0.74
+            } else {
+                0.7
+            },
             evidence: vec![
                 ChapterSettlementEvidence {
                     excerpt: promise.title.clone(),
-                    signal: if title_hit { "title_hit".to_string() } else { "description_hit".to_string() },
+                    signal: if title_hit {
+                        "title_hit".to_string()
+                    } else {
+                        "description_hit".to_string()
+                    },
                 },
                 ChapterSettlementEvidence {
                     excerpt: chapter_result.summary.clone(),
@@ -251,8 +279,12 @@ fn build_settlement_extraction(
     }
 
     for promise in extract_plot_promises(generated_content, observation) {
-        if promise_candidates.iter().any(|existing| existing.title == promise.title)
-            || open_promises.iter().any(|existing| existing.title == promise.title)
+        if promise_candidates
+            .iter()
+            .any(|existing| existing.title == promise.title)
+            || open_promises
+                .iter()
+                .any(|existing| existing.title == promise.title)
         {
             continue;
         }
@@ -323,27 +355,44 @@ fn build_settlement_extraction(
         .iter()
         .filter(|c| {
             let lower = c.to_lowercase();
-            lower.contains("关系") || lower.contains("盟友") || lower.contains("敌对")
-                || lower.contains("决裂") || lower.contains("结盟")
+            lower.contains("关系")
+                || lower.contains("盟友")
+                || lower.contains("敌对")
+                || lower.contains("决裂")
+                || lower.contains("结盟")
         })
-        .map(|_conflict| {
-            RelationshipDeltaEntry {
-                character_a_name: String::new(),
-                character_b_name: String::new(),
-                action: "changed".to_string(),
-                relation_type: "complex".to_string(),
-                visibility: "public".to_string(),
-                chapter_title: chapter_result.chapter_title.clone(),
-                source_ref: chapter_result.source_ref.clone(),
-            }
+        .map(|_conflict| RelationshipDeltaEntry {
+            character_a_name: String::new(),
+            character_b_name: String::new(),
+            action: "changed".to_string(),
+            relation_type: "complex".to_string(),
+            visibility: "public".to_string(),
+            chapter_title: chapter_result.chapter_title.clone(),
+            source_ref: chapter_result.source_ref.clone(),
         })
         .collect();
 
     let knowledge_deltas: Vec<KnowledgeDeltaEntry> = {
         let mut deltas = Vec::new();
         let lower_summary = chapter_result.summary.to_lowercase();
-        let reveal_cues = ["reveal", "揭露", "揭示", "透露", "暴露", "发现", "知道", "明白",
-            "真相", "秘密", "真相大白", "水落石出", "展现", "披露", "坦白", "发现"];
+        let reveal_cues = [
+            "reveal",
+            "揭露",
+            "揭示",
+            "透露",
+            "暴露",
+            "发现",
+            "知道",
+            "明白",
+            "真相",
+            "秘密",
+            "真相大白",
+            "水落石出",
+            "展现",
+            "披露",
+            "坦白",
+            "发现",
+        ];
         let has_reveal_cue = reveal_cues.iter().any(|cue| lower_summary.contains(cue))
             || chapter_result.new_conflicts.iter().any(|line| {
                 let lower = line.to_lowercase();
@@ -364,8 +413,18 @@ fn build_settlement_extraction(
     };
 
     let identity_deltas: Vec<IdentityDeltaEntry> = {
-        let identity_keywords = ["身份", "identity", "认同", "伪装", "面具", "真面目",
-            "真实身份", "假身份", "扮演", "角色"];
+        let identity_keywords = [
+            "身份",
+            "identity",
+            "认同",
+            "伪装",
+            "面具",
+            "真面目",
+            "真实身份",
+            "假身份",
+            "扮演",
+            "角色",
+        ];
         chapter_result
             .character_progress
             .iter()
@@ -423,7 +482,9 @@ fn build_settlement_extraction(
 
     // Emotional debt cue extraction: scan state_changes and new_conflicts for pressure keywords
     let mut emotional_debt_cues = Vec::new();
-    let emotional_keywords = ["愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦"];
+    let emotional_keywords = [
+        "愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦",
+    ];
     for line in &chapter_result.state_changes {
         for keyword in &emotional_keywords {
             if line.contains(keyword) && !emotional_debt_cues.contains(&keyword.to_string()) {
@@ -452,6 +513,21 @@ fn build_settlement_extraction(
         warnings: Vec::new(),
         emotional_debt_cues,
     }
+}
+
+// Deduplicate promise candidates by title, keeping highest confidence
+fn deduplicate_promise_candidates(candidates: &mut Vec<ChapterPromiseExtractionCandidate>) {
+    let mut kept: Vec<ChapterPromiseExtractionCandidate> = Vec::new();
+    for cand in candidates.drain(..) {
+        if let Some(existing) = kept.iter_mut().find(|k| k.title == cand.title) {
+            if cand.confidence > existing.confidence {
+                *existing = cand;
+            }
+        } else {
+            kept.push(cand);
+        }
+    }
+    *candidates = kept;
 }
 
 fn materialize_promise_delta_entries(
@@ -600,9 +676,11 @@ fn render_book_state_delta_line(entry: &ChapterBookStateDeltaEntry) -> String {
 }
 
 fn looks_irreversible(line: &str) -> bool {
-    ["失去", "死亡", "断绝", "背叛", "毁掉", "归还", "公开", "暴露"]
-        .iter()
-        .any(|cue| line.contains(cue))
+    [
+        "失去", "死亡", "断绝", "背叛", "毁掉", "归还", "公开", "暴露",
+    ]
+    .iter()
+    .any(|cue| line.contains(cue))
 }
 
 fn next_chapter_label(chapter: &str) -> String {
