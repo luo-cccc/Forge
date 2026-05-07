@@ -323,6 +323,23 @@ pub(crate) fn spawn_llm_ghost_proposal(
 
     tokio::spawn(async move {
         let target_for_error = render_target.clone();
+
+        // Provider budget preflight for ghost text generation
+        let _budget_report = writer_agent::provider_budget::evaluate_provider_budget(
+            writer_agent::provider_budget::WriterProviderBudgetRequest::new(
+                writer_agent::provider_budget::WriterProviderBudgetTask::GhostPreview,
+                &model,
+                2000,
+                160,
+            ),
+        );
+        tracing::info!(
+            task = "ghost_preview",
+            decision = ?_budget_report.decision,
+            tokens = _budget_report.estimated_total_tokens,
+            "Provider budget preflight"
+        );
+
         let text = match llm_runtime::chat_text_profile(
             &settings,
             messages,

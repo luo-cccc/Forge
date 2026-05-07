@@ -86,8 +86,8 @@ const classification = {
   export_writer_agent_trajectory: RISK.READ_ONLY,
 
   // Provider calls (LLM)
-  report_editor_state: RISK.PROVIDER_CALL,
-  report_semantic_lint_state: RISK.PROVIDER_CALL,
+  report_editor_state: RISK.MEMORY_WRITE,
+  report_semantic_lint_state: RISK.READ_ONLY,
   batch_generate_chapter: RISK.PROVIDER_CALL,
   generate_chapter_autonomous: RISK.PROVIDER_CALL,
   analyze_chapter: RISK.PROVIDER_CALL,
@@ -195,6 +195,7 @@ const KERNEL_AUDIT_COMMANDS = [
   "checkpoint_supervised_sprint",
   "record_supervised_sprint_budget_usage",
   "repair_chapter_state",
+  "report_editor_state",
 ];
 
 const issues = [];
