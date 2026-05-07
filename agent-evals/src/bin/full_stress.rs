@@ -2,7 +2,8 @@
 // Exercises: real LLM → settlement extraction → entity apply → entity tracking
 // Run: FORGE_STRESS_CHAPTER_COUNT=30 cargo run --bin full_stress -p agent-evals
 use agent_writer_lib::chapter_generation::{
-    build_basic_chapter_settlement_delta, ChapterResultDelta,
+    author_voice_sample, build_basic_chapter_settlement_delta, build_writing_checklist,
+    character_voice_cards, curated_context_summary, emotional_arc_guidance, ChapterResultDelta,
 };
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::settlement_apply::apply_chapter_settlement_delta;
@@ -145,9 +146,16 @@ fn main() {
         let target_chars = if i == 1 { 3000 } else { 3500 };
         let min_chars = target_chars - 200;
         let max_chars = target_chars + 200;
+        let voice = author_voice_sample(&memory, pid);
+        let cards = character_voice_cards(&memory);
+        let ctx = curated_context_summary(&memory);
+        let checklist = build_writing_checklist(&memory, &title);
+        let arc = emotional_arc_guidance(&memory, pid);
+        let checklist_str = checklist.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n");
+
         let system = format!(
-            "你是长篇小说的作者助手。故事：主角林墨寻找北境宗主真相。当前章节：{}。严格输出{}—{}字的中文章节正文。不要超出上限。只输出正文，不要标题。",
-            title, min_chars, max_chars
+            "{}\n{}\n{}\n## 本章写作清单\n{}\n{}\n\n你是长篇小说的作者助手。当前章节：{}。严格输出{}—{}字的中文章节正文。不要超出上限。只输出正文，不要标题。",
+            voice, cards, ctx, checklist_str, arc, title, min_chars, max_chars
         );
 
         let body = serde_json::json!({
