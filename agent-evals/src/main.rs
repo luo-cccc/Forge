@@ -262,6 +262,11 @@ fn main() {
     results.push(run_reader_takeaway_eval());
     results.push(run_reader_todayfive_eval());
     results.push(run_reader_planner_eval());
+    // Emotional Debt Sprint evals
+    results.push(run_emotional_debt_extraction_eval());
+    results.push(run_emotional_debt_planner_eval());
+    results.push(run_emotional_debt_todayfive_eval());
+    results.push(run_emotional_debt_diagnostics_eval());
     // 11.4D Cache-Aware Context Spine evals
     results.push(run_context_spine_keeps_static_prefix_first_eval());
     results.push(run_context_spine_moves_hot_buffer_last_eval());
