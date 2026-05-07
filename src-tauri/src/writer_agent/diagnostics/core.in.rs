@@ -65,6 +65,27 @@ impl DiagnosticsEngine {
 
         // 1. Entity conflict + timeline state checks.
         let entities = extract_entities(paragraph, memory);
+
+        // Story time context for timeline diagnostics.
+        let time_slice_evidence: Option<DiagnosticEvidence> = memory
+            .get_time_mapping_for_chapter(chapter_id)
+            .ok()
+            .and_then(|mappings| {
+                mappings.first().and_then(|m| {
+                    memory
+                        .get_time_slice_by_id(m.time_slice_id)
+                        .ok()
+                        .flatten()
+                        .map(|ts| DiagnosticEvidence {
+                            source: "story_time".into(),
+                            reference: format!("time_slice:{}", ts.id),
+                            snippet: format!(
+                                "{} (order: {}, mode: {})",
+                                ts.label, ts.relative_order, m.narrative_mode
+                            ),
+                        })
+                })
+            });
         for entity in &entities {
             let canonical_entity = memory
                 .resolve_canon_entity_name(entity)
@@ -121,6 +142,14 @@ impl DiagnosticsEngine {
                         key,
                         canon_value,
                     ) {
+                        let mut evidence = vec![DiagnosticEvidence {
+                            source: "canon".into(),
+                            reference: canonical_entity.clone(),
+                            snippet: format!("{} = {}", key, canon_value),
+                        }];
+                        if let Some(ref ts_evidence) = time_slice_evidence {
+                            evidence.push(ts_evidence.clone());
+                        }
                         results.push(DiagnosticResult {
                             id: next_id(),
                             severity: DiagnosticSeverity::Warning,
@@ -129,11 +158,7 @@ impl DiagnosticsEngine {
                             entity_name: Some(canonical_entity.clone()),
                             from: issue.from,
                             to: issue.to,
-                            evidence: vec![DiagnosticEvidence {
-                                source: "canon".into(),
-                                reference: canonical_entity.clone(),
-                                snippet: format!("{} = {}", key, canon_value),
-                            }],
+                            evidence,
                             fix_suggestion: issue.fix_suggestion,
                             operations: Vec::new(),
                         });
