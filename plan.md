@@ -109,7 +109,7 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 在 4 周主线闭合后，下一阶段不再优先追求“更多入口 / 更多面板 / 更多 agent 名称”，而是把 Forge 补成更硬的长篇生产内核。只采纳 5 条：
 
-1. 输入治理编译层 ✅ (2026-05-07)
+1. 输入治理编译层 ✅ (2026-05-07) + Writing Quality 赋能 ✅ (2026-05-07)
    - 已落地：`CompiledInput { intent_text, selected_evidence, rule_stack, trace_hint }` 编译工件
    - 已接入 `BuiltChapterContext`，持久化为 `compiled_input.json`
    - 目标：让“为什么这样写”在每章生成前可见、可复盘、可复用。 ✅
@@ -939,8 +939,8 @@ Sprint D 必须补：
 
 如果 `3.3` 是底层封顶冲刺，那么 `3.3.7` 到 `3.3.10` 就是底层封顶真正的四根梁：
 
-> **2026-05-07 状态更新：四根梁全部完成，加上算法适配、性能 gate、用户感受层、前端表达层、Feedback Learning、Reader Compensation、Emotional Debt。**
-> **当前基线：89 + 247 + 307 evals，0 audit issues。**
+> **2026-05-07 最终状态：所有计划项全部闭合。四根梁 + 算法适配 + 性能优化 + 用户感受层 + 前端表达层 + Feedback Learning + Reader Compensation + Emotional Debt + Data-Driven Optimization + Writing Quality。**
+> **当前基线：89 + 247 + 325 evals，0 audit issues。全功能真实压力测试已验证内核流水线 28/28 章 settlement 零失败。**
 
 
 

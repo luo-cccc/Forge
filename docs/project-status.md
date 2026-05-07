@@ -59,7 +59,7 @@ The planned implementation and offline eval gates from `plan.md` are complete as
 | Feedback Learning | 3 | ✅ |
 | Reader Compensation | 3 | ✅ |
 | Emotional Debt | 4 | ✅ |
-| **Total** | **41 planned gates** | **307 evals passing** |
+| **Total** | **~55 gates** | **325 evals** |
 
 ## What Is Solid Now
 
