@@ -201,6 +201,21 @@ pub enum WriterOperation {
         outcome: String,
         consequence: String,
     },
+    #[serde(rename = "time_slice.upsert")]
+    TimeSliceUpsert { label: String, relative_order: i32 },
+    #[serde(rename = "chapter_time_mapping.upsert")]
+    ChapterTimeMappingUpsert {
+        chapter_title: String,
+        scene_id: Option<i64>,
+        time_slice_id: i64,
+        narrative_mode: String,
+    },
+    #[serde(rename = "timeline_event.record")]
+    TimelineEventRecord {
+        subject_ids: Vec<i64>,
+        event_type: String,
+        time_slice_id: i64,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

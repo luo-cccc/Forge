@@ -261,5 +261,8 @@ pub fn subtask_operation_kind_label(operation: &WriterOperation) -> &'static str
         WriterOperation::SceneStateUpsert { .. } => "scene_state.upsert",
         WriterOperation::SceneObligationUpsert { .. } => "scene_obligation.upsert",
         WriterOperation::SceneResultRecord { .. } => "scene_result.record",
+        WriterOperation::TimeSliceUpsert { .. } => "time_slice.upsert",
+        WriterOperation::ChapterTimeMappingUpsert { .. } => "chapter_time_mapping.upsert",
+        WriterOperation::TimelineEventRecord { .. } => "timeline_event.record",
     }
 }

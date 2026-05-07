@@ -786,6 +786,78 @@ pub(crate) fn execute_writer_operation(
                 revision_after: None,
             })
         }
+        WriterOperation::TimeSliceUpsert { label, relative_order } => {
+            memory
+                .upsert_time_slice(label, *relative_order, "", "")
+                .map_err(|e| format!("time_slice.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Time slice upsert: {}", label),
+                    "upserted_time_slice",
+                    &[],
+                    &format!("order: {}", relative_order),
+                    &[format!("timeline:{}", label)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::ChapterTimeMappingUpsert {
+            chapter_title,
+            scene_id,
+            time_slice_id,
+            narrative_mode,
+        } => {
+            memory
+                .upsert_chapter_time_mapping(chapter_title, *scene_id, *time_slice_id, narrative_mode)
+                .map_err(|e| format!("chapter_time_mapping.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    chapter_title,
+                    &format!("Chapter time mapping: {} -> time slice {}", chapter_title, time_slice_id),
+                    "upserted_chapter_time_mapping",
+                    &[],
+                    &format!("narrative_mode: {}", narrative_mode),
+                    &[format!("timeline:chapter_time_mapping:{}", chapter_title)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::TimelineEventRecord {
+            subject_ids,
+            event_type,
+            time_slice_id,
+        } => {
+            memory
+                .record_timeline_event(subject_ids, event_type, *time_slice_id, "writer_operation")
+                .map_err(|e| format!("timeline_event.record: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Timeline event: {} in time slice {}", event_type, time_slice_id),
+                    "recorded_timeline_event",
+                    &[],
+                    &format!("subjects: {:?}", subject_ids),
+                    &[format!("timeline:event:{}:{}", event_type, time_slice_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
         WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
             success: false,
             operation,

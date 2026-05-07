@@ -73,6 +73,9 @@ pub(crate) fn approval_required_for_operation(operation: &WriterOperation) -> bo
             | WriterOperation::SceneStateUpsert { .. }
             | WriterOperation::SceneObligationUpsert { .. }
             | WriterOperation::SceneResultRecord { .. }
+            | WriterOperation::TimeSliceUpsert { .. }
+            | WriterOperation::ChapterTimeMappingUpsert { .. }
+            | WriterOperation::TimelineEventRecord { .. }
     )
 }
 
@@ -276,6 +279,9 @@ pub(crate) fn operation_kind_label(operation: &WriterOperation) -> &'static str 
         WriterOperation::SceneStateUpsert { .. } => "scene_state.upsert",
         WriterOperation::SceneObligationUpsert { .. } => "scene_obligation.upsert",
         WriterOperation::SceneResultRecord { .. } => "scene_result.record",
+        WriterOperation::TimeSliceUpsert { .. } => "time_slice.upsert",
+        WriterOperation::ChapterTimeMappingUpsert { .. } => "chapter_time_mapping.upsert",
+        WriterOperation::TimelineEventRecord { .. } => "timeline_event.record",
     }
 }
 
@@ -362,6 +368,15 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
         }
         WriterOperation::SceneResultRecord { scene_id, .. } => {
             Some(format!("scene:result:{}", scene_id))
+        }
+        WriterOperation::TimeSliceUpsert { label, .. } => {
+            Some(format!("timeline:{}", label))
+        }
+        WriterOperation::ChapterTimeMappingUpsert { chapter_title, .. } => {
+            Some(format!("timeline:chapter_time_mapping:{}", chapter_title))
+        }
+        WriterOperation::TimelineEventRecord { event_type, time_slice_id, .. } => {
+            Some(format!("timeline:event:{}:{}", event_type, time_slice_id))
         }
     }
 }
