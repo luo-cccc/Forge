@@ -754,6 +754,7 @@ include!("memory/character_state_methods.in.rs");
 include!("memory/relationship_methods.in.rs");
 include!("memory/knowledge_methods.in.rs");
 include!("memory/ownership_methods.in.rs");
+include!("memory/identity_methods.in.rs");
 include!("memory/promises_methods.in.rs");
 include!("memory/style_contract_methods.in.rs");
 include!("memory/mission_result_methods.in.rs");
