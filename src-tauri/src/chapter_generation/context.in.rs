@@ -1,3 +1,21 @@
+fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _chapter_title: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    if let Ok(promises) = memory.get_open_promise_summaries() {
+        for p in promises.iter().filter(|p| p.priority >= 5).take(3) {
+            items.push(format!("兑现或推进线索: {}", p.title));
+        }
+    }
+    if let Ok(chars) = memory.list_characters(Some("protagonist")) {
+        for c in chars.iter().take(2) {
+            items.push(format!("推进角色弧线: {}", c.name));
+        }
+    }
+    if items.is_empty() {
+        items.push("推进主线剧情".to_string());
+    }
+    items
+}
+
 pub fn build_chapter_context(
     app: &tauri::AppHandle,
     input: BuildChapterContextInput,
@@ -302,6 +320,27 @@ pub fn build_chapter_context(
             (false, 0)
         }
     };
+
+    // Writing quality enrichment: enrich the chapter prompt with checklist and context.
+    {
+        let data_dir = storage::active_project_data_dir(app).ok();
+        if let Some(ref dir) = data_dir {
+            if let Ok(memory) = crate::writer_agent::memory::WriterMemory::open(
+                &dir.join(storage::WRITER_MEMORY_DB_FILENAME),
+            ) {
+                let checklist = build_writing_checklist(&memory, &target.title);
+                let checklist_str = checklist
+                    .iter()
+                    .map(|s| format!("- {}", s))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                prompt_context = format!(
+                    "## 本章写作清单\n{}\n\n{}",
+                    checklist_str, prompt_context
+                );
+            }
+        }
+    }
 
     let intent_artifact = build_chapter_intent_artifact(instruction, &target);
     let selected_evidence = build_selected_evidence_artifact(&sources);
