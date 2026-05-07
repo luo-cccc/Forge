@@ -249,6 +249,7 @@ pub fn build_chapter_context(
         rule_stack,
         trace_artifact,
         scene_plan,
+        compiled_input: None,
     })
 }
 

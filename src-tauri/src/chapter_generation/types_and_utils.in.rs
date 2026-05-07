@@ -3,6 +3,7 @@ use agent_harness_core::{
     FeedbackContract, Intent, RequiredContext, TaskBelief, TaskPacket, TaskScope,
     ToolPolicyContract, ToolSideEffectLevel, VectorDB,
 };
+use crate::writer_agent::input_governance::CompiledInput;
 use serde::{Deserialize, Serialize};
 
 use crate::writer_agent::context_relevance::{format_text_chunk_relevance, rerank_text_chunks};
@@ -671,6 +672,7 @@ pub struct BuiltChapterContext {
     pub trace_artifact: ChapterTraceArtifact,
     #[serde(default)]
     pub scene_plan: Vec<ScenePlanEntry>,
+    pub compiled_input: Option<CompiledInput>,
 }
 
 #[derive(Debug, Clone)]

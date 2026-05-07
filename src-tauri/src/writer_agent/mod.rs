@@ -34,6 +34,9 @@ pub mod feedback;
 pub mod memory;
 pub mod metacognition;
 
+// ── Input Governance ──
+pub mod input_governance;
+
 // ── Planner & Budget ──
 pub mod intent;
 pub mod provider_budget;

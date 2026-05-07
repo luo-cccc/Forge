@@ -32,6 +32,7 @@ pub fn persist_chapter_runtime_artifacts(
     let scene_plan_path = runtime_dir.join(format!("{}.scene_plan.json", stem));
     let settlement_path = runtime_dir.join(format!("{}.settlement.json", stem));
     let length_path = runtime_dir.join(format!("{}.length.json", stem));
+    let compiled_input_path = runtime_dir.join(format!("{}.compiled_input.json", stem));
 
     write_json_file(&intent_path, &context.intent_artifact)?;
     write_json_file(&evidence_path, &context.selected_evidence)?;
@@ -40,6 +41,9 @@ pub fn persist_chapter_runtime_artifacts(
     write_json_file(&scene_plan_path, &context.scene_plan)?;
     write_json_file(&settlement_path, settlement_delta)?;
     write_json_file(&length_path, length_telemetry)?;
+    if let Some(ref compiled_input) = context.compiled_input {
+        write_json_file(&compiled_input_path, compiled_input)?;
+    }
 
     let replay = SettlementReplay {
         input_content_hash: {
@@ -61,17 +65,22 @@ pub fn persist_chapter_runtime_artifacts(
     let replay_path = runtime_dir.join(format!("{}.replay.json", stem));
     write_json_file(&replay_path, &replay)?;
 
+    let mut artifact_refs = vec![
+        path_ref(&project_dir, &intent_path),
+        path_ref(&project_dir, &evidence_path),
+        path_ref(&project_dir, &rule_stack_path),
+        path_ref(&project_dir, &trace_path),
+        path_ref(&project_dir, &scene_plan_path),
+        path_ref(&project_dir, &settlement_path),
+        path_ref(&project_dir, &length_path),
+        path_ref(&project_dir, &replay_path),
+    ];
+    if context.compiled_input.is_some() {
+        artifact_refs.push(path_ref(&project_dir, &compiled_input_path));
+    }
+
     Ok(PersistedChapterRuntimeArtifacts {
-        artifact_refs: vec![
-            path_ref(&project_dir, &intent_path),
-            path_ref(&project_dir, &evidence_path),
-            path_ref(&project_dir, &rule_stack_path),
-            path_ref(&project_dir, &trace_path),
-            path_ref(&project_dir, &scene_plan_path),
-            path_ref(&project_dir, &settlement_path),
-            path_ref(&project_dir, &length_path),
-            path_ref(&project_dir, &replay_path),
-        ],
+        artifact_refs,
     })
 }
 
