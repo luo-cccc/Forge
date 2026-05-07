@@ -773,3 +773,4 @@ include!("memory/scene_methods.in.rs");
 include!("memory/scene_state_methods.in.rs");
 include!("memory/scene_obligation_methods.in.rs");
 include!("memory/scene_result_methods.in.rs");
+include!("memory/time_slice_methods.in.rs");
