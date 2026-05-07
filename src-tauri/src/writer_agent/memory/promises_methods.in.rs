@@ -99,12 +99,15 @@ impl WriterMemory {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, title, description, introduced_chapter,
                     last_seen_chapter, last_seen_ref, expected_payoff, priority,
-                    blocked_reason, promoted, core
+                    blocked_reason, promoted, core, related_entities_json
              FROM plot_promises WHERE status = 'open' ORDER BY priority DESC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             let kind: String = row.get(1)?;
             let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
+            let related_entities_json: String = row.get::<_, String>(12).unwrap_or_default();
+            let related_entities: Vec<String> =
+                serde_json::from_str(&related_entities_json).unwrap_or_default();
             Ok(PlotPromiseSummary {
                 id: row.get(0)?,
                 kind,
@@ -119,6 +122,7 @@ impl WriterMemory {
                 blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
                 promoted: row.get::<_, i64>(10).unwrap_or_default() != 0,
                 core: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                related_entities,
             })
         })?;
         rows.collect()
@@ -131,7 +135,7 @@ impl WriterMemory {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, title, description, introduced_chapter,
                     last_seen_chapter, last_seen_ref, expected_payoff, priority,
-                    blocked_reason, promoted, core
+                    blocked_reason, promoted, core, related_entities_json
              FROM plot_promises
              WHERE status = 'open' AND title = ?1
              ORDER BY priority DESC, created_at DESC
@@ -140,6 +144,9 @@ impl WriterMemory {
         stmt.query_row(rusqlite::params![title], |row| {
             let kind: String = row.get(1)?;
             let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
+            let related_entities_json: String = row.get::<_, String>(12).unwrap_or_default();
+            let related_entities: Vec<String> =
+                serde_json::from_str(&related_entities_json).unwrap_or_default();
             Ok(PlotPromiseSummary {
                 id: row.get(0)?,
                 kind,
@@ -154,6 +161,7 @@ impl WriterMemory {
                 blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
                 promoted: row.get::<_, i64>(10).unwrap_or_default() != 0,
                 core: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                related_entities,
             })
         })
         .optional()
@@ -274,7 +282,9 @@ impl WriterMemory {
             let kind: String = row.get(1)?;
             let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
             let _status: String = row.get(7)?;
-            let _related_entities_json: String = row.get(12)?;
+            let related_entities_json: String = row.get(12)?;
+            let related_entities: Vec<String> =
+                serde_json::from_str(&related_entities_json).unwrap_or_default();
             let _subject_ids_json: String = row.get(13)?;
             let _subject_type_val: String = row.get(14)?;
             let _created_at: String = row.get(15)?;
@@ -292,6 +302,7 @@ impl WriterMemory {
                 blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
                 promoted: row.get::<_, i32>(10)? != 0,
                 core: row.get::<_, i32>(11)? != 0,
+                related_entities,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()

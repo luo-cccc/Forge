@@ -50,6 +50,8 @@ pub struct PlotPromiseSummary {
     pub promoted: bool,
     #[serde(default)]
     pub core: bool,
+    #[serde(default)]
+    pub related_entities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

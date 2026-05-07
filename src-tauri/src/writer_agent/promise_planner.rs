@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::memory::{ChapterMissionSummary, PlotPromiseSummary};
+use super::memory::{ChapterMissionSummary, PlotPromiseSummary, WriterMemory};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -365,6 +365,51 @@ fn chapter_number(chapter: &str) -> Option<i64> {
     numbers.last().copied()
 }
 
+pub(crate) fn promise_subject_pressure(
+    promise: &PlotPromiseSummary,
+    memory: &WriterMemory,
+    current_chapter: &str,
+) -> f64 {
+    let mut pressure = promise.priority as f64;
+
+    // Protagonist-subject promises: 2x weight
+    for related in &promise.related_entities {
+        if let Some(name) = related.strip_prefix("character:") {
+            if let Ok(Some(character)) = memory.get_character_by_name(name) {
+                if character.role_type == "protagonist" {
+                    pressure *= 2.0;
+                }
+            }
+        }
+    }
+
+    // Core promises: 1.5x weight
+    if promise.core {
+        pressure *= 1.5;
+    }
+
+    // Stale debt: +0.1 per chapter since last_seen beyond 5 chapters
+    if !promise.last_seen_chapter.is_empty() {
+        let last_num = extract_chapter_number(&promise.last_seen_chapter);
+        let current_num = extract_chapter_number(current_chapter);
+        let gap = current_num.saturating_sub(last_num);
+        if gap > 5 {
+            pressure += (gap - 5) as f64 * 0.1;
+        }
+    }
+
+    pressure
+}
+
+fn extract_chapter_number(chapter: &str) -> i64 {
+    chapter
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse::<i64>()
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +429,7 @@ mod tests {
             blocked_reason: String::new(),
             promoted: false,
             core: false,
+            related_entities: vec![],
         }
     }
 
