@@ -1,7 +1,7 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
+use std::path::Path;
 
 pub fn run_todayfive_content_quality_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();

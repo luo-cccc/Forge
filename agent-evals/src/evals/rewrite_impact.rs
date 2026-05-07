@@ -12,12 +12,7 @@ pub fn run_rewrite_impact_preview_is_read_only_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_character(
-            "林墨",
-            &[],
-            "protagonist",
-            "主角",
-        )
+        .upsert_character("林墨", &[], "protagonist", "主角")
         .ok();
     let canon_before = memory.list_canon_entities().unwrap().len();
     let observation = observation_in_chapter("林墨举起剑", "Chapter-3");
@@ -40,12 +35,7 @@ pub fn run_rewrite_impact_preview_includes_bidirectional_story_edges_eval() -> E
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_character(
-            "林墨",
-            &[],
-            "protagonist",
-            "主角",
-        )
+        .upsert_character("林墨", &[], "protagonist", "主角")
         .ok();
     memory
         .add_promise(
@@ -83,12 +73,7 @@ pub fn run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval() ->
     for i in 0..30 {
         let long_summary = format!("Entity{} has a very long summary text that should consume budget characters and cause truncation in story impact radius computation", i);
         memory
-            .upsert_character(
-                &format!("Entity{}", i),
-                &[],
-                "protagonist",
-                &long_summary,
-            )
+            .upsert_character(&format!("Entity{}", i), &[], "protagonist", &long_summary)
             .ok();
     }
     let observation = observation_in_chapter("test", "Chapter-1");

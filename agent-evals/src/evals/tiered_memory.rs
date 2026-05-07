@@ -205,12 +205,7 @@ pub fn run_incremental_update_bounded_entries_eval() -> EvalResult {
             )
             .unwrap();
         memory
-            .upsert_character(
-                &format!("角色{i}"),
-                &[],
-                "protagonist",
-                "大量实体",
-            )
+            .upsert_character(&format!("角色{i}"), &[], "protagonist", "大量实体")
             .unwrap();
     }
     let mut kernel = WriterAgentKernel::new("eval", memory);

@@ -472,12 +472,18 @@ pub fn promise_kind_rejection_penalty(kind: &str, memory: &WriterMemory) -> f64 
     }
 }
 
-pub fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+pub fn knowledge_readiness_factor(
+    promise: &PlotPromiseSummary,
+    memory: &WriterMemory,
+    current_chapter: &str,
+) -> f64 {
     let mut factor = 1.0;
     for related in &promise.related_entities {
         if let Some(name) = related.strip_prefix("character:") {
             if let Ok(Some(c)) = memory.get_character_by_name(name) {
-                if let Ok(ownerships) = memory.get_knowledge_by_holder("character", c.id, current_chapter) {
+                if let Ok(ownerships) =
+                    memory.get_knowledge_by_holder("character", c.id, current_chapter)
+                {
                     for o in &ownerships {
                         match o.knowledge_mode.as_str() {
                             "aware" | "suspecting" => factor = f64::min(factor * 1.1, 3.0),
@@ -493,9 +499,15 @@ pub fn knowledge_readiness_factor(promise: &PlotPromiseSummary, memory: &WriterM
     factor
 }
 
-pub fn timeline_due_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, current_chapter: &str) -> f64 {
+pub fn timeline_due_factor(
+    promise: &PlotPromiseSummary,
+    memory: &WriterMemory,
+    current_chapter: &str,
+) -> f64 {
     let expected_num = extract_chapter_number(&promise.expected_payoff);
-    if expected_num == 0 { return 1.0; }
+    if expected_num == 0 {
+        return 1.0;
+    }
     let expected_chapter = format!("Chapter-{}", expected_num);
     if let Ok(mappings) = memory.get_time_mapping_for_chapter(current_chapter) {
         if let Ok(expected_mappings) = memory.get_time_mapping_for_chapter(&expected_chapter) {
@@ -504,8 +516,14 @@ pub fn timeline_due_factor(promise: &PlotPromiseSummary, memory: &WriterMemory, 
                     memory.get_time_slice_by_id(cur.time_slice_id),
                     memory.get_time_slice_by_id(exp.time_slice_id),
                 ) {
-                    if cur_ts.relative_order > exp_ts.relative_order { return 1.3; }
-                    if cur.narrative_mode == "flashback" && cur_ts.relative_order < exp_ts.relative_order { return 0.3; }
+                    if cur_ts.relative_order > exp_ts.relative_order {
+                        return 1.3;
+                    }
+                    if cur.narrative_mode == "flashback"
+                        && cur_ts.relative_order < exp_ts.relative_order
+                    {
+                        return 0.3;
+                    }
                 }
             }
         }

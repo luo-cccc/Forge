@@ -195,8 +195,18 @@ pub fn build_chapter_context(
         );
     }
 
-    let (prompt_context, sources, budget_report) = composer.finish();
+    let (mut prompt_context, sources, budget_report) = composer.finish();
     let warnings = budget_report.warnings.clone();
+
+    if let Some(ref ci) = input.compiled_input {
+        let evidence_text = ci.selected_evidence.join("\n");
+        let rules_text = ci.rule_stack.join("\n");
+        let block = format!(
+            "\n## 本章生成计划\n意图: {}\n证据: {}\n规则: {}\n",
+            ci.intent_text, evidence_text, rules_text
+        );
+        prompt_context.push_str(&block);
+    }
     let intent_artifact = build_chapter_intent_artifact(instruction, &target);
     let selected_evidence = build_selected_evidence_artifact(&sources);
     let rule_stack = build_chapter_rule_stack(&chapter_contract);
@@ -249,7 +259,7 @@ pub fn build_chapter_context(
         rule_stack,
         trace_artifact,
         scene_plan,
-        compiled_input: None,
+        compiled_input: input.compiled_input.clone(),
     })
 }
 

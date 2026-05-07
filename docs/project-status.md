@@ -41,7 +41,7 @@ P1 is in progress:
 
 ## Sprint Completion (May 2026)
 
-All plan.md items completed as of 2026-05-07:
+The planned implementation and offline eval gates from `plan.md` are complete as of 2026-05-07. This table does not mean real-provider stability or 30/100-chapter continuity validation is fully closed; the open gaps documented in `plan.md` and `Remaining Gaps` below still apply.
 
 | Phase | Gates | Status |
 |-------|-------|--------|
@@ -59,7 +59,7 @@ All plan.md items completed as of 2026-05-07:
 | Feedback Learning | 3 | ✅ |
 | Reader Compensation | 3 | ✅ |
 | Emotional Debt | 4 | ✅ |
-| **Total** | **41 gates** | **307 evals** |
+| **Total** | **41 planned gates** | **307 evals passing** |
 
 ## What Is Solid Now
 

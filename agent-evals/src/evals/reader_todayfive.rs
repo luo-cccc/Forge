@@ -1,8 +1,8 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
-use agent_writer_lib::writer_agent::WriterAgentKernel;
 use agent_writer_lib::writer_agent::operation::WriterOperation;
+use agent_writer_lib::writer_agent::WriterAgentKernel;
 use std::path::Path;
 
 pub fn run_reader_todayfive_eval() -> EvalResult {
@@ -36,13 +36,14 @@ pub fn run_reader_todayfive_eval() -> EvalResult {
     let summary = kernel.today_five_summary();
 
     // Verify the next slot exists
-    let next = summary
-        .items
-        .iter()
-        .find(|i| i.slot == "next");
+    let next = summary.items.iter().find(|i| i.slot == "next");
     if next.is_none() {
         errors.push("missing next slot in TodayFive".to_string());
-        return eval_result("writer_agent:reader_todayfive", "no next slot".to_string(), errors);
+        return eval_result(
+            "writer_agent:reader_todayfive",
+            "no next slot".to_string(),
+            errors,
+        );
     }
     let next_item = next.unwrap();
     let detail = &next_item.detail;

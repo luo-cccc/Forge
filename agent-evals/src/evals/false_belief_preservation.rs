@@ -34,9 +34,7 @@ pub fn run_false_belief_preservation_eval() -> EvalResult {
     let a_knowledge = memory
         .get_knowledge_by_holder("character", 1, "Chapter-2")
         .unwrap();
-    let a_still_misbelieves = a_knowledge
-        .iter()
-        .any(|o| o.knowledge_mode == "misbelief");
+    let a_still_misbelieves = a_knowledge.iter().any(|o| o.knowledge_mode == "misbelief");
 
     if !a_still_misbelieves {
         errors.push("character A should still be in misbelief at Chapter-2".to_string());

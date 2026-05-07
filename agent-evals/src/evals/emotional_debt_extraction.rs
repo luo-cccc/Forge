@@ -5,12 +5,17 @@ use agent_writer_lib::chapter_generation::ChapterResultDelta;
 pub fn run_emotional_debt_extraction_eval() -> EvalResult {
     let mut errors = Vec::new();
 
-    let emotional_keywords = ["愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦"];
+    let emotional_keywords = [
+        "愤怒", "悲伤", "背叛", "恐惧", "失去", "悔恨", "自责", "绝望", "压抑", "痛苦",
+    ];
 
     // Create a ChapterResultDelta with state_changes and new_conflicts containing keywords
     let delta = ChapterResultDelta {
         summary: "章末总结".to_string(),
-        state_changes: vec!["角色A感到背叛与愤怒".to_string(), "角色B失去了家园".to_string()],
+        state_changes: vec![
+            "角色A感到背叛与愤怒".to_string(),
+            "角色B失去了家园".to_string(),
+        ],
         character_progress: vec![],
         new_conflicts: vec!["角色A对角色B的愤怒爆发".to_string()],
         new_clues: vec![],

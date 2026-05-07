@@ -1,6 +1,6 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
+use std::path::Path;
 
 pub fn run_feedback_ghost_style_preference_roundtrip_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();

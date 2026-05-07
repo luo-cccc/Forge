@@ -163,9 +163,7 @@ pub fn apply_chapter_settlement_delta(
     let mut character_state_applied = 0usize;
     for delta in &delta.character_state_deltas {
         if let Ok(Some(character)) = memory.get_character_by_name(&delta.character_name) {
-            let _ = memory.close_active_states_for_character(
-                character.id, &delta.chapter_title
-            );
+            let _ = memory.close_active_states_for_character(character.id, &delta.chapter_title);
             if let Ok(state_id) = memory.upsert_character_state(
                 character.id,
                 &delta.chapter_title,
@@ -190,13 +188,16 @@ pub fn apply_chapter_settlement_delta(
                 memory.get_character_by_name(&delta.character_b_name),
             ) {
                 match memory.upsert_relationship(
-                    a.id, b.id,
+                    a.id,
+                    b.id,
                     &delta.relation_type,
                     &delta.visibility,
                     &delta.chapter_title,
                     &delta.source_ref,
                 ) {
-                    Ok(_) => { relationship_applied += 1; }
+                    Ok(_) => {
+                        relationship_applied += 1;
+                    }
                     Err(e) => warnings.push(format!("relationship upsert failed: {}", e)),
                 }
             }
@@ -206,15 +207,25 @@ pub fn apply_chapter_settlement_delta(
     // Apply knowledge deltas
     let mut knowledge_applied = 0usize;
     for delta in &delta.knowledge_deltas {
-        if let Ok(knowledge_id) = memory.upsert_knowledge_item(&delta.topic, &delta.truth_state, &delta.source_ref) {
+        if let Ok(knowledge_id) =
+            memory.upsert_knowledge_item(&delta.topic, &delta.truth_state, &delta.source_ref)
+        {
             match memory.upsert_knowledge_ownership(
-                knowledge_id, &delta.holder_type, delta.holder_id,
-                &delta.knowledge_mode, &delta.chapter_title, &delta.source_ref,
+                knowledge_id,
+                &delta.holder_type,
+                delta.holder_id,
+                &delta.knowledge_mode,
+                &delta.chapter_title,
+                &delta.source_ref,
             ) {
                 Ok(_) => {
                     if delta.knowledge_mode == "aware" {
                         let _ = memory.record_reveal_event(
-                            knowledge_id, "knowledge", "public", &delta.chapter_title, &delta.source_ref,
+                            knowledge_id,
+                            "knowledge",
+                            "public",
+                            &delta.chapter_title,
+                            &delta.source_ref,
                         );
                     }
                     knowledge_applied += 1;
@@ -229,14 +240,21 @@ pub fn apply_chapter_settlement_delta(
     for delta in &delta.identity_deltas {
         if let Ok(Some(character)) = memory.get_character_by_name(&delta.character_name) {
             // Close any existing active identity layer for this character
-            if let Ok(Some(existing)) = memory.get_active_identity(character.id, &delta.chapter_title) {
+            if let Ok(Some(existing)) =
+                memory.get_active_identity(character.id, &delta.chapter_title)
+            {
                 let _ = memory.close_identity_layer(existing.id, &delta.chapter_title);
             }
             match memory.upsert_identity_layer(
-                character.id, &delta.public_identity, &delta.private_identity,
-                &delta.revealed_to, &delta.chapter_title,
+                character.id,
+                &delta.public_identity,
+                &delta.private_identity,
+                &delta.revealed_to,
+                &delta.chapter_title,
             ) {
-                Ok(_) => { identity_applied += 1; }
+                Ok(_) => {
+                    identity_applied += 1;
+                }
                 Err(e) => warnings.push(format!("identity_layer upsert failed: {}", e)),
             }
         }
@@ -245,9 +263,18 @@ pub fn apply_chapter_settlement_delta(
     // Apply scene deltas
     let mut scene_applied = 0usize;
     for proj in &delta.scene_deltas {
-        if proj.scene_id == 0 { continue; }
-        match memory.record_scene_result(proj.scene_id, &proj.outcome, &proj.consequence, &proj.source_ref) {
-            Ok(_) => { scene_applied += 1; }
+        if proj.scene_id == 0 {
+            continue;
+        }
+        match memory.record_scene_result(
+            proj.scene_id,
+            &proj.outcome,
+            &proj.consequence,
+            &proj.source_ref,
+        ) {
+            Ok(_) => {
+                scene_applied += 1;
+            }
             Err(e) => warnings.push(format!("scene_result failed: {}", e)),
         }
     }
@@ -260,16 +287,10 @@ pub fn apply_chapter_settlement_delta(
             let mut inserted = false;
             for entity_name in &known_entities {
                 if fact_line.contains(entity_name.as_str()) {
-                    let fact_key = format!(
-                        "fact-{}",
-                        crate::storage::content_revision(fact_line)
-                    );
-                    if let Ok(_) = memory.update_canon_attribute(
-                        entity_name,
-                        &fact_key,
-                        fact_line,
-                        0.5,
-                    ) {
+                    let fact_key = format!("fact-{}", crate::storage::content_revision(fact_line));
+                    if let Ok(_) =
+                        memory.update_canon_attribute(entity_name, &fact_key, fact_line, 0.5)
+                    {
                         inserted = true;
                     }
                     break; // One entity per fact line

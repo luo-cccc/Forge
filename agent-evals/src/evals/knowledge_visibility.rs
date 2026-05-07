@@ -39,9 +39,7 @@ pub fn run_knowledge_visibility_eval() -> EvalResult {
     let ownerships_after = memory
         .get_knowledge_by_holder("character", 1, "Chapter-3")
         .unwrap();
-    let now_aware = ownerships_after
-        .iter()
-        .any(|o| o.knowledge_mode == "aware");
+    let now_aware = ownerships_after.iter().any(|o| o.knowledge_mode == "aware");
 
     if !now_aware {
         errors.push("character should transition to aware mode after reveal".to_string());

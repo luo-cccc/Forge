@@ -1,8 +1,6 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
-use agent_writer_lib::chapter_generation::{
-    ChapterSettlementDelta, ReaderTakeaway,
-};
+use agent_writer_lib::chapter_generation::{ChapterSettlementDelta, ReaderTakeaway};
 use std::path::Path;
 
 pub fn run_reader_takeaway_eval() -> EvalResult {

@@ -5,9 +5,18 @@ use agent_writer_lib::writer_agent::metacognition::{
 };
 
 pub fn run_interrupt_contract_eval() -> EvalResult {
-    let has_high = matches!(WriterMetacognitiveRiskLevel::High, WriterMetacognitiveRiskLevel::High);
-    let has_medium = matches!(WriterMetacognitiveRiskLevel::Medium, WriterMetacognitiveRiskLevel::Medium);
-    let has_low = matches!(WriterMetacognitiveRiskLevel::Low, WriterMetacognitiveRiskLevel::Low);
+    let has_high = matches!(
+        WriterMetacognitiveRiskLevel::High,
+        WriterMetacognitiveRiskLevel::High
+    );
+    let has_medium = matches!(
+        WriterMetacognitiveRiskLevel::Medium,
+        WriterMetacognitiveRiskLevel::Medium
+    );
+    let has_low = matches!(
+        WriterMetacognitiveRiskLevel::Low,
+        WriterMetacognitiveRiskLevel::Low
+    );
     let variants_ok = has_high && has_medium && has_low;
 
     let high_risk_snapshot = WriterMetacognitiveSnapshot {

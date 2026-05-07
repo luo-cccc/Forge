@@ -1,11 +1,13 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::{MemoryAuditSummary, WriterMemory};
 use agent_writer_lib::writer_agent::promise_planner::promise_kind_rejection_penalty;
+use std::path::Path;
 
 pub fn run_feedback_planner_rejection_penalty_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
-    memory.ensure_story_contract_seed("eval", "test", "fantasy", "p", "j", "").unwrap();
+    memory
+        .ensure_story_contract_seed("eval", "test", "fantasy", "p", "j", "")
+        .unwrap();
 
     // Add 3 plot_promise promises
     for i in 1..=3 {
@@ -61,10 +63,7 @@ pub fn run_feedback_planner_rejection_penalty_eval() -> EvalResult {
     }
     // Should be 0.7 when >50% rejection
     if (penalty_rejected - 0.7).abs() > 1e-9 {
-        errors.push(format!(
-            "expected penalty 0.7, got {}",
-            penalty_rejected
-        ));
+        errors.push(format!("expected penalty 0.7, got {}", penalty_rejected));
     }
 
     // Scenario C: Different kind not affected

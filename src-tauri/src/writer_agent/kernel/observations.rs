@@ -214,7 +214,7 @@ impl WriterAgentKernel {
                 .chapter_revision
                 .clone()
                 .unwrap_or_else(|| "missing".to_string());
-            let alternatives = ghost_alternatives(
+            let mut alternatives = ghost_alternatives(
                 &intent.primary,
                 &observation,
                 &context_pack,
@@ -222,6 +222,34 @@ impl WriterAgentKernel {
                 insert_at,
                 &revision,
             );
+            let style_evidence = ghost_consume_style_preferences(&self.memory, &mut alternatives);
+            let fallback_operation = WriterOperation::TextInsert {
+                chapter: chapter.clone(),
+                at: insert_at,
+                text: continuation.clone(),
+                revision: revision.clone(),
+            };
+            let primary_preview = alternatives
+                .first()
+                .map(|alternative| alternative.preview.clone())
+                .unwrap_or_else(|| continuation.clone());
+            let primary_operation = alternatives
+                .first()
+                .and_then(|alternative| alternative.operation.clone())
+                .unwrap_or_else(|| fallback_operation.clone());
+            let mut evidence = context_pack_evidence(&context_pack, &observation);
+            evidence.extend(style_evidence.clone());
+            let mut rationale = format!(
+                "意图识别: {:?} ({:.0}%). ContextPack: {} sources, {}/{} chars.",
+                intent.primary,
+                intent.confidence * 100.0,
+                context_pack.sources.len(),
+                context_pack.total_chars,
+                context_pack.budget_limit
+            );
+            if !style_evidence.is_empty() {
+                rationale.push_str(" StyleLedger reordered the default ghost branch.");
+            }
 
             let proposal_id_value = proposal_id(&self.session_id, self.proposal_counter);
             proposal_context_budgets.insert(
@@ -240,22 +268,10 @@ impl WriterAgentKernel {
                         from: c.to,
                         to: c.to,
                     }),
-                preview: continuation.clone(),
-                operations: vec![WriterOperation::TextInsert {
-                    chapter,
-                    at: insert_at,
-                    text: continuation,
-                    revision,
-                }],
-                rationale: format!(
-                    "意图识别: {:?} ({:.0}%). ContextPack: {} sources, {}/{} chars.",
-                    intent.primary,
-                    intent.confidence * 100.0,
-                    context_pack.sources.len(),
-                    context_pack.total_chars,
-                    context_pack.budget_limit
-                ),
-                evidence: context_pack_evidence(&context_pack, &observation),
+                preview: primary_preview,
+                operations: vec![primary_operation],
+                rationale,
+                evidence,
                 risks: ghost_quality_risks(&self.memory, &self.project_id),
                 alternatives,
                 confidence: ghost_confidence(intent.confidence, &self.memory, &self.project_id),

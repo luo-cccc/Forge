@@ -43,6 +43,7 @@ pub async fn run_chapter_generation_pipeline(
         chapter_contract: config.payload.chapter_contract.clone().unwrap_or_default(),
         chapter_summary_override: config.payload.chapter_summary_override.clone(),
         user_profile_entries: config.user_profile_entries.clone(),
+        compiled_input: None,
     };
 
     let context = match build_chapter_context(&config.app, build_input) {

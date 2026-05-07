@@ -374,7 +374,14 @@ mod tests {
             .add_promise("plot_promise", "戒指", "遗物", "Ch1", "Ch5", 4)
             .unwrap();
         memory
-            .upsert_canon_entity("location", "林墨故居", &[], "x", &serde_json::json!({}), 0.3)
+            .upsert_canon_entity(
+                "location",
+                "林墨故居",
+                &[],
+                "x",
+                &serde_json::json!({}),
+                0.3,
+            )
             .ok();
         let queue = build_chapter_settlement_queue("Ch3", "rev-1", &memory, "eval");
         assert!(

@@ -302,36 +302,265 @@ pub(crate) fn context_pack_evidence(
 pub(crate) fn ghost_consume_style_preferences(
     memory: &WriterMemory,
     alternatives: &mut [ProposalAlternative],
-) {
+) -> Vec<EvidenceRef> {
     let prefs = match memory.list_style_preferences(20) {
         Ok(p) => p,
-        Err(_) => return,
+        Err(_) => return Vec::new(),
     };
-    if prefs.is_empty() {
-        return;
+    if prefs.is_empty() || alternatives.len() <= 1 {
+        return Vec::new();
     }
-    let accepted_keys: Vec<&str> = prefs
+    let accepted_preferences = prefs
         .iter()
         .filter(|p| p.accepted_count > 0)
-        .map(|p| p.key.as_str())
-        .collect();
-    if accepted_keys.is_empty() {
-        return;
+        .collect::<Vec<_>>();
+    if accepted_preferences.is_empty() {
+        return Vec::new();
     }
-    for alt in alternatives.iter_mut() {
-        for key in &accepted_keys {
-            if alt.label.to_lowercase().contains(&key.to_lowercase())
-                || alt.preview.contains(key)
-            {
-                // 1.2x confidence boost for ghost proposals matching accepted style keys
-                let boost_marker = format!(" style_boost:{}", key);
-                if !alt.rationale.contains("style_boost:") {
-                    alt.rationale.push_str(&boost_marker);
-                }
-                break;
+
+    let mut rankings = vec![(0i32, Vec::<String>::new()); alternatives.len()];
+    let mut style_evidence = Vec::new();
+
+    for preference in accepted_preferences {
+        let mut matched_any = false;
+        for (index, alternative) in alternatives.iter().enumerate() {
+            let score =
+                ghost_style_alignment_score(&preference.key, &preference.value, alternative);
+            if score > 0 {
+                rankings[index].0 += score;
+                rankings[index].1.push(preference.key.clone());
+                matched_any = true;
             }
         }
+        if matched_any {
+            style_evidence.push(EvidenceRef {
+                source: EvidenceSource::StyleLedger,
+                reference: preference.key.clone(),
+                snippet: preference.value.clone(),
+            });
+        }
     }
+
+    if style_evidence.is_empty() {
+        return Vec::new();
+    }
+
+    let original = alternatives.to_vec();
+    let mut order = (0..alternatives.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        rankings[*right]
+            .0
+            .cmp(&rankings[*left].0)
+            .then_with(|| left.cmp(right))
+    });
+
+    for (destination, source_index) in order.into_iter().enumerate() {
+        let mut alternative = original[source_index].clone();
+        let (score, preference_keys) = &rankings[source_index];
+        if *score > 0 {
+            let matched_keys = dedupe_keys(preference_keys)
+                .into_iter()
+                .take(2)
+                .collect::<Vec<_>>();
+            let boost_marker = format!(" style_pref:{} (+{})", matched_keys.join(","), score);
+            if !alternative.rationale.contains("style_pref:") {
+                alternative.rationale.push_str(&boost_marker);
+            }
+        }
+        alternatives[destination] = alternative;
+    }
+
+    style_evidence.truncate(3);
+    style_evidence
+}
+
+fn ghost_style_alignment_score(key: &str, value: &str, alternative: &ProposalAlternative) -> i32 {
+    let preference = format!("{} {}", key, value).to_lowercase();
+    let alternative_text = format!("{} {}", alternative.label, alternative.preview).to_lowercase();
+    let preview_len = alternative.preview.chars().count();
+    let mut score = 0;
+
+    if contains_any(
+        &preference,
+        &[
+            "dialogue.subtext",
+            "dialogue_subtext",
+            "prefers_subtext",
+            "subtext",
+            "潜台词",
+            "留白",
+            "解释情绪",
+        ],
+    ) {
+        score += score_hits(
+            &alternative_text,
+            &[
+                "咽回去",
+                "听不出",
+                "像是",
+                "没有立刻",
+                "压在",
+                "停住",
+                "短促的笑",
+                "挑衅",
+                "露出破绽",
+            ],
+            2,
+        );
+        if alternative.preview.contains('“') || alternative.preview.contains('"') {
+            score += 1;
+        }
+        score -= score_hits(&alternative_text, &["直接表态", "完整解释", "真正想说"], 1);
+    }
+
+    if contains_any(
+        &preference,
+        &[
+            "prose.sentence_length",
+            "sentence_length",
+            "sentence length",
+            "短句",
+            "长句",
+            "short sentence",
+            "long sentence",
+        ],
+    ) {
+        if contains_any(
+            &preference,
+            &["短句", "short", "利落", "克制", "简洁", "tight"],
+        ) {
+            score += if preview_len <= 32 {
+                2
+            } else if preview_len <= 42 {
+                1
+            } else {
+                0
+            };
+        }
+        if contains_any(&preference, &["长句", "long", "铺陈", "舒展", "elongated"]) {
+            score += if preview_len >= 42 {
+                2
+            } else if preview_len >= 34 {
+                1
+            } else {
+                0
+            };
+        }
+    }
+
+    if contains_any(
+        &preference,
+        &[
+            "description.sensory_detail",
+            "sensory_detail",
+            "sensory",
+            "描写",
+            "感官",
+            "气味",
+            "触感",
+            "画面",
+        ],
+    ) {
+        score += score_hits(
+            &alternative_text,
+            &["风", "冷意", "潮气", "味道", "声响", "夜色", "沉默", "缝隙"],
+            1,
+        );
+    }
+
+    if contains_any(
+        &preference,
+        &[
+            "structure.hook",
+            "chapter_hook",
+            "hook",
+            "cliffhanger",
+            "悬念",
+            "钩子",
+            "章尾",
+            "转折",
+        ],
+    ) {
+        score += score_hits(
+            &alternative_text,
+            &[
+                "脚步声",
+                "灯先灭了",
+                "无处可躲",
+                "更糟",
+                "截断",
+                "黑暗",
+                "来人",
+            ],
+            2,
+        );
+    }
+
+    if contains_any(
+        &preference,
+        &[
+            "action.clarity",
+            "action",
+            "combat",
+            "动作",
+            "打斗",
+            "追逐",
+            "交锋",
+        ],
+    ) {
+        score += score_hits(
+            &alternative_text,
+            &["侧身", "避开", "切进", "先机", "发力", "逼近", "收住"],
+            1,
+        );
+    }
+
+    if contains_any(
+        &preference,
+        &[
+            "tone.voice",
+            "tone",
+            "voice",
+            "克制",
+            "冷峻",
+            "轻松",
+            "幽默",
+            "风格",
+        ],
+    ) && contains_any(
+        &preference,
+        &["克制", "冷峻", "留白", "subtle", "restrained"],
+    ) {
+        score += score_hits(
+            &alternative_text,
+            &["没有立刻", "压在", "咽回去", "停住", "沉默", "短促"],
+            1,
+        );
+    }
+
+    score.max(0)
+}
+
+fn score_hits(haystack: &str, needles: &[&str], weight: i32) -> i32 {
+    needles
+        .iter()
+        .filter(|needle| haystack.contains(**needle))
+        .count() as i32
+        * weight
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn dedupe_keys(keys: &[String]) -> Vec<String> {
+    let mut unique = Vec::new();
+    for key in keys {
+        if !unique.iter().any(|existing| existing == key) {
+            unique.push(key.clone());
+        }
+    }
+    unique
 }
 
 #[cfg(test)]

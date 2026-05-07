@@ -342,7 +342,9 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
             mission.project_id, mission.chapter_title
         )),
         WriterOperation::OutlineUpdate { node_id, .. } => Some(format!("outline:{}", node_id)),
-        WriterOperation::KnowledgeUpsert { topic, .. } => Some(format!("canon:knowledge:{}", topic)),
+        WriterOperation::KnowledgeUpsert { topic, .. } => {
+            Some(format!("canon:knowledge:{}", topic))
+        }
         WriterOperation::KnowledgeOwnershipUpsert { knowledge_id, .. } => {
             Some(format!("canon:knowledge_ownership:{}", knowledge_id))
         }
@@ -356,10 +358,7 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
             chapter_title,
             sequence,
             ..
-        } => Some(format!(
-            "scene:{}:{}",
-            chapter_title, sequence
-        )),
+        } => Some(format!("scene:{}:{}", chapter_title, sequence)),
         WriterOperation::SceneStateUpsert { scene_id, .. } => {
             Some(format!("scene:state:{}", scene_id))
         }
@@ -369,15 +368,15 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
         WriterOperation::SceneResultRecord { scene_id, .. } => {
             Some(format!("scene:result:{}", scene_id))
         }
-        WriterOperation::TimeSliceUpsert { label, .. } => {
-            Some(format!("timeline:{}", label))
-        }
+        WriterOperation::TimeSliceUpsert { label, .. } => Some(format!("timeline:{}", label)),
         WriterOperation::ChapterTimeMappingUpsert { chapter_title, .. } => {
             Some(format!("timeline:chapter_time_mapping:{}", chapter_title))
         }
-        WriterOperation::TimelineEventRecord { event_type, time_slice_id, .. } => {
-            Some(format!("timeline:event:{}:{}", event_type, time_slice_id))
-        }
+        WriterOperation::TimelineEventRecord {
+            event_type,
+            time_slice_id,
+            ..
+        } => Some(format!("timeline:event:{}:{}", event_type, time_slice_id)),
     }
 }
 

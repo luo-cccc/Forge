@@ -7,8 +7,10 @@ pub fn run_repair_confirm_contract_eval() -> EvalResult {
     let contract = ChapterContract::default();
     let under_content = "x".repeat(2500);
     let over_content = "x".repeat(4500);
-    let under = chapter_contract_outcome(&under_content, &contract, ChapterContractPhase::ModelOutput);
-    let over = chapter_contract_outcome(&over_content, &contract, ChapterContractPhase::ModelOutput);
+    let under =
+        chapter_contract_outcome(&under_content, &contract, ChapterContractPhase::ModelOutput);
+    let over =
+        chapter_contract_outcome(&over_content, &contract, ChapterContractPhase::ModelOutput);
     let bounds_ok = contract.target_chars == 3500
         && contract.min_chars == 3000
         && contract.max_chars == 4000

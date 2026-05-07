@@ -20,12 +20,7 @@ pub fn run_chapter_settlement_creates_reviewable_updates_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_character(
-            "林墨",
-            &[],
-            "protagonist",
-            "主角",
-        )
+        .upsert_character("林墨", &[], "protagonist", "主角")
         .ok();
     memory
         .add_promise(
@@ -111,12 +106,7 @@ pub fn run_chapter_settlement_requires_approval_for_ledger_writes_eval() -> Eval
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_character(
-            "林墨",
-            &[],
-            "protagonist",
-            "主角",
-        )
+        .upsert_character("林墨", &[], "protagonist", "主角")
         .ok();
     let queue = build_chapter_settlement_queue("Chapter-3", "rev-1", &memory, "eval");
     for item in queue

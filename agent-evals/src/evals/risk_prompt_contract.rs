@@ -1,7 +1,7 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
+use std::path::Path;
 
 pub fn run_risk_prompt_contract_eval() -> EvalResult {
     // Test with canon risk debt -> guard tone should be danger
@@ -46,10 +46,7 @@ pub fn run_risk_prompt_contract_eval() -> EvalResult {
         .unwrap();
 
     let summary_with_debt = kernel.today_five_summary();
-    let guard_with_debt = summary_with_debt
-        .items
-        .iter()
-        .find(|i| i.slot == "guard");
+    let guard_with_debt = summary_with_debt.items.iter().find(|i| i.slot == "guard");
     let tone_with_debt = guard_with_debt.map(|i| i.tone.as_str()).unwrap_or("none");
 
     // Test with no debt -> guard tone should be success or accent
@@ -66,10 +63,7 @@ pub fn run_risk_prompt_contract_eval() -> EvalResult {
         .unwrap();
     let clean_kernel = WriterAgentKernel::new("eval", clean_memory);
     let summary_clean = clean_kernel.today_five_summary();
-    let guard_clean = summary_clean
-        .items
-        .iter()
-        .find(|i| i.slot == "guard");
+    let guard_clean = summary_clean.items.iter().find(|i| i.slot == "guard");
     let tone_no_debt = guard_clean.map(|i| i.tone.as_str()).unwrap_or("none");
 
     let debt_danger = tone_with_debt == "⚠️ 需要注意";

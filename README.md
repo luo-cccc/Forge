@@ -227,6 +227,8 @@ npm run verify
 
 Expected current baseline. This block is generated from `scripts/verification-baseline.cjs`; update it with `npm run baseline` when verification counts intentionally change.
 
+This baseline describes the expected state of the current branch only after the workspace is formatted and clean enough for `npm run verify` to pass. It is an offline engineering gate, not a claim that real-provider long-session stability is fully closed.
+
 <!-- verification-baseline:start -->
 - `cargo test -p agent-harness-core`: 89 tests passing
 - `cargo test -p agent-writer`: 247 tests passing

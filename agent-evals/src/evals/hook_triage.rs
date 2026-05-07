@@ -62,10 +62,7 @@ pub fn run_hook_triage_eval() -> EvalResult {
 
     let fresh_factor = hook_debt_triage_factor(&fresh_promise, "Chapter-14");
     if fresh_factor < 0.9 || fresh_factor > 1.1 {
-        errors.push(format!(
-            "expected fresh factor ~1.0, got {}",
-            fresh_factor
-        ));
+        errors.push(format!("expected fresh factor ~1.0, got {}", fresh_factor));
     }
 
     // Verify promise_subject_pressure integrates the factor (just checks it runs)
@@ -92,11 +89,13 @@ pub fn run_hook_triage_eval() -> EvalResult {
         related_entities: vec!["character:主角".to_string()],
     };
 
-    let pressure =
-        promise_subject_pressure(&pressure_promise, &memory, "Chapter-15");
+    let pressure = promise_subject_pressure(&pressure_promise, &memory, "Chapter-15");
     // With core=true, protagonist linked, and stale gap >10, pressure should be significant
     if pressure <= 0.0 {
-        errors.push(format!("promise_subject_pressure should be positive, got {}", pressure));
+        errors.push(format!(
+            "promise_subject_pressure should be positive, got {}",
+            pressure
+        ));
     }
 
     eval_result(

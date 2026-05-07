@@ -130,6 +130,13 @@ fn observe_records_context_recalls_from_surfaced_evidence() {
 #[test]
 fn observe_ghost_contains_three_parallel_branches() {
     let memory = WriterMemory::open(std::path::Path::new(":memory:")).unwrap();
+    memory
+        .upsert_style_preference(
+            "style:dialogue.subtext",
+            "对话偏潜台词和留白，不要直接解释情绪",
+            true,
+        )
+        .unwrap();
     let mut kernel = WriterAgentKernel::new("default", memory);
     let text = "林墨深吸一口气，说道：“这件事我本来不该告诉你，可你已经走到这里，就没有回头路了。";
     let mut obs = observation(text);
@@ -145,7 +152,13 @@ fn observe_ghost_contains_three_parallel_branches() {
         .unwrap();
 
     assert_eq!(ghost.alternatives.len(), 3);
-    assert_eq!(ghost.alternatives[0].label, "A 直接表态");
+    assert_eq!(ghost.alternatives[0].label, "C 压住情绪");
+    assert_eq!(ghost.preview, ghost.alternatives[0].preview);
+    assert!(ghost
+        .evidence
+        .iter()
+        .any(|evidence| evidence.source == EvidenceSource::StyleLedger));
+    assert!(ghost.alternatives[0].rationale.contains("style_pref:"));
     assert!(ghost.alternatives.iter().all(|alternative| matches!(
         alternative.operation,
         Some(WriterOperation::TextInsert { .. })

@@ -44,7 +44,8 @@ pub(crate) use chapters::{
     cue_hit_score, derive_next_beat, mission_result_haystack, proposal_id, proposal_trace_summary,
 };
 pub(crate) use ghost::{
-    context_pack_evidence, draft_continuation, ghost_alternatives, sanitize_continuation,
+    context_pack_evidence, draft_continuation, ghost_alternatives, ghost_consume_style_preferences,
+    sanitize_continuation,
 };
 pub use helpers::tool_filter_for_task;
 pub(crate) use helpers::{

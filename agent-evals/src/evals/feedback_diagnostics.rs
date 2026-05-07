@@ -1,7 +1,7 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::diagnostics::author_ignore_rate;
 use agent_writer_lib::writer_agent::memory::{MemoryAuditSummary, WriterMemory};
+use std::path::Path;
 
 pub fn run_feedback_diagnostics_ignore_rate_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -84,7 +84,10 @@ pub fn run_feedback_diagnostics_ignore_rate_eval() -> EvalResult {
 
     eval_result(
         "writer_agent:feedback_diagnostics_ignore_rate",
-        format!("noData={} high={} few={}", rate_no_data, rate_high, rate_few),
+        format!(
+            "noData={} high={} few={}",
+            rate_no_data, rate_high, rate_few
+        ),
         errors,
     )
 }

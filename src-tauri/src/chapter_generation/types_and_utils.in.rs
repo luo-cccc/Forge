@@ -705,6 +705,7 @@ pub struct BuildChapterContextInput {
     pub chapter_contract: ChapterContract,
     pub chapter_summary_override: Option<String>,
     pub user_profile_entries: Vec<String>,
+    pub compiled_input: Option<CompiledInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

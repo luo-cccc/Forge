@@ -1,7 +1,7 @@
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
 use agent_writer_lib::writer_agent::WriterAgentKernel;
+use std::path::Path;
 
 pub fn run_inspect_boundary_contract_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
@@ -37,13 +37,22 @@ pub fn run_inspect_boundary_contract_eval() -> EvalResult {
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
     kernel
-        .observe(observation_in_chapter("The hero stands before the ancient gate.", "Chapter-1"))
+        .observe(observation_in_chapter(
+            "The hero stands before the ancient gate.",
+            "Chapter-1",
+        ))
         .unwrap();
     kernel
-        .observe(observation_in_chapter("A shadow moves in the darkness beyond.", "Chapter-1"))
+        .observe(observation_in_chapter(
+            "A shadow moves in the darkness beyond.",
+            "Chapter-1",
+        ))
         .unwrap();
     kernel
-        .observe(observation_in_chapter("The sword glows with an eerie light.", "Chapter-1"))
+        .observe(observation_in_chapter(
+            "The sword glows with an eerie light.",
+            "Chapter-1",
+        ))
         .unwrap();
 
     let companion = kernel.companion_timeline_summary();

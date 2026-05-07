@@ -1,6 +1,6 @@
 # Forge Writer Agent 4 周冲刺计划
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## 0. 产品北极星
 
@@ -1460,3 +1460,335 @@ Week 4：
 - 有 synthetic + real 两层 gate
 
 如果这 5 件事成立，Forge 才算真正开始从“单章生成器”变成“长篇生产系统”。
+
+---
+
+## 13. 正文质量不降前提下的延迟优化与底层强化计划
+
+### 13.1 新约束
+
+这一轮优化只允许解决“慢”和“不稳定”，不允许通过以下方式换速度：
+
+- 不允许把高质量正文能力退回成短回答 / 段落续写器
+- 不允许为了省时砍掉 `Story Contract / Chapter Mission / Result Feedback / Promise Ledger`
+- 不允许把长篇连续性问题转移给作者手工兜底
+- 不允许把 save 后的权威状态、receipt、audit、provider budget 旁路掉
+- 不允许把“平均更快”建立在“repair 更多、返工更多、质量漂移更多”之上
+
+一句话：
+
+> 这一轮不是“让模型少写一点”，而是“让系统少重复做无效工作，让真正高价值的上下文更稳定地进入模型”。
+
+### 13.2 当前延迟问题的真实结构
+
+当前章节生成的慢，不是单个函数慢，而是 3 类成本叠加：
+
+1. 章节上下文每次全量重建
+   - outline / previous chapters / target existing text / lorebook / RAG / user profile 每次重新读取、裁剪、拼装
+   - 当前 `build_chapter_context()` 仍然偏一次性全包构建，而不是 cache-aware 组装
+
+2. draft 偏离目标区间后触发串行 repair
+   - 当前主链路是：
+     - `draft`
+     - `continuation` 或 `compress`
+     - 仍不合规时再 `hard_compress`
+   - 这意味着一次字数偏差，直接增加一次完整 provider RTT
+
+3. provider 抖动 + prompt/context 形状抖动叠加
+   - 已有 probe 说明：
+     - 有些章节主要是 provider jitter
+     - 有些章节同时有 prompt/context instability
+
+因此本轮优化目标不是“继续调一点温度”，而是把系统从：
+
+- 全量组装
+- 单次大 draft
+- 偏差后串行补救
+
+推进到：
+
+- cache-aware 分层组装
+- focus 驱动增量刷新
+- 更稳定的首稿命中率
+- 后处理尽可能后台化
+
+### 13.3 这一轮只做 6 件事
+
+#### 13.3.1 章节生成接入 Context Spine
+
+目标：
+
+- 让 chapter generation 不再每次从零拼一个“完整 prompt context”
+- 把章节生成上下文也变成 `FrozenPrefix / ProjectStablePrefix / FocusPack / HotBuffer / EphemeralScratch`
+
+要做的事：
+
+- 复用现有 `ContextSpine`
+- 把章节生成输入拆层：
+  - `FrozenPrefix`
+    - system chapter-generation contract
+    - fixed output protocol
+  - `ProjectStablePrefix`
+    - Story Contract
+    - Author Style
+    - long-term Canon / Promise short summaries
+  - `FocusPack`
+    - current chapter mission
+    - result feedback
+    - next beat
+    - story impact radius
+    - selected Project Brain evidence
+  - `HotBuffer`
+    - current user instruction
+    - target existing text
+    - explicit override summary
+
+完成定义：
+
+- 章节生成能产出 cache-aware spine artifact
+- 稳定前缀与动态尾部可分别统计 chars / estimated tokens
+- 章节生成能输出 cache stability report，而不是只输出 context source list
+
+#### 13.3.2 章节生成接入 FocusPack 增量刷新
+
+目标：
+
+- 连续写作时，不重复重建整包上下文
+- 只在真正切换 focus node 时刷新高波动部分
+
+要做的事：
+
+- 给 chapter generation 增加最小 `FocusState`
+- 在以下情况下只 rebuild `FocusPack + HotBuffer`：
+  - chapter switch
+  - scene switch
+  - selected evidence materially changed
+  - result feedback / next beat changed
+  - story impact radius materially changed
+
+明确不做：
+
+- 不在本轮把所有 agent 路径都强行统一
+- 不在本轮把 chapter generation 改造成复杂多 agent orchestration
+
+完成定义：
+
+- 同卷连续章节生成时，stable prefix 不重复构建
+- focus rebuild 次数、prefix churn 次数有独立 telemetry
+- 新增 gate：
+  - `chapter_generation_focus_pack_rebuild_only`
+  - `chapter_generation_stable_prefix_reuse`
+
+#### 13.3.3 上一章全文改为“结构化结果优先，按风险升级全文”
+
+目标：
+
+- 不把上一章全文读取当作默认成本
+- 仍然保住跨章连续性与收尾语义
+
+要做的事：
+
+- 默认上一章输入优先使用：
+  - `ChapterResultSummary`
+  - `NextBeat`
+  - `Promise last_seen / expected_payoff`
+  - `reader_takeaway`
+  - `settlement delta`
+- 只有以下情况升级为“读取上一章全文”：
+  - continuity risk 高
+  - unresolved debt 密度高
+  - target chapter 对上一章 closing image 强依赖
+  - previous structured result 证据不足
+
+明确不做：
+
+- 不取消上一章全文 fallback
+- 不为了快而只保留 outline summary
+
+完成定义：
+
+- 默认 chapter generation 不再无条件读取上一章全文
+- 全文读取有显式升级理由和 telemetry
+- 新增 gate：
+  - `chapter_generation_previous_fulltext_upgrade_only_on_risk`
+
+#### 13.3.4 CompiledInput 进入章节生成主链
+
+目标：
+
+- 把“为什么写、用哪些证据、遵守哪些规则”压缩为稳定工件
+- 降低 prompt prose 漂移带来的质量抖动
+
+要做的事：
+
+- `CompiledInput { intent_text, selected_evidence, rule_stack, trace_hint }`
+  进入 `BuiltChapterContext`
+- chapter draft / continuation / compress prompt 优先消费 compiled input
+- `selected_evidence` 不再只是 artifact，而是 prompt 一级输入
+
+明确不做：
+
+- 不把 compiled input 变成独立 truth file 让作者维护
+- 不让 compiled input 旁路原有 Story Contract / Chapter Mission
+
+完成定义：
+
+- chapter generation prompt 中能看到 compact compiled input
+- context prose 与 compiled input 的重复度明显下降
+- `compiled_input.json` 成为默认 runtime artifact
+- 新增 gate：
+  - `chapter_generation_compiled_input_enters_prompt`
+  - `chapter_generation_selected_evidence_stability`
+
+#### 13.3.5 Story Impact Radius 成为章节证据选择前置层
+
+目标：
+
+- 不再先堆很多上下文，再让模型自己筛
+- 让“本章真正会被影响的对象”决定召回与组装
+
+要做的事：
+
+- chapter generation 在 lore / RAG / previous chapter 选择前，先计算 `StoryImpactRadius`
+- 召回改为：
+  - coarse recall
+  - story-impact scoped typed filter
+  - small-set rerank
+- 让 promise / relationship / knowledge / scene / story-time 相关节点开始进入 impact radius
+
+完成定义：
+
+- 章节上下文中的外部证据至少一部分由 story impact 驱动选出
+- `selected_evidence` 中可区分：
+  - focus-derived
+  - impact-derived
+  - fallback-derived
+- 新增 gate：
+  - `chapter_generation_story_impact_scoped_recall`
+  - `chapter_generation_impact_budget_without_noise_expansion`
+
+#### 13.3.6 把 preflight 升级成 generation strategy selector
+
+目标：
+
+- 不再让所有章节都走同一条慢路径
+- 在不牺牲质量的前提下，让系统自动选“该重还是该轻”
+
+要做的事：
+
+- 在现有 preflight 基础上增加策略选择：
+  - `interactive_fast_draft`
+  - `interactive_safe_draft`
+  - `background_long_chapter`
+  - `repair_heavy_mode`
+- 策略选择只依赖已有信号：
+  - `story_contract_quality`
+  - `story_impact_truncated`
+  - `context_total_chars`
+  - `provider_budget_decision`
+  - `recent repair telemetry`
+  - `focus pack churn`
+
+明确不做：
+
+- 不让策略选择隐藏真实风险
+- 不让 interactive 模式偷偷跳过质量 gate
+
+完成定义：
+
+- preflight 报告新增 `generation_strategy`
+- 不同策略映射到不同 chapter profile / context budget / fallback policy
+- 新增 gate：
+  - `chapter_generation_strategy_selection_consistency`
+
+### 13.4 实施顺序
+
+这 6 件事不能乱做，必须按下面顺序推进：
+
+1. `CompiledInput` 主链接入
+2. chapter generation 接入 `ContextSpine`
+3. `FocusPack` 增量刷新
+4. 上一章全文升级策略
+5. `StoryImpactRadius` 前置证据选择
+6. `preflight -> generation strategy selector`
+
+原因：
+
+- 没有 compiled input，就只是换一套 context 拼接方式，收益有限
+- 没有 spine，就没有稳定前缀复用
+- 没有 focus rebuild，就没有连续写作收益
+- 没有 risk-upgrade 机制，就无法安全减少全文读取
+- 没有 story impact 前置层，就会继续用大上下文堆质量
+- 没有 strategy selector，就无法把不同章节分流到合适 profile
+
+### 13.5 性能与质量共同红线
+
+本轮必须同时满足两类红线：
+
+性能红线：
+
+- 默认 interactive chapter generation 平均延迟继续下降
+- repair rate 不能上升
+- context assembly 不因新结构显著变慢
+- save path 不引入新的同步重活
+
+质量红线：
+
+- anchor hit / anchor carry 不下降
+- continuation / compress 触发率下降或持平
+- real-author smoke 不能因为压缩上下文而出现明显 continuity regression
+- `Story Contract / Chapter Mission / Result Feedback / Promise Ledger` 命中率不能退化
+
+### 13.6 必补 telemetry
+
+这轮不允许“凭感觉调快”，必须补 telemetry：
+
+- `draft_ttft_ms`
+- `draft_total_ms`
+- `continuation_count`
+- `compress_count`
+- `hard_compress_count`
+- `repair_total_latency_ms`
+- `stable_prefix_chars`
+- `dynamic_tail_chars`
+- `focus_pack_rebuild_count`
+- `previous_fulltext_upgrade_count`
+- `generation_strategy`
+
+同时按章节类型分桶：
+
+- dialogue-heavy
+- action-heavy
+- reveal-heavy
+- transition / bridge
+
+### 13.7 新增 gate
+
+在原有 gate 之外，本轮新增以下约束 gate：
+
+- `chapter_generation_compiled_input_enters_prompt`
+- `chapter_generation_stable_prefix_reuse`
+- `chapter_generation_focus_pack_rebuild_only`
+- `chapter_generation_previous_fulltext_upgrade_only_on_risk`
+- `chapter_generation_story_impact_scoped_recall`
+- `chapter_generation_strategy_selection_consistency`
+- `chapter_generation_repair_rate_does_not_regress`
+- `chapter_generation_anchor_carry_does_not_regress`
+
+### 13.8 本轮明确不做
+
+- 不直接改成 streaming-first 生成架构
+- 不在本轮引入复杂多 agent 章节编排
+- 不把 settlement / diagnostics 全部改成异步 eventual-consistency
+- 不把所有慢问题都归因于 provider，再停在“换模型试试”
+- 不通过砍掉上下文、砍掉 contract、砍掉 quality gate 来换速度
+
+### 13.9 最后一句话
+
+这一轮优化的目标不是：
+
+> 让 Forge 更像一个快一点的生成按钮。
+
+而是：
+
+> 让 Forge 在继续守住长篇正文质量的前提下，变成一个更会复用上下文、更少返工、更少串行补救、更稳定命中高质量初稿的长篇写作内核。

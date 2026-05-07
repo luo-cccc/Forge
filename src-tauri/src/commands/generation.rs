@@ -1295,9 +1295,7 @@ pub fn repair_chapter_state(
                     Ok(d) => d,
                     Err(_) => continue,
                 };
-            if existing.chapter_title == chapter_title
-                && existing.chapter_revision == revision
-            {
+            if existing.chapter_title == chapter_title && existing.chapter_revision == revision {
                 return Ok(RepairChapterStateResult {
                     chapter_title: chapter_title.clone(),
                     revision: revision.clone(),
@@ -1329,6 +1327,7 @@ pub fn repair_chapter_state(
             chapter_contract: crate::chapter_generation::ChapterContract::default(),
             chapter_summary_override: None,
             user_profile_entries: crate::collect_user_profile_entries(&app).unwrap_or_default(),
+            compiled_input: None,
         },
     )
     .map_err(|error| error.message.clone())?;
@@ -1362,11 +1361,7 @@ pub fn repair_chapter_state(
     )?;
 
     // Verify settlement is replayable
-    let replay = crate::chapter_generation::replay_settlement_extraction(
-        &delta,
-        &content,
-        &memory,
-    );
+    let replay = crate::chapter_generation::replay_settlement_extraction(&delta, &content, &memory);
     if !replay.matches_original {
         tracing::warn!(
             chapter = chapter_title,
@@ -1379,7 +1374,8 @@ pub fn repair_chapter_state(
     if !delta.character_state_deltas.is_empty() {
         for cs_delta in &delta.character_state_deltas {
             if let Ok(Some(character)) = memory.get_character_by_name(&cs_delta.character_name) {
-                let _ = memory.close_active_states_for_character(character.id, &cs_delta.chapter_title);
+                let _ =
+                    memory.close_active_states_for_character(character.id, &cs_delta.chapter_title);
                 let _ = memory.upsert_character_state(
                     character.id,
                     &cs_delta.chapter_title,
@@ -1402,7 +1398,8 @@ pub fn repair_chapter_state(
                     memory.get_character_by_name(&rel_delta.character_b_name),
                 ) {
                     let _ = memory.upsert_relationship(
-                        a.id, b.id,
+                        a.id,
+                        b.id,
                         &rel_delta.relation_type,
                         &rel_delta.visibility,
                         &rel_delta.chapter_title,
@@ -1416,11 +1413,9 @@ pub fn repair_chapter_state(
     // Rebuild knowledge state from settlement deltas
     if !delta.knowledge_deltas.is_empty() {
         for kd in &delta.knowledge_deltas {
-            if let Ok(knowledge_id) = memory.upsert_knowledge_item(
-                &kd.topic,
-                &kd.truth_state,
-                &kd.source_ref,
-            ) {
+            if let Ok(knowledge_id) =
+                memory.upsert_knowledge_item(&kd.topic, &kd.truth_state, &kd.source_ref)
+            {
                 let _ = memory.upsert_knowledge_ownership(
                     knowledge_id,
                     &kd.holder_type,

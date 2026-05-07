@@ -1,8 +1,8 @@
 #![allow(unused_imports)]
 use crate::fixtures::*;
-use std::path::Path;
 use agent_writer_lib::writer_agent::diagnostics::DiagnosticsEngine;
 use agent_writer_lib::writer_agent::memory::WriterMemory;
+use std::path::Path;
 
 pub fn run_scene_obligation_diagnostic_eval() -> EvalResult {
     let mut errors = Vec::new();
@@ -37,9 +37,7 @@ pub fn run_scene_obligation_diagnostic_eval() -> EvalResult {
 
     // Verify obligation is detectable
     let obl = memory.get_scene_obligations(sid).unwrap();
-    let has_promise = obl
-        .as_ref()
-        .is_some_and(|o| o.promise_ids.contains(&pid));
+    let has_promise = obl.as_ref().is_some_and(|o| o.promise_ids.contains(&pid));
 
     // Verify the promise is in open summaries
     let open_promises = memory.get_open_promise_summaries().unwrap();
@@ -64,7 +62,10 @@ pub fn run_scene_obligation_diagnostic_eval() -> EvalResult {
         errors.push("promise not found in open summaries".to_string());
     }
     if !has_diag {
-        errors.push(format!("diagnostics returned {} results with promise present", diags.len()));
+        errors.push(format!(
+            "diagnostics returned {} results with promise present",
+            diags.len()
+        ));
     }
 
     EvalResult {
@@ -72,7 +73,9 @@ pub fn run_scene_obligation_diagnostic_eval() -> EvalResult {
         passed: has_promise && promise_found && has_diag,
         actual: format!(
             "obligationDetected={} promiseFound={} diagCount={}",
-            has_promise, promise_found, diags.len()
+            has_promise,
+            promise_found,
+            diags.len()
         ),
         errors,
     }

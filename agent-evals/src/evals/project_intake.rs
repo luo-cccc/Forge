@@ -12,12 +12,7 @@ pub fn run_project_intake_reports_sources_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_character(
-            "林墨",
-            &[],
-            "protagonist",
-            "主角",
-        )
+        .upsert_character("林墨", &[], "protagonist", "主角")
         .ok();
     memory
         .add_promise(

@@ -64,12 +64,7 @@ pub(crate) fn execute_writer_operation(
             if entity.kind == "character" {
                 // Upsert into characters table (new authoritative source)
                 memory
-                    .upsert_character(
-                        &entity.name,
-                        &entity.aliases,
-                        "supporting",
-                        &entity.summary,
-                    )
+                    .upsert_character(&entity.name, &entity.aliases, "supporting", &entity.summary)
                     .map_err(|e| format!("character: {}", e))?;
             }
             // Always maintain canon_entities row for backward compatibility
@@ -591,10 +586,16 @@ pub(crate) fn execute_writer_operation(
             memory
                 .record_decision(
                     valid_from_chapter,
-                    &format!("Knowledge ownership: {} by {}({})", knowledge_id, holder_type, holder_id),
+                    &format!(
+                        "Knowledge ownership: {} by {}({})",
+                        knowledge_id, holder_type, holder_id
+                    ),
                     "upserted_knowledge_ownership",
                     &[],
-                    &format!("{} mode for knowledge {} by {}({})", knowledge_mode, knowledge_id, holder_type, holder_id),
+                    &format!(
+                        "{} mode for knowledge {} by {}({})",
+                        knowledge_mode, knowledge_id, holder_type, holder_id
+                    ),
                     &[format!("knowledge_ownership:{}", knowledge_id)],
                 )
                 .ok();
@@ -626,7 +627,10 @@ pub(crate) fn execute_writer_operation(
                     &format!("Identity layer: character {}", character_id),
                     "upserted_identity_layer",
                     &[],
-                    &format!("Public: {} | Private: {}", public_identity, private_identity),
+                    &format!(
+                        "Public: {} | Private: {}",
+                        public_identity, private_identity
+                    ),
                     &[format!("identity_layer:{}", character_id)],
                 )
                 .ok();
@@ -737,12 +741,7 @@ pub(crate) fn execute_writer_operation(
             payoff_targets,
         } => {
             memory
-                .upsert_scene_obligations(
-                    *scene_id,
-                    promise_ids,
-                    mission_refs,
-                    payoff_targets,
-                )
+                .upsert_scene_obligations(*scene_id, promise_ids, mission_refs, payoff_targets)
                 .map_err(|e| format!("scene_obligation.upsert: {}", e))?;
             memory
                 .record_decision(
@@ -786,7 +785,10 @@ pub(crate) fn execute_writer_operation(
                 revision_after: None,
             })
         }
-        WriterOperation::TimeSliceUpsert { label, relative_order } => {
+        WriterOperation::TimeSliceUpsert {
+            label,
+            relative_order,
+        } => {
             memory
                 .upsert_time_slice(label, *relative_order, "", "")
                 .map_err(|e| format!("time_slice.upsert: {}", e))?;
@@ -814,12 +816,20 @@ pub(crate) fn execute_writer_operation(
             narrative_mode,
         } => {
             memory
-                .upsert_chapter_time_mapping(chapter_title, *scene_id, *time_slice_id, narrative_mode)
+                .upsert_chapter_time_mapping(
+                    chapter_title,
+                    *scene_id,
+                    *time_slice_id,
+                    narrative_mode,
+                )
                 .map_err(|e| format!("chapter_time_mapping.upsert: {}", e))?;
             memory
                 .record_decision(
                     chapter_title,
-                    &format!("Chapter time mapping: {} -> time slice {}", chapter_title, time_slice_id),
+                    &format!(
+                        "Chapter time mapping: {} -> time slice {}",
+                        chapter_title, time_slice_id
+                    ),
                     "upserted_chapter_time_mapping",
                     &[],
                     &format!("narrative_mode: {}", narrative_mode),
@@ -844,7 +854,10 @@ pub(crate) fn execute_writer_operation(
             memory
                 .record_decision(
                     active_chapter.as_deref().unwrap_or("project"),
-                    &format!("Timeline event: {} in time slice {}", event_type, time_slice_id),
+                    &format!(
+                        "Timeline event: {} in time slice {}",
+                        event_type, time_slice_id
+                    ),
                     "recorded_timeline_event",
                     &[],
                     &format!("subjects: {:?}", subject_ids),
