@@ -206,7 +206,11 @@ fn main() {
     results.push(run_character_state_versioning_eval());
     results.push(run_relationship_validity_eval());
     results.push(run_promise_subject_binding_eval());
+    results.push(run_hook_triage_eval());
     results.push(run_entity_settlement_eval());
+    results.push(run_fact_dedup_eval());
+    results.push(run_length_telemetry_eval());
+    results.push(run_entity_repair_state_eval());
     results.push(run_knowledge_visibility_eval());
     results.push(run_identity_reveal_eval());
     results.push(run_false_belief_preservation_eval());
