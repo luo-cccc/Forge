@@ -16,6 +16,26 @@ fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _
     items
 }
 
+fn curated_context_summary(memory: &crate::writer_agent::memory::WriterMemory) -> String {
+    let mut lines = Vec::new();
+    if let Ok(promises) = memory.get_open_promise_summaries() {
+        let mut sorted = promises.clone();
+        sorted.sort_by_key(|p| std::cmp::Reverse(p.priority));
+        for p in sorted.iter().take(3) {
+            lines.push(format!("线索: {} → {}", p.title, p.expected_payoff));
+        }
+    }
+    if let Ok(items) = memory.list_knowledge_items(None) {
+        for item in items.iter().take(3) {
+            lines.push(format!("背景: {}", item.topic));
+        }
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("## 关键信息\n{}", lines.join("\n"))
+}
+
 pub fn build_chapter_context(
     app: &tauri::AppHandle,
     input: BuildChapterContextInput,
@@ -338,6 +358,10 @@ pub fn build_chapter_context(
                     "## 本章写作清单\n{}\n\n{}",
                     checklist_str, prompt_context
                 );
+                let curated = curated_context_summary(&memory);
+                if !curated.is_empty() {
+                    prompt_context = format!("{}{}\n\n", prompt_context, curated);
+                }
             }
         }
     }
