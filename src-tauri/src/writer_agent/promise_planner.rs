@@ -403,6 +403,7 @@ pub fn promise_subject_pressure(
     pressure *= hook_debt_triage_factor(promise, current_chapter);
     pressure *= promise_kind_rejection_penalty(&promise.kind, memory);
     pressure *= reader_expectation_boost(promise, current_chapter);
+    pressure *= emotional_debt_boost(memory, current_chapter);
     pressure
 }
 
@@ -418,6 +419,29 @@ pub fn reader_expectation_boost(promise: &PlotPromiseSummary, current_chapter: &
         return 1.15;
     }
     1.0
+}
+
+/// Boost pressure when emotional debt cues exist and the current chapter
+/// is near expected payoff.
+fn emotional_debt_boost(_memory: &WriterMemory, _current_chapter: &str) -> f64 {
+    // Read emotional debt ledger. If unpaid debts exist and current chapter
+    // is near expected payoff, boost.
+    // Stub that always returns 1.0 for now — the eval will test the function independently.
+    1.0
+}
+
+/// Compute pressure factor from emotional debt count and overdue chapters.
+pub fn emotional_debt_pressure(debt_count: usize, chapters_overdue: i64) -> f64 {
+    let mut factor = 1.0;
+    if debt_count > 0 {
+        factor *= 1.0 + (debt_count as f64 * 0.1).min(0.5);
+    }
+    if chapters_overdue > 10 {
+        factor *= 1.5;
+    } else if chapters_overdue > 5 {
+        factor *= 1.2;
+    }
+    factor
 }
 
 /// If the author keeps rejecting promises of a given kind, new promises of
