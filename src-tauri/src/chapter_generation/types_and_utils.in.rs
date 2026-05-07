@@ -695,6 +695,7 @@ pub struct BuiltChapterContext {
     pub compiled_input: Option<CompiledInput>,
     pub stable_prefix_chars: usize,
     pub dynamic_tail_chars: usize,
+    pub focus_pack_rebuild_count: usize,
 }
 
 #[derive(Debug, Clone)]

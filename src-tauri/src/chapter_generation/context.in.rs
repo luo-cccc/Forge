@@ -247,6 +247,27 @@ pub fn build_chapter_context(
     let stable_prefix_chars: usize = sources.iter().take(3).map(|s| s.included_chars).sum();
     let dynamic_tail_chars: usize = sources.iter().skip(3).map(|s| s.included_chars).sum();
 
+    let mut rebuild_count: usize = 0;
+    if let Ok(mut state) = focus_state().lock() {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        instruction.hash(&mut hasher);
+        let result_hash = format!("{:x}", hasher.finish());
+        let mut hasher2 = std::collections::hash_map::DefaultHasher::new();
+        target.summary.hash(&mut hasher2);
+        let next_beat_hash = format!("{:x}", hasher2.finish());
+        let needs_rebuild = state.needs_rebuild(
+            &target.title,
+            None,
+            &result_hash,
+            &next_beat_hash,
+        );
+        if needs_rebuild {
+            state.record_rebuild(&target.title, None, &result_hash, &next_beat_hash);
+        }
+        rebuild_count = state.rebuild_count;
+    }
+
     Ok(BuiltChapterContext {
         request_id,
         target,
@@ -265,6 +286,7 @@ pub fn build_chapter_context(
         compiled_input: input.compiled_input.clone(),
         stable_prefix_chars,
         dynamic_tail_chars,
+        focus_pack_rebuild_count: rebuild_count,
     })
 }
 
@@ -642,6 +664,51 @@ fn chapter_source_confidence(source_type: &str) -> f32 {
 
 fn snippet_text(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
+}
+
+/// Tracks what changed between calls so FocusPack is only rebuilt when needed.
+#[derive(Default)]
+pub struct FocusState {
+    last_chapter: String,
+    last_scene_id: Option<i64>,
+    last_result_hash: String,
+    last_next_beat_hash: String,
+    pub rebuild_count: usize,
+}
+
+impl FocusState {
+    pub fn needs_rebuild(
+        &self,
+        chapter: &str,
+        scene_id: Option<i64>,
+        result_hash: &str,
+        next_beat_hash: &str,
+    ) -> bool {
+        self.last_chapter != chapter
+            || self.last_scene_id != scene_id
+            || self.last_result_hash != result_hash
+            || self.last_next_beat_hash != next_beat_hash
+    }
+
+    pub fn record_rebuild(
+        &mut self,
+        chapter: &str,
+        scene_id: Option<i64>,
+        result_hash: &str,
+        next_beat_hash: &str,
+    ) {
+        self.last_chapter = chapter.to_string();
+        self.last_scene_id = scene_id;
+        self.last_result_hash = result_hash.to_string();
+        self.last_next_beat_hash = next_beat_hash.to_string();
+        self.rebuild_count = self.rebuild_count.wrapping_add(1);
+    }
+}
+
+static FOCUS_STATE: std::sync::OnceLock<std::sync::Mutex<FocusState>> = std::sync::OnceLock::new();
+
+fn focus_state() -> &'static std::sync::Mutex<FocusState> {
+    FOCUS_STATE.get_or_init(|| std::sync::Mutex::new(FocusState::default()))
 }
 
 /// Cache-aware context spine for chapter generation.
