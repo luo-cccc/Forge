@@ -485,6 +485,33 @@ impl DiagnosticsEngine {
             }
         }
 
+        // Voice drift check for protagonist characters
+        if let Ok(chars) = memory.list_characters(Some("protagonist")) {
+            for c in &chars {
+                if paragraph.contains(&c.name) {
+                    let sentences: Vec<&str> = paragraph.split('。').filter(|s| !s.trim().is_empty()).collect();
+                    if !sentences.is_empty() {
+                        let avg_len = sentences.iter().map(|s| s.chars().count()).sum::<usize>() / sentences.len();
+                        if avg_len > 80 && (c.current_state_summary.contains("寡言") || c.current_state_summary.contains("沉默")) {
+                            results.push(DiagnosticResult {
+                                id: next_id(),
+                                severity: DiagnosticSeverity::Info,
+                                category: DiagnosticCategory::CanonConflict,
+                                message: format!("角色声音漂移: {} 以长句为主(avg {}字/句)，与设定可能不一致", c.name, avg_len),
+                                entity_name: Some(c.name.clone()),
+                                from: paragraph_offset,
+                                to: paragraph_offset + paragraph.chars().count(),
+                                evidence: vec![DiagnosticEvidence { source: "voice".into(), reference: c.name.clone(), snippet: format!("avg_sentence_len={}", avg_len) }],
+                                fix_suggestion: Some("检查角色对话/叙述风格是否与设定一致".into()),
+                                operations: Vec::new(),
+                            });
+                            break; // one voice drift per paragraph is enough
+                        }
+                    }
+                }
+            }
+        }
+
         // 6. Adjust severity based on author ignore patterns.
         for result in &mut results {
             let category_str = diagnostic_category_str(&result.category);
