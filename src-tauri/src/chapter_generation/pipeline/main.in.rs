@@ -53,13 +53,17 @@ pub async fn run_chapter_generation_pipeline(
         open_promise_count,
     };
 
-    let context = match build_chapter_context(&config.app, build_input) {
+    let mut context = match build_chapter_context(&config.app, build_input) {
         Ok(context) => context,
         Err(error) => {
             emit(ChapterGenerationEvent::failed(&request_id, error.clone()));
             return PipelineTerminal::Failed(error);
         }
     };
+
+    // Preflight: select generation strategy based on context size and risk.
+    let strategy = select_generation_strategy(&context, 0);
+    context.generation_strategy = strategy.clone();
 
     record_task_packet(&context);
 
@@ -69,9 +73,10 @@ pub async fn run_chapter_generation_pipeline(
         detail: Some("预检完成".to_string()),
         status: "done".to_string(),
         message: format!(
-            "检索到 {} 个上下文来源，当前提示上下文 {} 字。",
+            "检索到 {} 个上下文来源，当前提示上下文 {} 字。策略: {:?}",
             context.sources.len(),
-            context.budget.included_chars
+            context.budget.included_chars,
+            strategy,
         ),
         progress: 25,
         target_chapter_title: Some(context.target.title.clone()),
@@ -92,6 +97,7 @@ pub async fn run_chapter_generation_pipeline(
         output_chars: None,
         conflict: None,
         error: None,
+        generation_strategy: Some(strategy),
         warnings: context.warnings.clone(),
     });
 
@@ -459,6 +465,7 @@ pub async fn run_chapter_generation_pipeline(
         output_chars: Some(saved.output_chars),
         conflict: None,
         error: None,
+        generation_strategy: Some(context.generation_strategy.clone()),
         warnings,
     });
 
@@ -503,6 +510,23 @@ fn build_chapter_settlement_delta(
     ))
 }
 
+fn select_generation_strategy(
+    context: &BuiltChapterContext,
+    repair_history: usize,
+) -> GenerationStrategy {
+    let total_chars = context.budget.included_chars;
+    if repair_history > 2 {
+        return GenerationStrategy::RepairHeavyMode;
+    }
+    if total_chars < 8_000 && !context.impact_truncated {
+        return GenerationStrategy::InteractiveFastDraft;
+    }
+    if total_chars > 15_000 || context.impact_truncated {
+        return GenerationStrategy::BackgroundLongChapter;
+    }
+    GenerationStrategy::InteractiveSafeDraft
+}
+
 impl ChapterGenerationEvent {
     pub fn progress(
         request_id: &str,
@@ -537,6 +561,7 @@ impl ChapterGenerationEvent {
             output_chars: None,
             conflict: None,
             error: None,
+            generation_strategy: None,
             warnings: vec![],
         }
     }
@@ -575,6 +600,7 @@ impl ChapterGenerationEvent {
             output_chars: None,
             conflict: None,
             error: None,
+            generation_strategy: None,
             warnings: vec![],
         }
     }
@@ -605,6 +631,7 @@ impl ChapterGenerationEvent {
             output_chars: None,
             conflict: None,
             error: Some(error),
+            generation_strategy: None,
             warnings: vec![],
         }
     }
@@ -635,6 +662,7 @@ impl ChapterGenerationEvent {
             output_chars: None,
             conflict: Some(conflict),
             error: None,
+            generation_strategy: None,
             warnings: vec![],
         }
     }

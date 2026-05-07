@@ -704,6 +704,10 @@ pub struct BuiltChapterContext {
     pub impact_scoped: bool,
     #[serde(default)]
     pub impact_filtered_count: usize,
+    #[serde(default)]
+    pub impact_truncated: bool,
+    #[serde(default)]
+    pub generation_strategy: GenerationStrategy,
 }
 
 #[derive(Debug, Clone)]
@@ -875,6 +879,8 @@ pub struct ChapterGenerationEvent {
     pub conflict: Option<SaveConflict>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ChapterGenerationError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation_strategy: Option<GenerationStrategy>,
     pub warnings: Vec<String>,
 }
 
@@ -912,6 +918,21 @@ pub enum ChapterContractOutcome {
     OverMaxChars,
     UnderSaveFloor,
     OverSaveCeiling,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationStrategy {
+    InteractiveFastDraft,
+    InteractiveSafeDraft,
+    BackgroundLongChapter,
+    RepairHeavyMode,
+}
+
+impl Default for GenerationStrategy {
+    fn default() -> Self {
+        Self::InteractiveSafeDraft
+    }
 }
 
 pub fn char_count(text: &str) -> usize {
