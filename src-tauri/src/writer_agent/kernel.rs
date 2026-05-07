@@ -228,6 +228,7 @@ pub struct StoryDebtSnapshot {
 pub struct TodayFiveSummary {
     pub chapter_title: Option<String>,
     pub items: Vec<TodayFiveItem>,
+    pub is_onboarding: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -238,6 +239,25 @@ pub struct TodayFiveItem {
     pub value: String,
     pub detail: String,
     pub tone: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorySnapshot {
+    pub character_count: usize,
+    pub protagonist_name: Option<String>,
+    pub open_promise_count: usize,
+    pub total_chapters: usize,
+    pub latest_reveal: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub chapters_written: usize,
+    pub total_words: usize,
+    pub promises_advanced: usize,
+    pub new_characters: usize,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

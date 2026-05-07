@@ -1,5 +1,96 @@
 impl WriterAgentKernel {
+    pub fn add_feedback_event(&mut self, action: crate::writer_agent::feedback::FeedbackAction) {
+        let event = crate::writer_agent::feedback::ProposalFeedback {
+            proposal_id: format!("eval-{}", super::now_ms()),
+            action,
+            final_text: None,
+            reason: None,
+            created_at: super::now_ms(),
+        };
+        self.feedback_events.push(event);
+    }
+
+    pub fn story_snapshot(&self) -> StorySnapshot {
+        StorySnapshot {
+            character_count: self.memory.list_characters(None).unwrap_or_default().len(),
+            protagonist_name: self
+                .memory
+                .list_characters(Some("protagonist"))
+                .unwrap_or_default()
+                .first()
+                .map(|c| c.name.clone()),
+            open_promise_count: self.memory.get_open_promise_summaries().unwrap_or_default().len(),
+            total_chapters: self
+                .memory
+                .list_recent_chapter_results(&self.project_id, 100)
+                .unwrap_or_default()
+                .len(),
+            latest_reveal: String::new(),
+        }
+    }
+
+    pub fn recent_session_summary(&self, count: usize) -> SessionSummary {
+        let results = self
+            .memory
+            .list_recent_chapter_results(&self.project_id, count)
+            .unwrap_or_default();
+        SessionSummary {
+            chapters_written: results.len(),
+            total_words: results.iter().map(|r| r.summary.len()).sum(),
+            promises_advanced: 0,
+            new_characters: 0,
+        }
+    }
+
     pub fn today_five_summary(&self) -> TodayFiveSummary {
+        let character_count = self.memory.list_characters(None).unwrap_or_default().len();
+        let recent_results = self.memory.list_recent_chapter_results(&self.project_id, 100).unwrap_or_default();
+        let has_no_content = character_count == 0 && recent_results.is_empty();
+
+        if has_no_content {
+            return TodayFiveSummary {
+                chapter_title: self.active_chapter.clone(),
+                is_onboarding: true,
+                items: vec![
+                    TodayFiveItem {
+                        slot: "guard".to_string(),
+                        label: "欢迎使用 Forge".to_string(),
+                        value: "欢迎使用 Forge".to_string(),
+                        detail: "欢迎使用 Forge".to_string(),
+                        tone: "✅ 一切正常".to_string(),
+                    },
+                    TodayFiveItem {
+                        slot: "contract".to_string(),
+                        label: "我是你的写作伙伴".to_string(),
+                        value: "我是你的写作伙伴".to_string(),
+                        detail: "我是你的写作伙伴".to_string(),
+                        tone: "✅ 一切正常".to_string(),
+                    },
+                    TodayFiveItem {
+                        slot: "mission".to_string(),
+                        label: "先写一个开头".to_string(),
+                        value: "先写一个开头".to_string(),
+                        detail: "先写一个开头".to_string(),
+                        tone: "✅ 一切正常".to_string(),
+                    },
+                    TodayFiveItem {
+                        slot: "promise".to_string(),
+                        label: "然后点'生成下一章'".to_string(),
+                        value: "然后点'生成下一章'".to_string(),
+                        detail: "然后点'生成下一章'".to_string(),
+                        tone: "✅ 一切正常".to_string(),
+                    },
+                    TodayFiveItem {
+                        slot: "next".to_string(),
+                        label: "我会帮你记住角色、线索和承诺".to_string(),
+                        value: "我会帮你记住角色、线索和承诺".to_string(),
+                        detail: "我会帮你记住角色、线索和承诺".to_string(),
+                        tone: "✅ 一切正常".to_string(),
+                    },
+                ],
+            };
+        }
+
         let ledger = self.ledger_snapshot();
         let debt = self.story_debt_snapshot();
         let trace = self.trace_snapshot(20);
@@ -159,8 +250,47 @@ impl WriterAgentKernel {
             guard_detail
         };
 
+        // Session retrospective summary
+        let session = self.recent_session_summary(5);
+        let guard_detail = format!(
+            "{} | 本次写作: 写了{}章, 推进{}条线索",
+            guard_detail, session.chapters_written, session.promises_advanced
+        );
+
+        // Trust-building feedback stats
+        let total_feedback = self.feedback_events.len();
+        let guard_detail = if total_feedback > 0 {
+            let accepted_count = self
+                .feedback_events
+                .iter()
+                .filter(|f| matches!(f.action, crate::writer_agent::feedback::FeedbackAction::Accepted))
+                .count();
+            let ignored_count = self
+                .feedback_events
+                .iter()
+                .filter(|f| matches!(f.action, crate::writer_agent::feedback::FeedbackAction::Snoozed))
+                .count();
+            let accept_pct = if total_feedback > 0 {
+                (accepted_count * 100) / total_feedback
+            } else {
+                0
+            };
+            let ignore_pct = if total_feedback > 0 {
+                (ignored_count * 100) / total_feedback
+            } else {
+                0
+            };
+            format!(
+                "{} | 你的写作习惯: 接受建议 {}%, 忽略提醒 {}%",
+                guard_detail, accept_pct, ignore_pct
+            )
+        } else {
+            guard_detail
+        };
+
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
+            is_onboarding: false,
             items: vec![
                 TodayFiveItem {
                     slot: "guard".to_string(),
