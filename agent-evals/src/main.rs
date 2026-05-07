@@ -327,6 +327,11 @@ fn main() {
     results.push(run_voice_anchor_eval());
     results.push(run_emotional_arc_eval());
     results.push(run_voice_card_eval());
+    // Deep Writing Guard evals
+    results.push(run_voice_drift_eval());
+    results.push(run_pacing_monotony_eval());
+    results.push(run_scene_density_eval());
+    results.push(run_burnout_signal_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
