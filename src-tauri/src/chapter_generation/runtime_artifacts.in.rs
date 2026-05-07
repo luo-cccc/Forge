@@ -29,6 +29,7 @@ pub fn persist_chapter_runtime_artifacts(
     let evidence_path = runtime_dir.join(format!("{}.evidence.json", stem));
     let rule_stack_path = runtime_dir.join(format!("{}.rule_stack.json", stem));
     let trace_path = runtime_dir.join(format!("{}.trace.json", stem));
+    let scene_plan_path = runtime_dir.join(format!("{}.scene_plan.json", stem));
     let settlement_path = runtime_dir.join(format!("{}.settlement.json", stem));
     let length_path = runtime_dir.join(format!("{}.length.json", stem));
 
@@ -36,6 +37,7 @@ pub fn persist_chapter_runtime_artifacts(
     write_json_file(&evidence_path, &context.selected_evidence)?;
     write_json_file(&rule_stack_path, &context.rule_stack)?;
     write_json_file(&trace_path, &context.trace_artifact)?;
+    write_json_file(&scene_plan_path, &context.scene_plan)?;
     write_json_file(&settlement_path, settlement_delta)?;
     write_json_file(&length_path, length_telemetry)?;
 
@@ -65,6 +67,7 @@ pub fn persist_chapter_runtime_artifacts(
             path_ref(&project_dir, &evidence_path),
             path_ref(&project_dir, &rule_stack_path),
             path_ref(&project_dir, &trace_path),
+            path_ref(&project_dir, &scene_plan_path),
             path_ref(&project_dir, &settlement_path),
             path_ref(&project_dir, &length_path),
             path_ref(&project_dir, &replay_path),

@@ -228,6 +228,12 @@ pub fn build_chapter_context(
         crate::agent_runtime::now_ms(),
     );
 
+    let scene_plan = vec![ScenePlanEntry {
+        name: target.title.clone(),
+        objective: intent_artifact.goal.clone(),
+        participants: Vec::new(),
+    }];
+
     Ok(BuiltChapterContext {
         request_id,
         target,
@@ -242,6 +248,7 @@ pub fn build_chapter_context(
         selected_evidence,
         rule_stack,
         trace_artifact,
+        scene_plan,
     })
 }
 

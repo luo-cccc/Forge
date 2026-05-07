@@ -631,6 +631,14 @@ pub struct ChapterLengthTelemetry {
     pub warning: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenePlanEntry {
+    pub name: String,
+    pub objective: String,
+    pub participants: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltChapterContext {
@@ -647,6 +655,8 @@ pub struct BuiltChapterContext {
     pub selected_evidence: Vec<ChapterSelectedEvidenceArtifact>,
     pub rule_stack: ChapterRuleStackArtifact,
     pub trace_artifact: ChapterTraceArtifact,
+    #[serde(default)]
+    pub scene_plan: Vec<ScenePlanEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -794,6 +804,8 @@ pub struct ChapterGenerationEvent {
     pub rule_stack: Option<ChapterRuleStackArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_artifact: Option<ChapterTraceArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_plan: Option<Vec<ScenePlanEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settlement_delta: Option<ChapterSettlementDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
