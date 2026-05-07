@@ -792,5 +792,48 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
         );",
     )?;
 
+    // v19 migration: scenes + scene_state + scene_obligations + scene_results
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS scenes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chapter_title TEXT NOT NULL,
+            sequence INTEGER NOT NULL DEFAULT 0,
+            scene_type TEXT DEFAULT 'scene',
+            summary TEXT DEFAULT ''
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS scene_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scene_id INTEGER NOT NULL,
+            objective TEXT DEFAULT '',
+            participants_json TEXT DEFAULT '[]',
+            location_ref TEXT DEFAULT '',
+            entry_state_json TEXT DEFAULT '{}',
+            exit_state_json TEXT DEFAULT '{}',
+            FOREIGN KEY (scene_id) REFERENCES scenes(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS scene_obligations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scene_id INTEGER NOT NULL,
+            promise_ids_json TEXT DEFAULT '[]',
+            mission_refs_json TEXT DEFAULT '[]',
+            payoff_targets_json TEXT DEFAULT '[]',
+            FOREIGN KEY (scene_id) REFERENCES scenes(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS scene_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scene_id INTEGER NOT NULL,
+            outcome TEXT DEFAULT '',
+            consequence TEXT DEFAULT '',
+            source_ref TEXT DEFAULT '',
+            FOREIGN KEY (scene_id) REFERENCES scenes(id)
+        );",
+    )?;
+
     Ok(())
 }

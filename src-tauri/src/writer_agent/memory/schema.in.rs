@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -437,6 +437,43 @@ CREATE TABLE IF NOT EXISTS reveal_events (
     revealed_to TEXT NOT NULL,
     chapter TEXT NOT NULL,
     source_ref TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS scenes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_title TEXT NOT NULL,
+    sequence INTEGER NOT NULL DEFAULT 0,
+    scene_type TEXT DEFAULT 'scene',
+    summary TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS scene_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scene_id INTEGER NOT NULL,
+    objective TEXT DEFAULT '',
+    participants_json TEXT DEFAULT '[]',
+    location_ref TEXT DEFAULT '',
+    entry_state_json TEXT DEFAULT '{}',
+    exit_state_json TEXT DEFAULT '{}',
+    FOREIGN KEY (scene_id) REFERENCES scenes(id)
+);
+
+CREATE TABLE IF NOT EXISTS scene_obligations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scene_id INTEGER NOT NULL,
+    promise_ids_json TEXT DEFAULT '[]',
+    mission_refs_json TEXT DEFAULT '[]',
+    payoff_targets_json TEXT DEFAULT '[]',
+    FOREIGN KEY (scene_id) REFERENCES scenes(id)
+);
+
+CREATE TABLE IF NOT EXISTS scene_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scene_id INTEGER NOT NULL,
+    outcome TEXT DEFAULT '',
+    consequence TEXT DEFAULT '',
+    source_ref TEXT DEFAULT '',
+    FOREIGN KEY (scene_id) REFERENCES scenes(id)
 );
 "#;
 
