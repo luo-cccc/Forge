@@ -492,7 +492,7 @@ fn diagnostic_category_str(category: &DiagnosticCategory) -> &'static str {
 
 /// Returns the fraction of recent feedback where the author ignored proposals
 /// of a given diagnostic category. Returns 0.0 when insufficient data exists.
-fn author_ignore_rate(category: &str, memory: &WriterMemory) -> f64 {
+pub fn author_ignore_rate(category: &str, memory: &WriterMemory) -> f64 {
     let audits = match memory.list_memory_audit(30) {
         Ok(list) => list,
         Err(_) => return 0.0,

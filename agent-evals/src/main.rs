@@ -14,6 +14,9 @@ fn main() {
     results.push(run_canon_conflict_apply_eval());
     results.push(run_story_review_queue_canon_eval());
     results.push(run_multi_ghost_eval());
+    results.push(run_feedback_diagnostics_ignore_rate_eval());
+    results.push(run_feedback_ghost_style_preference_roundtrip_eval());
+    results.push(run_feedback_planner_rejection_penalty_eval());
     results.push(run_feedback_suppression_eval());
     results.push(run_context_budget_eval());
     results.push(run_context_budget_trace_eval());
