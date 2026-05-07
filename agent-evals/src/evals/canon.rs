@@ -263,7 +263,7 @@ pub fn run_timeline_contradiction_eval() -> EvalResult {
             &["三哥".to_string()],
             "protagonist",
             "第三章已死亡。",
-            &serde_json::json!({"status": "dead"}),
+            &serde_json::json!({"status": "已死亡"}),
             0.92,
         )
         .unwrap();
