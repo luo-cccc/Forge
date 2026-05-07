@@ -202,6 +202,38 @@ pub fn apply_chapter_settlement_delta(
         }
     }
 
+    // Apply knowledge deltas
+    let mut knowledge_applied = 0usize;
+    for delta in &delta.knowledge_deltas {
+        if let Ok(knowledge_id) = memory.upsert_knowledge_item(&delta.topic, &delta.truth_state, &delta.source_ref) {
+            if memory.upsert_knowledge_ownership(
+                knowledge_id, &delta.holder_type, delta.holder_id,
+                &delta.knowledge_mode, &delta.chapter_title, &delta.source_ref,
+            ).is_ok() {
+                if delta.knowledge_mode == "aware" {
+                    let _ = memory.record_reveal_event(
+                        knowledge_id, "knowledge", "public", &delta.chapter_title, &delta.source_ref,
+                    );
+                }
+                knowledge_applied += 1;
+            }
+        }
+    }
+
+    // Apply identity deltas
+    let mut identity_applied = 0usize;
+    for delta in &delta.identity_deltas {
+        if let Ok(Some(character)) = memory.get_character_by_name(&delta.character_name) {
+            let _ = memory.close_identity_layer(0, &delta.chapter_title);
+            if memory.upsert_identity_layer(
+                character.id, &delta.public_identity, &delta.private_identity,
+                &delta.revealed_to, &delta.chapter_title,
+            ).is_ok() {
+                identity_applied += 1;
+            }
+        }
+    }
+
     let existing = memory
         .get_book_state(project_id)
         .map_err(|e| e.to_string())?
@@ -270,6 +302,8 @@ pub fn apply_chapter_settlement_delta(
         book_state_updated,
         character_state_applied,
         relationship_applied,
+        knowledge_applied,
+        identity_applied,
         warnings,
     })
 }

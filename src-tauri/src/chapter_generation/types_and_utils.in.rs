@@ -593,6 +593,8 @@ pub struct ChapterSettlementApplyResult {
     pub book_state_updated: bool,
     pub character_state_applied: usize,
     pub relationship_applied: usize,
+    pub knowledge_applied: usize,
+    pub identity_applied: usize,
     pub warnings: Vec<String>,
 }
 
