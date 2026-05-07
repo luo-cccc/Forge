@@ -4,7 +4,25 @@ impl WriterAgentKernel {
         let debt = self.story_debt_snapshot();
         let trace = self.trace_snapshot(20);
         let current_chapter = self.active_chapter.clone();
-        let ranked_promises = ledger.open_promises.clone();
+        let ranked_by_pressure = {
+            let mut sorted = ledger.open_promises.clone();
+            let ch = current_chapter.as_deref().unwrap_or("Chapter-1");
+            sorted.sort_by(|a, b| {
+                let pa = crate::writer_agent::promise_planner::promise_subject_pressure(
+                    a,
+                    &self.memory,
+                    ch,
+                );
+                let pb = crate::writer_agent::promise_planner::promise_subject_pressure(
+                    b,
+                    &self.memory,
+                    ch,
+                );
+                pb.partial_cmp(&pa)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            sorted
+        };
         let contract_debt = debt
             .entries
             .iter()
@@ -19,7 +37,7 @@ impl WriterAgentKernel {
                 StoryDebtCategory::CanonRisk | StoryDebtCategory::TimelineRisk
             )
         });
-        let open_promise = ranked_promises.first();
+        let open_promise = ranked_by_pressure.first();
         let next_beat = ledger.next_beat.as_ref();
         let latest_result = current_chapter
             .as_deref()
@@ -57,6 +75,24 @@ impl WriterAgentKernel {
         } else {
             "No active story debt surfaced.".to_string()
         };
+        let character_count = self
+            .memory
+            .list_characters(None)
+            .unwrap_or_default()
+            .len();
+        let active_relationship_count = current_chapter.as_deref().map_or(0, |ch| {
+            self.memory
+                .list_characters(None)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|c| self.memory.get_active_relationships(c.id, ch).ok())
+                .flatten()
+                .count()
+        });
+        let guard_detail = format!(
+            "{} characters, {} relationships. {}",
+            character_count, active_relationship_count, guard_detail
+        );
 
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
@@ -129,14 +165,24 @@ impl WriterAgentKernel {
                         .map(|promise| promise.title.clone())
                         .unwrap_or_else(|| "No open promise".to_string()),
                     detail: open_promise
-                        .map(|promise| {
-                            if promise.expected_payoff.trim().is_empty() {
-                                promise.description.clone()
-                            } else {
-                                format!("{} -> {}", promise.description, promise.expected_payoff)
+                        .map(|p| {
+                            let char_name = p
+                                .related_entities
+                                .iter()
+                                .find_map(|e| e.strip_prefix("character:"))
+                                .and_then(|name| {
+                                    self.memory.get_character_by_name(name).ok().flatten()
+                                })
+                                .map(|c| c.name);
+                            match char_name {
+                                Some(name) => format!(
+                                    "{} → {} ({} 的承诺)",
+                                    p.description, p.expected_payoff, name
+                                ),
+                                None => format!("{} → {}", p.description, p.expected_payoff),
                             }
                         })
-                        .unwrap_or_else(|| "Ledger has no unresolved promise.".to_string()),
+                        .unwrap_or_else(|| "No open promise".to_string()),
                     tone: if open_promise.is_some() {
                         "accent".to_string()
                     } else {
