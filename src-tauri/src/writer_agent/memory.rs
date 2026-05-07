@@ -771,3 +771,5 @@ include!("memory/volume_arc_book_methods.in.rs");
 include!("memory/sprint_methods.in.rs");
 include!("memory/scene_methods.in.rs");
 include!("memory/scene_state_methods.in.rs");
+include!("memory/scene_obligation_methods.in.rs");
+include!("memory/scene_result_methods.in.rs");
