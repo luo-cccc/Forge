@@ -15,6 +15,26 @@ pub struct EvalResult {
     pub errors: Vec<String>,
 }
 
+impl EvalResult {
+    pub fn pass_if(fixture: &str, condition: bool, actual: String) -> Self {
+        if condition {
+            EvalResult {
+                fixture: fixture.to_string(),
+                passed: true,
+                actual,
+                errors: Vec::new(),
+            }
+        } else {
+            EvalResult {
+                fixture: fixture.to_string(),
+                passed: false,
+                actual,
+                errors: vec!["condition failed".to_string()],
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct EvalReport {
     pub total: usize,
