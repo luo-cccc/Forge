@@ -20,7 +20,15 @@ fn initialize_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(SCHEMA)?;
     migrate_writer_memory_schema(conn)?;
     conn.execute_batch(INDEX_SCHEMA)?;
+    apply_schema_alters(conn)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    Ok(())
+}
+
+fn apply_schema_alters(conn: &Connection) -> SqlResult<()> {
+    for stmt in SCHEMA_V20_ALTERS.split(';').filter(|s| !s.trim().is_empty()) {
+        let _ = conn.execute_batch(&format!("{};", stmt));
+    }
     Ok(())
 }
 
@@ -833,6 +841,55 @@ fn migrate_writer_memory_schema(conn: &Connection) -> SqlResult<()> {
             source_ref TEXT DEFAULT '',
             FOREIGN KEY (scene_id) REFERENCES scenes(id)
         );",
+    )?;
+
+    // v20 migration: time slices + timeline + entity time_slice_id columns
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS story_time_slices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            relative_order INTEGER DEFAULT 0,
+            start_ref TEXT DEFAULT '',
+            end_ref TEXT DEFAULT ''
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chapter_time_mapping (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chapter_title TEXT NOT NULL,
+            scene_id INTEGER,
+            time_slice_id INTEGER NOT NULL,
+            narrative_mode TEXT DEFAULT 'present',
+            FOREIGN KEY (time_slice_id) REFERENCES story_time_slices(id)
+        );",
+    )?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS timeline_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_ids_json TEXT DEFAULT '[]',
+            event_type TEXT NOT NULL,
+            time_slice_id INTEGER NOT NULL,
+            source_ref TEXT DEFAULT '',
+            FOREIGN KEY (time_slice_id) REFERENCES story_time_slices(id)
+        );",
+    )?;
+    ensure_column(
+        conn,
+        "character_state_versions",
+        "time_slice_id",
+        "time_slice_id INTEGER",
+    )?;
+    ensure_column(
+        conn,
+        "character_relationships",
+        "time_slice_id",
+        "time_slice_id INTEGER",
+    )?;
+    ensure_column(
+        conn,
+        "identity_layers",
+        "time_slice_id",
+        "time_slice_id INTEGER",
     )?;
 
     Ok(())

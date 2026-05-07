@@ -1,4 +1,4 @@
-const SCHEMA_VERSION: i64 = 19;
+const SCHEMA_VERSION: i64 = 20;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS canon_entities (
@@ -475,6 +475,32 @@ CREATE TABLE IF NOT EXISTS scene_results (
     source_ref TEXT DEFAULT '',
     FOREIGN KEY (scene_id) REFERENCES scenes(id)
 );
+
+CREATE TABLE IF NOT EXISTS story_time_slices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    relative_order INTEGER DEFAULT 0,
+    start_ref TEXT DEFAULT '',
+    end_ref TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS chapter_time_mapping (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_title TEXT NOT NULL,
+    scene_id INTEGER,
+    time_slice_id INTEGER NOT NULL,
+    narrative_mode TEXT DEFAULT 'present',
+    FOREIGN KEY (time_slice_id) REFERENCES story_time_slices(id)
+);
+
+CREATE TABLE IF NOT EXISTS timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_ids_json TEXT DEFAULT '[]',
+    event_type TEXT NOT NULL,
+    time_slice_id INTEGER NOT NULL,
+    source_ref TEXT DEFAULT '',
+    FOREIGN KEY (time_slice_id) REFERENCES story_time_slices(id)
+);
 "#;
 
 const INDEX_SCHEMA: &str = r#"
@@ -515,4 +541,10 @@ CREATE INDEX IF NOT EXISTS idx_volume_snapshots_project_volume ON volume_snapsho
 CREATE INDEX IF NOT EXISTS idx_arc_snapshots_project_volume ON arc_snapshots(project_id, volume_id);
 CREATE INDEX IF NOT EXISTS idx_supervised_sprints_project_status ON supervised_sprints(project_id, status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_supervised_sprint_checkpoints_sprint ON supervised_sprint_checkpoints(project_id, sprint_id, created_at);
+"#;
+
+const SCHEMA_V20_ALTERS: &str = r#"
+ALTER TABLE character_state_versions ADD COLUMN time_slice_id INTEGER;
+ALTER TABLE character_relationships ADD COLUMN time_slice_id INTEGER;
+ALTER TABLE identity_layers ADD COLUMN time_slice_id INTEGER;
 "#;
