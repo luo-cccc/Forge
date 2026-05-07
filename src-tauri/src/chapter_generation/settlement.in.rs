@@ -31,6 +31,11 @@ pub fn build_basic_chapter_settlement_delta(
     );
     // Deduplicate promise candidates by title, keeping highest confidence
     deduplicate_promise_candidates(&mut extraction.promise_candidates);
+    // Filter low-confidence candidates and cap total
+    extraction
+        .promise_candidates
+        .retain(|c| c.confidence >= 0.6);
+    extraction.promise_candidates.truncate(15);
 
     let promise_updates =
         materialize_promise_delta_entries(&extraction, &chapter_result, &open_promises);
