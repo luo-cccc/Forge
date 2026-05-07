@@ -529,6 +529,13 @@ CREATE INDEX IF NOT EXISTS idx_context_recalls_project_count ON writer_context_r
 CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_session_seq ON writer_run_events(project_id, session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_writer_run_events_project_ts ON writer_run_events(project_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_manual_agent_turns_project_created_at ON manual_agent_turns(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_char_state_character_chapter ON character_state_versions(character_id, valid_from_chapter);
+CREATE INDEX IF NOT EXISTS idx_char_rel_char_a ON character_relationships(character_a_id, valid_from_chapter);
+CREATE INDEX IF NOT EXISTS idx_char_rel_char_b ON character_relationships(character_b_id, valid_from_chapter);
+CREATE INDEX IF NOT EXISTS idx_knowledge_ownership_holder ON knowledge_ownership(holder_type, holder_id, valid_from_chapter);
+CREATE INDEX IF NOT EXISTS idx_identity_layers_character ON identity_layers(character_id, valid_from_chapter);
+CREATE INDEX IF NOT EXISTS idx_scenes_chapter ON scenes(chapter_title);
+CREATE INDEX IF NOT EXISTS idx_chapter_time_mapping_chapter ON chapter_time_mapping(chapter_title);
 
 CREATE INDEX IF NOT EXISTS idx_rcp_project ON reader_compensation_profiles(project_id);
 CREATE INDEX IF NOT EXISTS idx_edl_project_state ON emotional_debt_lifecycles(project_id, current_state);
