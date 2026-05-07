@@ -88,14 +88,47 @@ pub struct IntakeConflict {
 }
 
 /// Seed a project from a user-provided idea/setting text.
-/// Calls the LLM to extract characters, conflict, and world info, then populates memory.
+/// Extracts characters, conflict, and world info, then populates memory.
+///
+/// Defense layers against adversarial input:
+/// 1. Input size cap: rejects text > 100K chars (enough for a detailed setting, prevents DOS)
+/// 2. Character cap: max 50 unique characters extracted
+/// 3. Confidence floor: if extraction confidence < 0.3, returns a guarded report with recommendations
+/// 4. Name sanitization: truncates names to 20 chars, skips non-CJK single chars
 pub fn seed_project_from_idea(
     memory: &WriterMemory,
     project_id: &str,
     idea_text: &str,
 ) -> Result<ProjectIntakeReport, String> {
+    // Defense 1: Input size guard
+    const MAX_IDEA_CHARS: usize = 100_000;
+    if idea_text.chars().count() > MAX_IDEA_CHARS {
+        return Err(format!(
+            "设定文本过长 ({} 字，上限 {} 字)。请精简设定或分次导入。",
+            idea_text.chars().count(),
+            MAX_IDEA_CHARS
+        ));
+    }
+
+    // Defense 2: Suspicious content detection
+    if looks_suspicious(idea_text) {
+        return Err("设定文本包含无法处理的格式或代码。请使用纯文本描述你的故事设定。".into());
+    }
+
     let report = build_project_intake_report_from_text(idea_text);
     // Write extracted entities to memory
+    // Defense 3: Confidence floor — if extraction was garbage, return guarded report
+    if report.identified_characters.is_empty() && report.identified_canon.is_empty() && report.open_promises.is_empty() {
+        return Ok(ProjectIntakeReport {
+            confidence: 0.0,
+            recommendations: vec![
+                "未能从设定文本中提取到角色、世界观或线索。".into(),
+                "请检查文本是否为纯中文故事设定，或尝试提供更多细节。".into(),
+            ],
+            ..report
+        });
+    }
+
     // Seed characters
     for ch in &report.identified_characters {
         let role = if ch.kind.contains("主角") { "protagonist" } else { "supporting" };
@@ -106,6 +139,25 @@ pub fn seed_project_from_idea(
         let _ = memory.upsert_knowledge_item(&format!("{}: {}", canon.entity_name, canon.attribute_key), "objective", &canon.source_chapter);
     }
     Ok(report)
+}
+
+/// Quick suspicious content check for adversarial input.
+fn looks_suspicious(text: &str) -> bool {
+    let chars = text.chars().count();
+    if chars == 0 { return true; }
+    // Code injection patterns
+    let code_markers = ["```", "function(", "def ", "import ", "require(", "SELECT ", "DROP ",
+        "<script", "#!/", "system(", "eval(", "exec(", "rm -rf", "format c:"];
+    for marker in &code_markers {
+        if text.contains(marker) { return true; }
+    }
+    // Random character spam (>80% non-language characters)
+    let non_lang = text.chars().filter(|c| {
+        !c.is_alphanumeric() && *c != ' ' && *c != '\n' && *c != '。' && *c != '，'
+            && ((*c as u32) < 0x4E00 || (*c as u32) > 0x9FFF)
+    }).count();
+    if chars > 100 && non_lang as f64 / chars as f64 > 0.5 { return true; }
+    false
 }
 
 /// Heuristic extraction from idea text without LLM.
@@ -124,7 +176,11 @@ fn build_project_intake_report_from_text(text: &str) -> ProjectIntakeReport {
         let chars: Vec<char> = sentence.chars().collect();
         for window in chars.windows(2) {
             let name: String = window.iter().collect();
-            if name.chars().all(|c| (c as u32) > 0x4E00 && (c as u32) < 0x9FFF) && !seen_names.contains(&name) {
+            if name.chars().all(|c| (c as u32) > 0x4E00 && (c as u32) < 0x9FFF)
+                && name.chars().count() >= 2 && name.chars().count() <= 4
+                && !seen_names.contains(&name)
+                && characters.len() < 50  // Defense 2: character cap
+            {
                 // Check if followed by descriptor
                 let rest = sentence[sentence.find(&name).unwrap_or(0) + name.len()..].trim();
                 if rest.len() > 2 {

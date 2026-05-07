@@ -333,6 +333,7 @@ fn main() {
     results.push(run_scene_density_eval());
     results.push(run_burnout_signal_eval());
     results.push(run_idea_seed_eval());
+    results.push(run_idea_seed_adversarial_eval());
 
     let passed = results.iter().filter(|result| result.passed).count();
     let report = EvalReport {
