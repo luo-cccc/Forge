@@ -608,6 +608,7 @@ pub struct ChapterSettlementApplyResult {
     pub relationship_applied: usize,
     pub knowledge_applied: usize,
     pub identity_applied: usize,
+    pub scene_applied: usize,
     pub warnings: Vec<String>,
 }
 

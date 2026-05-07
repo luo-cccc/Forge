@@ -242,6 +242,15 @@ pub fn apply_chapter_settlement_delta(
         }
     }
 
+    // Apply scene deltas
+    let mut scene_applied = 0usize;
+    for proj in &delta.scene_deltas {
+        match memory.record_scene_result(proj.scene_id, &proj.outcome, &proj.consequence, &proj.source_ref) {
+            Ok(_) => { scene_applied += 1; }
+            Err(e) => warnings.push(format!("scene_result failed: {}", e)),
+        }
+    }
+
     let existing = memory
         .get_book_state(project_id)
         .map_err(|e| e.to_string())?
@@ -312,6 +321,7 @@ pub fn apply_chapter_settlement_delta(
         relationship_applied,
         knowledge_applied,
         identity_applied,
+        scene_applied,
         warnings,
     })
 }
