@@ -560,6 +560,8 @@ pub struct ChapterSettlementApplyResult {
     pub promise_deferred: usize,
     pub promise_abandoned: usize,
     pub book_state_updated: bool,
+    pub character_state_applied: usize,
+    pub relationship_applied: usize,
     pub warnings: Vec<String>,
 }
 

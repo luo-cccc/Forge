@@ -159,6 +159,49 @@ pub fn apply_chapter_settlement_delta(
         }
     }
 
+    // Apply character state deltas
+    let mut character_state_applied = 0usize;
+    for delta in &delta.character_state_deltas {
+        if let Ok(Some(character)) = memory.get_character_by_name(&delta.character_name) {
+            let _ = memory.close_active_states_for_character(
+                character.id, &delta.chapter_title
+            );
+            if let Ok(state_id) = memory.upsert_character_state(
+                character.id,
+                &delta.chapter_title,
+                &serde_json::json!(delta.core_commitments),
+                &delta.goal_state,
+                &serde_json::json!({}),
+                &[],
+                &delta.source_ref,
+            ) {
+                character_state_applied += 1;
+                let _ = state_id;
+            }
+        }
+    }
+
+    // Apply relationship deltas
+    let mut relationship_applied = 0usize;
+    for delta in &delta.relationship_deltas {
+        if !delta.character_a_name.is_empty() && !delta.character_b_name.is_empty() {
+            if let (Ok(Some(a)), Ok(Some(b))) = (
+                memory.get_character_by_name(&delta.character_a_name),
+                memory.get_character_by_name(&delta.character_b_name),
+            ) {
+                if memory.upsert_relationship(
+                    a.id, b.id,
+                    &delta.relation_type,
+                    &delta.visibility,
+                    &delta.chapter_title,
+                    &delta.source_ref,
+                ).is_ok() {
+                    relationship_applied += 1;
+                }
+            }
+        }
+    }
+
     let existing = memory
         .get_book_state(project_id)
         .map_err(|e| e.to_string())?
@@ -225,6 +268,8 @@ pub fn apply_chapter_settlement_delta(
         promise_deferred,
         promise_abandoned,
         book_state_updated,
+        character_state_applied,
+        relationship_applied,
         warnings,
     })
 }
