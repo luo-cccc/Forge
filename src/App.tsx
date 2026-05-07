@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Editor } from "@tiptap/core";
 import { useAppStore } from "./store";
@@ -8,6 +8,7 @@ import AgentPanel from "./components/AgentPanel";
 import { CompanionPanel } from "./components/CompanionPanel";
 import ProjectTree from "./components/ProjectTree";
 import { WriterInspectorPanel } from "./components/WriterInspectorPanel";
+import SettingsView from "./components/SettingsView";
 
 interface SelectionState {
   from: number;
@@ -56,6 +57,18 @@ function App() {
   const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
   const isAgentThinking = useAppStore((s) => s.isAgentThinking);
   const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>(Commands.checkApiKey, { provider: "openai" })
+      .then(setHasApiKey)
+      .catch(() => setHasApiKey(false));
+  }, []);
+
+  useEffect(() => {
+    if (hasApiKey === false) setShowSettings(true);
+  }, [hasApiKey]);
 
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
@@ -263,6 +276,19 @@ function App() {
     const cursorPosition = Array.from(editor.state.doc.textBetween(0, from, "\n")).length;
     return { full, paragraph, selected, cursorPosition };
   }, []);
+
+  if (showSettings) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--fg-surface)', zIndex: 100, display: 'flex', flexDirection: 'column', padding: 'var(--space-8)', overflow: 'auto' }}>
+        <div style={{ maxWidth: 560, margin: '0 auto', width: '100%' }}>
+          <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--fg-text-primary)' }}>欢迎使用 Forge</h2>
+          <p style={{ color: 'var(--fg-text-secondary)', marginBottom: 'var(--space-6)', fontSize: 'var(--text-sm)' }}>请先配置 API Key 以开始写作。密钥存储在系统密钥链中，不会上传到任何服务器。</p>
+          <SettingsView />
+          <button className="forge-btn forge-btn-primary" style={{ marginTop: 'var(--space-4)' }} onClick={() => { setShowSettings(false); invoke<boolean>(Commands.checkApiKey, { provider: "openai" }).then(setHasApiKey).catch(() => setHasApiKey(false)); }}>完成设置，开始写作</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="forge-root">
