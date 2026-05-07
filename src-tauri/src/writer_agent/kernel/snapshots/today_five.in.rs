@@ -56,6 +56,20 @@ impl WriterAgentKernel {
                     .find(|mission| mission.chapter_title == chapter)
             })
         });
+        // Try scene-level objective first
+        let scene_objective = current_chapter.as_deref().and_then(|ch| {
+            self.memory.list_scenes_by_chapter(ch).ok().and_then(|scenes| {
+                scenes.first().and_then(|s| {
+                    self.memory.get_scene_state(s.id).ok().flatten().map(|state| state.objective)
+                })
+            })
+        });
+        let next_value = scene_objective
+            .filter(|obj| !obj.trim().is_empty())
+            .unwrap_or_else(|| next_beat.map(|beat| beat.goal.clone())
+                .or_else(|| latest_result.map(|r| r.summary.clone()))
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| "No next move".to_string()));
         let guard_value = if !debt.entries.is_empty() {
             format!("{} active guards", debt.open_count)
         } else if trace
@@ -210,11 +224,7 @@ impl WriterAgentKernel {
                 TodayFiveItem {
                     slot: "next".to_string(),
                     label: "Next Move".to_string(),
-                    value: next_beat
-                        .map(|beat| beat.goal.clone())
-                        .or_else(|| latest_result.map(|result| result.summary.clone()))
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| "No next move".to_string()),
+                    value: next_value,
                     detail: canon_risk
                         .map(|entry| entry.message.clone())
                         .or_else(|| latest_result.and_then(|result| result.new_conflicts.first().cloned()))
