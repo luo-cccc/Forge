@@ -356,6 +356,7 @@ export default function EditorPanel({
   const clearExpiredSnooze = useAppStore((s) => s.clearExpiredSnooze);
   const entityCards = useAppStore((s) => s.entityCards);
   const addEntityCard = useAppStore((s) => s.addEntityCard);
+  const [ghostActive, setGhostActive] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
@@ -827,6 +828,8 @@ export default function EditorPanel({
       if (!inlinePreviewPluginKey.getState(editor.state)) {
         setInlinePreview(null);
       }
+      const ghost = ghostTextPluginKey.getState(editor.state);
+      setGhostActive(!!ghost?.text);
       editor.commands.clearSemanticLint();
       scheduleEditorTelemetry();
       scheduleSemanticLint();
@@ -1382,6 +1385,11 @@ export default function EditorPanel({
             isThinking={bubbleThinking}
             onStop={() => {}}
           />
+        )}
+        {ghostActive && (
+          <div className="fixed bottom-4 right-4 bg-surface text-xs text-text-muted px-3 py-1.5 rounded border border-border z-30">
+            <kbd className="font-mono">Tab</kbd> 接受 · <kbd className="font-mono">Esc</kbd> 忽略
+          </div>
         )}
         {inlinePreview && (
           <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-bg-raised border border-accent rounded-sm px-3 py-2 shadow-lg z-40">
