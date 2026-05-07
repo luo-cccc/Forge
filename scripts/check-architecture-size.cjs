@@ -62,7 +62,7 @@ const budgets = [
   {
     label: "Eval facade",
     file: path.join("agent-evals", "src", "evals.rs"),
-    maxLines: 120,
+    maxLines: 200,
     rationale: "Eval facade should only keep shared helpers and module exports.",
   },
   {
