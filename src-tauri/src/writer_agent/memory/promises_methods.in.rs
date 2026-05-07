@@ -99,13 +99,13 @@ impl WriterMemory {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, title, description, introduced_chapter,
                     last_seen_chapter, last_seen_ref, expected_payoff, priority,
-                    blocked_reason, promoted, core, related_entities_json
+                    status, blocked_reason, promoted, core, related_entities_json
              FROM plot_promises WHERE status = 'open' ORDER BY priority DESC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             let kind: String = row.get(1)?;
             let risk = PromiseKind::from_kind_str(&kind).default_risk().to_string();
-            let related_entities_json: String = row.get::<_, String>(12).unwrap_or_default();
+            let related_entities_json: String = row.get::<_, String>(13).unwrap_or_default();
             let related_entities: Vec<String> =
                 serde_json::from_str(&related_entities_json).unwrap_or_default();
             Ok(PlotPromiseSummary {
@@ -118,10 +118,11 @@ impl WriterMemory {
                 last_seen_ref: row.get(6)?,
                 expected_payoff: row.get(7)?,
                 priority: row.get(8)?,
+                status: row.get::<_, String>(9).unwrap_or_default(),
                 risk,
-                blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
-                promoted: row.get::<_, i64>(10).unwrap_or_default() != 0,
-                core: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                blocked_reason: row.get::<_, String>(10).unwrap_or_default(),
+                promoted: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                core: row.get::<_, i64>(12).unwrap_or_default() != 0,
                 related_entities,
             })
         })?;
@@ -135,7 +136,7 @@ impl WriterMemory {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, title, description, introduced_chapter,
                     last_seen_chapter, last_seen_ref, expected_payoff, priority,
-                    blocked_reason, promoted, core, related_entities_json
+                    status, blocked_reason, promoted, core, related_entities_json
              FROM plot_promises
              WHERE status = 'open' AND title = ?1
              ORDER BY priority DESC, created_at DESC
@@ -157,10 +158,11 @@ impl WriterMemory {
                 last_seen_ref: row.get(6)?,
                 expected_payoff: row.get(7)?,
                 priority: row.get(8)?,
+                status: row.get::<_, String>(9).unwrap_or_default(),
                 risk,
-                blocked_reason: row.get::<_, String>(9).unwrap_or_default(),
-                promoted: row.get::<_, i64>(10).unwrap_or_default() != 0,
-                core: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                blocked_reason: row.get::<_, String>(10).unwrap_or_default(),
+                promoted: row.get::<_, i64>(11).unwrap_or_default() != 0,
+                core: row.get::<_, i64>(12).unwrap_or_default() != 0,
                 related_entities,
             })
         })
@@ -297,6 +299,7 @@ impl WriterMemory {
                 last_seen_chapter: row.get(5)?,
                 last_seen_ref: String::new(),
                 expected_payoff: row.get(6)?,
+                status: row.get::<_, String>(7).unwrap_or_default(),
                 priority: row.get(8)?,
                 risk,
                 blocked_reason: row.get::<_, String>(9).unwrap_or_default(),

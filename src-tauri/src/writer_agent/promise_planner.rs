@@ -400,6 +400,7 @@ pub fn promise_subject_pressure(
 
     pressure *= knowledge_readiness_factor(promise, memory, current_chapter);
     pressure *= timeline_due_factor(promise, memory, current_chapter);
+    pressure *= hook_debt_triage_factor(promise, current_chapter);
     pressure
 }
 
@@ -453,6 +454,19 @@ fn extract_chapter_number(chapter: &str) -> i64 {
         .unwrap_or(0)
 }
 
+pub fn hook_debt_triage_factor(promise: &PlotPromiseSummary, current_chapter: &str) -> f64 {
+    let mut factor = 1.0;
+    let current_num = extract_chapter_number(current_chapter);
+    let last_num = extract_chapter_number(&promise.last_seen_chapter);
+    if current_num.saturating_sub(last_num) > 10 {
+        factor *= 1.5;
+    }
+    if promise.status == "resolved" && !promise.blocked_reason.is_empty() {
+        factor *= 0.2;
+    }
+    factor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,6 +484,7 @@ mod tests {
             priority,
             risk: "high".to_string(),
             blocked_reason: String::new(),
+            status: String::new(),
             promoted: false,
             core: false,
             related_entities: vec![],

@@ -47,6 +47,8 @@ pub struct PlotPromiseSummary {
     #[serde(default)]
     pub blocked_reason: String,
     #[serde(default)]
+    pub status: String,
+    #[serde(default)]
     pub promoted: bool,
     #[serde(default)]
     pub core: bool,
