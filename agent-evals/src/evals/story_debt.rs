@@ -3,11 +3,13 @@ use super::*;
 pub fn run_story_debt_snapshot_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     memory
@@ -106,11 +108,13 @@ pub fn run_story_debt_priority_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     memory

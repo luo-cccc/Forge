@@ -1,11 +1,13 @@
 pub fn run_context_budget_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     memory
@@ -54,11 +56,13 @@ pub fn run_context_budget_eval() -> EvalResult {
 pub fn run_context_budget_trace_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -131,11 +135,13 @@ pub fn run_context_source_trend_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀，正在追查玉佩线。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

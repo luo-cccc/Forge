@@ -291,11 +291,13 @@ pub fn run_vague_memory_candidate_rejected_eval() -> EvalResult {
 pub fn run_duplicate_memory_candidate_deduped_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "林墨惯用寒影刀的刀客，正在追查玉佩。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     memory
@@ -369,11 +371,13 @@ pub fn run_duplicate_memory_candidate_deduped_eval() -> EvalResult {
 pub fn run_conflicting_memory_candidate_requires_review_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "林墨惯用寒影刀，不轻易改用其他兵器。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

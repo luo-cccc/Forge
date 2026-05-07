@@ -258,11 +258,13 @@ fn seed_continuous_writing_memory(memory: &WriterMemory) {
         )
         .unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &["寒影刀客".to_string()],
             "protagonist",
             "主角，惯用寒影刀，追查霜铃塔钥与潮汐祭账。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     memory

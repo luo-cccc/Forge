@@ -124,11 +124,13 @@ pub fn run_planning_review_uses_story_foundation_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀，面对张三时说话克制。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
 

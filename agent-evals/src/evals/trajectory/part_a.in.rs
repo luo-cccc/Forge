@@ -55,11 +55,13 @@ pub fn run_trajectory_export_eval() -> EvalResult {
 pub fn run_append_only_run_event_store_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角惯用武器是寒影刀",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -308,11 +310,13 @@ pub fn run_trajectory_export_has_redaction_warning_eval() -> EvalResult {
 pub fn run_trajectory_trace_viewer_export_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角惯用武器是寒影刀",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -407,11 +411,13 @@ pub fn run_trajectory_trace_viewer_export_eval() -> EvalResult {
 pub fn run_post_write_diagnostics_recorded_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角惯用武器是寒影刀",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -490,11 +496,13 @@ pub fn run_post_write_diagnostics_recorded_eval() -> EvalResult {
 pub fn run_post_write_diagnostics_after_accepted_operation_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角惯用武器是寒影刀",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);

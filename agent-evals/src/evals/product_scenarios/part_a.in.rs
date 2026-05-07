@@ -411,11 +411,13 @@ fn run_scenario_mission_drift_save_eval() -> EvalResult {
 fn run_scenario_canon_conflict_no_autowrite_eval() -> EvalResult {
     let memory = seeded_memory();
     memory
-        .upsert_character(
+        .upsert_character_with_attrs(
             "林墨",
             &[],
             "protagonist",
             "主角，惯用寒影刀。",
+            &serde_json::json!({"weapon": "寒影刀"}),
+            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
