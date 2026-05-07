@@ -140,6 +140,13 @@ impl WriterAgentKernel {
             })
             .unwrap_or_default();
         let guard_detail = format!("{}{}", guard_detail, time_context);
+        let chapter_summary = format!(
+            "{}章 · {}条线索 · {}个角色",
+            current_chapter.as_deref().unwrap_or("?"),
+            ledger.open_promises.len(),
+            self.memory.list_characters(None).unwrap_or_default().len(),
+        );
+        let guard_detail = format!("{} | {}", guard_detail, chapter_summary);
 
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
