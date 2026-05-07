@@ -57,8 +57,7 @@ pub fn run_save_path_consistency_eval() -> EvalResult {
     }
 
     // All save observations must share the same reason
-    if save_obs_1.reason != ObservationReason::Save
-        || save_obs_2.reason != ObservationReason::Save
+    if save_obs_1.reason != ObservationReason::Save || save_obs_2.reason != ObservationReason::Save
     {
         errors.push("save observations must have Save reason".to_string());
     }
@@ -86,7 +85,8 @@ pub fn run_save_path_consistency_eval() -> EvalResult {
     // Verify isomorphism: both observations share the same field shape
     let same_source = save_obs_1.source == save_obs_2.source;
     let same_reason = save_obs_1.reason == save_obs_2.reason;
-    let both_have_chapter = save_obs_1.chapter_title.is_some() && save_obs_2.chapter_title.is_some();
+    let both_have_chapter =
+        save_obs_1.chapter_title.is_some() && save_obs_2.chapter_title.is_some();
     let both_have_revision =
         save_obs_1.chapter_revision.is_some() && save_obs_2.chapter_revision.is_some();
     let both_have_digest =
@@ -101,8 +101,9 @@ pub fn run_save_path_consistency_eval() -> EvalResult {
         && both_editor_clean;
 
     if !isomorphic {
-        errors.push("save observations from different paths must be structurally isomorphic"
-            .to_string());
+        errors.push(
+            "save observations from different paths must be structurally isomorphic".to_string(),
+        );
     }
 
     eval_result(

@@ -12,7 +12,14 @@ pub fn run_settlement_replay_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     let project_id = "eval-settlement-replay";
     memory
-        .ensure_story_contract_seed(project_id, "Settlement Replay Test", "fantasy", "promise", "journey", "")
+        .ensure_story_contract_seed(
+            project_id,
+            "Settlement Replay Test",
+            "fantasy",
+            "promise",
+            "journey",
+            "",
+        )
         .unwrap();
 
     let content = "第四章内容：主角发现了古剑的秘密，剑身泛着蓝色微光。这把剑曾经属于北境宗主。江湖上流传着关于这把剑的传说。";

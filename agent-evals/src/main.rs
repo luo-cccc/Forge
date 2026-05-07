@@ -203,6 +203,10 @@ fn main() {
     results.push(run_save_path_consistency_eval());
     results.push(run_settlement_replay_eval());
     results.push(run_chronology_preservation_eval());
+    results.push(run_character_state_versioning_eval());
+    results.push(run_relationship_validity_eval());
+    results.push(run_promise_subject_binding_eval());
+    results.push(run_entity_settlement_eval());
     results.push(run_rewrite_impact_preview_is_read_only_eval());
     results.push(run_rewrite_impact_preview_includes_bidirectional_story_edges_eval());
     results.push(run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval());
