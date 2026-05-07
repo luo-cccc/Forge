@@ -121,6 +121,46 @@ pub enum WriterOperation {
         node_id: String,
         patch: serde_json::Value,
     },
+    #[serde(rename = "knowledge.upsert")]
+    KnowledgeUpsert {
+        topic: String,
+        #[serde(rename = "truthState")]
+        truth_state: String,
+    },
+    #[serde(rename = "knowledge_ownership.upsert")]
+    KnowledgeOwnershipUpsert {
+        #[serde(rename = "knowledgeId")]
+        knowledge_id: i64,
+        #[serde(rename = "holderType")]
+        holder_type: String,
+        #[serde(rename = "holderId")]
+        holder_id: i64,
+        #[serde(rename = "knowledgeMode")]
+        knowledge_mode: String,
+        #[serde(rename = "validFromChapter")]
+        valid_from_chapter: String,
+    },
+    #[serde(rename = "identity_layer.upsert")]
+    IdentityLayerUpsert {
+        #[serde(rename = "characterId")]
+        character_id: i64,
+        #[serde(rename = "publicIdentity")]
+        public_identity: String,
+        #[serde(rename = "privateIdentity")]
+        private_identity: String,
+        #[serde(rename = "validFromChapter")]
+        valid_from_chapter: String,
+    },
+    #[serde(rename = "reveal_event.record")]
+    RevealEventRecord {
+        #[serde(rename = "subjectId")]
+        subject_id: i64,
+        #[serde(rename = "revealType")]
+        reveal_type: String,
+        #[serde(rename = "revealedTo")]
+        revealed_to: String,
+        chapter: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

@@ -550,6 +550,125 @@ pub(crate) fn execute_writer_operation(
                 })
             }
         }
+        WriterOperation::KnowledgeUpsert { topic, truth_state } => {
+            memory
+                .upsert_knowledge_item(topic, truth_state, "writer_operation")
+                .map_err(|e| format!("knowledge.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Knowledge upsert: {}", topic),
+                    "upserted_knowledge",
+                    &[],
+                    &format!("Truth state '{}' for topic '{}'", truth_state, topic),
+                    &[format!("knowledge:{}", topic)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::KnowledgeOwnershipUpsert {
+            knowledge_id,
+            holder_type,
+            holder_id,
+            knowledge_mode,
+            valid_from_chapter,
+        } => {
+            memory
+                .upsert_knowledge_ownership(
+                    *knowledge_id,
+                    holder_type,
+                    *holder_id,
+                    knowledge_mode,
+                    valid_from_chapter,
+                    "writer_operation",
+                )
+                .map_err(|e| format!("knowledge_ownership.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    valid_from_chapter,
+                    &format!("Knowledge ownership: {} by {}({})", knowledge_id, holder_type, holder_id),
+                    "upserted_knowledge_ownership",
+                    &[],
+                    &format!("{} mode for knowledge {} by {}({})", knowledge_mode, knowledge_id, holder_type, holder_id),
+                    &[format!("knowledge_ownership:{}", knowledge_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::IdentityLayerUpsert {
+            character_id,
+            public_identity,
+            private_identity,
+            valid_from_chapter,
+        } => {
+            memory
+                .upsert_identity_layer(
+                    *character_id,
+                    public_identity,
+                    private_identity,
+                    &[],
+                    valid_from_chapter,
+                )
+                .map_err(|e| format!("identity_layer.upsert: {}", e))?;
+            memory
+                .record_decision(
+                    valid_from_chapter,
+                    &format!("Identity layer: character {}", character_id),
+                    "upserted_identity_layer",
+                    &[],
+                    &format!("Public: {} | Private: {}", public_identity, private_identity),
+                    &[format!("identity_layer:{}", character_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::RevealEventRecord {
+            subject_id,
+            reveal_type,
+            revealed_to,
+            chapter,
+        } => {
+            memory
+                .record_reveal_event(
+                    *subject_id,
+                    reveal_type,
+                    revealed_to,
+                    chapter,
+                    "writer_operation",
+                )
+                .map_err(|e| format!("reveal_event.record: {}", e))?;
+            memory
+                .record_decision(
+                    chapter,
+                    &format!("Reveal: {} to {}", reveal_type, revealed_to),
+                    "recorded_reveal_event",
+                    &[],
+                    &format!("{} revealed {} to {}", subject_id, reveal_type, revealed_to),
+                    &[format!("reveal_event:{}", subject_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
         WriterOperation::OutlineUpdate { .. } => Ok(OperationResult {
             success: false,
             operation,

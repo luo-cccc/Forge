@@ -65,6 +65,10 @@ pub(crate) fn approval_required_for_operation(operation: &WriterOperation) -> bo
             | WriterOperation::StoryContractUpsert { .. }
             | WriterOperation::ChapterMissionUpsert { .. }
             | WriterOperation::OutlineUpdate { .. }
+            | WriterOperation::KnowledgeUpsert { .. }
+            | WriterOperation::KnowledgeOwnershipUpsert { .. }
+            | WriterOperation::IdentityLayerUpsert { .. }
+            | WriterOperation::RevealEventRecord { .. }
     )
 }
 
@@ -260,6 +264,10 @@ pub(crate) fn operation_kind_label(operation: &WriterOperation) -> &'static str 
         WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
         WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
         WriterOperation::OutlineUpdate { .. } => "outline.update",
+        WriterOperation::KnowledgeUpsert { .. } => "knowledge.upsert",
+        WriterOperation::KnowledgeOwnershipUpsert { .. } => "knowledge_ownership.upsert",
+        WriterOperation::IdentityLayerUpsert { .. } => "identity_layer.upsert",
+        WriterOperation::RevealEventRecord { .. } => "reveal_event.record",
     }
 }
 
@@ -320,6 +328,16 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
             mission.project_id, mission.chapter_title
         )),
         WriterOperation::OutlineUpdate { node_id, .. } => Some(format!("outline:{}", node_id)),
+        WriterOperation::KnowledgeUpsert { topic, .. } => Some(format!("canon:knowledge:{}", topic)),
+        WriterOperation::KnowledgeOwnershipUpsert { knowledge_id, .. } => {
+            Some(format!("canon:knowledge_ownership:{}", knowledge_id))
+        }
+        WriterOperation::IdentityLayerUpsert { character_id, .. } => {
+            Some(format!("canon:identity_layer:{}", character_id))
+        }
+        WriterOperation::RevealEventRecord { subject_id, .. } => {
+            Some(format!("canon:reveal_event:{}", subject_id))
+        }
     }
 }
 

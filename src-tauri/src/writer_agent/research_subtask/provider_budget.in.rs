@@ -253,5 +253,9 @@ pub fn subtask_operation_kind_label(operation: &WriterOperation) -> &'static str
         WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
         WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
         WriterOperation::OutlineUpdate { .. } => "outline.update",
+        WriterOperation::KnowledgeUpsert { .. } => "knowledge.upsert",
+        WriterOperation::KnowledgeOwnershipUpsert { .. } => "knowledge_ownership.upsert",
+        WriterOperation::IdentityLayerUpsert { .. } => "identity_layer.upsert",
+        WriterOperation::RevealEventRecord { .. } => "reveal_event.record",
     }
 }
