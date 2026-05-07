@@ -16,6 +16,21 @@ fn build_writing_checklist(memory: &crate::writer_agent::memory::WriterMemory, _
     items
 }
 
+fn character_voice_cards(memory: &crate::writer_agent::memory::WriterMemory) -> String {
+    if let Ok(chars) = memory.list_characters(None) {
+        let cards: Vec<String> = chars
+            .iter()
+            .take(5)
+            .map(|c| format!("{} ({}): {}", c.name, c.role_type, c.current_state_summary))
+            .collect();
+        if cards.is_empty() {
+            return String::new();
+        }
+        return format!("## 角色速写\n{}", cards.join("\n"));
+    }
+    String::new()
+}
+
 fn emotional_arc_guidance(memory: &crate::writer_agent::memory::WriterMemory, project_id: &str) -> String {
     let results = memory.list_recent_chapter_results(project_id, 1).unwrap_or_default();
     if let Some(latest) = results.first() {
@@ -388,6 +403,10 @@ pub fn build_chapter_context(
                 let curated = curated_context_summary(&memory);
                 if !curated.is_empty() {
                     prompt_context = format!("{}{}\n\n", prompt_context, curated);
+                }
+                let voice_cards = character_voice_cards(&memory);
+                if !voice_cards.is_empty() {
+                    prompt_context = format!("{}{}\n\n", prompt_context, voice_cards);
                 }
                 if let Ok(project_id) = storage::active_project_id(app) {
                     let voice = author_voice_sample(&memory, &project_id);
