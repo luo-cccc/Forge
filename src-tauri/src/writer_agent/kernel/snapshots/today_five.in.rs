@@ -93,6 +93,14 @@ impl WriterAgentKernel {
             "{} characters, {} relationships. {}",
             character_count, active_relationship_count, guard_detail
         );
+        let concealed_count = self.memory
+            .list_knowledge_items(Some("objective"))
+            .unwrap_or_default()
+            .len();
+        let guard_detail = format!(
+            "{} | {} concealed truths tracked",
+            guard_detail, concealed_count
+        );
 
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
@@ -174,13 +182,23 @@ impl WriterAgentKernel {
                                     self.memory.get_character_by_name(name).ok().flatten()
                                 })
                                 .map(|c| c.name);
-                            match char_name {
+                            let mut base = match char_name {
                                 Some(name) => format!(
                                     "{} → {} ({} 的承诺)",
                                     p.description, p.expected_payoff, name
                                 ),
                                 None => format!("{} → {}", p.description, p.expected_payoff),
+                            };
+                            let concealed = self.memory
+                                .list_knowledge_items(Some("objective"))
+                                .unwrap_or_default();
+                            let relates_to_concealed = concealed.iter().any(|ki| {
+                                p.description.contains(&ki.topic) || p.title.contains(&ki.topic)
+                            });
+                            if relates_to_concealed {
+                                base.push_str(" ⚠️ 还不能揭");
                             }
+                            base
                         })
                         .unwrap_or_else(|| "No open promise".to_string()),
                     tone: if open_promise.is_some() {
