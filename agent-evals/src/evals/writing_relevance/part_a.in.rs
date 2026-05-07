@@ -12,23 +12,19 @@ pub fn run_current_plot_relevance_prioritizes_same_name_entity_eval() -> EvalRes
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &["北境林墨".to_string()],
+            "protagonist",
             "北境线主角，追查寒玉戒指，被黑衣人追杀。",
-            &serde_json::json!({"arc": "北境", "object": "寒玉戒指"}),
-            0.9,
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨影",
             &["南境林墨".to_string()],
+            "protagonist",
             "南境支线人物，负责朝堂密信。",
-            &serde_json::json!({"arc": "南境", "object": "密信"}),
-            0.9,
         )
         .unwrap();
     let kernel = WriterAgentKernel::new("eval", memory);

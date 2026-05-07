@@ -289,13 +289,11 @@ pub fn run_task_packet_trace_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     memory
@@ -540,13 +538,11 @@ pub fn run_generic_persona_not_used_as_foundation_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀，面对张三时说话克制。",
-            &serde_json::json!({ "weapon": "寒影刀", "voice": "克制" }),
-            0.95,
         )
         .unwrap();
     memory

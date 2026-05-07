@@ -1,13 +1,11 @@
 pub fn run_context_budget_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     memory
@@ -56,13 +54,11 @@ pub fn run_context_budget_eval() -> EvalResult {
 pub fn run_context_budget_trace_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -135,13 +131,11 @@ pub fn run_context_source_trend_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀，正在追查玉佩线。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -227,17 +221,15 @@ pub fn run_context_source_trend_pressure_eval() -> EvalResult {
         .unwrap();
     for idx in 0..6 {
         memory
-            .upsert_canon_entity(
-                "character",
+            .upsert_character(
                 &format!("线索人物{}", idx),
                 &[],
+                "protagonist",
                 &format!(
                     "线索人物{}知道玉佩线的一部分，但每个人都只提供含混证词。{}",
                     idx,
                     "寒玉戒指、北境密库、伪造令牌、张三隐瞒。".repeat(8)
                 ),
-                &serde_json::json!({ "clue": "玉佩", "chapter": idx }),
-                0.9,
             )
             .unwrap();
     }

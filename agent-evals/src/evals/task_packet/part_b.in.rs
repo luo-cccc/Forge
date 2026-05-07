@@ -262,13 +262,11 @@ pub fn run_continuity_diagnostic_task_receipt_eval() -> EvalResult {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角，惯用寒影刀。",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.95,
         )
         .unwrap();
     memory

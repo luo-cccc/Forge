@@ -258,23 +258,19 @@ fn seed_continuous_writing_memory(memory: &WriterMemory) {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &["寒影刀客".to_string()],
+            "protagonist",
             "主角，惯用寒影刀，追查霜铃塔钥与潮汐祭账。",
-            &serde_json::json!({"weapon": "寒影刀", "loyalty": "protects Zhang San"}),
-            0.92,
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "张三",
             &["账房".to_string()],
+            "protagonist",
             "张三保管过潮汐祭账，动机可疑但多次保护林墨。",
-            &serde_json::json!({"holdsLedger": true, "trust": "unstable"}),
-            0.88,
         )
         .unwrap();
     memory
@@ -414,33 +410,27 @@ fn seed_real_author_project_memory(memory: &WriterMemory) {
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "苏晚",
             &["镜使".to_string()],
+            "protagonist",
             "女主，镜墟守护者的女儿，能进入铜镜记忆片段。",
-            &serde_json::json!({"ability": "镜中行走", "bond": "父亲遗命"}),
-            0.95,
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "沈砚",
             &["画师".to_string()],
+            "protagonist",
             "曾在镜墟迷途三年，画下铜镜线索，不愿再进幻界。",
-            &serde_json::json!({"role": "线索提供者", "trauma": "铜镜吞噬记忆"}),
-            0.91,
         )
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "云娘",
             &["镜灵".to_string()],
+            "protagonist",
             "镜墟中最古老的灵体，声称知道真相但只以交易形式透露。",
-            &serde_json::json!({"alignment": "ambiguous", "knowledge": "complete"}),
-            0.88,
         )
         .unwrap();
     memory

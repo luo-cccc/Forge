@@ -107,13 +107,11 @@ pub fn run_preflight_reports_story_impact_truncation_eval() -> EvalResult {
         .unwrap();
     for i in 0..30 {
         memory
-            .upsert_canon_entity(
-                "character",
+            .upsert_character(
                 &format!("Entity{}", i),
                 &[],
+                "protagonist",
                 &format!("Entity {} summary", i),
-                &serde_json::Value::Object(serde_json::Map::new()),
-                0.8,
             )
             .ok();
     }

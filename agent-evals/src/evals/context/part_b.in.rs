@@ -197,13 +197,11 @@ pub fn run_next_beat_context_eval() -> EvalResult {
 pub fn run_context_recall_tracking_eval() -> EvalResult {
     let memory = WriterMemory::open(Path::new(":memory:")).unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角",
-            &serde_json::json!({ "weapon": "寒影刀" }),
-            0.9,
         )
         .unwrap();
     let mut kernel = WriterAgentKernel::new("eval", memory);
@@ -457,13 +455,11 @@ pub fn run_thousand_chapter_context_assembly_under_500ms_eval() -> EvalResult {
     // Canon entities (~30)
     for i in 1..=30 {
         memory
-            .upsert_canon_entity(
-                "character",
+            .upsert_character(
                 &format!("角色-{i}"),
                 &[],
+                "protagonist",
                 &format!("角色 {i} 的设定摘要，与寒影刀旧债有关。"),
-                &serde_json::json!({}),
-                0.9,
             )
             .unwrap();
     }

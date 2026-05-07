@@ -12,13 +12,11 @@ pub fn run_project_intake_reports_sources_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角",
-            &serde_json::json!({"weapon":"sword"}),
-            0.9,
         )
         .ok();
     memory

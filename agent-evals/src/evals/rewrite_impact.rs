@@ -12,13 +12,11 @@ pub fn run_rewrite_impact_preview_is_read_only_eval() -> EvalResult {
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角",
-            &serde_json::json!({"weapon":"sword"}),
-            0.9,
         )
         .ok();
     let canon_before = memory.list_canon_entities().unwrap().len();
@@ -42,13 +40,11 @@ pub fn run_rewrite_impact_preview_includes_bidirectional_story_edges_eval() -> E
         .ensure_story_contract_seed("eval", "Test", "fantasy", "promise", "journey", "")
         .unwrap();
     memory
-        .upsert_canon_entity(
-            "character",
+        .upsert_character(
             "林墨",
             &[],
+            "protagonist",
             "主角",
-            &serde_json::json!({"weapon":"sword"}),
-            0.9,
         )
         .ok();
     memory
@@ -87,13 +83,11 @@ pub fn run_rewrite_impact_preview_warns_on_truncated_high_risk_sources_eval() ->
     for i in 0..30 {
         let long_summary = format!("Entity{} has a very long summary text that should consume budget characters and cause truncation in story impact radius computation", i);
         memory
-            .upsert_canon_entity(
-                "character",
+            .upsert_character(
                 &format!("Entity{}", i),
                 &[],
+                "protagonist",
                 &long_summary,
-                &serde_json::Value::Object(serde_json::Map::new()),
-                0.8,
             )
             .ok();
     }
