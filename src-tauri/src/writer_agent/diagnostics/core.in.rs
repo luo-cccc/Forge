@@ -451,7 +451,65 @@ impl DiagnosticsEngine {
             });
         }
 
+        // 6. Adjust severity based on author ignore patterns.
+        for result in &mut results {
+            let category_str = diagnostic_category_str(&result.category);
+            let ignore_rate = author_ignore_rate(category_str, memory);
+            if ignore_rate > 0.6 {
+                match &result.category {
+                    DiagnosticCategory::CanonConflict => {
+                        if result.severity == DiagnosticSeverity::Warning {
+                            result.severity = DiagnosticSeverity::Info;
+                        }
+                    }
+                    DiagnosticCategory::StoryContractViolation
+                    | DiagnosticCategory::ChapterMissionViolation => {
+                        if result.severity == DiagnosticSeverity::Error {
+                            result.severity = DiagnosticSeverity::Warning;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         results
     }
+}
+
+fn diagnostic_category_str(category: &DiagnosticCategory) -> &'static str {
+    match category {
+        DiagnosticCategory::CanonConflict => "canon_conflict",
+        DiagnosticCategory::UnresolvedPromise => "unresolved_promise",
+        DiagnosticCategory::StoryContractViolation => "story_contract_violation",
+        DiagnosticCategory::ChapterMissionViolation => "chapter_mission_violation",
+        DiagnosticCategory::TimelineIssue => "timeline_issue",
+        DiagnosticCategory::CharacterVoiceInconsistency => "character_voice_inconsistency",
+        DiagnosticCategory::PacingNote => "pacing_note",
+        DiagnosticCategory::PayoffGap => "payoff_gap",
+    }
+}
+
+/// Returns the fraction of recent feedback where the author ignored proposals
+/// of a given diagnostic category. Returns 0.0 when insufficient data exists.
+fn author_ignore_rate(category: &str, memory: &WriterMemory) -> f64 {
+    let audits = match memory.list_memory_audit(30) {
+        Ok(list) => list,
+        Err(_) => return 0.0,
+    };
+    let mut seen = 0usize;
+    let mut ignored = 0usize;
+    for entry in &audits {
+        if entry.kind == category || entry.kind.contains(category) {
+            seen += 1;
+            if entry.action.contains("ignored") || entry.action.contains("rejected") || entry.action.contains("snoozed") {
+                ignored += 1;
+            }
+        }
+    }
+    if seen < 5 {
+        return 0.0;
+    }
+    ignored as f64 / seen as f64
 }
 
