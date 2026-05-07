@@ -1,14 +1,20 @@
 [package]
 name = "agent-evals"
+default-run = "run_eval"
 version = "0.1.0"
 edition = "2021"
 description = "Evaluation harness for Forge Writer Agent Kernel"
 
+
+[[bin]]
+name = "full_stress"
+path = "src/bin/full_stress.rs"
 [[bin]]
 name = "run_eval"
 path = "src/main.rs"
 
 [dependencies]
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 agent-harness-core = { path = "../agent-harness-core" }
 agent-writer = { path = "../src-tauri" }
 async-trait = "0.1"

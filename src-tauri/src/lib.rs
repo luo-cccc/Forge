@@ -12,7 +12,7 @@ mod commands;
 mod editor_realtime;
 mod event_payloads;
 mod events;
-mod llm_runtime;
+pub mod llm_runtime;
 mod manual_agent;
 mod memory_context;
 mod observation_bridge;
