@@ -357,6 +357,7 @@ export default function EditorPanel({
   const entityCards = useAppStore((s) => s.entityCards);
   const addEntityCard = useAppStore((s) => s.addEntityCard);
   const [ghostActive, setGhostActive] = useState(false);
+  const [ghostLoading, setGhostLoading] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
@@ -581,6 +582,7 @@ export default function EditorPanel({
     }
     if (!activeRequestId) return;
     activeGhostRequestIdRef.current = null;
+    setGhostLoading(false);
     void invoke(Commands.abortEditorPrediction, { requestId: activeRequestId }).catch((e) => {
       console.error("Failed to abort ghost completion:", e);
     });
@@ -599,10 +601,12 @@ export default function EditorPanel({
         editorDirty: isEditorDirty,
       };
       activeGhostRequestIdRef.current = payload.requestId;
+      setGhostLoading(true);
 
       void invoke(Commands.reportEditorState, { payload }).catch((e) => {
         if (activeGhostRequestIdRef.current === payload.requestId) {
           activeGhostRequestIdRef.current = null;
+          setGhostLoading(false);
         }
         console.error("Editor telemetry failed:", e);
       });
@@ -705,6 +709,7 @@ export default function EditorPanel({
 
         const currentGhost = ghostTextPluginKey.getState(editor.state);
         if (!currentGhost) {
+          setGhostLoading(false);
           const candidates =
             chunk.candidates && chunk.candidates.length > 0
               ? chunk.candidates
@@ -747,6 +752,7 @@ export default function EditorPanel({
         const end = event.payload;
         if (end.requestId !== activeGhostRequestIdRef.current) return;
         activeGhostRequestIdRef.current = null;
+        setGhostLoading(false);
         if (end.reason !== "complete") {
           editor.commands.clearGhostText();
         }
@@ -825,6 +831,7 @@ export default function EditorPanel({
       lastEditAtRef.current = Date.now();
       setIsEditorDirty(true);
       abortGhostRequest(undefined, true);
+      setGhostLoading(false);
       if (!inlinePreviewPluginKey.getState(editor.state)) {
         setInlinePreview(null);
       }
@@ -1385,6 +1392,11 @@ export default function EditorPanel({
             isThinking={bubbleThinking}
             onStop={() => {}}
           />
+        )}
+        {ghostLoading && !ghostActive && (
+          <div className="fixed bottom-4 right-4 bg-surface text-xs text-text-muted px-3 py-1.5 rounded border border-border z-30 animate-pulse">
+            ⏳ 正在思考...
+          </div>
         )}
         {ghostActive && (
           <div className="fixed bottom-4 right-4 bg-surface text-xs text-text-muted px-3 py-1.5 rounded border border-border z-30">
