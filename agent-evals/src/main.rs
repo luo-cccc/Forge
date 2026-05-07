@@ -258,6 +258,10 @@ fn main() {
     results.push(run_reader_compensation_budget_stays_compact_eval());
     results.push(run_product_metrics_tracks_payoff_chain_eval());
     results.push(run_trajectory_exports_reader_compensation_metrics_eval());
+    // Reader Compensation Sprint (reader_takeaway, today_five, planner)
+    results.push(run_reader_takeaway_eval());
+    results.push(run_reader_todayfive_eval());
+    results.push(run_reader_planner_eval());
     // 11.4D Cache-Aware Context Spine evals
     results.push(run_context_spine_keeps_static_prefix_first_eval());
     results.push(run_context_spine_moves_hot_buffer_last_eval());

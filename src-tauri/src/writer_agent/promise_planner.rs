@@ -408,7 +408,7 @@ pub fn promise_subject_pressure(
 
 /// Boost promises whose expected payoff aligns with the current chapter
 /// (reader expectation alignment).
-fn reader_expectation_boost(promise: &PlotPromiseSummary, current_chapter: &str) -> f64 {
+pub fn reader_expectation_boost(promise: &PlotPromiseSummary, current_chapter: &str) -> f64 {
     let expected_num = extract_chapter_number(&promise.expected_payoff);
     let current_num = extract_chapter_number(current_chapter);
     if expected_num > 0 && current_num > 0 && expected_num == current_num {
