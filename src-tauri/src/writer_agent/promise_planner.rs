@@ -402,7 +402,22 @@ pub fn promise_subject_pressure(
     pressure *= timeline_due_factor(promise, memory, current_chapter);
     pressure *= hook_debt_triage_factor(promise, current_chapter);
     pressure *= promise_kind_rejection_penalty(&promise.kind, memory);
+    pressure *= reader_expectation_boost(promise, current_chapter);
     pressure
+}
+
+/// Boost promises whose expected payoff aligns with the current chapter
+/// (reader expectation alignment).
+fn reader_expectation_boost(promise: &PlotPromiseSummary, current_chapter: &str) -> f64 {
+    let expected_num = extract_chapter_number(&promise.expected_payoff);
+    let current_num = extract_chapter_number(current_chapter);
+    if expected_num > 0 && current_num > 0 && expected_num == current_num {
+        return 1.2;
+    }
+    if expected_num > 0 && current_num > 0 && expected_num == current_num + 1 {
+        return 1.15;
+    }
+    1.0
 }
 
 /// If the author keeps rejecting promises of a given kind, new promises of
