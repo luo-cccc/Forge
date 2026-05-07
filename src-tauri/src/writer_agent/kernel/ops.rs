@@ -62,6 +62,7 @@ pub(crate) fn execute_writer_operation(
         }
         WriterOperation::CanonUpsertEntity { entity } => {
             if entity.kind == "character" {
+                // Upsert into characters table (new authoritative source)
                 memory
                     .upsert_character(
                         &entity.name,
@@ -70,18 +71,18 @@ pub(crate) fn execute_writer_operation(
                         &entity.summary,
                     )
                     .map_err(|e| format!("character: {}", e))?;
-            } else {
-                memory
-                    .upsert_canon_entity(
-                        &entity.kind,
-                        &entity.name,
-                        &entity.aliases,
-                        &entity.summary,
-                        &entity.attributes,
-                        entity.confidence,
-                    )
-                    .map_err(|e| format!("canon: {}", e))?;
             }
+            // Always maintain canon_entities row for backward compatibility
+            memory
+                .upsert_canon_entity(
+                    &entity.kind,
+                    &entity.name,
+                    &entity.aliases,
+                    &entity.summary,
+                    &entity.attributes,
+                    entity.confidence,
+                )
+                .map_err(|e| format!("canon: {}", e))?;
             Ok(OperationResult {
                 success: true,
                 operation,

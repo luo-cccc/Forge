@@ -17,7 +17,48 @@ impl WriterMemory {
                  updated_at = datetime('now')",
             rusqlite::params![name, aliases_json, role_type, summary],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let char_id = self.conn.last_insert_rowid();
+        // Maintain canon_entities row for backward compatibility
+        self.conn.execute(
+            "INSERT OR IGNORE INTO canon_entities (name, kind, aliases_json, summary, attributes_json, confidence, updated_at)
+             VALUES (?1, 'character', ?2, ?3, '{}', 0.95, datetime('now'))",
+            rusqlite::params![name, aliases_json, summary],
+        )?;
+        self.conn.execute(
+            "UPDATE canon_entities SET aliases_json=?2, summary=?3, updated_at=datetime('now')
+             WHERE name=?1 AND kind='character'",
+            rusqlite::params![name, aliases_json, summary],
+        )?;
+        Ok(char_id)
+    }
+
+    pub fn upsert_character_with_attrs(
+        &self,
+        name: &str,
+        aliases: &[String],
+        role_type: &str,
+        summary: &str,
+        attributes: &serde_json::Value,
+        confidence: f64,
+    ) -> rusqlite::Result<i64> {
+        let char_id = self.upsert_character(name, aliases, role_type, summary)?;
+        let attrs_json = serde_json::to_string(attributes).unwrap_or_default();
+        self.conn.execute(
+            "UPDATE canon_entities SET attributes_json=?1, confidence=?2, updated_at=datetime('now')
+             WHERE name=?3 AND kind='character'",
+            rusqlite::params![attrs_json, confidence, name],
+        )?;
+        // Store individual facts
+        if let Some(obj) = attributes.as_object() {
+            for (key, value) in obj {
+                let _ = self.conn.execute(
+                    "INSERT OR IGNORE INTO canon_facts (entity_id, key, value, source_ref, confidence)
+                     VALUES ((SELECT id FROM canon_entities WHERE name=?1 AND kind='character'), ?2, ?3, 'upsert_character', ?4)",
+                    rusqlite::params![name, key, value.as_str().unwrap_or(&value.to_string()), confidence],
+                );
+            }
+        }
+        Ok(char_id)
     }
 
     pub fn get_character_by_name(&self, name: &str) -> rusqlite::Result<Option<CharacterSummary>> {
