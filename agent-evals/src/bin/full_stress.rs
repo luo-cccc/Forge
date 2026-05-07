@@ -135,6 +135,7 @@ fn main() {
         ..Default::default()
     };
     let mut latencies: Vec<u64> = vec![];
+    let mut last_summary = String::new();
 
     for i in 1..=chapter_count {
         let title = format!("Chapter-{}", i);
@@ -153,7 +154,7 @@ fn main() {
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": format!("请写第{}章", i)}
+                {"role": "user", "content": format!("请写第{}章\n{}", i, last_summary)}
             ],
             "max_tokens": (max_chars * 2).min(8192),
             "temperature": 0.8
@@ -243,6 +244,8 @@ fn main() {
                 errors: errors.clone(),
             });
             report.completed += 1;
+
+            last_summary = format!("上一章写了{}字，{}条线索推进中。", chars, pc);
 
             eprintln!(
                 "chars={} {} lat={}ms setl={} ent={}c/{}p/{}k",
