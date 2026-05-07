@@ -80,6 +80,12 @@ pub fn run_chapter_generation_task_packet_trace_eval() -> EvalResult {
         stable_prefix_chars: 0,
         dynamic_tail_chars: 0,
         focus_pack_rebuild_count: 0,
+        previous_fulltext_upgrade_count: 0,
+        previous_fulltext_upgrade_reason: String::new(),
+        impact_scoped: false,
+        impact_filtered_count: 0,
+        impact_truncated: false,
+        generation_strategy: agent_writer_lib::chapter_generation::GenerationStrategy::default(),
     };
     let packet = build_chapter_generation_task_packet(
         &kernel.project_id,
