@@ -119,6 +119,9 @@ pub async fn run_chapter_generation_pipeline(
     let mut continuation_applied = false;
     let mut compress_applied = false;
     let mut hard_compress_applied = false;
+    let mut continuation_latency_ms: u64 = 0;
+    let mut compress_latency_ms: u64 = 0;
+    let mut hard_compress_latency_ms: u64 = 0;
 
     match chapter_contract_outcome(
         &draft.content,
@@ -134,6 +137,7 @@ pub async fn run_chapter_generation_pipeline(
                 55,
                 Some(context.target.title.clone()),
             ));
+            let continuation_t0 = std::time::Instant::now();
             let continuation = match continue_chapter_draft(
                 &config.settings,
                 &context,
@@ -164,6 +168,7 @@ pub async fn run_chapter_generation_pipeline(
                 draft.content = draft.content.trim().to_string();
                 draft.output_chars = char_count(&draft.content);
                 continuation_applied = true;
+                continuation_latency_ms = continuation_t0.elapsed().as_millis() as u64;
             }
         }
         ChapterContractOutcome::OverMaxChars => {
@@ -175,6 +180,7 @@ pub async fn run_chapter_generation_pipeline(
                 55,
                 Some(context.target.title.clone()),
             ));
+            let compress_t0 = std::time::Instant::now();
             let compressed = match compress_chapter_draft(
                 &config.settings,
                 &context,
@@ -201,6 +207,7 @@ pub async fn run_chapter_generation_pipeline(
                 draft.content = compressed.content.trim().to_string();
                 draft.output_chars = char_count(&draft.content);
                 compress_applied = true;
+                compress_latency_ms = compress_t0.elapsed().as_millis() as u64;
             }
         }
         ChapterContractOutcome::Valid
@@ -222,6 +229,7 @@ pub async fn run_chapter_generation_pipeline(
             60,
             Some(context.target.title.clone()),
         ));
+        let hard_compress_t0 = std::time::Instant::now();
         let compressed = match compress_chapter_draft_hard(
             &config.settings,
             &context,
@@ -248,6 +256,7 @@ pub async fn run_chapter_generation_pipeline(
             draft.content = compressed.content.trim().to_string();
             draft.output_chars = char_count(&draft.content);
             hard_compress_applied = true;
+            hard_compress_latency_ms = hard_compress_t0.elapsed().as_millis() as u64;
         }
     }
 
@@ -368,6 +377,14 @@ pub async fn run_chapter_generation_pipeline(
         continuation_applied,
         compress_applied,
         hard_compress_applied,
+        phase_telemetry: LengthPhaseTelemetry {
+            continuation_count: if continuation_applied { 1 } else { 0 },
+            compress_count: if compress_applied { 1 } else { 0 },
+            hard_compress_count: if hard_compress_applied { 1 } else { 0 },
+            continuation_latency_ms,
+            compress_latency_ms,
+            hard_compress_latency_ms,
+        },
         warning: if saved.output_chars < context.chapter_contract.min_chars
             || saved.output_chars > context.chapter_contract.max_chars
         {

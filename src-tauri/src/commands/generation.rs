@@ -1413,6 +1413,55 @@ pub fn repair_chapter_state(
         }
     }
 
+    // Rebuild knowledge state from settlement deltas
+    if !delta.knowledge_deltas.is_empty() {
+        for kd in &delta.knowledge_deltas {
+            if let Ok(knowledge_id) = memory.upsert_knowledge_item(
+                &kd.topic,
+                &kd.truth_state,
+                &kd.source_ref,
+            ) {
+                let _ = memory.upsert_knowledge_ownership(
+                    knowledge_id,
+                    &kd.holder_type,
+                    kd.holder_id,
+                    &kd.knowledge_mode,
+                    &kd.chapter_title,
+                    &kd.source_ref,
+                );
+                if kd.knowledge_mode == "aware" {
+                    let _ = memory.record_reveal_event(
+                        knowledge_id,
+                        "knowledge",
+                        "public",
+                        &kd.chapter_title,
+                        &kd.source_ref,
+                    );
+                }
+            }
+        }
+    }
+
+    // Rebuild identity state from settlement deltas
+    if !delta.identity_deltas.is_empty() {
+        for id_delta in &delta.identity_deltas {
+            if let Ok(Some(character)) = memory.get_character_by_name(&id_delta.character_name) {
+                if let Ok(Some(existing)) =
+                    memory.get_active_identity(character.id, &id_delta.chapter_title)
+                {
+                    let _ = memory.close_identity_layer(existing.id, &id_delta.chapter_title);
+                }
+                let _ = memory.upsert_identity_layer(
+                    character.id,
+                    &id_delta.public_identity,
+                    &id_delta.private_identity,
+                    &id_delta.revealed_to,
+                    &id_delta.chapter_title,
+                );
+            }
+        }
+    }
+
     let telemetry = crate::chapter_generation::ChapterLengthTelemetry {
         target_chars: context.chapter_contract.target_chars,
         min_chars: context.chapter_contract.min_chars,
@@ -1424,6 +1473,7 @@ pub fn repair_chapter_state(
         continuation_applied: false,
         compress_applied: false,
         hard_compress_applied: false,
+        phase_telemetry: Default::default(),
         warning: None,
     };
     let artifacts = crate::chapter_generation::persist_chapter_runtime_artifacts(
