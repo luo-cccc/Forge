@@ -15,6 +15,16 @@ pub async fn run_chapter_generation_pipeline(
         .clone()
         .unwrap_or_else(|| make_request_id("chapter"));
 
+    emit(ChapterGenerationEvent::progress_with_detail(
+        &request_id,
+        "start",
+        "管道启动",
+        "running",
+        "生成管道已启动",
+        0,
+        None,
+    ));
+
     emit(ChapterGenerationEvent::progress(
         &request_id,
         PHASE_STARTED,
@@ -47,7 +57,8 @@ pub async fn run_chapter_generation_pipeline(
 
     emit(ChapterGenerationEvent {
         request_id: request_id.clone(),
-        phase: PHASE_CONTEXT_BUILT.to_string(),
+        phase: PHASE_PREFLIGHT.to_string(),
+        detail: Some("预检完成".to_string()),
         status: "done".to_string(),
         message: format!(
             "检索到 {} 个上下文来源，当前提示上下文 {} 字。",
@@ -76,18 +87,20 @@ pub async fn run_chapter_generation_pipeline(
         warnings: context.warnings.clone(),
     });
 
-    emit(ChapterGenerationEvent::progress(
+    emit(ChapterGenerationEvent::progress_with_detail(
         &request_id,
         PHASE_SCENE_PLAN,
+        "场景规划完成",
         "running",
         "正在规划本章场景与长度目标...",
         35,
         Some(context.target.title.clone()),
     ));
 
-    emit(ChapterGenerationEvent::progress(
+    emit(ChapterGenerationEvent::progress_with_detail(
         &request_id,
-        PHASE_PROGRESS,
+        PHASE_SEGMENT_DRAFT,
+        "正在写第一段",
         "running",
         "正在撰写章节初稿...",
         45,
@@ -129,9 +142,10 @@ pub async fn run_chapter_generation_pipeline(
         ChapterContractPhase::ModelOutput,
     ) {
         ChapterContractOutcome::UnderMinChars => {
-            emit(ChapterGenerationEvent::progress(
+            emit(ChapterGenerationEvent::progress_with_detail(
                 &request_id,
-                PHASE_CONTINUATION,
+                PHASE_MERGE,
+                "正在合并段落",
                 "running",
                 "初稿字数不足，正在续写以满足章节长度约束...",
                 55,
@@ -260,9 +274,10 @@ pub async fn run_chapter_generation_pipeline(
         }
     }
 
-    emit(ChapterGenerationEvent::progress(
+    emit(ChapterGenerationEvent::progress_with_detail(
         &request_id,
         PHASE_LENGTH_VALIDATE,
+        "正在校验长度",
         "running",
         "正在校验章节长度约束...",
         63,
@@ -278,9 +293,10 @@ pub async fn run_chapter_generation_pipeline(
         return PipelineTerminal::Failed(error);
     }
 
-    emit(ChapterGenerationEvent::progress(
+    emit(ChapterGenerationEvent::progress_with_detail(
         &request_id,
-        PHASE_PROGRESS,
+        PHASE_SAVE,
+        "正在保存",
         "running",
         "正在保存章节并检查编辑器冲突...",
         70,
@@ -312,9 +328,10 @@ pub async fn run_chapter_generation_pipeline(
         }
     };
 
-    emit(ChapterGenerationEvent::progress(
+    emit(ChapterGenerationEvent::progress_with_detail(
         &request_id,
-        PHASE_PROGRESS,
+        PHASE_POLISH,
+        "正在润色",
         "running",
         "正在更新大纲状态...",
         85,
@@ -410,8 +427,9 @@ pub async fn run_chapter_generation_pipeline(
         };
 
     emit(ChapterGenerationEvent {
-        request_id,
+        request_id: request_id.clone(),
         phase: PHASE_COMPLETED.to_string(),
+        detail: Some("生成完成".to_string()),
         status: "done".to_string(),
         message: format!("{} 初稿已保存。", saved.chapter_title),
         progress: 100,
@@ -435,6 +453,16 @@ pub async fn run_chapter_generation_pipeline(
         error: None,
         warnings,
     });
+
+    emit(ChapterGenerationEvent::progress_with_detail(
+        &request_id,
+        "end",
+        "管道完成",
+        "done",
+        "生成管道已结束",
+        100,
+        Some(saved.chapter_title.clone()),
+    ));
 
     PipelineTerminal::Completed {
         saved,
@@ -479,6 +507,45 @@ impl ChapterGenerationEvent {
         Self {
             request_id: request_id.to_string(),
             phase: phase.to_string(),
+            detail: None,
+            status: status.to_string(),
+            message: message.to_string(),
+            progress,
+            target_chapter_title,
+            sources: None,
+            budget: None,
+            receipt: None,
+            intent_artifact: None,
+            selected_evidence: None,
+            rule_stack: None,
+            trace_artifact: None,
+            scene_plan: None,
+            settlement_delta: None,
+            settlement_apply: None,
+            length_telemetry: None,
+            artifact_refs: None,
+            saved: None,
+            chapter_contract: None,
+            output_chars: None,
+            conflict: None,
+            error: None,
+            warnings: vec![],
+        }
+    }
+
+    pub fn progress_with_detail(
+        request_id: &str,
+        phase: &str,
+        detail: &str,
+        status: &str,
+        message: &str,
+        progress: u8,
+        target_chapter_title: Option<String>,
+    ) -> Self {
+        Self {
+            request_id: request_id.to_string(),
+            phase: phase.to_string(),
+            detail: Some(detail.to_string()),
             status: status.to_string(),
             message: message.to_string(),
             progress,
@@ -508,6 +575,7 @@ impl ChapterGenerationEvent {
         Self {
             request_id: request_id.to_string(),
             phase: PHASE_FAILED.to_string(),
+            detail: None,
             status: "error".to_string(),
             message: error.message.clone(),
             progress: 100,
@@ -537,6 +605,7 @@ impl ChapterGenerationEvent {
         Self {
             request_id: request_id.to_string(),
             phase: PHASE_CONFLICT.to_string(),
+            detail: None,
             status: "conflict".to_string(),
             message: format!("保存被阻止：{}。", conflict.reason),
             progress: 100,

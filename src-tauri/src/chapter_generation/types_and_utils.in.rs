@@ -28,6 +28,12 @@ pub const PHASE_CONFLICT: &str = "chapter_generation_conflict";
 pub const PHASE_COMPLETED: &str = "chapter_generation_completed";
 pub const PHASE_FAILED: &str = "chapter_generation_failed";
 
+pub const PHASE_PREFLIGHT: &str = "preflight";
+pub const PHASE_SEGMENT_DRAFT: &str = "segment_draft";
+pub const PHASE_MERGE: &str = "merge";
+pub const PHASE_POLISH: &str = "polish";
+pub const PHASE_SAVE: &str = "save";
+
 const DEFAULT_TOTAL_CONTEXT_CHARS: usize = 24_000;
 const DEFAULT_INSTRUCTION_CHARS: usize = 1_000;
 const DEFAULT_OUTLINE_CHARS: usize = 6_000;
@@ -801,6 +807,8 @@ pub struct OutlineUpdateOutput {
 pub struct ChapterGenerationEvent {
     pub request_id: String,
     pub phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     pub status: String,
     pub message: String,
     pub progress: u8,
