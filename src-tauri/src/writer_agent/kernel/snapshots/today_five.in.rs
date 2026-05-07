@@ -116,6 +116,31 @@ impl WriterAgentKernel {
             guard_detail, concealed_count
         );
 
+        let time_context = current_chapter
+            .as_deref()
+            .and_then(|ch| {
+                self.memory
+                    .get_time_mapping_for_chapter(ch)
+                    .ok()
+                    .and_then(|mappings| {
+                        mappings.first().and_then(|m| {
+                            if m.narrative_mode == "present" {
+                                return None;
+                            }
+                            self.memory.list_time_slices().ok().and_then(|slices| {
+                                slices.iter().find(|ts| ts.id == m.time_slice_id).map(|ts| {
+                                    format!(
+                                        " | 故事时间: {} ({})",
+                                        ts.label, m.narrative_mode
+                                    )
+                                })
+                            })
+                        })
+                    })
+            })
+            .unwrap_or_default();
+        let guard_detail = format!("{}{}", guard_detail, time_context);
+
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
             items: vec![
