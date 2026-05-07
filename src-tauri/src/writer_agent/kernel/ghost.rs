@@ -2,6 +2,7 @@
 
 use crate::writer_agent::context::{ContextSource, WritingContextPack};
 use crate::writer_agent::intent::WritingIntent;
+use crate::writer_agent::memory::WriterMemory;
 use crate::writer_agent::observation::WriterObservation;
 use crate::writer_agent::operation::WriterOperation;
 use crate::writer_agent::proposal::{EvidenceRef, EvidenceSource, ProposalAlternative};
@@ -293,6 +294,44 @@ pub(crate) fn context_pack_evidence(
     }
 
     evidence
+}
+
+/// Read accepted style preferences from memory and annotate ghost alternatives.
+/// When an alternative's rationale aligns with an accepted style key, it receives a
+/// style-confidence boost marker that downstream proposal scoring can consume.
+pub(crate) fn ghost_consume_style_preferences(
+    memory: &WriterMemory,
+    alternatives: &mut [ProposalAlternative],
+) {
+    let prefs = match memory.list_style_preferences(20) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if prefs.is_empty() {
+        return;
+    }
+    let accepted_keys: Vec<&str> = prefs
+        .iter()
+        .filter(|p| p.accepted_count > 0)
+        .map(|p| p.key.as_str())
+        .collect();
+    if accepted_keys.is_empty() {
+        return;
+    }
+    for alt in alternatives.iter_mut() {
+        for key in &accepted_keys {
+            if alt.label.to_lowercase().contains(&key.to_lowercase())
+                || alt.preview.contains(key)
+            {
+                // 1.2x confidence boost for ghost proposals matching accepted style keys
+                let boost_marker = format!(" style_boost:{}", key);
+                if !alt.rationale.contains("style_boost:") {
+                    alt.rationale.push_str(&boost_marker);
+                }
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
