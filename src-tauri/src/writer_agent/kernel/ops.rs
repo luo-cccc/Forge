@@ -262,6 +262,137 @@ pub(crate) fn execute_writer_operation(
                 revision_after: None,
             })
         }
+        WriterOperation::CharacterUpsert {
+            name,
+            aliases,
+            role_type,
+            summary,
+        } => {
+            memory
+                .upsert_character(name, aliases, role_type, summary)
+                .map_err(|e| format!("character: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Character upsert: {}", name),
+                    "upserted_character",
+                    &[],
+                    summary,
+                    &[format!("character:{}", name)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::CharacterStateUpsert {
+            character_id,
+            valid_from_chapter,
+            core_commitments,
+            goal_state,
+            identity_state,
+            source_ref,
+        } => {
+            memory
+                .upsert_character_state(
+                    *character_id,
+                    valid_from_chapter,
+                    core_commitments,
+                    goal_state,
+                    identity_state,
+                    &[],
+                    source_ref,
+                )
+                .map_err(|e| format!("character_state: {}", e))?;
+            memory
+                .record_decision(
+                    valid_from_chapter,
+                    &format!("Character state upsert: character {}", character_id),
+                    "upserted_character_state",
+                    &[],
+                    &format!("State updated from {}", source_ref),
+                    &[format!("character_state:{}", character_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::RelationshipUpsert {
+            character_a_id,
+            character_b_id,
+            relation_type,
+            visibility,
+            valid_from_chapter,
+            source_ref,
+        } => {
+            memory
+                .upsert_relationship(
+                    *character_a_id,
+                    *character_b_id,
+                    relation_type,
+                    visibility,
+                    valid_from_chapter,
+                    source_ref,
+                )
+                .map_err(|e| format!("relationship: {}", e))?;
+            memory
+                .record_decision(
+                    valid_from_chapter,
+                    &format!(
+                        "Relationship upsert: {} <-> {}",
+                        character_a_id, character_b_id
+                    ),
+                    "upserted_relationship",
+                    &[],
+                    &format!("{}: {} from {}", relation_type, visibility, source_ref),
+                    &[format!(
+                        "relationship:{}-{}",
+                        character_a_id, character_b_id
+                    )],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
+        WriterOperation::PromiseBindSubject {
+            promise_id,
+            subject_ids,
+            subject_type,
+        } => {
+            memory
+                .bind_promise_subject(*promise_id, subject_ids, subject_type)
+                .map_err(|e| format!("promise.bind_subject: {}", e))?;
+            memory
+                .record_decision(
+                    active_chapter.as_deref().unwrap_or("project"),
+                    &format!("Bind subjects to promise {}", promise_id),
+                    "bound_promise_subjects",
+                    &[],
+                    &format!(
+                        "Bound {} {:?} to promise {}",
+                        subject_type, subject_ids, promise_id
+                    ),
+                    &[format!("promise:{}", promise_id)],
+                )
+                .ok();
+            Ok(OperationResult {
+                success: true,
+                operation,
+                error: None,
+                revision_after: None,
+            })
+        }
         WriterOperation::StyleUpdatePreference { key, value } => {
             match validate_style_preference_with_memory(key, value, memory) {
                 MemoryCandidateQuality::Acceptable => {}

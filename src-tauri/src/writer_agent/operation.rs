@@ -63,6 +63,52 @@ pub enum WriterOperation {
         chapter: String,
         reason: String,
     },
+    #[serde(rename = "character.upsert")]
+    CharacterUpsert {
+        name: String,
+        aliases: Vec<String>,
+        #[serde(rename = "roleType")]
+        role_type: String,
+        summary: String,
+    },
+    #[serde(rename = "character_state.upsert")]
+    CharacterStateUpsert {
+        #[serde(rename = "characterId")]
+        character_id: i64,
+        #[serde(rename = "validFromChapter")]
+        valid_from_chapter: String,
+        #[serde(rename = "coreCommitments")]
+        core_commitments: serde_json::Value,
+        #[serde(rename = "goalState")]
+        goal_state: serde_json::Value,
+        #[serde(rename = "identityState")]
+        identity_state: serde_json::Value,
+        #[serde(rename = "sourceRef")]
+        source_ref: String,
+    },
+    #[serde(rename = "relationship.upsert")]
+    RelationshipUpsert {
+        #[serde(rename = "characterAId")]
+        character_a_id: i64,
+        #[serde(rename = "characterBId")]
+        character_b_id: i64,
+        #[serde(rename = "relationType")]
+        relation_type: String,
+        visibility: String,
+        #[serde(rename = "validFromChapter")]
+        valid_from_chapter: String,
+        #[serde(rename = "sourceRef")]
+        source_ref: String,
+    },
+    #[serde(rename = "promise.bind_subject")]
+    PromiseBindSubject {
+        #[serde(rename = "promiseId")]
+        promise_id: i64,
+        #[serde(rename = "subjectIds")]
+        subject_ids: Vec<i64>,
+        #[serde(rename = "subjectType")]
+        subject_type: String,
+    },
     #[serde(rename = "style.update_preference")]
     StyleUpdatePreference { key: String, value: String },
     #[serde(rename = "story_contract.upsert")]

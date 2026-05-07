@@ -57,6 +57,10 @@ pub(crate) fn approval_required_for_operation(operation: &WriterOperation) -> bo
             | WriterOperation::PromiseResolve { .. }
             | WriterOperation::PromiseDefer { .. }
             | WriterOperation::PromiseAbandon { .. }
+            | WriterOperation::CharacterUpsert { .. }
+            | WriterOperation::CharacterStateUpsert { .. }
+            | WriterOperation::RelationshipUpsert { .. }
+            | WriterOperation::PromiseBindSubject { .. }
             | WriterOperation::StyleUpdatePreference { .. }
             | WriterOperation::StoryContractUpsert { .. }
             | WriterOperation::ChapterMissionUpsert { .. }
@@ -248,6 +252,10 @@ pub(crate) fn operation_kind_label(operation: &WriterOperation) -> &'static str 
         WriterOperation::PromiseResolve { .. } => "promise.resolve",
         WriterOperation::PromiseDefer { .. } => "promise.defer",
         WriterOperation::PromiseAbandon { .. } => "promise.abandon",
+        WriterOperation::CharacterUpsert { .. } => "character.upsert",
+        WriterOperation::CharacterStateUpsert { .. } => "character_state.upsert",
+        WriterOperation::RelationshipUpsert { .. } => "relationship.upsert",
+        WriterOperation::PromiseBindSubject { .. } => "promise.bind_subject",
         WriterOperation::StyleUpdatePreference { .. } => "style.update_preference",
         WriterOperation::StoryContractUpsert { .. } => "story_contract.upsert",
         WriterOperation::ChapterMissionUpsert { .. } => "chapter_mission.upsert",
@@ -288,6 +296,21 @@ pub(crate) fn operation_affected_scope(operation: &WriterOperation) -> Option<St
             chapter,
             ..
         } => Some(format!("promise:{}:{}", promise_id, chapter)),
+        WriterOperation::CharacterUpsert { name, .. } => Some(format!("canon:character:{}", name)),
+        WriterOperation::CharacterStateUpsert { character_id, .. } => {
+            Some(format!("canon:character_state:{}", character_id))
+        }
+        WriterOperation::RelationshipUpsert {
+            character_a_id,
+            character_b_id,
+            ..
+        } => Some(format!(
+            "canon:relationship:{}-{}",
+            character_a_id, character_b_id
+        )),
+        WriterOperation::PromiseBindSubject { promise_id, .. } => {
+            Some(format!("promise:bind_subject:{}", promise_id))
+        }
         WriterOperation::StyleUpdatePreference { key, .. } => Some(format!("style:{}", key)),
         WriterOperation::StoryContractUpsert { contract } => {
             Some(format!("story_contract:{}", contract.project_id))
