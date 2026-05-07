@@ -189,14 +189,15 @@ pub fn apply_chapter_settlement_delta(
                 memory.get_character_by_name(&delta.character_a_name),
                 memory.get_character_by_name(&delta.character_b_name),
             ) {
-                if memory.upsert_relationship(
+                match memory.upsert_relationship(
                     a.id, b.id,
                     &delta.relation_type,
                     &delta.visibility,
                     &delta.chapter_title,
                     &delta.source_ref,
-                ).is_ok() {
-                    relationship_applied += 1;
+                ) {
+                    Ok(_) => { relationship_applied += 1; }
+                    Err(e) => warnings.push(format!("relationship upsert failed: {}", e)),
                 }
             }
         }
@@ -206,16 +207,19 @@ pub fn apply_chapter_settlement_delta(
     let mut knowledge_applied = 0usize;
     for delta in &delta.knowledge_deltas {
         if let Ok(knowledge_id) = memory.upsert_knowledge_item(&delta.topic, &delta.truth_state, &delta.source_ref) {
-            if memory.upsert_knowledge_ownership(
+            match memory.upsert_knowledge_ownership(
                 knowledge_id, &delta.holder_type, delta.holder_id,
                 &delta.knowledge_mode, &delta.chapter_title, &delta.source_ref,
-            ).is_ok() {
-                if delta.knowledge_mode == "aware" {
-                    let _ = memory.record_reveal_event(
-                        knowledge_id, "knowledge", "public", &delta.chapter_title, &delta.source_ref,
-                    );
+            ) {
+                Ok(_) => {
+                    if delta.knowledge_mode == "aware" {
+                        let _ = memory.record_reveal_event(
+                            knowledge_id, "knowledge", "public", &delta.chapter_title, &delta.source_ref,
+                        );
+                    }
+                    knowledge_applied += 1;
                 }
-                knowledge_applied += 1;
+                Err(e) => warnings.push(format!("knowledge_ownership upsert failed: {}", e)),
             }
         }
     }
@@ -224,12 +228,16 @@ pub fn apply_chapter_settlement_delta(
     let mut identity_applied = 0usize;
     for delta in &delta.identity_deltas {
         if let Ok(Some(character)) = memory.get_character_by_name(&delta.character_name) {
-            let _ = memory.close_identity_layer(0, &delta.chapter_title);
-            if memory.upsert_identity_layer(
+            // Close any existing active identity layer for this character
+            if let Ok(Some(existing)) = memory.get_active_identity(character.id, &delta.chapter_title) {
+                let _ = memory.close_identity_layer(existing.id, &delta.chapter_title);
+            }
+            match memory.upsert_identity_layer(
                 character.id, &delta.public_identity, &delta.private_identity,
                 &delta.revealed_to, &delta.chapter_title,
-            ).is_ok() {
-                identity_applied += 1;
+            ) {
+                Ok(_) => { identity_applied += 1; }
+                Err(e) => warnings.push(format!("identity_layer upsert failed: {}", e)),
             }
         }
     }
