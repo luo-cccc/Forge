@@ -451,6 +451,40 @@ impl DiagnosticsEngine {
             });
         }
 
+        // 5. Emotional debt pressure check.
+        let debt_keywords = ["愤怒", "悲伤", "背叛", "恐惧", "悔恨"];
+        let mut has_pressure = false;
+        for kw in &debt_keywords {
+            if paragraph.contains(kw) {
+                has_pressure = true;
+                break;
+            }
+        }
+        if has_pressure {
+            // Check if there's a payoff or resolution in the same paragraph
+            let has_resolution = paragraph.contains("放下")
+                || paragraph.contains("释怀")
+                || paragraph.contains("原谅");
+            if !has_resolution {
+                results.push(DiagnosticResult {
+                    id: next_id(),
+                    severity: DiagnosticSeverity::Info,
+                    category: DiagnosticCategory::TimelineIssue,
+                    message: "情绪压力场景未发现释放/解决信号".to_string(),
+                    entity_name: None,
+                    from: paragraph_offset,
+                    to: paragraph_offset + paragraph.chars().count(),
+                    evidence: vec![DiagnosticEvidence {
+                        source: "emotional_debt".into(),
+                        reference: "chapter".into(),
+                        snippet: "pressure without payoff".to_string(),
+                    }],
+                    fix_suggestion: Some("考虑在后续场景中添加情绪释放或解决".into()),
+                    operations: Vec::new(),
+                });
+            }
+        }
+
         // 6. Adjust severity based on author ignore patterns.
         for result in &mut results {
             let category_str = diagnostic_category_str(&result.category);
