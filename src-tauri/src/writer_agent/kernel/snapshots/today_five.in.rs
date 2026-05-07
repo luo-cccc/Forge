@@ -288,6 +288,22 @@ impl WriterAgentKernel {
             guard_detail
         };
 
+        // Author burnout check
+        let guard_detail = if let Ok(results) = self.memory.list_recent_chapter_results(&self.project_id, 5) {
+            if results.len() >= 3 {
+                let recent_summaries_short = results.iter().rev().take(2).all(|r| r.summary.len() < 50);
+                if recent_summaries_short {
+                    format!("{}\n💡 最近几章的摘要较短——可能是连续写作导致的疲劳。建议休息一下或回顾前几章。", guard_detail)
+                } else {
+                    guard_detail
+                }
+            } else {
+                guard_detail
+            }
+        } else {
+            guard_detail
+        };
+
         TodayFiveSummary {
             chapter_title: current_chapter.clone(),
             is_onboarding: false,
