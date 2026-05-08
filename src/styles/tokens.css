@@ -1,41 +1,54 @@
-/* Forge design tokens: compact Codex-like desktop surface. */
+/* Forge Design Tokens — Open WebUI Inspired */
 :root {
-  --fg-surface-deep: #0b0c0d;
-  --fg-surface: #101112;
-  --fg-surface-raised: #151719;
-  --fg-surface-overlay: #1b1d20;
-  --fg-surface-hover: #202327;
-  --fg-border: #34383f;
-  --fg-border-subtle: #25282d;
+  /* Surfaces */
+  --bg-deepest: #090a0b;
+  --bg-deep: #0f1114;
+  --bg-base: #15171b;
+  --bg-raised: #1b1d23;
+  --bg-overlay: #21242b;
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-active: rgba(255,255,255,0.06);
+  --bg-selected: rgba(255,255,255,0.08);
 
-  --fg-text-primary: #ececec;
-  --fg-text-secondary: #b9bdc3;
-  --fg-text-tertiary: #7f858d;
-  --fg-text-disabled: #585e66;
+  /* Borders */
+  --border-subtle: rgba(255,255,255,0.06);
+  --border-default: rgba(255,255,255,0.1);
+  --border-strong: rgba(255,255,255,0.15);
+  --border-accent: rgba(255,255,255,0.18);
 
-  --fg-accent: #e8e1d6;
-  --fg-accent-hover: #f5efe5;
-  --fg-accent-muted: rgb(232 225 214 / 0.11);
-  --fg-accent-border: rgb(232 225 214 / 0.24);
+  /* Text */
+  --text-primary: #ececec;
+  --text-secondary: #b0b5bd;
+  --text-tertiary: #6b7280;
+  --text-disabled: #4b5159;
 
-  --fg-success: #71d08a;
-  --fg-warning: #d8ae5f;
-  --fg-danger: #f07d75;
-  --fg-ring: rgb(232 225 214 / 0.45);
+  /* Accent — warm amber/gold */
+  --accent: #d4a853;
+  --accent-hover: #e0bc6b;
+  --accent-muted: rgba(212,168,83,0.12);
+  --accent-text: #1a1410;
 
-  --font-ui: "Aptos", "Segoe UI Variable", "Microsoft YaHei UI", sans-serif;
-  --font-editor: "Aptos", "Segoe UI Variable", "Microsoft YaHei UI", sans-serif;
-  --font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", monospace;
-  --text-xs: 0.6875rem;
+  /* Semantic */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  /* Typography */
+  --font-sans: "Inter", "Segoe UI Variable", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+  --text-2xs: 0.625rem;
+  --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
   --text-lg: 1.0625rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
-  --leading-tight: 1.35;
+  --leading-tight: 1.3;
   --leading-normal: 1.55;
-  --leading-relaxed: 1.72;
+  --leading-relaxed: 1.7;
 
+  /* Spacing */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -46,105 +59,57 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  --header-height: 44px;
-  --sidebar-width: 268px;
-  --companion-width: 360px;
-  --status-bar-height: 28px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* Layout */
+  --sidebar-width: 260px;
+  --companion-width: 340px;
+  --toolbar-height: 40px;
+  --statusbar-height: 28px;
 
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --duration-fast: 120ms;
+  --duration-instant: 80ms;
+  --duration-fast: 150ms;
   --duration-normal: 200ms;
   --duration-slow: 300ms;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.24);
-  --shadow-md: 0 12px 28px rgb(0 0 0 / 0.28);
-  --shadow-lg: 0 24px 70px rgb(0 0 0 / 0.4);
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.6);
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-}
+/* Reset */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; width: 100%; overflow: hidden; background: var(--bg-deepest); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-sm); line-height: var(--leading-normal); -webkit-font-smoothing: antialiased; }
+body { margin: 0; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); text-decoration: none; }
+::selection { background: var(--bg-selected); }
 
-html,
-body,
-#root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  background: var(--fg-surface-deep);
-  color: var(--fg-text-primary);
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
-body {
-  margin: 0;
-}
+/* Focus */
+:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
+/* Skeleton */
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton { background: linear-gradient(90deg, var(--bg-raised) 25%, var(--bg-overlay) 50%, var(--bg-raised) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; border-radius: var(--radius-sm); }
 
-button {
-  color: inherit;
-}
-
-::selection {
-  background: rgb(232 225 214 / 0.22);
-}
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.12);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.2);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-:focus-visible {
-  outline: 1px solid var(--fg-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-.text-mono {
-  font-family: var(--font-mono);
-}
-
-.text-secondary {
-  color: var(--fg-text-secondary);
-}
-
-.text-tertiary {
-  color: var(--fg-text-tertiary);
-}
-
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* Utility */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-mono { font-family: var(--font-mono); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
