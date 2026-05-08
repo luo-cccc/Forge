@@ -6,6 +6,12 @@ Last updated: 2026-05-08
 
 Forge is a Cursor-style writing agent for novels, not a generic writing tool. The editor is only the workbench. The product value is the persistent co-writer that knows the book, tracks commitments, watches continuity, proposes typed changes, and learns from what the author accepts or rejects.
 
+## Active Docs
+
+- `README.md`: overview, setup, and verification baseline
+- `plan.md`: project whitepaper and execution archive
+- `docs/README.md`: documentation map and cleanup policy
+
 ## P0 Status (May 2026): Unified Writer Agent Kernel Brain
 
 P0 is complete:
@@ -39,9 +45,9 @@ P1 is in progress:
 - `agent-evals` now includes 10 long-form product scenario checks in `agent-evals/src/evals/product_scenarios.rs`, covering multi-chapter promise tracking, result feedback handoff, payoff timing, resolved-promise quieting, object whereabouts, mission drift, canon guardrails, style feedback, decision metrics, and context explainability. A separate synthetic 20-chapter continuous-writing fixture covers cross-session save observations, task drift, foreshadowing recall, author feedback, story debt, and product metrics replay. More realistic author-project fixtures are still needed before product value can be called proven.
 - Writer Agent context relevance ranking now prioritizes Canon / Promise ledger slices by mission, next beat, result feedback, recent decisions, cursor-local story signals, open promises, and lightweight scene-type matches, with `WHY writing_relevance` explanations on retrieved entries. Project Brain / vector chunks are now reranked after semantic retrieval using the same writing-focus, scene-type, avoid-term, and active-chapter proximity signals; standalone `query_project_brain` also injects active WriterMemory focus into retrieval and rerank. Scene-type explanations prioritize setup/payoff and reveal over generic action/description signals, Project Brain rerank explains adjacent/current chapter proximity, and Project Brain rerank now extracts author-project terms from indexed keywords/phrase boundaries.
 
-## Sprint Completion (May 2026)
+## Whitepaper Milestone Snapshot (May 2026)
 
-The planned implementation and offline eval gates from `plan.md` are complete as of 2026-05-07. This table does not mean real-provider stability or 30/100-chapter continuity validation is fully closed; the open gaps documented in `plan.md` and `Remaining Gaps` below still apply.
+The execution archive and offline eval gates recorded in `plan.md` were closed by 2026-05-07. Treat this as a milestone snapshot, not the source of current verification counts; the current branch baseline lives in the verification block below. Real-provider stability and 30/100-chapter continuity validation are still not fully closed, and the open gaps documented in `plan.md` and `Remaining Gaps` below still apply.
 
 | Phase | Gates | Status |
 |-------|-------|--------|
@@ -59,7 +65,7 @@ The planned implementation and offline eval gates from `plan.md` are complete as
 | Feedback Learning | 3 | ✅ |
 | Reader Compensation | 3 | ✅ |
 | Emotional Debt | 4 | ✅ |
-| **Total** | **~55 gates** | **325 evals** |
+| **Total** | **~55 gates** | **Closed; current branch baseline is 332 evals** |
 
 ## What Is Solid Now
 
@@ -149,6 +155,7 @@ The expected local baseline is generated from `scripts/verification-baseline.cjs
 
 ## Cleanliness Decisions
 
+- Use `docs/README.md` as the navigation entry point for active vs archived documentation.
 - Keep root `Cargo.lock`.
 - Remove and ignore `src-tauri/Cargo.lock`; it is a duplicate member lockfile because the workspace root is the repository root.
 - Keep `.env`, `node_modules`, `dist`, `target`, `.worktrees`, and report directories ignored.

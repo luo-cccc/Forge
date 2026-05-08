@@ -1,6 +1,12 @@
-# Forge Writer Agent 4 周冲刺计划
+# Forge Writer Agent 项目白皮书
 
 Last updated: 2026-05-08
+
+> 本文件已经从阶段性“4 周冲刺计划”升级为 Forge 的项目白皮书。
+>
+> 白皮书负责定义：产品北极星、不变边界、状态内核、验证标准、中长期工程路线，以及当前仍未闭合的真实缺口。
+>
+> 原 4 周执行路线、周验收命令和周会模板保留在 §6-§12，作为实现档案与交叉引用兼容层；当前分支的最新实现状态以 [docs/project-status.md](docs/project-status.md) 为准，文档导航见 [docs/README.md](docs/README.md)。
 
 ## 0. 产品北极星
 
@@ -22,9 +28,9 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 
 ---
 
-## 1. 本轮不变边界
+## 1. 项目不变边界
 
-这 4 周冲刺允许重写路径、调整 schema、重排阶段，但不允许破坏以下已成立能力：
+Forge 进入长篇生产系统阶段后，允许重写路径、调整 schema、重排阶段，但不允许破坏以下已成立能力：
 
 - 保存安全边界不能退化：
   - dirty state、chapter switching、autosave、accepted feedback、batch generation dirty protection 必须继续成立。
@@ -39,15 +45,15 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 - `npm run verify`、现有 Rust tests、现有 eval 基线不能被“临时跳过”：
   - 新能力可以增量放行，但不能靠关闭旧 gate 获得通过。
 
-如果某项冲刺改动必须突破这些边界，先停下来重写方案，不允许边做边破。
+如果某项阶段性改动必须突破这些边界，先停下来重写方案，不允许边做边破。
 
 ---
 
-## 2. 冲刺目标
+## 2. 白皮书摘要
 
-4 周内，把 Forge 从“单章生成器 + 近期记忆助手”推进到“可验证的长篇生产系统第一版”。
+Forge 当前阶段的核心任务，是把系统从“单章生成器 + 近期记忆助手”推进到“可验证、可恢复、可扩展的长篇生产系统第一版”。
 
-本轮只追 5 件事：
+白皮书当前聚焦 5 根主梁：
 
 1. 把 `3500 ± 500` 字变成系统级 `ChapterContract`，不再只是口号。
 2. 把章节生成从单次 draft 改成可控的多阶段流水线。
@@ -55,7 +61,7 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 4. 把批量推进从 `Supervised Sprint v1` 升级到可暂停 / 恢复 / checkpoint 的 `Sprint v2`。
 5. 把评测从 20 章 synthetic 提升到千章 synthetic，并补 30 章真实作者回归门。
 
-本轮不追：
+当前阶段不优先：
 
 - Reader Compensation 深化
 - Emotional Debt 新玩法
@@ -72,7 +78,7 @@ Forge 不是“带 AI 功能的写作工具”，而是“以 agent 为主体的
 - Writer Agent Kernel、TaskPacket、typed operations、memory、trajectory、approval/audit、provider budget、post-write diagnostics、metacognitive gate 已有地基。
 - Story Contract、Chapter Mission、Result Feedback Loop、Promise Ledger 已经活跃。
 - `supervised_sprint.rs` 已有第一阶段能力，覆盖 preflight → receipt → review → save → settlement。
-- 当前验证基线可稳定通过：`agent-harness-core` 89 tests、`agent-writer` 242 tests、`agent-evals` 265/265 passing、`check:audit` 72 commands 0 issues。
+- 当前验证基线可稳定通过：`agent-harness-core` 89 tests、`agent-writer` 250 tests、`agent-evals` 332/332 passing、`check:audit` 74 commands 0 issues。
 - Week 1 已落地：
   - `ChapterContract`
   - 章节生成 continuation / compress / length-validate 骨架
@@ -939,8 +945,8 @@ Sprint D 必须补：
 
 如果 `3.3` 是底层封顶冲刺，那么 `3.3.7` 到 `3.3.10` 就是底层封顶真正的四根梁：
 
-> **2026-05-07 最终状态：所有计划项全部闭合。四根梁 + 算法适配 + 性能优化 + 用户感受层 + 前端表达层 + Feedback Learning + Reader Compensation + Emotional Debt + Data-Driven Optimization + Writing Quality。**
-> **当前基线：89 + 247 + 325 evals，0 audit issues。全功能真实压力测试已验证内核流水线 28/28 章 settlement 零失败。**
+> **2026-05-07 阶段结论：白皮书首轮落地项已闭合。四根梁 + 算法适配 + 性能优化 + 用户感受层 + 前端表达层 + Feedback Learning + Reader Compensation + Emotional Debt + Data-Driven Optimization + Writing Quality。**
+> **当前分支离线验证基线：89 + 250 tests，332 evals，0 audit issues。全功能真实压力测试已验证内核流水线 28/28 章 settlement 零失败。**
 
 
 
@@ -953,7 +959,7 @@ Sprint D 必须补：
 
 ### 3.1 当前完成度
 
-按 4 周主线看，代码完成度是：
+按已归档的 4 周主线看，代码完成度是：
 
 - Week 1：已完成最小闭环
 - Week 2：已完成最小闭环
@@ -977,9 +983,9 @@ Sprint D 必须补：
 
 ---
 
-## 4. 本轮完成定义
+## 4. 当前阶段完成定义
 
-当前按验收门核对如下：
+当前按阶段验收门核对如下：
 
 | 验收门 | 状态 | 备注 |
 |------|------|------|
@@ -999,7 +1005,7 @@ Sprint D 必须补：
 
 ---
 
-## 5. 冲刺原则
+## 5. 工程原则
 
 1. 先上生产 contract，再上记忆分层。
 2. 先量出退化曲线，再改搜索与上下文路径。
@@ -1009,7 +1015,9 @@ Sprint D 必须补：
 
 ---
 
-## 6. 4 周路线
+## 6. 实施档案：4 周落地主线（已完成）
+
+以下内容保留为实现归档，描述的是已完成的集中落地主线，不再作为当前排期承诺。
 
 ### Week 1：量化基线 + ChapterContract
 
@@ -1317,7 +1325,7 @@ Sprint D 必须补：
 
 ---
 
-## 7. 周间依赖
+## 7. 实施档案：周间依赖
 
 - Week 2 不能早于 Week 1 的 `probe:scale` 数据。
 - Week 3 不能早于 Week 2 的 ANN 和 schema 落地。
@@ -1331,7 +1339,7 @@ Sprint D 必须补：
 
 ---
 
-## 8. 每周验收命令
+## 8. 实施档案：每周验收命令
 
 Week 1：
 
@@ -1360,7 +1368,7 @@ Week 4：
 
 ---
 
-## 9. 每周例会模板
+## 9. 实施档案：周会模板
 
 只保留两场固定例会，所有周都按同一节奏走。
 
@@ -1380,7 +1388,7 @@ Week 4：
 
 1. 本周 `周中必须对齐的结果` 是否已经冻结。
 2. 当前协议 / schema / payload / 样例是否仍存在分歧。
-3. 是否有任何变更会破坏 `本轮不变边界`。
+3. 是否有任何变更会破坏 `项目不变边界`。
 4. 若未冻结，本周剩余时间内由谁在何时拍板。
 
 会后必须产出：
@@ -1436,7 +1444,7 @@ Week 4：
 
 ---
 
-## 11. 冲刺后再做
+## 11. 下一阶段暂缓项
 
 4 周版完成后，再考虑：
 
@@ -1449,7 +1457,7 @@ Week 4：
 
 ---
 
-## 12. 最后的判断
+## 12. 当前阶段结论
 
 这 4 周计划不是“把所有长篇能力做完”，而是只做最短关键路径：
 
@@ -1463,7 +1471,7 @@ Week 4：
 
 ---
 
-## 13. 正文质量不降前提下的延迟优化与底层强化计划
+## 13. 后续优化纲要：正文质量不降前提下的延迟优化与底层强化
 
 ### 13.1 新约束
 

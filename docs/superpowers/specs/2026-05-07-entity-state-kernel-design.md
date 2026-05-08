@@ -2,7 +2,7 @@
 
 Date: 2026-05-07
 Status: draft
-Plan ref: plan.md §3.3.7
+Whitepaper ref: plan.md §3.3.7
 
 ## Overview
 

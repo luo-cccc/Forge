@@ -5,7 +5,7 @@ Status: draft
 
 ## Overview
 
-Execute plan.md §3.3 (底层封顶冲刺): close the semantic gaps in Forge's long-form production kernel. This is NOT a feature phase — it is an audit-and-gate phase that locks down authoritative state, settlement extraction, recovery, provider budget, and default user surface before any UX polish begins.
+Execute whitepaper section `plan.md` §3.3 (底层封顶冲刺): close the semantic gaps in Forge's long-form production kernel. This is NOT a feature phase — it is an audit-and-gate phase that locks down authoritative state, settlement extraction, recovery, provider budget, and default user surface before any UX polish begins.
 
 ## Principle
 

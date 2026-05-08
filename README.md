@@ -38,7 +38,7 @@ agent-harness-core/          Reusable agent runtime foundation
   tool_registry.rs           Tool inventory and side-effect policy
 
 agent-evals/                 Regression evals for writer-agent behavior, organized by evals/* responsibility modules
-docs/                        Architecture plans and project status
+docs/                        Active references, status docs, and archived design materials
 scripts/                     Local static checks
 ```
 
@@ -246,6 +246,14 @@ This baseline describes the expected state of the current branch only after the 
 
 `cargo run -p agent-evals` writes local reports under `reports/`; `npm run verify` cleans generated eval reports before checking whitespace.
 
+## Documentation Map
+
+- [Project Whitepaper](plan.md): product thesis, invariants, state architecture, validation bars, and archived execution program.
+- [Project Status](docs/project-status.md): current stable capabilities, cleanliness decisions, and remaining gaps.
+- [Docs Index](docs/README.md): navigation for active docs vs archived plans/specs.
+- [Real Provider Tuning](docs/real-provider-tuning.md): tuning history and measured provider notes.
+- [Historical Plans And Specs](docs/superpowers): dated implementation archive.
+
 ## Current Engineering Priorities
 
 P0/P1 foundation work comes before new UI:
@@ -256,4 +264,4 @@ P0/P1 foundation work comes before new UI:
 - Keep memory grounded in author feedback and saved manuscript results.
 - Keep generated reports and build outputs out of git.
 
-See [Project Status](docs/project-status.md) for the latest architecture state and remaining gaps.
+See [Project Status](docs/project-status.md) for the latest architecture state and remaining gaps, and [Project Whitepaper](plan.md) for the long-range product and system definition.
