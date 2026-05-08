@@ -64,7 +64,7 @@ function App() {
 
   useEffect(() => {
     invoke<boolean>(Commands.checkApiKey, { provider: "openai" })
-      .then(setHasApiKey)
+      .then((v: unknown) => setHasApiKey(v as boolean))
       .catch(() => setHasApiKey(false));
   }, []);
 
@@ -286,7 +286,7 @@ function App() {
           <h2 style={{fontSize:'var(--text-xl)',fontWeight:600,marginBottom:'var(--space-2)',color:'var(--fg-text-primary)'}}>Welcome to Forge</h2>
           <p style={{color:'var(--fg-text-secondary)',marginBottom:'var(--space-6)'}}>Connect a model to start writing. Your API key stays in the system keychain.</p>
           <SettingsView />
-          <button className="forge-btn forge-btn-primary" style={{marginTop:'var(--space-4)'}} onClick={() => { setShowSettings(false); invoke(Commands.checkApiKey, { provider: "openai" }).then(setHasApiKey).catch(() => setHasApiKey(false)); }}>Done</button>
+          <button className="forge-btn forge-btn-primary" style={{marginTop:'var(--space-4)'}} onClick={() => { setShowSettings(false); invoke(Commands.checkApiKey, { provider: "openai" }).then((v: unknown) => setHasApiKey(v as boolean)).catch(() => setHasApiKey(false)); }}>Done</button>
         </div>
       </div>
     );
