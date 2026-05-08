@@ -6,11 +6,6 @@ import { Commands, Events, type ChapterGenerationEvent, type SprintProgress, typ
 import type { Editor } from "@tiptap/core";
 
 const OutlinePanel = lazy(() => import("./OutlinePanel"));
-const ScriptDoctorPanel = lazy(() => import("./ScriptDoctorPanel"));
-const LoreGraphView = lazy(() => import("./LoreGraphView"));
-const StoryboardView = lazy(() => import("./StoryboardView"));
-const SandboxView = lazy(() => import("./SandboxView"));
-const SettingsView = lazy(() => import("./SettingsView"));
 
 interface ChapterInfo {
   title: string;
@@ -26,12 +21,12 @@ interface ProjectTreeProps {
 function PanelFallback() {
   return (
     <div className="flex flex-1 items-center justify-center text-xs text-text-muted">
-      Loading panel...
+      正在载入...
     </div>
   );
 }
 
-export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: ProjectTreeProps) {
+export default function ProjectTree({ onSelectChapter }: ProjectTreeProps) {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const activeVolumeId = useAppStore((s) => s.activeVolumeId);
   const setActiveVolumeId = useAppStore((s) => s.setActiveVolumeId);
@@ -41,7 +36,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
   const setSprintProgress = useAppStore((s) => s.setSprintProgress);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [newTitle, setNewTitle] = useState("");
-  const [tab, setTab] = useState<"chapters" | "outline" | "doctor" | "graph" | "storyboard" | "sandbox" | "settings">("chapters");
+  const [tab, setTab] = useState<"chapters" | "outline">("chapters");
 
   const refresh = useCallback(async () => {
     try {
@@ -113,37 +108,27 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
   });
 
   return (
-    <div className="flex h-full flex-col bg-bg-surface">
-      <div className="grid grid-cols-3 gap-1 border-b border-border-subtle p-2">
+    <div className="forge-project-panel">
+      <div className="forge-project-tabs">
         {([
-          ["chapters", "Chapters"],
-          ["outline", "Outline"],
-          ["doctor", "Doctor"],
-          ["graph", "Graph"],
-          ["storyboard", "Board"],
-          ["sandbox", "Sandbox"],
-          ["settings", "Settings"],
+          ["chapters", "章节"],
+          ["outline", "大纲"],
         ] as const).map(([nextTab, label]) => (
           <button
             key={nextTab}
             onClick={() => setTab(nextTab)}
-            className={`rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-              tab === nextTab
-                ? "bg-bg-raised text-text-primary shadow-sm"
-                : "text-text-muted hover:bg-bg-raised/60 hover:text-text-secondary"
-            }`}
+            className={`forge-project-tab ${tab === nextTab ? "active" : ""}`}
           >
             {label}
           </button>
         ))}
-        <span className="hidden" />
       </div>
       {(activeVolumeId || sprintProgress) && (
-        <div className="space-y-1 border-b border-border-subtle bg-bg-deep px-3 py-2 text-[10px] text-text-muted">
-          {activeVolumeId && <div>Volume filter: {activeVolumeId}</div>}
+        <div className="forge-project-context">
+          {activeVolumeId && <div>卷筛选：{activeVolumeId}</div>}
           {sprintProgress && (
             <div>
-              Sprint {sprintProgress.status} · {sprintProgress.chaptersCompleted}/
+              连续写作 {sprintProgress.status} · {sprintProgress.chaptersCompleted}/
               {sprintProgress.chaptersCompleted + sprintProgress.chaptersRemaining}
             </div>
           )}
@@ -152,37 +137,33 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
 
       {tab === "chapters" ? (
         <>
-          <div className="flex-1 overflow-y-auto">
-            {visibleChapters.map((ch) => (
+          <div className="forge-chapter-list">
+            <div className="forge-panel-section-label">章节列表</div>
+            {visibleChapters.map((ch, index) => (
               <button
                 key={ch.filename}
                 onClick={() => onSelectChapter(ch.title)}
-                className={`w-full border-l-2 px-4 py-2.5 text-left text-xs transition-colors ${
-                  currentChapter === ch.title
-                    ? "border-accent bg-accent-subtle text-text-primary"
-                    : "border-transparent text-text-secondary hover:bg-bg-raised hover:text-text-primary"
-                }`}
+                className={`forge-chapter-row ${currentChapter === ch.title ? "active" : ""}`}
               >
-                <span className="mr-2 font-mono text-[10px] text-text-muted">
-                  {String(visibleChapters.indexOf(ch) + 1).padStart(2, "0")}
-                </span>
-                {ch.title}
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <strong>{ch.title}</strong>
               </button>
             ))}
           </div>
-          <div className="space-y-2 border-t border-border-subtle p-3">
-            <div className="flex gap-1">
+          <div className="forge-chapter-create">
+            <div className="forge-panel-section-label">项目管理</div>
+            <div className="forge-volume-filter">
               <button
                 onClick={() => setActiveVolumeId(null)}
-                className={`rounded-md border px-2 py-1 text-[10px] ${activeVolumeId === null ? "border-accent text-text-primary" : "border-border-subtle text-text-muted"}`}
+                className={`forge-chip ${activeVolumeId === null ? "active" : ""}`}
               >
-                All
+                全部
               </button>
               {volumeList.slice(0, 4).map((volume) => (
                 <button
                   key={volume.id}
                   onClick={() => setActiveVolumeId(volume.id)}
-                  className={`rounded-md border px-2 py-1 text-[10px] ${activeVolumeId === volume.id ? "border-accent text-text-primary" : "border-border-subtle text-text-muted"}`}
+                  className={`forge-chip ${activeVolumeId === volume.id ? "active" : ""}`}
                 >
                   {volume.title}
                 </button>
@@ -192,14 +173,14 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="New chapter..."
-              className="w-full rounded-md border border-border-subtle bg-bg-deep px-2.5 py-1.5 text-xs text-text-primary placeholder-text-muted focus:border-accent focus:outline-none"
+              placeholder="输入新章节名"
+              className="forge-input"
             />
             <button
               onClick={handleCreate}
-              className="w-full rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-bg-deep transition-colors hover:bg-accent/90"
+              className="forge-btn forge-btn-secondary forge-btn-wide"
             >
-              New Chapter
+              新建章节
             </button>
           </div>
         </>
@@ -207,17 +188,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
         <Suspense fallback={<PanelFallback />}>
           {tab === "outline" ? (
             <OutlinePanel />
-          ) : tab === "doctor" ? (
-            <ScriptDoctorPanel editorRef={editorRef} onApplyFix={onApplyFix} />
-          ) : tab === "graph" ? (
-            <LoreGraphView />
-          ) : tab === "storyboard" ? (
-            <StoryboardView />
-          ) : tab === "sandbox" ? (
-            <SandboxView />
-          ) : (
-            <SettingsView />
-          )}
+          ) : null}
         </Suspense>
       )}
     </div>

@@ -7,11 +7,12 @@ import {
   type FileBackupInfo,
   type ProjectFileRestored,
 } from "../protocol";
+import { FORGE_THEMES, type ForgeTheme } from "../uiPreferences";
 
 const RECOVERY_TARGETS = [
-  { id: "lorebook", label: "Lorebook", target: { kind: "lorebook" } },
-  { id: "outline", label: "Outline", target: { kind: "outline" } },
-  { id: "project_brain", label: "Project Brain", target: { kind: "project_brain" } },
+  { id: "lorebook", label: "设定库", target: { kind: "lorebook" } },
+  { id: "outline", label: "大纲", target: { kind: "outline" } },
+  { id: "project_brain", label: "项目记忆", target: { kind: "project_brain" } },
 ] satisfies Array<{ id: ProjectFileRestored["kind"]; label: string; target: BackupTarget }>;
 
 type BackupMap = Record<ProjectFileRestored["kind"], FileBackupInfo[]>;
@@ -20,6 +21,8 @@ type ConnectionState = "checking" | "connected" | "empty" | "saving" | "error";
 interface SettingsViewProps {
   onConfigured?: () => void;
   mode?: "onboarding" | "panel";
+  theme: ForgeTheme;
+  onThemeChange: (theme: ForgeTheme) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -29,25 +32,27 @@ function formatBytes(bytes: number): string {
 }
 
 function formatTime(ms: number): string {
-  if (!ms) return "unknown";
+  if (!ms) return "未知";
   return new Date(ms).toLocaleString();
 }
 
 function keychainLabel(): string {
-  if (navigator.platform.includes("Win")) return "Windows Credential Manager";
-  if (navigator.platform.includes("Mac")) return "macOS Keychain";
-  return "system secret storage";
+  if (navigator.platform.includes("Win")) return "Windows 凭据管理器";
+  if (navigator.platform.includes("Mac")) return "macOS 钥匙串";
+  return "系统密钥存储";
 }
 
 export default function SettingsView({
   onConfigured,
   mode = "panel",
+  theme,
+  onThemeChange,
 }: SettingsViewProps) {
   const [apiKey, setApiKey] = useState("");
   const [showSecret, setShowSecret] = useState(false);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
-  const [statusMessage, setStatusMessage] = useState("Checking local keychain...");
+  const [statusMessage, setStatusMessage] = useState("正在检查本机密钥...");
   const [logs, setLogs] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -77,17 +82,20 @@ export default function SettingsView({
       setConnectionState(ok ? "connected" : "empty");
       setStatusMessage(
         ok
-          ? `Connected. Key is stored in ${keychainLabel()}.`
-          : "Paste an OpenAI-compatible API key to connect the model.",
+          ? `已连接。密钥保存在${keychainLabel()}。`
+          : "粘贴 OpenAI 或 OpenRouter 兼容密钥后即可开始写作。",
       );
+      if (ok && mode === "onboarding") {
+        onConfigured?.();
+      }
       return ok;
     } catch (e) {
       setHasKey(false);
       setConnectionState("error");
-      setStatusMessage(`Could not read the local keychain: ${String(e)}`);
+      setStatusMessage(`无法读取本机密钥：${String(e)}`);
       return false;
     }
-  }, []);
+  }, [mode, onConfigured]);
 
   useEffect(() => {
     const connectionTimer = setTimeout(() => {
@@ -111,12 +119,12 @@ export default function SettingsView({
         return;
       }
       setConnectionState("error");
-      setStatusMessage("Paste an API key first.");
+      setStatusMessage("请先粘贴 API key。");
       return;
     }
 
     setConnectionState("saving");
-    setStatusMessage("Saving key to the local keychain...");
+    setStatusMessage("正在保存到本机密钥存储...");
     try {
       await invoke(Commands.setApiKey, { provider: "openai", key: apiKey.trim() });
       setApiKey("");
@@ -127,7 +135,7 @@ export default function SettingsView({
       }
     } catch (e) {
       setConnectionState("error");
-      setStatusMessage(`Save failed: ${String(e)}`);
+      setStatusMessage(`保存失败：${String(e)}`);
     }
   }, [apiKey, hasKey, onConfigured, refreshConnection]);
 
@@ -136,11 +144,11 @@ export default function SettingsView({
       const text = await navigator.clipboard.readText();
       if (text.trim()) {
         setApiKey(text.trim());
-        setStatusMessage("Key pasted. Click Connect to save it locally.");
+        setStatusMessage("已粘贴密钥，点击保存后进入写作。");
       }
     } catch (e) {
       setConnectionState("error");
-      setStatusMessage(`Clipboard access failed: ${String(e)}`);
+      setStatusMessage(`无法读取剪贴板：${String(e)}`);
     }
   }, []);
 
@@ -148,7 +156,7 @@ export default function SettingsView({
     setVerifying(true);
     try {
       const ok = await refreshConnection();
-      setLogs(ok ? "A key is present in the OS keychain." : "No saved key found.");
+      setLogs(ok ? "已在系统密钥存储中找到密钥。" : "未找到已保存密钥。");
     } finally {
       setVerifying(false);
     }
@@ -157,9 +165,9 @@ export default function SettingsView({
   const handleExportLogs = useCallback(async () => {
     try {
       const path = await invoke<string>(Commands.exportDiagnosticLogs);
-      setLogs(`Logs exported to: ${path}`);
+      setLogs(`日志已导出到：${path}`);
     } catch (e) {
-      setLogs(`Export failed: ${String(e)}`);
+      setLogs(`导出失败：${String(e)}`);
     }
   }, []);
 
@@ -171,11 +179,11 @@ export default function SettingsView({
       });
       setLogs(
         format === "trace_viewer"
-          ? `Trace viewer trajectory exported to: ${path}`
-          : `Forge trajectory exported to: ${path}`,
+          ? `Trace Viewer 轨迹已导出到：${path}`
+          : `Forge 轨迹已导出到：${path}`,
       );
     } catch (e) {
-      setLogs(`Trajectory export failed: ${String(e)}`);
+      setLogs(`轨迹导出失败：${String(e)}`);
     }
   }, []);
 
@@ -193,80 +201,76 @@ export default function SettingsView({
       window.dispatchEvent(new CustomEvent<ProjectFileRestored>(Events.projectFileRestored, {
         detail: { kind: item.id },
       }));
-      setLogs(`${item.label} restored from ${backup.filename}`);
+      setLogs(`${item.label}已从 ${backup.filename} 恢复`);
       await refreshBackups();
     } catch (e) {
-      setLogs(`Restore failed: ${String(e)}`);
+      setLogs(`恢复失败：${String(e)}`);
     } finally {
       setRestoring(null);
     }
   }, [refreshBackups]);
 
-  const statusClass =
+  const statusTone =
     connectionState === "connected"
-      ? "border-success/30 bg-success/10 text-success"
+      ? "success"
       : connectionState === "error"
-        ? "border-danger/30 bg-danger/10 text-danger"
+        ? "danger"
         : connectionState === "saving" || connectionState === "checking"
-          ? "border-warning/30 bg-warning/10 text-warning"
-          : "border-border-subtle bg-bg-deep text-text-muted";
+          ? "warning"
+          : "";
   const primaryLabel =
     connectionState === "saving"
-      ? "Connecting..."
+      ? "正在保存..."
       : hasKey && !apiKey.trim()
-        ? mode === "onboarding" ? "Continue" : "Connected"
-        : "Connect";
+        ? mode === "onboarding" ? "进入写作" : "已连接"
+        : "保存并进入写作";
 
   return (
-    <div className={`flex h-full flex-col overflow-y-auto ${mode === "onboarding" ? "" : "p-4"}`}>
+    <div className={`forge-settings-view ${mode === "onboarding" ? "onboarding" : "panel"}`}>
       {mode === "panel" && (
-        <div className="mb-4">
-          <h2 className="font-display text-sm font-medium tracking-wide text-text-primary">
-            Settings
-          </h2>
-          <p className="mt-1 text-xs text-text-muted">
-            Model connection and local maintenance.
-          </p>
+        <div>
+          <h2 className="forge-settings-title">设置</h2>
+          <p className="forge-settings-subtitle">模型连接与本机维护。</p>
         </div>
       )}
 
-      <section className="rounded-xl border border-border-subtle bg-bg-raised/80 p-4 shadow-sm">
-        <div className="mb-4 flex items-start justify-between gap-3">
+      <section className="forge-settings-card">
+        <div className="forge-settings-card-header">
           <div>
-            <div className="text-sm font-medium text-text-primary">Connect your model</div>
-            <p className="mt-1 text-xs leading-relaxed text-text-muted">
-              Forge uses an OpenAI-compatible endpoint. The key stays on this device.
+            <div className="forge-settings-card-title">模型密钥</div>
+            <p className="forge-settings-card-description">
+              Forge 使用 OpenAI 兼容接口，密钥只保存在这台电脑上。
             </p>
           </div>
-          <div className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] ${statusClass}`}>
+          <div className={`forge-status-badge ${statusTone}`}>
             {connectionState === "connected"
-              ? "Connected"
+              ? "已连接"
               : connectionState === "saving"
-                ? "Saving"
+                ? "保存中"
                 : connectionState === "checking"
-                  ? "Checking"
+                  ? "检查中"
                   : connectionState === "error"
-                    ? "Action needed"
-                    : "Not connected"}
+                    ? "需要处理"
+                    : "未连接"}
           </div>
         </div>
 
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-accent/25 bg-accent-subtle p-3">
-            <div className="text-xs font-medium text-text-primary">OpenRouter compatible</div>
-            <div className="mt-1 text-[10px] text-text-muted">Default desktop runtime</div>
+        <div className="forge-provider-summary">
+          <div>
+            <div className="forge-card-title">兼容 OpenAI / OpenRouter</div>
+            <div className="forge-card-description">粘贴密钥即可连接当前模型运行时。</div>
           </div>
-          <div className="rounded-lg border border-border-subtle bg-bg-deep p-3">
-            <div className="text-xs font-medium text-text-secondary">Stored locally</div>
-            <div className="mt-1 text-[10px] text-text-muted">{keychainLabel()}</div>
+          <div>
+            <div className="forge-card-title">本机保存</div>
+            <div className="forge-card-description">{keychainLabel()}</div>
           </div>
         </div>
 
-        <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-          API key
+        <label className="forge-label">
+          密钥
         </label>
-        <div className="flex gap-2">
-          <div className="relative min-w-0 flex-1">
+        <div className="forge-secret-row">
+          <div className="forge-secret-input-wrap">
             <input
               type={showSecret ? "text" : "password"}
               value={apiKey}
@@ -274,116 +278,144 @@ export default function SettingsView({
               onKeyDown={(e) => {
                 if (e.key === "Enter") void handleSave();
               }}
-              placeholder={hasKey ? "Key stored. Paste a new key to replace it." : "sk-or-v1-..."}
-              className="h-10 w-full rounded-lg border border-border-subtle bg-bg-deep px-3 pr-16 text-sm text-text-primary placeholder-text-muted outline-none transition-colors focus:border-accent/60"
+              placeholder={hasKey ? "已保存密钥。粘贴新密钥可替换。" : "sk-or-v1-..."}
+              className="forge-field"
             />
             <button
               type="button"
               onClick={() => setShowSecret((value) => !value)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-[10px] text-text-muted hover:bg-bg-raised hover:text-text-primary"
+              className="forge-secret-toggle"
             >
-              {showSecret ? "Hide" : "Show"}
+              {showSecret ? "隐藏" : "显示"}
             </button>
           </div>
-          <button
-            type="button"
-            onClick={handlePaste}
-            className="forge-btn forge-btn-secondary h-10"
-          >
-            Paste
+          <button type="button" onClick={handlePaste} className="forge-btn forge-btn-secondary forge-btn-large">
+            粘贴
           </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="forge-connect-actions">
           <button
             type="button"
             onClick={handleSave}
             disabled={connectionState === "saving" || (hasKey === true && !apiKey.trim() && mode === "panel")}
-            className="forge-btn forge-btn-primary h-9 px-4"
+            className="forge-btn forge-btn-primary forge-btn-large"
           >
             {primaryLabel}
           </button>
-          <button
-            type="button"
-            onClick={handleVerify}
-            disabled={verifying}
-            className="forge-btn forge-btn-secondary h-9"
-          >
-            {verifying ? "Checking..." : "Check saved key"}
-          </button>
+          {mode === "onboarding" && (
+            <span className="forge-inline-help">
+              粘贴后按 Enter 也可以保存。
+            </span>
+          )}
         </div>
 
-        <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${statusClass}`}>
+        <div className={`forge-status-message ${statusTone}`}>
           {statusMessage}
         </div>
       </section>
 
-      {mode === "panel" && (
+      <section className="forge-settings-card">
+        <div className="forge-settings-card-header">
+          <div>
+            <div className="forge-settings-card-title">界面外观</div>
+            <p className="forge-settings-card-description">
+              主题会立即应用，并保存在这台电脑上。
+            </p>
+          </div>
+        </div>
+
+        <div className="forge-theme-grid" role="group" aria-label="主题">
+          {FORGE_THEMES.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`forge-theme-option ${theme === item.value ? "active" : ""}`}
+              onClick={() => onThemeChange(item.value)}
+              aria-pressed={theme === item.value}
+            >
+              <span className={`forge-theme-swatch ${item.value}`} aria-hidden="true" />
+              <span>
+                <strong>{item.label}</strong>
+                <small>{item.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {(mode === "panel" || hasKey) && (
         <details
-          className="mt-4 rounded-xl border border-border-subtle bg-bg-surface"
+          className="forge-settings-details"
           open={advancedOpen}
           onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
         >
-          <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-text-secondary hover:text-text-primary">
-            Advanced maintenance
-          </summary>
-          <div className="space-y-4 border-t border-border-subtle p-4">
-            <div className="flex flex-wrap gap-2">
+          <summary>高级维护</summary>
+          <div className="forge-settings-details-body">
+            <div className="forge-maintenance-actions">
+              <button
+                type="button"
+                onClick={handleVerify}
+                disabled={verifying}
+                className="forge-btn forge-btn-secondary"
+              >
+                {verifying ? "检查中..." : "检查已保存密钥"}
+              </button>
               <button
                 type="button"
                 onClick={handleExportLogs}
                 className="forge-btn forge-btn-secondary"
               >
-                Export logs
+                导出日志
               </button>
               <button
                 type="button"
                 onClick={() => handleExportTrajectory()}
                 className="forge-btn forge-btn-secondary"
               >
-                Export Forge trace
+                导出 Forge 轨迹
               </button>
               <button
                 type="button"
                 onClick={() => handleExportTrajectory("trace_viewer")}
                 className="forge-btn forge-btn-secondary"
               >
-                Export trace viewer JSONL
+                导出 Trace Viewer JSONL
               </button>
             </div>
 
-            <div className="space-y-2 border-t border-border-subtle pt-4">
+            <div>
               <div>
-                <h3 className="text-xs font-medium text-text-primary">Recovery</h3>
-                <p className="mt-1 text-[10px] text-text-muted">
-                  Restore project support files from bounded local backups.
+                <h3 className="forge-card-title">恢复</h3>
+                <p className="forge-card-description">
+                  从本机备份恢复项目辅助文件。
                 </p>
               </div>
-              <div className="space-y-2">
+              <div className="forge-recovery-grid">
                 {RECOVERY_TARGETS.map((item) => {
                   const rows = backups[item.id] ?? [];
                   return (
-                    <div key={item.id} className="rounded-lg border border-border-subtle bg-bg-raised p-2">
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <span className="text-xs text-text-secondary">{item.label}</span>
-                        <span className="font-mono text-[10px] text-text-muted">{rows.length}</span>
+                    <div key={item.id} className="forge-recovery-card">
+                      <div className="forge-recovery-card-header">
+                        <span>{item.label}</span>
+                        <span className="text-mono forge-muted">{rows.length}</span>
                       </div>
                       {rows.length === 0 ? (
-                        <div className="text-[10px] text-text-muted">No backups yet.</div>
+                        <div className="forge-muted">暂无备份。</div>
                       ) : (
-                        <div className="space-y-1">
+                        <div className="forge-backup-list">
                           {rows.slice(0, 3).map((backup) => {
                             const restoreKey = `${item.id}:${backup.id}`;
                             return (
                               <div
                                 key={backup.id}
-                                className="flex items-center justify-between gap-2 rounded-md bg-bg-deep px-2 py-1"
+                                className="forge-backup-row"
                               >
-                                <div className="min-w-0">
-                                  <div className="truncate text-[10px] text-text-secondary" title={backup.filename}>
+                                <div className="truncate">
+                                  <div className="truncate" title={backup.filename}>
                                     {formatTime(backup.modifiedAt)}
                                   </div>
-                                  <div className="font-mono text-[10px] text-text-muted">
+                                  <div className="text-mono forge-muted">
                                     {formatBytes(backup.bytes)}
                                   </div>
                                 </div>
@@ -391,9 +423,9 @@ export default function SettingsView({
                                   type="button"
                                   onClick={() => handleRestore(item, backup)}
                                   disabled={restoring === restoreKey}
-                                  className="shrink-0 rounded-md border border-border-subtle px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent disabled:opacity-50"
+                                  className="forge-btn forge-btn-ghost forge-btn-compact"
                                 >
-                                  {restoring === restoreKey ? "..." : "Restore"}
+                                  {restoring === restoreKey ? "..." : "恢复"}
                                 </button>
                               </div>
                             );
@@ -407,7 +439,7 @@ export default function SettingsView({
             </div>
 
             {logs && (
-              <div className="rounded-lg border border-border-subtle bg-bg-deep p-2 font-mono text-xs text-text-muted">
+              <div className="forge-log-box">
                 {logs}
               </div>
             )}

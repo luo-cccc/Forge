@@ -129,8 +129,12 @@ pub(crate) fn store_api_key(provider: &str, key: &str) -> Result<(), String> {
 
     match keyring_result {
         Ok(()) => {
-            remove_api_key_fallback(&provider);
-            Ok(())
+            if load_api_key_from_keychain(&provider).as_deref() == Some(key.as_str()) {
+                remove_api_key_fallback(&provider);
+                Ok(())
+            } else {
+                write_api_key_fallback(&provider, &key, "keyring readback failed after save")
+            }
         }
         Err(error) => write_api_key_fallback(&provider, &key, &error),
     }

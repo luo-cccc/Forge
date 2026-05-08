@@ -6,6 +6,7 @@ import {
   Commands,
   Events,
   type AgentError,
+  type AgentMode,
   type AskAgentContextPayload,
   type AskProjectBrainPayload,
   type AgentLoopEventPayload,
@@ -369,7 +370,7 @@ export default function AgentPanel({
             const kind = activeExploreRequest.kind;
             setPendingProviderBudgetRetry({
               kind,
-              label: kind === "project_brain" ? "Project Brain" : "Manual request",
+              label: kind === "project_brain" ? "项目大脑" : "手动请求",
               budget,
               retry:
                 activeExploreRequest.kind === "project_brain"
@@ -554,7 +555,7 @@ export default function AgentPanel({
       (pendingChapterDraftRetry
         ? {
             kind: "chapter_generation" as const,
-            label: "Chapter generation",
+            label: "章节生成",
             budget: pendingChapterDraftRetry.budget,
             retry: { payload: pendingChapterDraftRetry.payload },
           }
@@ -636,7 +637,7 @@ export default function AgentPanel({
         ...prev,
         {
           role: "agent",
-          content: `Provider budget approved for ${pending.budget.estimatedTotalTokens} tokens; retrying ${pending.label}.`,
+          content: `已批准 ${pending.budget.estimatedTotalTokens} tokens 的供应商预算，正在重试 ${pending.label}。`,
         },
       ]);
     } catch (e) {
@@ -661,16 +662,21 @@ export default function AgentPanel({
     (pendingChapterDraftRetry
       ? {
           kind: "chapter_generation" as const,
-          label: "Chapter generation",
+          label: "章节生成",
           budget: pendingChapterDraftRetry.budget,
           retry: { payload: pendingChapterDraftRetry.payload },
         }
       : null);
+  const agentModeLabel = (mode: AgentMode) => {
+    if (mode === "off") return "关闭";
+    if (mode === "passive") return "被动";
+    return "主动";
+  };
 
   return (
     <div className="flex flex-col h-full border-l border-border-subtle">
       <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider flex items-center justify-between">
-        <span>{brainMode ? "Project Brain" : "Explore Lab"}</span>
+        <span>{brainMode ? "项目大脑" : "项目问答"}</span>
         <div className="flex items-center gap-1">
           {(["off", "passive", "proactive"] as const).map((mode) => (
             <button
@@ -682,7 +688,7 @@ export default function AgentPanel({
                   : "bg-bg-raised text-text-muted border border-border-subtle"
               }`}
             >
-              {mode}
+              {agentModeLabel(mode)}
             </button>
           ))}
           <button
@@ -693,7 +699,7 @@ export default function AgentPanel({
                 : "bg-bg-raised text-text-muted border border-border-subtle"
             }`}
           >
-            {brainMode ? "Brain" : "Draft Lab"}
+            {brainMode ? "大脑" : "问答"}
           </button>
         </div>
       </div>
@@ -703,23 +709,23 @@ export default function AgentPanel({
           <div className="flex items-center justify-between gap-2">
             <span className="text-text-secondary">伴生面板</span>
             <span className={agentMode === "proactive" ? "text-accent" : "text-text-muted"}>
-              {agentMode}
+              {agentModeLabel(agentMode)}
             </span>
           </div>
           {latestObservation ? (
             <div className="space-y-1">
               <div className="truncate">
-                Last observation: {latestObservation.reason} · idle {latestObservation.idleMs}ms
+                最近观察：{latestObservation.reason} · 空闲 {latestObservation.idleMs}ms
               </div>
               <div className="truncate">
-                Paragraph: {latestObservation.currentParagraph || "empty"}
+                段落：{latestObservation.currentParagraph || "空"}
               </div>
             </div>
           ) : (
-            <div>No editor observation yet.</div>
+            <div>暂无编辑器观察。</div>
           )}
           <div>
-            Suggestions queued: {suggestionQueue.length}
+            建议队列：{suggestionQueue.length}
             {snoozedUntil && snoozedUntil > Date.now()
               ? ` · snoozed until ${new Date(snoozedUntil).toLocaleTimeString()}`
               : ""}
@@ -762,7 +768,7 @@ export default function AgentPanel({
         )}
         {messages.length === 0 && !streaming && !searchStatus && (
           <div className="rounded-sm border border-border-subtle bg-bg-raised px-3 py-2 text-xs text-text-muted">
-            Explore mode is for deliberate drafting and project questions. Chapter draft requests stay here instead of the writing surface.
+            项目问答用于分支草稿、设定追问和项目问题；不会直接污染正文创作区。
           </div>
         )}
         {messages.map((msg, i) => (
@@ -788,7 +794,7 @@ export default function AgentPanel({
               >
                 <span className="text-sm">💡</span>
                 <span className="flex-1">
-                  <span className="text-purple-300 font-medium">Learned: </span>
+                  <span className="text-purple-300 font-medium">已学习：</span>
                   {ep.skill}
                 </span>
                 <span className="text-[10px] text-purple-400 px-1.5 py-0.5 rounded-sm bg-purple-500/15">
@@ -840,33 +846,33 @@ export default function AgentPanel({
                   {event.message}
                   {event.budget && (
                     <span className="block text-[10px] text-text-muted">
-                      {event.budget.sourceCount} sources · {event.budget.includedChars}/{event.budget.maxChars} chars
+                      {event.budget.sourceCount} 个来源 · {event.budget.includedChars}/{event.budget.maxChars} 字符
                     </span>
                   )}
                   {event.intentArtifact?.goal && (
                     <span className="block text-[10px] text-text-muted">
-                      Goal · {event.intentArtifact.goal}
+                      目标 · {event.intentArtifact.goal}
                     </span>
                   )}
                   {event.lengthTelemetry && (
                     <span className="block text-[10px] text-text-muted">
-                      Length · draft {event.lengthTelemetry.draftChars ?? "-"} → final {event.lengthTelemetry.finalChars ?? "-"}
-                      {event.lengthTelemetry.continuationApplied ? " · cont" : ""}
-                      {event.lengthTelemetry.compressApplied ? " · compress" : ""}
-                      {event.lengthTelemetry.hardCompressApplied ? " · hard" : ""}
+                      长度 · 草稿 {event.lengthTelemetry.draftChars ?? "-"} → 最终 {event.lengthTelemetry.finalChars ?? "-"}
+                      {event.lengthTelemetry.continuationApplied ? " · 已续补" : ""}
+                      {event.lengthTelemetry.compressApplied ? " · 已压缩" : ""}
+                      {event.lengthTelemetry.hardCompressApplied ? " · 强压缩" : ""}
                     </span>
                   )}
                   {event.settlementApply && (
                     <span className="block text-[10px] text-text-muted">
-                      Settlement · result {event.settlementApply.chapterResultSnapshotId ?? "-"}
-                      {event.settlementApply.promiseCreated ? ` · +${event.settlementApply.promiseCreated} promise` : ""}
-                      {event.settlementApply.promiseResolved ? ` · ${event.settlementApply.promiseResolved} resolved` : ""}
-                      {event.settlementApply.bookStateUpdated ? " · book state" : ""}
+                      结算 · 结果 {event.settlementApply.chapterResultSnapshotId ?? "-"}
+                      {event.settlementApply.promiseCreated ? ` · +${event.settlementApply.promiseCreated} 伏笔` : ""}
+                      {event.settlementApply.promiseResolved ? ` · ${event.settlementApply.promiseResolved} 已兑现` : ""}
+                      {event.settlementApply.bookStateUpdated ? " · 全书状态" : ""}
                     </span>
                   )}
                   {event.artifactRefs?.length ? (
                     <span className="block text-[10px] text-text-muted">
-                      Artifacts · {event.artifactRefs.length}
+                      产物 · {event.artifactRefs.length}
                     </span>
                   ) : null}
                 </span>
@@ -878,7 +884,7 @@ export default function AgentPanel({
           <div className="text-xs max-w-[90%] rounded-sm px-3 py-2 bg-accent-subtle/30 border border-accent/30 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium text-accent">
-                Provider budget approval · {visibleProviderBudgetRetry.label}
+                供应商预算审批 · {visibleProviderBudgetRetry.label}
               </span>
               <span className="font-mono text-[10px] text-text-muted">
                 {visibleProviderBudgetRetry.budget.decision}
@@ -892,7 +898,7 @@ export default function AgentPanel({
                 </span>
               </div>
               <div className="rounded bg-bg-deep p-2">
-                <span className="block text-[10px] text-text-muted">Estimated Cost</span>
+                <span className="block text-[10px] text-text-muted">预估成本</span>
                 <span className="font-mono text-text-primary">
                   {formatProviderCostMicros(visibleProviderBudgetRetry.budget.estimatedCostMicros)}
                 </span>
@@ -900,7 +906,7 @@ export default function AgentPanel({
             </div>
             <p className="line-clamp-2 text-text-secondary">
               {visibleProviderBudgetRetry.budget.reasons[0] ??
-                "This provider call needs explicit approval before retrying."}
+                "这次模型调用需要明确批准后才能重试。"}
             </p>
             {visibleProviderBudgetRetry.budget.remediation[0] && (
               <p className="line-clamp-2 text-[10px] text-text-muted">
@@ -913,7 +919,7 @@ export default function AgentPanel({
                 disabled={isStreaming}
                 className="rounded-sm bg-accent px-2 py-1 text-[11px] text-bg-deep disabled:opacity-50"
               >
-                Approve and Retry
+                批准并重试
               </button>
               <button
                 onClick={() => {
@@ -922,19 +928,19 @@ export default function AgentPanel({
                 }}
                 className="rounded-sm border border-border-subtle bg-bg-deep px-2 py-1 text-[11px] text-text-muted hover:text-text-secondary"
               >
-                Dismiss
+                关闭
               </button>
             </div>
           </div>
         )}
         {agentError && (
           <div className="text-sm max-w-[90%] rounded-sm px-3 py-2 bg-danger/20 border border-danger text-danger whitespace-pre-wrap flex items-center gap-3">
-            <span>{agentError}</span>
+            <span>{agentError.replace(/^Error:/, "错误：")}</span>
             <button
               onClick={handleRetry}
               className="text-xs px-2 py-0.5 rounded-sm bg-danger text-white hover:bg-danger/80 transition-colors flex-shrink-0"
             >
-              Retry
+              重试
             </button>
           </div>
         )}
@@ -944,7 +950,7 @@ export default function AgentPanel({
               ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
               : "bg-accent-subtle border border-accent text-accent"
           }`}>
-            Searching lorebook: <span className="font-medium">{searchStatus.keyword}</span>...
+            正在检索设定库：<span className="font-medium">{searchStatus.keyword}</span>...
           </div>
         )}
         {streaming && (
@@ -962,7 +968,7 @@ export default function AgentPanel({
           onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
           disabled={isStreaming}
           className="w-full px-3 py-2 rounded-sm bg-bg-deep border border-border-subtle text-text-primary placeholder-text-muted focus:outline-none focus:border-accent text-sm disabled:opacity-50"
-          placeholder={brainMode ? "Ask Project Brain..." : "Explore a draft, branch, or chapter..."}
+          placeholder={brainMode ? "询问项目大脑..." : "询问草稿、分支或章节..."}
         />
       </div>
     </div>

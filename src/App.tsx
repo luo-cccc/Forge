@@ -9,6 +9,12 @@ import { CompanionPanel } from "./components/CompanionPanel";
 import ProjectTree from "./components/ProjectTree";
 import { WriterInspectorPanel } from "./components/WriterInspectorPanel";
 import SettingsView from "./components/SettingsView";
+import {
+  DEFAULT_FORGE_THEME,
+  FORGE_THEME_STORAGE_KEY,
+  isForgeTheme,
+  type ForgeTheme,
+} from "./uiPreferences";
 
 interface SelectionState {
   from: number;
@@ -45,6 +51,15 @@ function docPositionFromTextCharIndex(editor: Editor, targetCharIndex: number): 
   return Math.max(0, Math.min(position, editor.state.doc.content.size));
 }
 
+async function checkConfiguredApiKey(): Promise<boolean> {
+  try {
+    return await invoke<boolean>(Commands.checkApiKey, { provider: "openai" });
+  } catch (error) {
+    console.error("API key check failed:", error);
+    return false;
+  }
+}
+
 function App() {
   const editorRef = useRef<Editor | null>(null);
   const selectionRef = useRef<SelectionState>({ from: 0, to: 0, text: "" });
@@ -54,23 +69,45 @@ function App() {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const setCurrentChapter = useAppStore((s) => s.setCurrentChapter);
   const setCurrentChapterRevision = useAppStore((s) => s.setCurrentChapterRevision);
+  const isEditorDirty = useAppStore((s) => s.isEditorDirty);
   const setIsEditorDirty = useAppStore((s) => s.setIsEditorDirty);
   const isAgentThinking = useAppStore((s) => s.isAgentThinking);
   const setIsAgentThinking = useAppStore((s) => s.setIsAgentThinking);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [companionCollapsed, setCompanionCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [companionCollapsed, setCompanionCollapsed] = useState(true);
+  const [theme, setTheme] = useState<ForgeTheme>(() => {
+    if (typeof window === "undefined") return DEFAULT_FORGE_THEME;
+    const storedTheme = window.localStorage.getItem(FORGE_THEME_STORAGE_KEY);
+    return isForgeTheme(storedTheme) ? storedTheme : DEFAULT_FORGE_THEME;
+  });
 
-  useEffect(() => {
-    invoke<boolean>(Commands.checkApiKey, { provider: "openai" })
-      .then((v: unknown) => setHasApiKey(v as boolean))
-      .catch(() => setHasApiKey(false));
+  const handleSettingsConfigured = useCallback(() => {
+    setHasApiKey(true);
+    setShowSettings(false);
+  }, []);
+
+  const handleThemeChange = useCallback((nextTheme: ForgeTheme) => {
+    setTheme(nextTheme);
+    window.localStorage.setItem(FORGE_THEME_STORAGE_KEY, nextTheme);
   }, []);
 
   useEffect(() => {
-    if (hasApiKey === false) setShowSettings(true);
-  }, [hasApiKey]);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void checkConfiguredApiKey().then((ok) => {
+      if (cancelled) return;
+      setHasApiKey(ok);
+      setShowSettings(!ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleEditorReady = useCallback(async (editor: Editor) => {
     editorRef.current = editor;
@@ -81,7 +118,7 @@ function App() {
     }
     try {
       const content = await invoke<string>(Commands.loadChapter, { title: "Chapter-1" });
-      editor.commands.setContent(content || "<p>Start writing...</p>");
+      editor.commands.setContent(content || "<p>开始写作...</p>");
       const revision = await invoke<string>(Commands.getChapterRevision, { title: "Chapter-1" });
       setCurrentChapterRevision(revision);
       setIsEditorDirty(false);
@@ -138,7 +175,7 @@ function App() {
         try {
           await invoke(Commands.createChapter, { title });
           if (editorRef.current) {
-            editorRef.current.commands.setContent("<p>Start writing...</p>");
+            editorRef.current.commands.setContent("<p>开始写作...</p>");
           }
           const revision = await invoke<string>(Commands.getChapterRevision, { title });
           setCurrentChapterRevision(revision);
@@ -176,14 +213,14 @@ function App() {
   ): Promise<ApplyWriterOperationResult> => {
     const editor = editorRef.current;
     if (!editor) {
-      return { applied: false, saved: false, error: "Editor is not ready." };
+      return { applied: false, saved: false, error: "编辑器尚未准备好。" };
     }
 
     if ("chapter" in operation && operation.chapter !== currentChapter) {
       return {
         applied: false,
         saved: false,
-        error: `Operation targets ${operation.chapter}, but the open chapter is ${currentChapter}.`,
+        error: `操作目标是 ${operation.chapter}，但当前打开的是 ${currentChapter}。`,
       };
     }
 
@@ -210,7 +247,7 @@ function App() {
         break;
       }
       default:
-        return { applied: false, saved: false, error: `Unsupported operation kind: ${operation.kind}` };
+        return { applied: false, saved: false, error: `暂不支持这种操作：${operation.kind}` };
     }
 
     setIsEditorDirty(true);
@@ -240,7 +277,7 @@ function App() {
       }).catch((error) => {
         console.error("Failed to record operation save failure:", error);
       });
-      return { applied: true, saved: false, error: `Save failed: ${String(e)}` };
+      return { applied: true, saved: false, error: `保存失败：${String(e)}` };
     }
   }, [currentChapter, setCurrentChapterRevision, setIsEditorDirty]);
 
@@ -279,87 +316,192 @@ function App() {
     return { full, paragraph, selected, cursorPosition };
   }, []);
 
-  if (showSettings) {
+  if (hasApiKey === null && !showSettings) {
     return (
-      <div className="forge-overlay">
-        <div className="forge-overlay-inner">
-          <h2 style={{fontSize:'var(--text-xl)',fontWeight:600,marginBottom:'var(--space-2)',color:'var(--fg-text-primary)'}}>Welcome to Forge</h2>
-          <p style={{color:'var(--fg-text-secondary)',marginBottom:'var(--space-6)'}}>Connect a model to start writing. Your API key stays in the system keychain.</p>
-          <SettingsView />
-          <button className="forge-btn forge-btn-primary" style={{marginTop:'var(--space-4)'}} onClick={() => { setShowSettings(false); invoke(Commands.checkApiKey, { provider: "openai" }).then((v: unknown) => setHasApiKey(v as boolean)).catch(() => setHasApiKey(false)); }}>Done</button>
+      <div className="forge-overlay" data-theme={theme}>
+        <div className="forge-boot-card">
+          <div className="forge-brand-mark">F</div>
+          <h1>正在打开 Forge</h1>
+          <p>正在检查本机模型配置...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (showSettings) {
+    const isOnboarding = hasApiKey !== true;
+    return (
+      <div className="forge-overlay" data-theme={theme}>
+        <div className={isOnboarding ? "forge-onboarding-shell" : "forge-settings-shell"}>
+          <header className="forge-onboarding-header">
+            <div>
+              <div className="forge-brand-mark">F</div>
+              <h1>{isOnboarding ? "连接 Forge" : "设置"}</h1>
+              <p>
+                {isOnboarding
+                  ? "只需要配置一次模型密钥。Forge 会把密钥保存在本机，保存成功后直接进入写作界面。"
+                  : "模型连接、诊断日志和本地恢复工具。"}
+              </p>
+            </div>
+            {!isOnboarding && (
+              <button
+                className="forge-btn forge-btn-secondary"
+                onClick={() => setShowSettings(false)}
+              >
+                关闭
+              </button>
+            )}
+          </header>
+          <SettingsView
+            mode={isOnboarding ? "onboarding" : "panel"}
+            onConfigured={handleSettingsConfigured}
+            theme={theme}
+            onThemeChange={handleThemeChange}
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="forge-root">
-      {/* Activity Bar */}
-      <nav className="forge-activity-bar">
-        <button className="forge-activity-btn active" title="Chapters">📄</button>
-        <button className="forge-activity-btn" title="Settings" onClick={() => setShowSettings(true)}>⚙</button>
-      </nav>
-
-      {/* Sidebar */}
-      <aside className={`forge-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <div className="forge-sidebar-header">
-          <span>Chapters</span>
-          <button className="forge-btn-ghost" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{fontSize:10,padding:'0 4px'}}>◁</button>
-        </div>
-        <div className="forge-sidebar-body">
-          <ProjectTree onSelectChapter={handleSelectChapter} editorRef={editorRef} onApplyFix={handleApplyFix} />
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div className={`forge-main ${sidebarCollapsed ? '' : 'sidebar-open'}`}>
-        <div className="forge-editor-area">
-          {/* Tab Bar */}
-          <div className="forge-tab-bar">
-            <div className="forge-tab active">{currentChapter}</div>
-            <button className="forge-btn-ghost" onClick={handleGenerate} style={{marginLeft:'auto',height:26,fontSize:'var(--text-xs)'}}>
-              {isAgentThinking ? '⏳' : '+ Generate'}
-            </button>
-            <button className="forge-btn-ghost" onClick={() => setCompanionCollapsed(!companionCollapsed)} style={{height:26,fontSize:'var(--text-xs)'}}>
-              {companionCollapsed ? '◁' : '▷'}
-            </button>
-          </div>
-          {/* Editor */}
-          <div className="forge-editor-body">
-            <EditorPanel onEditorReady={handleEditorReady} onSelectionUpdate={handleSelectionUpdate} />
+    <div className="forge-root" data-theme={theme}>
+      <header className="forge-titlebar">
+        <div className="forge-titlebar-left">
+          <div className="forge-title-lockup">
+            <span className="forge-brand-dot">F</span>
+            <div>
+              <strong>Forge</strong>
+              <span>中文小说创作</span>
+            </div>
           </div>
         </div>
+        <div className="forge-titlebar-center">
+          <span className="forge-titlebar-chapter">{currentChapter}</span>
+          <span className={`forge-save-pill ${isEditorDirty ? "dirty" : ""}`}>
+            {isEditorDirty ? "未保存" : "已保存"}
+          </span>
+        </div>
+        <div className="forge-titlebar-actions">
+          <button
+            className="forge-btn forge-btn-primary"
+            onClick={handleGenerate}
+            disabled={isAgentThinking}
+          >
+            {isAgentThinking ? "续写中..." : "续写正文"}
+          </button>
+          <button
+            className="forge-btn forge-btn-ghost"
+            onClick={() => setShowSettings(true)}
+          >
+            设置
+          </button>
+        </div>
+      </header>
 
-        {/* Companion */}
+      <div className="forge-shell">
+        <nav className="forge-rail" aria-label="主要导航">
+          <button
+            className={`forge-rail-btn ${!sidebarCollapsed ? "active" : ""}`}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-pressed={!sidebarCollapsed}
+          >
+            章节
+          </button>
+          {([
+            ["write", "续写"],
+            ["review", "审稿"],
+            ["explore", "项目"],
+            ["inspect", "检查"],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              className={`forge-rail-btn ${!companionCollapsed && storyMode === mode ? "active" : ""}`}
+              onClick={() => {
+                setStoryMode(mode);
+                setCompanionCollapsed((value) => (storyMode === mode ? !value : false));
+              }}
+              aria-pressed={!companionCollapsed && storyMode === mode}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <aside className={`forge-sidebar forge-floating-panel ${sidebarCollapsed ? "collapsed" : ""}`}>
+          <div className="forge-panel-header">
+            <div>
+              <span className="forge-panel-kicker">项目</span>
+              <strong>章节与大纲</strong>
+            </div>
+            <button
+              className="forge-btn forge-btn-ghost forge-btn-compact"
+              onClick={() => setSidebarCollapsed(true)}
+            >
+              关闭
+            </button>
+          </div>
+          <div className="forge-sidebar-body">
+            <ProjectTree onSelectChapter={handleSelectChapter} editorRef={editorRef} onApplyFix={handleApplyFix} />
+          </div>
+        </aside>
+
+        <main className="forge-main">
+          <div className="forge-editor-area">
+            <div className="forge-editor-body">
+              <EditorPanel onEditorReady={handleEditorReady} onSelectionUpdate={handleSelectionUpdate} />
+            </div>
+          </div>
+        </main>
+
         {!companionCollapsed && (
-          <aside className="forge-companion">
-            <div className="forge-mode-row">
-              {(["write","review","explore","inspect"] as const).map(m => (
-                <button key={m} className={`forge-mode-btn ${storyMode===m?'active':''}`} onClick={()=>setStoryMode(m)}>
-                  {m==="write"?"Write":m==="review"?"Review":m==="explore"?"Explore":"Inspect"}
+          <aside className="forge-companion forge-floating-panel">
+            <div className="forge-panel-header">
+              <div>
+                <span className="forge-panel-kicker">助手</span>
+                <strong>
+                  {storyMode === "write"
+                    ? "续写辅助"
+                    : storyMode === "review"
+                      ? "审稿队列"
+                      : storyMode === "explore"
+                        ? "项目问答"
+                        : "运行检查"}
+                </strong>
+              </div>
+              <button
+                className="forge-btn forge-btn-ghost forge-btn-compact"
+                onClick={() => setCompanionCollapsed(true)}
+              >
+                关闭
+              </button>
+            </div>
+            <div className="forge-mode-row" aria-label="助手模式">
+              {([
+                ["write", "续写"],
+                ["review", "审稿"],
+                ["explore", "项目"],
+                ["inspect", "检查"],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  className={`forge-mode-btn ${storyMode === mode ? "active" : ""}`}
+                  onClick={() => setStoryMode(mode)}
+                >
+                  {label}
                 </button>
               ))}
             </div>
-            {storyMode==="inspect"
-              ? <WriterInspectorPanel getContext={getContext} />
-              : <CompanionPanel mode={storyMode} onApplyOperation={handleApplyWriterOperation} />
-            }
-            {storyMode==="explore" && <AgentPanel mode={storyMode} getContext={getContext} />}
+            <div className="forge-companion-body">
+              {storyMode === "inspect"
+                ? <WriterInspectorPanel getContext={getContext} />
+                : storyMode === "explore"
+                  ? <AgentPanel mode={storyMode} getContext={getContext} />
+                  : <CompanionPanel mode={storyMode} onApplyOperation={handleApplyWriterOperation} />
+              }
+            </div>
           </aside>
         )}
       </div>
-
-      {/* Status Bar */}
-      <footer className="forge-statusbar">
-        <div className="forge-statusbar-left">
-          <span>{isAgentThinking ? 'Generating…' : 'Ready'}</span>
-          <span>·</span>
-          <span>332 gates</span>
-        </div>
-        <div className="forge-statusbar-right">
-          <span>local &lt;5ms</span>
-        </div>
-      </footer>
     </div>
   );
 }

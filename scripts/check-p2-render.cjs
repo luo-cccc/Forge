@@ -61,8 +61,8 @@ try {
     }),
   );
 
-  assertIncludes(html, "Writing Companion");
-  assertIncludes(html, "What It Is Guarding");
+  assertIncludes(html, "写作助手");
+  assertIncludes(html, "正在守护的内容");
 
   const forbidden = [
     "Evidence Trace",

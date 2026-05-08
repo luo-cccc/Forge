@@ -79,7 +79,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
   return (
     <div className="border-b border-border-subtle bg-bg-surface">
       <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-secondary font-display tracking-wider flex items-center justify-between">
-        <span>Lorebook</span>
+        <span>设定库</span>
         <button
           onClick={onClose}
           className="text-text-muted hover:text-text-primary transition-colors"
@@ -90,7 +90,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
 
       <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
         {entries.length === 0 && (
-          <p className="text-text-muted text-xs">No entries yet. Add your first character or setting below.</p>
+          <p className="text-text-muted text-xs">暂无条目。可以先添加角色、地点或核心设定。</p>
         )}
         {entries.map((entry) => (
           <div key={entry.id} className="bg-bg-raised rounded-sm p-3 text-sm">
@@ -100,7 +100,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
                 onClick={() => handleDelete(entry.id)}
                 className="text-text-muted hover:text-danger text-xs transition-colors"
               >
-                Delete
+                删除
               </button>
             </div>
             <p className="text-text-secondary text-xs leading-relaxed">{entry.content}</p>
@@ -111,13 +111,13 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="Keyword (e.g. 林墨)"
+            placeholder="关键词，例如：林墨"
             className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent"
           />
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Description..."
+            placeholder="设定描述..."
             rows={3}
             className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent resize-none"
           />
@@ -125,7 +125,7 @@ export default function LorebookDrawer({ isOpen, onClose }: LorebookDrawerProps)
             onClick={handleAdd}
             className="w-full px-3 py-1.5 rounded-sm bg-accent hover:bg-accent/80 text-bg-deep text-xs transition-colors"
           >
-            Add Entry
+            添加条目
           </button>
         </div>
       </div>

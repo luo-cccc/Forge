@@ -81,12 +81,12 @@ type CompanionTone = "neutral" | "⚠️ 需要注意" | "📝 提个醒" | "✅
 
 function readinessText(tone: string | undefined): { text: string; color: string } {
   if (tone?.includes("需要注意")) {
-    return { text: "Needs attention", color: "text-warning" };
+    return { text: "需要注意", color: "text-warning" };
   }
   if (tone?.includes("提个醒")) {
-    return { text: "Ready with notes", color: "text-success" };
+    return { text: "可继续，有提示", color: "text-success" };
   }
-  return { text: "Ready", color: "text-success" };
+  return { text: "可以继续写", color: "text-success" };
 }
 
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
@@ -202,12 +202,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
     const result = await onApplyOperation?.(operation, proposalId);
     if (!result?.applied) {
-      setOperationError(result?.error ?? "The editor could not apply this operation.");
+      setOperationError(result?.error ?? "编辑器无法应用这次操作。");
       return false;
     }
 
     if (!result.saved) {
-      setOperationError(result.error ?? "The editor applied this operation, but it was not saved. Feedback was not recorded.");
+      setOperationError(result.error ?? "编辑器已应用这次修改，但保存失败，反馈不会写入记录。");
       return false;
     }
 
@@ -265,7 +265,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     setOperationError(null);
     const operation = primaryOperation(proposal);
     if (!operation) {
-      await recordFeedback(proposal.id, "accepted", proposal.preview, "Accepted proposal without executable operation.");
+      await recordFeedback(proposal.id, "accepted", proposal.preview, "作者接受了无可执行操作的建议。");
       return;
     }
 
@@ -284,7 +284,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       });
 
       if (!result.success) {
-        const message = result.error?.message ?? "Operation was rejected by the kernel.";
+        const message = result.error?.message ?? "内核拒绝了这次操作。";
         setOperationError(message);
         if (result.error?.code === "conflict") {
           await recordFeedback(proposal.id, "snoozed", undefined, message);
@@ -308,7 +308,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
     setOperationError(null);
     const operation = queuePrimaryOperation(entry);
     if (!operation) {
-      await recordFeedback(entry.proposalId, "accepted", entry.message, "Accepted queue item without executable operation.");
+      await recordFeedback(entry.proposalId, "accepted", entry.message, "作者接受了无可执行操作的队列项。");
       return;
     }
 
@@ -325,7 +325,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       });
 
       if (!result.success) {
-        const message = result.error?.message ?? "Operation was rejected by the kernel.";
+        const message = result.error?.message ?? "内核拒绝了这次操作。";
         setOperationError(message);
         if (result.error?.code === "conflict") {
           await recordFeedback(entry.proposalId, "snoozed", undefined, message);
@@ -358,7 +358,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         approval: operationApproval("story_review_queue", feedbackReason, entry.proposalId, nowMs),
       });
       if (!result.success) {
-        setOperationError(result.error?.message ?? "Operation was rejected by the kernel.");
+        setOperationError(result.error?.message ?? "内核拒绝了这次操作。");
         return;
       }
 
@@ -388,7 +388,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         ),
       });
       if (!result.success) {
-        setOperationError(result.error?.message ?? "Could not update this promise.");
+        setOperationError(result.error?.message ?? "无法更新这个伏笔。");
         return;
       }
       await refreshStatus();
@@ -410,7 +410,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         approval: operationApproval("story_debt", feedbackReason, entry.relatedReviewIds[0], nowMs),
       });
       if (!result.success) {
-        setOperationError(result.error?.message ?? "Could not apply this story debt action.");
+        setOperationError(result.error?.message ?? "无法应用这个故事债务动作。");
         return;
       }
 
@@ -435,7 +435,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
   const handleIgnoreDebtEntry = useCallback(async (entry: StoryDebtEntry) => {
     const proposalId = entry.relatedReviewIds[0]?.replace(/^review_/, "");
     if (proposalId) {
-      await recordFeedback(proposalId, "rejected", undefined, "Ignored from story debt summary.");
+      await recordFeedback(proposalId, "rejected", undefined, "已从故事债务摘要中忽略。");
     }
   }, [recordFeedback]);
 
@@ -490,7 +490,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
 
     if (operations.length === 0) {
       setFoundationSaveState("error");
-      setOperationError("Fill at least one Story Contract or Chapter Mission field before saving.");
+      setOperationError("保存前至少填写一个故事契约或本章任务字段。");
       return;
     }
 
@@ -507,7 +507,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           ),
         });
         if (!result.success) {
-          throw new Error(result.error?.message ?? "Foundation operation was rejected by the kernel.");
+          throw new Error(result.error?.message ?? "内核拒绝了地基保存操作。");
         }
       }
       setFoundationDirty(false);
@@ -592,14 +592,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
       <div className="border-b border-border-subtle px-4 py-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="font-display text-sm font-medium tracking-wide text-text-primary">
-            {mode === "write" ? "Writing Companion" : mode === "review" ? "Story Review" : "Agent Evidence"}
+            {mode === "write" ? "写作助手" : mode === "review" ? "审稿队列" : "助手证据"}
           </span>
           <span className={`w-2 h-2 rounded-full ${
             isAgentThinking ? "bg-accent animate-pulse" : "bg-success"
           }`} />
         </div>
         <div className="mb-2 text-[10px] text-text-muted">
-          {isAgentThinking ? "Generating" : "Idle"}
+          {isAgentThinking ? "正在生成" : "待命"}
         </div>
         {todayFiveSummary && (() => {
           const guardTone = todayFiveSummary.items[0]?.tone;
@@ -613,19 +613,19 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         {status && mode !== "write" && (
           <div className="grid grid-cols-2 gap-2 text-xs text-text-muted">
             <div>
-              <span className="block text-text-secondary">Observations</span>
+              <span className="block text-text-secondary">观察</span>
               <span className="font-mono">{status.observationCount}</span>
             </div>
             <div>
-              <span className="block text-text-secondary">Proposals</span>
+              <span className="block text-text-secondary">建议</span>
               <span className="font-mono">{status.proposalCount}</span>
             </div>
             <div>
-              <span className="block text-text-secondary">Open Promises</span>
+              <span className="block text-text-secondary">未回收伏笔</span>
               <span className="font-mono text-accent">{status.openPromiseCount}</span>
             </div>
             <div>
-              <span className="block text-text-secondary">Feedback</span>
+              <span className="block text-text-secondary">反馈</span>
               <span className="font-mono">{status.totalFeedbackEvents}</span>
             </div>
           </div>
@@ -669,7 +669,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           <div className="space-y-3">
             {mode !== "write" && agentMode !== "proactive" && (
               <div className="p-3 rounded bg-accent-subtle/30 border border-accent/20 text-xs text-text-secondary">
-                Agent is in {agentMode} mode. Switch to Proactive for ambient suggestions.
+                当前助手模式为 {agentMode}。切到主动模式后才会给出环境建议。
               </div>
             )}
             {operationError && (
@@ -680,25 +680,25 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {sprintProgress && (
               <div className="rounded border border-accent/20 bg-accent-subtle/20 p-2 text-xs">
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-secondary">Sprint</span>
+                  <span className="font-medium text-text-secondary">连续写作</span>
                   <span className="text-[10px] text-accent">{sprintProgress.status}</span>
                 </div>
                 <div className="text-text-primary">
                   {sprintProgress.chaptersCompleted}/
-                  {sprintProgress.chaptersCompleted + sprintProgress.chaptersRemaining} chapters
+                  {sprintProgress.chaptersCompleted + sprintProgress.chaptersRemaining} 章
                 </div>
                 <div className="mt-1 text-[10px] text-text-muted">
-                  checkpoints {sprintProgress.checkpointCount} · budget {sprintProgress.spentBudgetMicros}
+                  检查点 {sprintProgress.checkpointCount} · 预算 {sprintProgress.spentBudgetMicros}
                   {sprintProgress.budgetCeilingMicros ? ` / ${sprintProgress.budgetCeilingMicros}` : ""}
                 </div>
               </div>
             )}
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-medium text-text-secondary">What It Is Guarding</span>
+                <span className="font-medium text-text-secondary">正在守护的内容</span>
                 {mode !== "write" && (
                   <span className="text-[10px] text-text-muted">
-                    {storyDebt?.openCount ?? 0} open · {ledger?.openPromises.length ?? 0} promises
+                    {storyDebt?.openCount ?? 0} 个待处理 · {ledger?.openPromises.length ?? 0} 个伏笔
                   </span>
                 )}
               </div>
@@ -728,7 +728,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 {saveFeedback}
               </div>
             )}
-            {mode === "explore" && (
+            {mode !== "write" && mode === "explore" && (
               <div className={`rounded border p-2 text-xs ${secondBrainToneClass(contextBudgetTone(trace))}`}>
                 {(() => {
                   const latestContextTrace = latestContextProposal(trace);
@@ -737,10 +737,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     <>
                       <div className="mb-1 flex items-center justify-between gap-2">
                         <span className="text-[10px] uppercase tracking-wide text-text-muted">
-                          Evidence Trace
+                          <span className="sr-only">Evidence Trace</span>
+                          证据轨迹
                         </span>
                         <span className="font-mono text-[10px] text-text-muted">
-                          {latestContextTrace?.kind ?? "idle"}
+                          {latestContextTrace?.kind ?? "空闲"}
                         </span>
                       </div>
                       <div className={`font-medium ${secondBrainValueClass(contextBudgetTone(trace))}`}>
@@ -773,34 +774,37 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             {mode === "explore" && (
               <div className="text-xs text-text-muted">
-                <div className="mb-2 text-text-secondary font-medium">Active Scene</div>
+                <div className="mb-2 text-text-secondary font-medium">当前场景</div>
                 <div className="p-2 rounded bg-bg-raised border border-border-subtle">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate">{currentChapter || "No chapter loaded"}</span>
+                    <span className="truncate">{currentChapter || "未载入章节"}</span>
                     {chapterBackups.length > 0 && (
                       <button
                         onClick={handleRestoreLatestChapterBackup}
                         className="shrink-0 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary hover:border-accent/40 hover:text-accent"
                         title={chapterBackups[0].filename}
                       >
-                        Restore latest
+                        恢复最近版本
                       </button>
                     )}
                   </div>
                   {chapterBackups.length > 0 && (
                     <div className="mt-1 text-[10px] text-text-muted">
-                      {chapterBackups.length} recent backups · latest {formatBytes(chapterBackups[0].bytes)}
+                      {chapterBackups.length} 个最近备份 · 最新 {formatBytes(chapterBackups[0].bytes)}
                     </div>
                   )}
                 </div>
               </div>
             )}
-            {mode === "explore" && storageDiagnostics && (
+            {mode !== "write" && mode === "explore" && storageDiagnostics && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2 text-xs">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Project Storage</span>
+                  <span className="font-medium text-text-primary">
+                    <span className="sr-only">Project Storage</span>
+                    项目存储
+                  </span>
                   <span className={storageDiagnostics.healthy ? "text-success" : "text-danger"}>
-                    {storageDiagnostics.healthy ? "healthy" : "needs attention"}
+                    {storageDiagnostics.healthy ? "正常" : "需要处理"}
                   </span>
                 </div>
                 <div className="mb-2 min-w-0 text-[10px] text-text-muted">
@@ -860,7 +864,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {mode !== "write" && visibleProposals.length > 0 && (
               <div>
                 <div className="text-xs text-text-secondary font-medium mb-2">
-                  Pending Proposals ({visibleProposals.length})
+                  待处理建议（{visibleProposals.length}）
                 </div>
                 {visibleProposals.slice(0, 5).map((p) => (
                   <div key={p.id} className={`p-2 rounded border mb-1 text-xs ${
@@ -873,7 +877,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       <div className="flex items-center gap-1">
                         {isEnhancedGhost(p) && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] bg-success/10 text-success">
-                            Enhanced
+                            增强
                           </span>
                         )}
                         <span className={`px-1.5 py-0.5 rounded text-[10px] ${
@@ -900,7 +904,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     {primaryOperation(p) && (
                       <div className="mb-2 rounded bg-bg-deep border border-border-subtle p-1.5 text-[10px] text-text-muted">
                         {primaryOperation(p)?.kind}
-                        {p.alternatives.length > 1 ? ` · ${p.alternatives.length} branches` : ""}
+                        {p.alternatives.length > 1 ? ` · ${p.alternatives.length} 个分支` : ""}
                       </div>
                     )}
                     <div className="flex gap-1">
@@ -908,19 +912,19 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                         onClick={() => handleApplyProposal(p)}
                         className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
                       >
-                        Apply
+                        应用
                       </button>
                       <button
                         onClick={() => handleFeedback(p.id, "rejected")}
                         className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
                       >
-                        Reject
+                        拒绝
                       </button>
                       <button
                         onClick={() => handleFeedback(p.id, "snoozed")}
                         className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
                       >
-                        Snooze
+                        稍后
                       </button>
                     </div>
                   </div>
@@ -940,11 +944,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             <div className="rounded border border-border-subtle bg-bg-raised p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
-                  <div className="font-medium text-text-primary">Story Contract</div>
-                  <div className="text-[10px] text-text-muted">Book-level promise every agent action must obey.</div>
+                  <div className="font-medium text-text-primary">故事契约</div>
+                  <div className="text-[10px] text-text-muted">所有助手动作都必须遵守的全书约束。</div>
                 </div>
                 <span className="shrink-0 text-[10px] text-text-muted">
-                  {ledger?.storyContract?.updatedAt ? "saved" : "draft"}
+                  {ledger?.storyContract?.updatedAt ? "已保存" : "草稿"}
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-2">
@@ -955,7 +959,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, title: event.target.value }));
                   }}
                   className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Title"
+                  placeholder="作品标题"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -965,7 +969,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       setContractDraft((prev) => ({ ...prev, genre: event.target.value }));
                     }}
                     className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                    placeholder="Genre"
+                    placeholder="类型"
                   />
                   <input
                     value={contractDraft.targetReader}
@@ -974,7 +978,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       setContractDraft((prev) => ({ ...prev, targetReader: event.target.value }));
                     }}
                     className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                    placeholder="Target reader"
+                    placeholder="目标读者"
                   />
                 </div>
                 <textarea
@@ -984,7 +988,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, readerPromise: event.target.value }));
                   }}
                   className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Reader promise"
+                  placeholder="读者承诺"
                 />
                 <textarea
                   value={contractDraft.first30ChapterPromise}
@@ -993,7 +997,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, first30ChapterPromise: event.target.value }));
                   }}
                   className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="First 30 chapters promise"
+                  placeholder="前 30 章承诺"
                 />
                 <textarea
                   value={contractDraft.mainConflict}
@@ -1002,7 +1006,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, mainConflict: event.target.value }));
                   }}
                   className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Main conflict"
+                  placeholder="主冲突"
                 />
                 <textarea
                   value={contractDraft.structuralBoundary}
@@ -1011,7 +1015,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, structuralBoundary: event.target.value }));
                   }}
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Boundaries / forbidden moves"
+                  placeholder="边界 / 禁止动作"
                 />
                 <textarea
                   value={contractDraft.toneContract}
@@ -1020,7 +1024,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setContractDraft((prev) => ({ ...prev, toneContract: event.target.value }));
                   }}
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Tone and style floor"
+                  placeholder="基调与风格底线"
                 />
               </div>
             </div>
@@ -1028,8 +1032,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             <div className="rounded border border-border-subtle bg-bg-raised p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
-                  <div className="font-medium text-text-primary">Chapter Mission</div>
-                  <div className="text-[10px] text-text-muted">{currentChapter || "No chapter selected"}</div>
+                  <div className="font-medium text-text-primary">本章任务</div>
+                  <div className="text-[10px] text-text-muted">{currentChapter || "未选择章节"}</div>
                 </div>
                 <select
                   value={missionDraft.status}
@@ -1039,13 +1043,13 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   }}
                   className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-text-secondary outline-none focus:border-accent"
                 >
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="needs_review">Review</option>
-                  <option value="completed">Done</option>
-                  <option value="drifted">Drift</option>
-                  <option value="blocked">Blocked</option>
-                  <option value="retired">Retired</option>
+                  <option value="draft">草稿</option>
+                  <option value="active">进行中</option>
+                  <option value="needs_review">待复核</option>
+                  <option value="completed">已完成</option>
+                  <option value="drifted">已偏移</option>
+                  <option value="blocked">受阻</option>
+                  <option value="retired">已归档</option>
                 </select>
               </div>
               <div className="grid grid-cols-1 gap-2">
@@ -1056,7 +1060,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setMissionDraft((prev) => ({ ...prev, mission: event.target.value }));
                   }}
                   className="min-h-16 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="What this chapter must accomplish"
+                  placeholder="这一章必须完成什么"
                 />
                 <textarea
                   value={missionDraft.mustInclude}
@@ -1065,7 +1069,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setMissionDraft((prev) => ({ ...prev, mustInclude: event.target.value }));
                   }}
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Must include"
+                  placeholder="必须包含"
                 />
                 <textarea
                   value={missionDraft.mustNot}
@@ -1074,7 +1078,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setMissionDraft((prev) => ({ ...prev, mustNot: event.target.value }));
                   }}
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Must not reveal or do"
+                  placeholder="不能揭示或不能做"
                 />
                 <textarea
                   value={missionDraft.expectedEnding}
@@ -1083,7 +1087,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     setMissionDraft((prev) => ({ ...prev, expectedEnding: event.target.value }));
                   }}
                   className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                  placeholder="Expected ending state"
+                  placeholder="预期结尾状态"
                 />
                 {missionDraft.status === "blocked" && (
                   <textarea
@@ -1093,7 +1097,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       setMissionDraft((prev) => ({ ...prev, blockedReason: event.target.value }));
                     }}
                     className="min-h-14 rounded border border-warning/30 bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-warning"
-                    placeholder="Why is this mission blocked? (visible to agent)"
+                    placeholder="为什么受阻？这会提供给助手。"
                   />
                 )}
                 {missionDraft.status === "retired" && (
@@ -1104,7 +1108,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       setMissionDraft((prev) => ({ ...prev, retiredHistory: event.target.value }));
                     }}
                     className="min-h-14 rounded border border-border-subtle bg-bg-deep px-2 py-1 text-text-primary outline-none focus:border-accent"
-                    placeholder="Why was this mission retired? (preserved for history)"
+                    placeholder="为什么归档？这会保留在历史里。"
                   />
                 )}
               </div>
@@ -1119,21 +1123,21 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                     : "text-text-muted"
               }`}>
                 {foundationSaveState === "saving"
-                  ? "Saving foundation..."
+                  ? "正在保存地基..."
                   : foundationSaveState === "saved"
-                    ? "Foundation saved"
+                    ? "地基已保存"
                     : foundationSaveState === "error"
-                      ? "Foundation save failed"
+                      ? "地基保存失败"
                       : foundationDirty
-                        ? "Unsaved foundation edits"
-                        : "Foundation is synced"}
+                        ? "地基有未保存修改"
+                        : "地基已同步"}
               </span>
               <button
                 onClick={handleSaveFoundation}
                 disabled={foundationSaveState === "saving"}
                 className="rounded bg-accent px-3 py-1 text-xs text-bg-deep transition-colors hover:bg-accent/80 disabled:opacity-60"
               >
-                Save Foundation
+                保存地基
               </button>
             </div>
           </div>
@@ -1149,35 +1153,35 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {storyDebt && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Story Debt</span>
+                  <span className="font-medium text-text-primary">故事债务</span>
                   <span className="text-[10px] text-text-muted">
-                    {storyDebt.chapterTitle || currentChapter || "project"}
+                    {storyDebt.chapterTitle || currentChapter || "项目"}
                   </span>
                 </div>
                 <div className="mt-2 grid grid-cols-6 gap-1 text-center">
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-text-primary">{storyDebt.openCount}</div>
-                    <div className="text-[10px] text-text-muted">open</div>
+                    <div className="text-[10px] text-text-muted">待处理</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.contractCount}</div>
-                    <div className="text-[10px] text-text-muted">contract</div>
+                    <div className="text-[10px] text-text-muted">契约</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.missionCount}</div>
-                    <div className="text-[10px] text-text-muted">mission</div>
+                    <div className="text-[10px] text-text-muted">任务</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-danger">{storyDebt.canonRiskCount}</div>
-                    <div className="text-[10px] text-text-muted">canon</div>
+                    <div className="text-[10px] text-text-muted">设定</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-accent">{storyDebt.promiseCount}</div>
-                    <div className="text-[10px] text-text-muted">promise</div>
+                    <div className="text-[10px] text-text-muted">伏笔</div>
                   </div>
                   <div className="rounded bg-bg-deep p-1">
                     <div className="font-mono text-text-secondary">{storyDebt.pacingCount}</div>
-                    <div className="text-[10px] text-text-muted">pacing</div>
+                    <div className="text-[10px] text-text-muted">节奏</div>
                   </div>
                 </div>
                 {storyDebt.entries.slice(0, 3).map((entry) => {
@@ -1210,7 +1214,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                               onClick={() => handleApplyDebtOperation(entry, canonOperation, "Updated canon from story debt.")}
                               className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
                             >
-                              Update Canon
+                              更新设定
                             </button>
                           )}
                           {secondaryOperations.map((operation) => (
@@ -1227,7 +1231,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                               onClick={() => handleIgnoreDebtEntry(entry)}
                               className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-muted border border-border-subtle hover:bg-bg-surface"
                             >
-                              Ignore
+                              忽略
                             </button>
                           )}
                         </div>
@@ -1239,7 +1243,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             {visibleReviewQueue.length === 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-3 text-text-muted">
-                No story review items waiting.
+                暂无待处理审稿项。
               </div>
             )}
             {visibleReviewQueue.map((entry) => {
@@ -1280,26 +1284,26 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                       onClick={() => handleApplyQueueEntry(entry)}
                       className="px-2 py-1 text-[10px] rounded bg-accent-subtle text-accent border border-accent/40 hover:bg-accent/20"
                     >
-                      {operation ? operationLabel(operation) : "Apply"}
+                      {operation ? operationLabel(operation) : "应用"}
                     </button>
                     <button
                       onClick={() => handleFeedback(entry.proposalId, "rejected")}
                       className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
                     >
-                      Ignore
+                      忽略
                     </button>
                     <button
                       onClick={() => handleFeedback(entry.proposalId, "snoozed")}
                       className="px-2 py-1 text-[10px] rounded bg-bg-raised text-text-muted border border-border-subtle hover:bg-bg-surface"
                     >
-                      Snooze
+                      稍后
                     </button>
                     {canonOperation && (
                       <button
                         onClick={() => handleApplyQueueOperation(entry, canonOperation, "Updated canon instead of changing text.")}
                         className="px-2 py-1 text-[10px] rounded bg-bg-deep text-text-secondary border border-border-subtle hover:text-accent hover:border-accent/40"
                       >
-                        Update Canon
+                        更新设定
                       </button>
                     )}
                     {secondaryOperations.map((item) => (
@@ -1321,7 +1325,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         {effectiveTab === "promises" && (
           <div className="space-y-2 text-xs">
             {(ledger?.openPromises.length ?? 0) === 0 && (
-              <p className="text-text-muted">No open plot promises recorded yet.</p>
+              <p className="text-text-muted">暂无待兑现伏笔。</p>
             )}
             {(showAllPromises ? rankedPromises : rankedPromises.slice(0, 3)).map((promise) => {
               const chapter = currentChapter ?? (promise.expectedPayoff || "current chapter");
@@ -1364,7 +1368,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   </div>
                   {promise.blockedReason && (
                     <div className="mt-1 text-[10px] text-warning">
-                      Blocked: {promise.blockedReason}
+                      受阻：{promise.blockedReason}
                     </div>
                   )}
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -1387,8 +1391,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                 className="w-full py-1.5 text-[10px] text-text-muted hover:text-accent border border-dashed border-border-subtle rounded"
               >
                 {showAllPromises
-                  ? "Show top 3 only"
-                  : `Show all ${rankedPromises.length} promises`}
+                  ? "只显示前 3 项"
+                  : `显示全部 ${rankedPromises.length} 个伏笔`}
               </button>
             )}
           </div>
@@ -1397,7 +1401,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         {effectiveTab === "canon" && (
           <div className="space-y-2 text-xs">
             {(ledger?.canonEntities.length ?? 0) === 0 && (ledger?.canonRules.length ?? 0) === 0 && (
-              <p className="text-text-muted">No canon entities or rules recorded yet.</p>
+              <p className="text-text-muted">暂无设定实体或规则。</p>
             )}
             {ledger?.canonRules.map((rule) => (
               <div key={`${rule.category}-${rule.rule}`} className="rounded bg-bg-raised border border-border-subtle p-2">
@@ -1438,7 +1442,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
         {effectiveTab === "decisions" && (
           <div className="space-y-2 text-xs">
             {(ledger?.recentDecisions.length ?? 0) === 0 && (
-              <p className="text-text-muted">No creative decisions recorded yet.</p>
+              <p className="text-text-muted">暂无创作决策记录。</p>
             )}
             {ledger?.recentDecisions.map((decision) => (
               <div key={`${decision.createdAt}-${decision.title}`} className="rounded bg-bg-raised border border-border-subtle p-2">
@@ -1461,12 +1465,12 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
               (ledger?.memoryReliability.length ?? 0) === 0 &&
               (ledger?.memoryAudit.length ?? 0) === 0 &&
               (trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) === 0 && (
-              <p className="text-text-muted">No agent audit events yet.</p>
+              <p className="text-text-muted">暂无助手审计事件。</p>
             )}
             {(ledger?.memoryReliability.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Memory Reliability</span>
+                  <span className="font-medium text-text-primary">记忆可靠度</span>
                   <span className="text-[10px] text-text-muted">
                     {ledger?.memoryReliability.length ?? 0} slots
                   </span>
@@ -1509,7 +1513,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(trace?.postWriteDiagnostics.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Post-write Diagnostics</span>
+                  <span className="font-medium text-text-primary">写后诊断</span>
                   <span className="text-[10px] text-text-muted">
                     {trace?.postWriteDiagnostics.length ?? 0} reports
                   </span>
@@ -1570,7 +1574,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(trace?.taskPackets.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Why It Spoke</span>
+                  <span className="font-medium text-text-primary">触发原因</span>
                   <span className="text-[10px] text-text-muted">
                     {trace?.taskPackets.length ?? 0} packets
                   </span>
@@ -1608,7 +1612,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {((trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0) > 0) && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Context Recall</span>
+                  <span className="font-medium text-text-primary">上下文召回</span>
                   <span className="text-[10px] text-text-muted">
                     {trace?.contextRecalls.length ?? ledger?.contextRecalls.length ?? 0} tracked
                   </span>
@@ -1633,7 +1637,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             {(trace?.recentProposals.length ?? 0) > 0 && (
               <div className="rounded bg-bg-raised border border-border-subtle p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="font-medium text-text-primary">Context Trace</span>
+                  <span className="font-medium text-text-primary">上下文轨迹</span>
                   <span className="text-[10px] text-text-muted">
                     {trace?.recentProposals.filter((proposal) => proposal.contextBudget).length ?? 0} budgeted
                   </span>
@@ -1700,7 +1704,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
             )}
             {(ledger?.memoryAudit.length ?? 0) > 0 && (
               <div className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                Memory Audit
+                记忆审计
               </div>
             )}
             {ledger?.memoryAudit.map((entry) => (
@@ -1721,7 +1725,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
                   <p className="mt-1 text-text-muted">{entry.rationale}</p>
                 )}
                 {entry.reason && (
-                  <p className="mt-1 text-text-secondary">Reason: {entry.reason}</p>
+                  <p className="mt-1 text-text-secondary">原因：{entry.reason}</p>
                 )}
               </div>
             ))}

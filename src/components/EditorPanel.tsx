@@ -369,6 +369,7 @@ export default function EditorPanel({
   const [parallelDraftsLoading, setParallelDraftsLoading] = useState(false);
   const [parallelDraftsError, setParallelDraftsError] = useState<string | null>(null);
   const [parallelDrafts, setParallelDrafts] = useState<ParallelDraft[]>([]);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -379,7 +380,7 @@ export default function EditorPanel({
       EntityAnchor,
       PatchMark,
     ],
-    content: "<p>Start writing your novel here...</p>",
+    content: "<p>从这里开始写正文...</p>",
     editorProps: {
       attributes: {
         class:
@@ -879,7 +880,7 @@ export default function EditorPanel({
           }
           const now = new Date();
           setSaveIndicator(
-            `Saved at ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
+            `已保存 ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
           );
           setTimeout(() => setSaveIndicator(null), 3000);
         } catch (e) {
@@ -1207,7 +1208,7 @@ export default function EditorPanel({
     setParallelDraftsError(null);
     try {
       if (!isTauri()) {
-        throw new Error("Parallel drafts require the Tauri desktop runtime and an API key.");
+        throw new Error("多版草稿需要桌面运行时和已保存的模型密钥。");
       }
       const missionCtx = chapterMission
         ? `任务: ${chapterMission.mission}; 必保: ${chapterMission.mustInclude}; 禁止: ${chapterMission.mustNot}`
@@ -1268,85 +1269,91 @@ export default function EditorPanel({
   if (!editor) {
     return (
       <div className="flex h-full items-center justify-center text-text-muted">
-        Loading editor...
+        正在载入编辑器...
       </div>
     );
   }
 
   return (
     <div className="flex h-full flex-col">
-      <div className="relative flex items-center justify-between border-b border-border-subtle px-4 py-2.5 text-sm text-text-secondary">
-        <span className="font-display text-xs font-medium tracking-wide">Editor</span>
-        {saveIndicator && (
-          <span className="ml-2 text-[10px] tracking-wide text-text-muted">
-            {saveIndicator}
-          </span>
-        )}
+      <div className="forge-editor-toolbar">
+        <div className="forge-editor-toolbar-main">
+          <span className="forge-editor-toolbar-title">正文</span>
+          {saveIndicator && (
+            <span className="forge-editor-save-state">
+              {saveIndicator}
+            </span>
+          )}
+        </div>
         {showToast && (
           <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-success/40 bg-success/15 px-3 py-1.5 text-xs text-success">
-            AI writing complete. Press Ctrl+Z / Cmd+Z to undo
+            AI 写作已完成。可按 Ctrl+Z / Cmd+Z 撤销。
           </div>
         )}
-        <div className="flex gap-1">
+        <div className="forge-editor-toolbar-actions">
           <button
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("bold"))}`}
-            title="Bold"
+            onClick={() => setToolsOpen((value) => !value)}
+            className={`forge-btn forge-btn-ghost ${toolsOpen ? "active" : ""}`}
+            title="写作工具"
           >
-            B
-          </button>
-          <button
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={`px-2.5 py-1 rounded-sm text-xs font-editor italic transition-colors ${btnActive(editor.isActive("italic"))}`}
-            title="Italic"
-          >
-            I
-          </button>
-          <button
-            onClick={() => editor.chain().focus().toggleStrike().run()}
-            className={`px-2.5 py-1 rounded-sm text-xs font-editor line-through transition-colors ${btnActive(editor.isActive("strike"))}`}
-            title="Strikethrough"
-          >
-            S
-          </button>
-          <span className="w-px h-4 bg-border-subtle mx-1 self-center" />
-          <button
-            onClick={() => setDrawerOpen(!drawerOpen)}
-            className={`px-2.5 py-1 rounded-sm text-xs transition-colors ${
-              drawerOpen ? "bg-bg-raised text-accent" : "text-text-muted hover:text-text-primary"
-            }`}
-            title="Lorebook"
-          >
-            Lorebook
-          </button>
-          <button
-            onClick={handleGenerateParallelDrafts}
-            className={`px-2.5 py-1 rounded-sm text-xs transition-colors ${
-              parallelDraftsOpen
-                ? "bg-bg-raised text-accent"
-                : "text-text-muted hover:text-text-primary"
-            }`}
-            title="Parallel drafts"
-          >
-            Drafts
-          </button>
-          <span className="w-px h-4 bg-border-subtle mx-1 self-center" />
-          <button
-            onClick={() => editor.commands.toggleHeading({ level: 2 })}
-            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("heading", { level: 2 }))}`}
-            title="Heading"
-          >
-            H
-          </button>
-          <button
-            onClick={() => editor.chain().focus().toggleBlockquote().run()}
-            className={`px-2.5 py-1 rounded-sm text-xs font-editor transition-colors ${btnActive(editor.isActive("blockquote"))}`}
-            title="Blockquote"
-          >
-            &ldquo;
+            写作工具
           </button>
         </div>
       </div>
+      {toolsOpen && (
+        <div className="forge-editor-tool-drawer">
+          <button
+            onClick={handleGenerateParallelDrafts}
+            className={`forge-btn forge-btn-secondary ${parallelDraftsOpen ? "active" : ""}`}
+            title="生成多版草稿"
+          >
+            多版草稿
+          </button>
+          <button
+            onClick={() => setDrawerOpen(!drawerOpen)}
+            className={`forge-btn forge-btn-secondary ${drawerOpen ? "active" : ""}`}
+            title="查看设定"
+          >
+            设定库
+          </button>
+          <span className="forge-toolbar-divider" />
+          <button
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            className={`forge-format-btn ${btnActive(editor.isActive("bold"))}`}
+            title="加粗"
+          >
+            粗
+          </button>
+          <button
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            className={`forge-format-btn italic ${btnActive(editor.isActive("italic"))}`}
+            title="斜体"
+          >
+            斜
+          </button>
+          <button
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            className={`forge-format-btn line-through ${btnActive(editor.isActive("strike"))}`}
+            title="删除线"
+          >
+            删
+          </button>
+          <button
+            onClick={() => editor.commands.toggleHeading({ level: 2 })}
+            className={`forge-format-btn ${btnActive(editor.isActive("heading", { level: 2 }))}`}
+            title="标题"
+          >
+            标
+          </button>
+          <button
+            onClick={() => editor.chain().focus().toggleBlockquote().run()}
+            className={`forge-format-btn ${btnActive(editor.isActive("blockquote"))}`}
+            title="引用"
+          >
+            引
+          </button>
+        </div>
+      )}
 
       <LorebookDrawer
         isOpen={drawerOpen}
@@ -1363,7 +1370,7 @@ export default function EditorPanel({
           </span>
           {chapterMission.mustNot && (
             <span className="text-[10px] text-danger/70 truncate hidden lg:inline" title={chapterMission.mustNot}>
-              Avoid: {chapterMission.mustNot}
+              避免：{chapterMission.mustNot}
             </span>
           )}
         </div>
@@ -1405,19 +1412,19 @@ export default function EditorPanel({
         )}
         {inlinePreview && (
           <div className="absolute bottom-4 right-4 flex items-center gap-2 bg-bg-raised border border-accent rounded-sm px-3 py-2 shadow-lg z-40">
-            <span className="text-xs text-accent">AI Preview</span>
+            <span className="text-xs text-accent">AI 预览</span>
             <span className="w-px h-4 bg-border-subtle" />
             <button
               onClick={handleAccept}
               className="text-xs text-bg-deep bg-success hover:bg-success/80 px-2.5 py-0.5 rounded-sm transition-colors"
             >
-              Accept (Tab)
+              接受（Tab）
             </button>
             <button
               onClick={handleReject}
               className="text-xs text-danger hover:text-danger/80 px-2.5 py-0.5 transition-colors"
             >
-              Reject (Esc)
+              拒绝（Esc）
             </button>
           </div>
         )}

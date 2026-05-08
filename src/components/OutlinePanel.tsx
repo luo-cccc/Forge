@@ -70,16 +70,16 @@ export default function OutlinePanel() {
             return next;
           });
           if (status === "complete") {
-            setToast(`${chapter_title} generated successfully`);
+            setToast(`${chapter_title} 已生成`);
           } else {
-            setToast(`Error: ${chapter_title} - ${error}`);
+            setToast(`生成失败：${chapter_title} - ${error}`);
           }
           refresh();
         }
       });
       unlistenChapter = await listen<ChapterGenerationEvent>(Events.chapterGeneration, (event) => {
         if (event.payload.phase === "chapter_generation_completed") {
-          setToast(`${event.payload.saved?.chapterTitle ?? "Chapter"} drafted successfully`);
+          setToast(`${event.payload.saved?.chapterTitle ?? "章节"} 已完成草稿`);
           refresh();
         }
       });
@@ -211,7 +211,7 @@ export default function OutlinePanel() {
                         ...
                       </>
                     ) : (
-                      "Generate"
+                      "生成"
                     )}
                   </button>
                   <button
@@ -245,13 +245,13 @@ export default function OutlinePanel() {
         <input
           value={chapterTitle}
           onChange={(e) => setChapterTitle(e.target.value)}
-          placeholder="Chapter title..."
+          placeholder="章节标题..."
           className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent"
         />
         <textarea
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
-          placeholder="Summary / beat..."
+          placeholder="摘要 / 情节点..."
           rows={2}
           className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent resize-none"
         />
@@ -259,7 +259,7 @@ export default function OutlinePanel() {
           onClick={handleSave}
           className="w-full px-2.5 py-1.5 rounded-sm bg-accent hover:bg-accent/80 text-bg-deep text-xs transition-colors"
         >
-          Save Beat
+          保存情节点
         </button>
       </div>
     </div>
