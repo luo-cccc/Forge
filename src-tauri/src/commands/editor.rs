@@ -123,7 +123,7 @@ pub async fn report_semantic_lint_state(
     }
 
     let app_clone = app.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let _intent = agent_harness_core::Intent::Linter;
         if let Some(lint) = crate::find_semantic_lint(&app_clone, &payload) {
             let _ = app_clone.emit(events::EDITOR_SEMANTIC_LINT, lint);

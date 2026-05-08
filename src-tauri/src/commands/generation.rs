@@ -562,7 +562,7 @@ pub async fn batch_generate_chapter(
     let app_clone = app.clone();
     let title_clone = chapter_title.clone();
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let _ = app_clone.emit(
             crate::events::BATCH_STATUS,
             BatchStatus {
@@ -651,7 +651,7 @@ pub async fn batch_generate_chapter(
                 );
                 let embed_app = app_clone.clone();
                 let embed_title = title_clone.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     crate::auto_embed_chapter(&embed_app, &embed_title, &generated_content).await;
                 });
                 let _ = app_clone.emit(
@@ -741,7 +741,7 @@ pub async fn generate_chapter_autonomous(
     let trace_request_id = request_id.clone();
     let requested_target_title = payload.target_chapter_title.clone();
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let user_instruction = payload.user_instruction.clone();
         let trace_app = app_clone.clone();
         let budget_app = app_clone.clone();
@@ -806,7 +806,7 @@ pub async fn generate_chapter_autonomous(
                     Some(&settlement_delta),
                 );
                 let embed_app = app_clone.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     crate::auto_embed_chapter(&embed_app, &saved.chapter_title, &generated_content)
                         .await;
                 });

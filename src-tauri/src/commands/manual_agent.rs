@@ -451,7 +451,7 @@ pub async fn ask_agent(
             }
 
             let app_clone = app.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 crate::extract_skills_from_recent(&app_clone).await;
             });
 

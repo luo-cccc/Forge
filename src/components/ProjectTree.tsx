@@ -25,7 +25,7 @@ interface ProjectTreeProps {
 
 function PanelFallback() {
   return (
-    <div className="flex-1 flex items-center justify-center text-xs text-text-muted">
+    <div className="flex flex-1 items-center justify-center text-xs text-text-muted">
       Loading panel...
     </div>
   );
@@ -113,81 +113,33 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
   });
 
   return (
-    <div className="flex flex-col h-full border-r border-border-subtle bg-bg-surface">
-      <div className="flex border-b border-border-subtle">
-        <button
-          onClick={() => setTab("chapters")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "chapters"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          Chapters
-        </button>
-        <button
-          onClick={() => setTab("outline")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "outline"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          Outline
-        </button>
-        <button
-          onClick={() => setTab("doctor")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "doctor"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          Doctor
-        </button>
-        <button
-          onClick={() => setTab("graph")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "graph"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          Graph
-        </button>
-        <button
-          onClick={() => setTab("storyboard")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "storyboard"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          Board
-        </button>
-        <button
-          onClick={() => setTab("sandbox")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "sandbox"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          🧪
-        </button>
-        <button
-          onClick={() => setTab("settings")}
-          className={`flex-1 py-2.5 text-xs transition-colors font-display tracking-wider ${
-            tab === "settings"
-              ? "bg-bg-deep text-accent border-b border-accent"
-              : "text-text-muted hover:text-text-secondary"
-          }`}
-        >
-          ⚙
-        </button>
+    <div className="flex h-full flex-col bg-bg-surface">
+      <div className="grid grid-cols-3 gap-1 border-b border-border-subtle p-2">
+        {([
+          ["chapters", "Chapters"],
+          ["outline", "Outline"],
+          ["doctor", "Doctor"],
+          ["graph", "Graph"],
+          ["storyboard", "Board"],
+          ["sandbox", "Sandbox"],
+          ["settings", "Settings"],
+        ] as const).map(([nextTab, label]) => (
+          <button
+            key={nextTab}
+            onClick={() => setTab(nextTab)}
+            className={`rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+              tab === nextTab
+                ? "bg-bg-raised text-text-primary shadow-sm"
+                : "text-text-muted hover:bg-bg-raised/60 hover:text-text-secondary"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="hidden" />
       </div>
       {(activeVolumeId || sprintProgress) && (
-        <div className="px-3 py-2 border-b border-border-subtle bg-bg-deep text-[10px] text-text-muted space-y-1">
+        <div className="space-y-1 border-b border-border-subtle bg-bg-deep px-3 py-2 text-[10px] text-text-muted">
           {activeVolumeId && <div>Volume filter: {activeVolumeId}</div>}
           {sprintProgress && (
             <div>
@@ -205,22 +157,24 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
               <button
                 key={ch.filename}
                 onClick={() => onSelectChapter(ch.title)}
-                className={`w-full text-left px-4 py-2.5 text-xs transition-colors ${
+                className={`w-full border-l-2 px-4 py-2.5 text-left text-xs transition-colors ${
                   currentChapter === ch.title
-                    ? "bg-accent-subtle text-accent border-l-2 border-accent"
-                    : "text-text-secondary hover:bg-bg-raised hover:text-text-primary border-l-2 border-transparent"
+                    ? "border-accent bg-accent-subtle text-text-primary"
+                    : "border-transparent text-text-secondary hover:bg-bg-raised hover:text-text-primary"
                 }`}
               >
-                <span className="mr-1">{currentChapter === ch.title ? "✓" : "□"}</span>
+                <span className="mr-2 font-mono text-[10px] text-text-muted">
+                  {String(visibleChapters.indexOf(ch) + 1).padStart(2, "0")}
+                </span>
                 {ch.title}
               </button>
             ))}
           </div>
-          <div className="p-3 border-t border-border-subtle space-y-1.5">
+          <div className="space-y-2 border-t border-border-subtle p-3">
             <div className="flex gap-1">
               <button
                 onClick={() => setActiveVolumeId(null)}
-                className={`px-2 py-1 rounded-sm text-[10px] border ${activeVolumeId === null ? "border-accent text-accent" : "border-border-subtle text-text-muted"}`}
+                className={`rounded-md border px-2 py-1 text-[10px] ${activeVolumeId === null ? "border-accent text-text-primary" : "border-border-subtle text-text-muted"}`}
               >
                 All
               </button>
@@ -228,7 +182,7 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
                 <button
                   key={volume.id}
                   onClick={() => setActiveVolumeId(volume.id)}
-                  className={`px-2 py-1 rounded-sm text-[10px] border ${activeVolumeId === volume.id ? "border-accent text-accent" : "border-border-subtle text-text-muted"}`}
+                  className={`rounded-md border px-2 py-1 text-[10px] ${activeVolumeId === volume.id ? "border-accent text-text-primary" : "border-border-subtle text-text-muted"}`}
                 >
                   {volume.title}
                 </button>
@@ -239,13 +193,13 @@ export default function ProjectTree({ onSelectChapter, editorRef, onApplyFix }: 
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               placeholder="New chapter..."
-              className="w-full px-2.5 py-1.5 rounded-sm bg-bg-deep border border-border-subtle text-text-primary text-xs placeholder-text-muted focus:outline-none focus:border-accent"
+              className="w-full rounded-md border border-border-subtle bg-bg-deep px-2.5 py-1.5 text-xs text-text-primary placeholder-text-muted focus:border-accent focus:outline-none"
             />
             <button
               onClick={handleCreate}
-              className="w-full px-2.5 py-1.5 rounded-sm bg-accent hover:bg-accent/90 text-bg-deep text-xs transition-colors"
+              className="w-full rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-bg-deep transition-colors hover:bg-accent/90"
             >
-              + New Chapter
+              New Chapter
             </button>
           </div>
         </>

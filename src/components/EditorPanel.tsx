@@ -383,7 +383,7 @@ export default function EditorPanel({
     editorProps: {
       attributes: {
         class:
-          "prose prose-invert max-w-none h-full focus:outline-none px-8 py-6 text-text-primary leading-relaxed font-editor",
+          "mx-auto h-full max-w-[760px] px-8 py-7 font-editor text-[15px] leading-relaxed text-text-primary focus:outline-none",
       },
     },
   });
@@ -1267,23 +1267,23 @@ export default function EditorPanel({
 
   if (!editor) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted">
+      <div className="flex h-full items-center justify-center text-text-muted">
         Loading editor...
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 py-2.5 border-b border-border-subtle text-sm text-text-secondary flex items-center justify-between relative">
-        <span className="font-display tracking-wider text-xs">Editor</span>
+    <div className="flex h-full flex-col">
+      <div className="relative flex items-center justify-between border-b border-border-subtle px-4 py-2.5 text-sm text-text-secondary">
+        <span className="font-display text-xs font-medium tracking-wide">Editor</span>
         {saveIndicator && (
-          <span className="text-[10px] text-text-muted tracking-wide ml-2">
+          <span className="ml-2 text-[10px] tracking-wide text-text-muted">
             {saveIndicator}
           </span>
         )}
         {showToast && (
-          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-1.5 rounded-sm bg-success/20 border border-success text-success text-xs whitespace-nowrap">
+          <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-success/40 bg-success/15 px-3 py-1.5 text-xs text-success">
             AI writing complete. Press Ctrl+Z / Cmd+Z to undo
           </div>
         )}
@@ -1370,7 +1370,7 @@ export default function EditorPanel({
       )}
       <div className="flex-1 min-h-0 relative flex">
         <div className="flex-1 min-w-0 flex flex-col relative">
-          <div className="flex-1 overflow-y-auto relative">
+          <div className="relative flex-1 overflow-y-auto">
             <EditorContent editor={editor} />
           </div>
           <CoWriterStatusBar />
@@ -1395,7 +1395,7 @@ export default function EditorPanel({
         )}
         {ghostLoading && !ghostActive && (
           <div className="fixed bottom-4 right-4 bg-surface text-xs text-text-muted px-3 py-1.5 rounded border border-border z-30 animate-pulse">
-            ⏳ 正在思考...
+            正在思考...
           </div>
         )}
         {ghostActive && (

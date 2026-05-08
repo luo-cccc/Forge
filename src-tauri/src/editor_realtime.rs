@@ -321,7 +321,7 @@ pub(crate) fn spawn_llm_ghost_proposal(
     let model = settings.model.clone();
     let messages = writer_agent_ghost_messages(&observation, &context_pack);
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let target_for_error = render_target.clone();
 
         // Provider budget preflight for ghost text generation

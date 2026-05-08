@@ -79,6 +79,16 @@ interface ApplyOperationResult {
 
 type CompanionTone = "neutral" | "⚠️ 需要注意" | "📝 提个醒" | "✅ 一切正常";
 
+function readinessText(tone: string | undefined): { text: string; color: string } {
+  if (tone?.includes("需要注意")) {
+    return { text: "Needs attention", color: "text-warning" };
+  }
+  if (tone?.includes("提个醒")) {
+    return { text: "Ready with notes", color: "text-success" };
+  }
+  return { text: "Ready", color: "text-success" };
+}
+
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOperation }) => {
   const currentChapter = useAppStore((s) => s.currentChapter);
   const currentChapterRevision = useAppStore((s) => s.currentChapterRevision);
@@ -577,11 +587,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           : activeTab;
 
   return (
-    <div className="flex flex-col h-full bg-bg-surface">
+    <div className="flex h-full flex-col bg-bg-surface">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-border-subtle">
-        <div className="flex items-center justify-between mb-2">
-          <span className="font-display text-sm tracking-wider text-text-primary">
+      <div className="border-b border-border-subtle px-4 py-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-display text-sm font-medium tracking-wide text-text-primary">
             {mode === "write" ? "Writing Companion" : mode === "review" ? "Story Review" : "Agent Evidence"}
           </span>
           <span className={`w-2 h-2 rounded-full ${
@@ -589,16 +599,14 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({ mode, onApplyOpe
           }`} />
         </div>
         <div className="mb-2 text-[10px] text-text-muted">
-          {isAgentThinking ? "正在生成..." : "空闲"}
+          {isAgentThinking ? "Generating" : "Idle"}
         </div>
         {todayFiveSummary && (() => {
           const guardTone = todayFiveSummary.items[0]?.tone;
-          const readiness = guardTone?.includes("需要注意") ? { emoji: "⚠️", text: "建议先处理冲突", color: "text-yellow-400" }
-            : guardTone?.includes("提个醒") ? { emoji: "📝", text: "可以继续", color: "text-green-400" }
-            : { emoji: "✅", text: "可以继续", color: "text-green-400" };
+          const readiness = readinessText(guardTone);
           return (
             <div className={`mb-2 text-xs ${readiness.color}`}>
-              {readiness.emoji} {readiness.text}
+              {readiness.text}
             </div>
           );
         })()}

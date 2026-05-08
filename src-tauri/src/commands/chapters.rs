@@ -89,7 +89,7 @@ pub fn save_chapter(
     let app_clone = app.clone();
     let title_clone = title.clone();
     let content_clone = content.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         crate::auto_embed_chapter(&app_clone, &title_clone, &content_clone).await;
     });
 

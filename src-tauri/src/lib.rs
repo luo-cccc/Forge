@@ -116,22 +116,40 @@ pub fn run() {
             let app_state = AppState::open(app.handle()).map_err(startup_error)?;
 
             let mut event_bus = agent_harness_core::AmbientEventBus::new(256);
-            let ah = app.handle().clone();
-            let output_app = ah.clone();
+            let app_handle = app.handle().clone();
+            let output_app = app_handle.clone();
             event_bus.set_output_handler(std::sync::Arc::new(move |output| {
                 emit_ambient_output(&output_app, output);
             }));
 
-            event_bus.spawn_agent(std::sync::Arc::new(
-                ambient_agents::context_fetcher::ContextFetcherAgent {
-                    app: ah.clone(),
-                    cache: cache1,
-                },
-            ));
-
             app.manage(std::sync::Mutex::new(event_bus));
             app.manage(app_state);
             app.manage(cache_for_state);
+
+            let agent_app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(bus_state) =
+                    agent_app.try_state::<std::sync::Mutex<agent_harness_core::AmbientEventBus>>()
+                {
+                    match bus_state.lock() {
+                        Ok(mut event_bus) => {
+                            event_bus.spawn_agent(std::sync::Arc::new(
+                                ambient_agents::context_fetcher::ContextFetcherAgent {
+                                    app: agent_app.clone(),
+                                    cache: cache1,
+                                },
+                            ));
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                "Ambient event bus lock poisoned during startup: {error}"
+                            );
+                        }
+                    }
+                } else {
+                    tracing::error!("Ambient event bus state was unavailable during startup");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
