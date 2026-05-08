@@ -280,18 +280,13 @@ function App() {
   }, []);
 
   if (showSettings) {
-  if (showSettings) {
     return (
-      <div className="forge-settings-overlay">
-        <div className="forge-settings-panel">
-          <div className="forge-settings-header">
-            <h3 style={{fontWeight:600}}>Settings</h3>
-            <button className="forge-btn forge-btn-ghost" onClick={() => setShowSettings(false)}>Close</button>
-          </div>
-          <div className="forge-settings-body">
-            <SettingsView />
-            <button className="forge-btn forge-btn-primary" style={{marginTop:'var(--space-4)'}} onClick={() => { setShowSettings(false); invoke(Commands.checkApiKey, { provider: "openai" }).then((v) => setHasApiKey(v as boolean)).catch(() => setHasApiKey(false)); }}>Done</button>
-          </div>
+      <div className="forge-overlay">
+        <div className="forge-overlay-inner">
+          <h2 style={{fontSize:'var(--text-xl)',fontWeight:600,marginBottom:'var(--space-2)',color:'var(--fg-text-primary)'}}>Welcome to Forge</h2>
+          <p style={{color:'var(--fg-text-secondary)',marginBottom:'var(--space-6)'}}>Connect a model to start writing. Your API key stays in the system keychain.</p>
+          <SettingsView />
+          <button className="forge-btn forge-btn-primary" style={{marginTop:'var(--space-4)'}} onClick={() => { setShowSettings(false); invoke(Commands.checkApiKey, { provider: "openai" }).then((v: unknown) => setHasApiKey(v as boolean)).catch(() => setHasApiKey(false)); }}>Done</button>
         </div>
       </div>
     );
@@ -299,78 +294,73 @@ function App() {
 
   return (
     <div className="forge-root">
-      {/* Toolbar */}
-      <header className="forge-toolbar">
-        <div className="forge-toolbar-left">
-          <button className="forge-btn forge-btn-ghost" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{fontSize:14}}>{sidebarCollapsed ? '▶' : '◀'}</button>
-          <span style={{fontWeight:600,fontSize:'var(--text-sm)'}}>Forge</span>
-          <span className="forge-toolbar-divider" />
-          <span className="truncate text-tertiary" style={{fontSize:'var(--text-xs)'}}>{currentChapter}</span>
-        </div>
-        <div className="forge-toolbar-right">
-          <button className="forge-btn forge-btn-primary" onClick={handleGenerate} disabled={isAgentThinking}>
-            {isAgentThinking ? 'Generating...' : 'Generate'}
-          </button>
-          <button className="forge-btn forge-btn-ghost" onClick={() => setCompanionCollapsed(!companionCollapsed)}>
-            {companionCollapsed ? 'Panel' : 'Panel'}
-          </button>
-          <button className="forge-btn forge-btn-ghost" onClick={() => setShowSettings(true)}>Settings</button>
-        </div>
-      </header>
+      {/* Activity Bar */}
+      <nav className="forge-activity-bar">
+        <button className="forge-activity-btn active" title="Chapters">📄</button>
+        <button className="forge-activity-btn" title="Settings" onClick={() => setShowSettings(true)}>⚙</button>
+      </nav>
 
-      {/* Body */}
-      <div className="forge-body">
-        {/* Sidebar */}
-        <aside className={}>
-          <div className="forge-sidebar-search">
-            <input type="text" placeholder="Search chapters..." />
-          </div>
-          <div className="forge-sidebar-list">
-            <ProjectTree onSelectChapter={handleSelectChapter} editorRef={editorRef} onApplyFix={handleApplyFix} />
-          </div>
-          <div className="forge-sidebar-footer">
-            <div className="forge-sidebar-footer-avatar">F</div>
-            <span className="truncate" style={{fontSize:'var(--text-xs)'}}>Local Project</span>
-          </div>
-        </aside>
+      {/* Sidebar */}
+      <aside className={`forge-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="forge-sidebar-header">
+          <span>Chapters</span>
+          <button className="forge-btn-ghost" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{fontSize:10,padding:'0 4px'}}>◁</button>
+        </div>
+        <div className="forge-sidebar-body">
+          <ProjectTree onSelectChapter={handleSelectChapter} editorRef={editorRef} onApplyFix={handleApplyFix} />
+        </div>
+      </aside>
 
-        {/* Main Editor */}
-        <main className="forge-main">
-          <div className="forge-editor-area">
-            <div className="forge-editor-inner">
-              <EditorPanel onEditorReady={handleEditorReady} onSelectionUpdate={handleSelectionUpdate} />
-            </div>
+      {/* Main */}
+      <div className={`forge-main ${sidebarCollapsed ? '' : 'sidebar-open'}`}>
+        <div className="forge-editor-area">
+          {/* Tab Bar */}
+          <div className="forge-tab-bar">
+            <div className="forge-tab active">{currentChapter}</div>
+            <button className="forge-btn-ghost" onClick={handleGenerate} style={{marginLeft:'auto',height:26,fontSize:'var(--text-xs)'}}>
+              {isAgentThinking ? '⏳' : '+ Generate'}
+            </button>
+            <button className="forge-btn-ghost" onClick={() => setCompanionCollapsed(!companionCollapsed)} style={{height:26,fontSize:'var(--text-xs)'}}>
+              {companionCollapsed ? '◁' : '▷'}
+            </button>
           </div>
-        </main>
+          {/* Editor */}
+          <div className="forge-editor-body">
+            <EditorPanel onEditorReady={handleEditorReady} onSelectionUpdate={handleSelectionUpdate} />
+          </div>
+        </div>
 
         {/* Companion */}
-        <aside className={}>
-          <div className="forge-mode-row">
-            {(["write","review","explore","inspect"] as const).map(m => (
-              <button key={m} className={} onClick={()=>setStoryMode(m)}>
-                {m==="write"?"Write":m==="review"?"Review":m==="explore"?"Explore":"Inspect"}
-              </button>
-            ))}
-          </div>
-          {storyMode==="inspect"
-            ? <WriterInspectorPanel getContext={getContext} />
-            : <CompanionPanel mode={storyMode} onApplyOperation={handleApplyWriterOperation} />
-          }
-          {storyMode==="explore" && <AgentPanel mode={storyMode} getContext={getContext} />}
-        </aside>
+        {!companionCollapsed && (
+          <aside className="forge-companion">
+            <div className="forge-mode-row">
+              {(["write","review","explore","inspect"] as const).map(m => (
+                <button key={m} className={`forge-mode-btn ${storyMode===m?'active':''}`} onClick={()=>setStoryMode(m)}>
+                  {m==="write"?"Write":m==="review"?"Review":m==="explore"?"Explore":"Inspect"}
+                </button>
+              ))}
+            </div>
+            {storyMode==="inspect"
+              ? <WriterInspectorPanel getContext={getContext} />
+              : <CompanionPanel mode={storyMode} onApplyOperation={handleApplyWriterOperation} />
+            }
+            {storyMode==="explore" && <AgentPanel mode={storyMode} getContext={getContext} />}
+          </aside>
+        )}
       </div>
 
       {/* Status Bar */}
       <footer className="forge-statusbar">
-        <div style={{display:'flex',alignItems:'center',gap:'var(--space-2)'}}>
-          <span className={} />
-          <span>{isAgentThinking ? 'Generating...' : 'Ready'}</span>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:'var(--space-3)'}}>
+        <div className="forge-statusbar-left">
+          <span>{isAgentThinking ? 'Generating…' : 'Ready'}</span>
+          <span>·</span>
           <span>332 gates</span>
+        </div>
+        <div className="forge-statusbar-right">
           <span>local &lt;5ms</span>
         </div>
       </footer>
     </div>
   );
+}
 export default App;
